@@ -1,6 +1,6 @@
 # Visual refresh — Polish 3: the reviewers' minors that users meet
 
-**Status:** rev 15 (2026-11-01). Rev 4 approved by the user (`23f8afb`).
+**Status:** rev 16 (2026-11-02). Rev 4 approved by the user (`23f8afb`).
 - Rev 1 (`e10671b`): the user's decisions D82–D87, the controller's calls C1–C15, after the builder check.
 - Rev 2 folds in spec review round 1 (`spec-r1-opus-a.md`, `spec-r1-opus-b.md`, `spec-r1-fable.md`: 4 Critical, 18 Important, 34 Minor across the three lanes) and adds C16–C19.
 - Rev 3 folds in round 2 (`spec-r2-opus.md`, `spec-r2-fable.md`: 1 Critical, 8 Important, 20 Minor; round 2 found 18 of round 1's 22 Critical/Important resolved, 4 partly, all four finished here).
@@ -16,6 +16,7 @@
 - Rev 13 records Task 9's look check (user OK: a PDF and a PNG open in the browser's viewer, a CSV downloads, the run date message at 1280) and its calls: the run date messages give the day with two digits, as `formatShortDate` does ("01 Jan 2026"); a stripped link is found on the markdown tokens, not by a pattern over nh3's output; the range is checked only when a PATCH sends a date (review r1).
 - Rev 14 records the user's D89 from the Safari pass: a quiz submitted with attempts left shows that result again on return, replacing C13's "Showing the last result again is not in scope".
 - Rev 15 records the user's D90 from the Safari pass: a block or sequence rename that shows an error line keeps ✓, × and the block number level with the field.
+- Rev 16 records the user's D91 and D92 from the Safari pass at 400px: the course page's phone progress row no longer runs its Quiz chip over the chevron in Safari, and it sits below the deadlines card, right on the blocks.
 
 **Branch:** `feat/visual-refresh-polish3-minors`, cut from the Polish 2 tip `71dd8cc`. It stays local: no push, no merge.
 **Workspace:** `.superpowers/sdd/2026-10-31-visual-refresh-polish3-minors/` (`inventory.html`: the grouped backlog and the recon; the review rounds `spec-r*-*.md`).
@@ -56,6 +57,8 @@ The user's, made in the brainstorm on 2026-10-31.
 - **D88 — Only the student screens must work on a phone.** "This service can not be fully functional on small screen. We keep this option so student can do some quick actions on mobile phone, like check video, quiz or progress, but the part about course admin and teaching admin is not intended to be functional on small screens." (user, after the 400px shots). The 400px rule of D82 covers Login, the course list, the course page, the player and the mini-project page. The authoring screens (Versions, the editor and its modals) and the teaching screens (Teaching, a course's runs, a run's tabs) are laptop screens: a sideways scroll or a cramped header there at 400px is not a defect.
 - **D89 — A submitted quiz shows its result when the student comes back.** "I submitted my answers and did not ask for make a new attempt, why they disappeared? Why I do not see them and I do not see how many were correct?" (user, Safari pass, step 6). A quiz with attempts used and some left opens on the last result: the answers locked, the score, "Attempt N of M" and Try again, as right after the submit. This holds after moving away and after a reload. The correct answers stay hidden until the last attempt is used (the reveal). Details in §Each item its own instance, and the attempt count.
 - **D90 — An error under a rename field leaves the row's buttons in line.** Found in the Safari pass (step 15, the user's screenshot): renaming a block or sequence to `!!!` shows "Title must contain at least one Latin letter or digit" under the field, and ✓ and × dropped below the field's line. The cause predates Polish 3: `AccordionHeader`'s `.acc-row` centres its children, so the buttons and the block number centred on the field plus its message. Fix (user: fix now): while renaming, the row carries `.renaming`; `.acc-row.renaming { align-items: flex-start }`, `.renaming .actions { height: var(--control-h) }` and `.renaming .num { line-height: var(--control-h) }`, so they sit level with the field whatever shows under it. Without an error nothing moves. The create rows (`.add-row`) already align to the top.
+- **D91 — The phone progress row keeps its chevron clear in Safari.** Found in the Safari pass at 400px (step 19, the user's screenshot): on the course page, the D78 phone row's collapse-all chevron sat on top of the "Quiz 22%" chip. The cause predates Polish 3 (D78): `ProgressMeter` sized its bar and chip by `flex-basis` only (`0 0 150px`, 80px at ≤560px, and `0 0 86px`). In the phone row they sit inside a shrink-to-fit wrapper, `.cv-meter`, which WebKit sizes from the items' content, not their basis: 133.8px for 176px of items, so the chip ran 42px over the button (a probe page measured it in the user's Safari; Chrome sized it right). Fix (user: fix now): the sizes become widths with `flex: none` (`.progress` 150px, 80px at ≤560px; `.quiz-chip` 86px). The block headers and sequence rows, where the two sit straight in the row, keep the same columns. One difference: a "✓ Quiz 100%" chip needs 88px, and the old basis let it grow 2px out of the column; it now holds 86px, its text 1px into each side's padding, still inside the pill (Opus r1).
+- **D92 — On a phone the progress row sits on the blocks.** "Move the line with overall progress and collapse/expand chevron closer to the course content, below the deadlines block" (user, D91 look). Under 880px the order is the deadlines card, the progress row, the blocks, the teachers, the info; this replaces Polish 2's D80 order "progress card, phone row, deadlines, blocks, teachers, info" for the phone (the progress card is hidden there). The row always sits right before the blocks, so D78's 4px to the first block always holds. Wide screens do not change: the row is hidden there, and the right column stays progress, deadlines, teachers, info.
 
 ### The controller's calls
 
@@ -368,7 +371,7 @@ User-visible entries the review round named, not taken, with the reason. They st
 Anything else that looks off counts only if the user flags it while looking at the shots.
 
 **Results (2026-10-31, `shots-400.html`, 26 screens signed in as dev@):**
-- **Student screens pass.** Login, the course list, the course page, the player (page, quiz, video, strip and "Item N of M"), the mini-project page and the 404: no sideways scroll, nothing clipped. The AppHeader fits at 400px. So no narrow-screen task is planned.
+- **Student screens pass.** (The Safari pass later found the course page's phone row overlapping in Safari only, D91; the shots were taken in Chrome.) Login, the course list, the course page, the player (page, quiz, video, strip and "Item N of M"), the mini-project page and the 404: no sideways scroll, nothing clipped. The AppHeader fits at 400px. So no narrow-screen task is planned.
 - **Authoring and teaching screens are out of scope (D88).** The shots found the Roster tab at 621px (Group column and row actions cut off), the Mini-projects tab at 702px, Teaching at 416px, the editor's item row breaking "Warm-up quiz" inside the word, the quiz editor header showing "Warm…", and the editor title wrapping to three lines. None of them is planned. The Overview `.ov-row` with a date field open fits anyway.
 
 **Backlog entries this closes:**
@@ -409,6 +412,7 @@ The plan names each, so every red/green is planned. Line numbers are from `visua
 - `.uses-chip` ~4888 stays (the span keeps the class);
 - `.add-input` ~3903 and `.title-input` ~3959 stay, and gain the qualified `[aria-invalid]` rows (C3);
 - three new AccordionHeader rows for D90 (rev 15): `.acc-row.renaming` `align-items:flex-start`, `.renaming .actions` `height:var(--control-h)`, `.renaming .num` `line-height:var(--control-h)`; EXPECTED_CHECKS 2486 → 2489;
+- D91 (rev 16) rewrites three ProgressMeter rows in (j): `.progress` `flex:none;width:150px`, its ≤560px `width:80px`, and `.quiz-chip` `flex:none;width:86px`; D92 adds one CourseView markup row, the phone row between the deadlines card and the blocks; EXPECTED_CHECKS 2489 → 2490;
 - `.vtitle` ~3830 (the row title as a link);
 - the SequencePlayer AST/SIG rows (~1381, ~1540-1553) stay unchanged by C13's placement, and the ItemRouter grep rows (~1171) are unaffected by the `{#key}`;
 - the MiniProjectLink SIG row, if the mini-project row adopts `routeClick` (its markup gains an `onclick`);
