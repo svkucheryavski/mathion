@@ -41,7 +41,7 @@ def test_student_url_no_query():
 def test_staff_url_no_query():
     ctx = _ctx()
     url = _staff_url(ctx)
-    assert url == "http://localhost:8000/courses/calc-101/runs/42"
+    assert url == "http://localhost:8000/teaching/calc-101/runs/42"  # Polish 3 C9
     assert "?" not in url and "#" not in url
 
 
@@ -55,7 +55,7 @@ def test_course_slug_property_derives_live():
 @pytest.mark.parametrize("kind,expected_url", [
     ("evaluation_received",   "http://localhost:8000/courses/calc-101"),
     ("run_enrolled",          "http://localhost:8000/courses/calc-101"),
-    ("run_teacher_assigned",  "http://localhost:8000/courses/calc-101/runs/42"),
+    ("run_teacher_assigned",  "http://localhost:8000/teaching/calc-101/runs/42"),
     ("mini_project_published", "http://localhost:8000/courses/calc-101"),
 ])
 def test_each_kind_renders(kind, expected_url):

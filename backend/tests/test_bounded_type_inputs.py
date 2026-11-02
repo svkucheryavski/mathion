@@ -35,7 +35,7 @@ def _quiz_item(admin_client, slug):
         "/api/courses", json={"slug": slug, "name": "B", "description": ""}
     ).json()
     version = admin_client.post(
-        f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+        f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}
     ).json()
     block = admin_client.post(
         f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}
@@ -243,7 +243,7 @@ def test_block_create_409_when_order_exhausted_via_reorder(admin_client):
         "/api/courses", json={"slug": "blk-exhaust", "name": "B", "description": ""}
     ).json()
     version = admin_client.post(
-        f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+        f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}
     ).json()
     block = admin_client.post(
         f"/api/versions/{version['id']}/blocks", json={"title": "First", "info": ""}
@@ -268,7 +268,7 @@ def test_sequence_create_409_when_order_exhausted(admin_client, db):
         "/api/courses", json={"slug": "seq-exhaust", "name": "S", "description": ""}
     ).json()
     version = admin_client.post(
-        f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+        f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}
     ).json()
     block = admin_client.post(
         f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}

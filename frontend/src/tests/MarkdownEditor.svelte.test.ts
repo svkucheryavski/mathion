@@ -207,7 +207,7 @@ describe('MarkdownEditor — textarea drop', () => {
 
   it('§7.2: a drop whose upload resolves AFTER `disabled` flips true does NOT mutate value', async () => {
     // Regression for the readOnly→disabled fix (commit 6690c9e): the textarea now stays mounted
-    // while the option-mutation two-way lock is engaged, so a late upload must be blocked by
+    // while the editor is disabled, so a late upload must be blocked by
     // insertAtCursor's `disabled` guard. The old readOnly path unmounted the textarea, so a late
     // insert no-op'd on `!textareaEl`; without the explicit guard this would bypass §7.2.
     let resolveUpload!: (a: AssetItem) => void;
@@ -603,5 +603,113 @@ describe('MarkdownEditor — window-level file-drop navigation guard', () => {
     ev.preventDefault = preventSpy;
     window.dispatchEvent(ev);
     expect(preventSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('MarkdownEditor — plain (Slice-5b D6)', () => {
+  it('shows the source as text with no tabs, no sidebar and no /render call', async () => {
+    const { target } = mountEditor({ value: '# Title\n$x^2$', plain: true });
+    await Promise.resolve(); flushSync();
+    expect(target.querySelector('[data-testid="markdown-plain"]')!.textContent).toBe('# Title\n$x^2$');
+    expect(target.querySelector('.tabs')).toBeNull();
+    expect(target.querySelector('[data-testid="asset-sidebar"]')).toBeNull();
+    expect(target.querySelector('textarea')).toBeNull();
+    expect(stubCtx.renderPreview).not.toHaveBeenCalled();
+  });
+
+  it('wins over readOnly: still no /render call', async () => {
+    mountEditor({ value: 'x', plain: true, readOnly: true });
+    await Promise.resolve(); flushSync();
+    expect(stubCtx.renderPreview).not.toHaveBeenCalled();
+  });
+});
+
+describe('MarkdownEditor — ariaLabel (Slice-5b R10)', () => {
+  it('names the textarea', () => {
+    const { target } = mountEditor({ ariaLabel: 'Content' });
+    flushSync();
+    expect(target.querySelector('textarea')!.getAttribute('aria-label')).toBe('Content');
+  });
+});
+
+describe('MarkdownEditor — frozen (Slice-5b D10)', () => {
+  it('makes the textarea readonly without blurring it', async () => {
+    const { target, propsRef } = mountEditor({ value: 'abc' });
+    flushSync();
+    const ta = target.querySelector('textarea')!;
+    ta.focus();
+    propsRef.frozen = true;
+    flushSync();
+    expect(ta.hasAttribute('readonly')).toBe(true);
+    expect(ta.disabled).toBe(false);
+    expect(document.activeElement).toBe(ta);
+  });
+
+  it('blocks a textarea drop: no upload, no insert', async () => {
+    const { target } = mountEditor({ value: 'abc', frozen: true });
+    flushSync();
+    const file = new File(['x'], 'a.png', { type: 'image/png' });
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
+    target.querySelector('textarea')!.dispatchEvent(ev);
+    await Promise.resolve(); flushSync();
+    expect(stubCtx.upload).not.toHaveBeenCalled();
+  });
+
+  it('disables sidebar inserts and the drop zone', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1 })]);
+    const { target } = mountEditor({ value: '', frozen: true });
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    expect(target.querySelector<HTMLButtonElement>('.row-click')!.disabled).toBe(true);
+    expect(target.querySelector('[data-testid="drop-zone"]')!.classList.contains('disabled')).toBe(true);
+  });
+
+  it('keeps the tabs usable', async () => {
+    const { target } = mountEditor({ value: 'abc', frozen: true });
+    flushSync();
+    const preview = target.querySelector<HTMLButtonElement>('button[data-action="preview"]')!;
+    expect(preview.disabled).toBe(false);
+    preview.click();
+    await Promise.resolve(); flushSync();
+    expect(stubCtx.renderPreview).toHaveBeenCalledWith('abc');
+  });
+});
+
+describe('MarkdownEditor — noAssets (5d D11)', () => {
+  it('noAssets: no sidebar, no upload on drop, and a window file drop never navigates', async () => {
+    const { target } = mountEditor({ value: 'x', noAssets: true });
+    await Promise.resolve(); flushSync();
+    expect(target.querySelector('[data-testid="asset-sidebar"]')).toBeNull();
+    expect(target.querySelector('textarea')).not.toBeNull();
+    const file = new File(['a'], 'a.png', { type: 'image/png' });
+    const drop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
+    target.querySelector('textarea')!.dispatchEvent(drop);
+    await Promise.resolve();
+    expect(stubCtx.upload).not.toHaveBeenCalled();
+    const winDrop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
+    Object.defineProperty(winDrop, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
+    window.dispatchEvent(winDrop);
+    expect(winDrop.defaultPrevented).toBe(true);
+  });
+});
+
+describe('MarkdownEditor — preview variant (Polish 2 D51)', () => {
+  it.each([
+    [undefined, 'pv-page', false],
+    ['page', 'pv-page', false],
+    ['prompt', 'pv-prompt', true],
+    ['explanation', 'pv-explanation', true],
+  ])('variant %s: the preview is prose with %s (compact: %s); external links open in a new tab, page links stay', async (variant, cls, compact) => {
+    (stubCtx.renderPreview as ReturnType<typeof vi.fn>).mockResolvedValue({ html: `<p><a href="https://example.org/p">x</a> <a href="${location.origin}/courses/x">y</a></p>` });
+    const { target } = mountEditor(variant === undefined ? { readOnly: true } : { readOnly: true, variant });
+    await vi.waitFor(() => expect(target.querySelector('.preview a')).not.toBeNull());
+    const preview = target.querySelector('.preview')!;
+    expect(preview.classList.contains('prose')).toBe(true);
+    expect(preview.classList.contains(cls)).toBe(true);
+    expect(preview.classList.contains('compact')).toBe(compact);
+    expect(preview.querySelector('a[href="https://example.org/p"]')!.getAttribute('target')).toBe('_blank');
+    // D58: inside the editor a Mathion page link stays in the tab, where DirtyGuard covers unsaved work.
+    expect(preview.querySelector(`a[href="${location.origin}/courses/x"]`)!.hasAttribute('target')).toBe(false);
   });
 });

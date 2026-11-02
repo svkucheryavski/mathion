@@ -11,6 +11,9 @@
   const isCovered = $derived(vstate.items[String(item.id)]?.is_covered ?? false);
 </script>
 
+<!-- C13: each item gets its own component instance, so quiz → quiz never
+     carries the first quiz's answers and result over. -->
+{#key item.id}
 {#if item.type === 'static_page'}
   <PageItem {item} />
 {:else if item.type === 'video'}
@@ -18,11 +21,12 @@
 {:else if item.type === 'quiz'}
   <QuizItem {item} />
 {:else if item.type === 'mini_project'}
-  <UnsupportedItem type="mini_project" />
+  <UnsupportedItem />
 {:else if item.type === 'interactive_app'}
   <InteractiveAppItem {item} {isCovered} />
 {:else}
   {@const _x = assertNever(item)}
   {String(_x)}
-  <UnsupportedItem type={(item as { type: string }).type} />
+  <UnsupportedItem />
 {/if}
+{/key}

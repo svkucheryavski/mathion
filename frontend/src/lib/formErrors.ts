@@ -3,7 +3,7 @@
 //
 // Why a helper rather than inline mapping in each create flow: the three
 // editor create flows (VersionEditPage createBlock, BlockAccordion
-// createSequence, SequenceAccordion createItem) all need the same shape,
+// createSequence, NewItemModal submit) all need the same shape,
 // and a copy-pasted mapper would drift. Pure function — no runes — so
 // it's trivially unit-testable in isolation.
 //

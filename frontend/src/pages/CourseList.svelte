@@ -2,30 +2,55 @@
   import { api, ApiError } from '../lib/api';
   import type { CourseListItem } from '../lib/types';
   import CourseCard from '../components/course/CourseCard.svelte';
-  import Spinner from '../components/ui/Spinner.svelte';
+  import Skeleton from '../components/ui/Skeleton.svelte';
+  import EmptyState from '../components/ui/EmptyState.svelte';
+  import ErrorState from '../components/ui/ErrorState.svelte';
 
   let loading = $state(true);
   let courses = $state<CourseListItem[]>([]);
-  let error = $state('');
+  // An object, not a string: an empty message still shows the error. The shape
+  // mirrors CourseView's; nothing here branches on `status` yet.
+  let error = $state<{ status: number; message: string } | null>(null);
+  // Retry counter (Slice-4 enumerated (A)2): the load effect reads it at its
+  // top, so incrementing it re-runs the fetch. Retry is reachable only from
+  // the error branch — i.e. after the previous request settled — so at most
+  // one request is ever in flight and no stale-response guard is needed.
+  let reloadTick = $state(0);
+  // Current enrolments only: version_id !== null excludes admin-only rows (not
+  // enrolments), is_active excludes past enrolments — so the header never disagrees
+  // with a pure-student card's "Past enrolment" footer. (courses.length would
+  // over-count, catastrophically for a superuser who gets an admin-only row per course.)
+  const enrolledCount = $derived(courses.filter((c) => c.version_id !== null && c.is_active).length);
 
   $effect(() => {
+    void reloadTick;
     loading = true;
+    error = null;
     api.get<CourseListItem[]>('/api/my-courses')
       .then((cs) => { courses = cs; })
-      .catch((e: unknown) => { error = e instanceof ApiError ? e.displayMessage : 'Failed to load courses.'; })
+      .catch((e: unknown) => {
+        error = e instanceof ApiError
+          ? { status: e.status, message: e.displayMessage || 'Something went wrong on the server. Try again.' }
+          : { status: 0, message: 'Check your connection and try again.' };   // a network failure
+      })
       .finally(() => { loading = false; });
   });
+
+  function retry(): void { reloadTick += 1; }
 </script>
 
 <div class="page">
-  <h1>Your courses</h1>
+  <div class="page-head">
+    <h1>Your courses</h1>
+    {#if enrolledCount > 0}<span class="enrolled">{enrolledCount} enrolled</span>{/if}
+  </div>
 
   {#if loading}
-    <Spinner />
-  {:else if error}
-    <p class="error">{error}</p>
+    <Skeleton />
+  {:else if error !== null}
+    <ErrorState title="Couldn't load courses" message={error.message} onretry={retry} />
   {:else if courses.length === 0}
-    <p class="empty">You're not enrolled in any courses yet — ask your teacher for an invite.</p>
+    <EmptyState title="You're not enrolled in any courses yet — ask your teacher for an invite." />
   {:else}
     <div class="grid">
       {#each courses as c (c.course.id)}
@@ -36,9 +61,10 @@
 </div>
 
 <style>
-  .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
-  .page h1 { margin-bottom: var(--space-4); }
-  .grid { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
-  .empty { color: var(--muted); padding: var(--space-6) 0; text-align: center; }
-  .error { color: var(--danger); }
+  .page { max-width: var(--page-max); margin: 0 auto; padding: var(--space-3); }
+  .page-head { display: flex; align-items: center; gap: 12px; /* ref 2038 */ margin-bottom: var(--space-3); /* 16px, ref 2038 */ }
+  .page-head h1 { margin: 0; flex: 1; }
+  .enrolled { font-family: var(--font-mono); font-size: 12px; /* ref 2040 */ color: var(--muted); }
+  /* grid gap 16px → 12px (ref 2042); responsive auto-fill columns kept */
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
 </style>

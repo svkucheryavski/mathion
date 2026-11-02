@@ -1,8 +1,8 @@
 // Module-scoped reactive store for the version currently open in the admin
 // editor. Holds the full AdminTree (course + version + blocks/sequences/items)
-// fetched from `/api/versions/{vid}/admin-tree`. Pages subscribe via
-// `currentEditorVersion.value` (reactive $state property), call `loadAdminTree`
-// on mount, and `clearEditorVersion` on unmount.
+// fetched from `/api/versions/{vid}/admin-tree`. Read by VersionEditPage and its
+// subtree (BlockAccordion, SequenceAccordion, the item modal); loaded and
+// cleared only by VersionEditPage. No other page may call clearEditorVersion.
 //
 // Single-flight: concurrent calls for the same versionId share one in-flight
 // promise. `force: true` bypasses this for post-mutation refetches.

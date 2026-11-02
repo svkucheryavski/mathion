@@ -142,7 +142,16 @@ class Question(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     item: Mapped["Item"] = relationship(back_populates="questions")
-    options: Mapped[list["AnswerOption"]] = relationship(back_populates="question", cascade="all, delete-orphan", order_by="AnswerOption.order, AnswerOption.id")
+    # passive_deletes: deleting a question (or any ancestor) lets the database's
+    # ON DELETE CASCADE remove the answer rows AFTER the question row is locked —
+    # the 5d D12 lock order. An ORM-side cascade would delete answer rows first
+    # and deadlock against a correctness change holding the question. This holds
+    # only while the collection is unloaded at delete time: never eager-load
+    # `options` on a delete path.
+    options: Mapped[list["AnswerOption"]] = relationship(
+        back_populates="question", cascade="all, delete-orphan", passive_deletes=True,
+        order_by="AnswerOption.order, AnswerOption.id",
+    )
 
 
 class AnswerOption(Base):

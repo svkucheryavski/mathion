@@ -55,7 +55,7 @@ it('renders neither form until config resolves (render-gate) and fires no reques
 });
 
 it('send_pin_enabled=false: direct email+PIN entry submits to verify-pin, never request-pin', async () => {
-  vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve());
+  vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
   const f = vi.fn((url: string) => {
     const s = String(url);
     if (s.includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: false }));
@@ -112,7 +112,7 @@ it('config-fetch failure resolves to two-step and enables submit', async () => {
 
 it('captures + clears superuser_return_path on mount and navigates there after verify', async () => {
   sessionStorage.setItem('superuser_return_path', '/superuser/tok');
-  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve());
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
   const f = vi.fn((url: string) => {
     const s = String(url);
     if (s.includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: false }));
@@ -144,4 +144,65 @@ it('a stale return path from a prior mount does not survive to a later login', a
   component = mount(Login, { target });
   await settle();
   expect(sessionStorage.getItem('superuser_return_path')).toBeNull();
+});
+
+it('§2a: segmented duration in a card+logo; selecting 30 submits numeric duration_days', async () => {
+  vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  const calls: Array<[string, RequestInit]> = [];
+  const f = vi.fn((url: string, init?: RequestInit) => {
+    calls.push([String(url), init ?? {}]);
+    if (String(url).includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: false }));
+    if (String(url).includes('/api/auth/verify-pin')) return Promise.resolve(jsonResponse(200, { user: FAKE_USER }));
+    return Promise.resolve(jsonResponse(200, {}));
+  });
+  vi.stubGlobal('fetch', f);
+  component = mount(Login, { target });
+  await settle();
+
+  expect(target.querySelector('.card')).not.toBeNull();
+  expect(target.querySelector('.brand svg')).not.toBeNull();
+  expect(target.querySelector('.brand .wordmark')?.textContent).toContain('Mathion');
+  expect(target.querySelector('[role="radiogroup"]')).not.toBeNull();
+  expect(target.querySelector('select')).toBeNull();
+  expect(target.querySelector('input[name="pin"]')?.classList.contains('mono')).toBe(true);
+
+  const seg30 = (Array.from(target.querySelectorAll('.segment')) as HTMLElement[])
+    .find((s) => (s.textContent ?? '').includes('30'))!;
+  (seg30.querySelector('input') as HTMLInputElement).click();
+  flushSync();
+  expect(seg30.classList.contains('selected')).toBe(true);
+
+  setValue(target.querySelector('input[name="email"]')!, 'a@b.com');
+  setValue(target.querySelector('input[name="pin"]')!, '123456');
+  submitForm(target);           // helper takes the CONTAINER and finds the form itself
+  await settle();
+
+  const verify = calls.find(([u]) => u.includes('/api/auth/verify-pin'))!;
+  const body = JSON.parse(String(verify[1].body));
+  expect(body.duration_days).toBe(30);
+  expect(typeof body.duration_days).toBe('number');
+});
+
+it('§2a: the two-step pin step carries the full-width primary (ref 2010) and a named duration radiogroup', async () => {
+  // Guards Login.svelte:118 — `full` on the pin-step "Sign in". The §2a test above
+  // forces send_pin_enabled:false, which renders the intentionally-plain single-form
+  // button (:101), so without this test `full`'s only production call site is unguarded.
+  const f = vi.fn((url: string) => {
+    const s = String(url);
+    if (s.includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: true }));
+    if (s.includes('/request-pin')) return Promise.resolve(jsonResponse(200, { message: 'PIN sent' }));
+    return Promise.resolve(jsonResponse(200, {}));
+  });
+  vi.stubGlobal('fetch', f);
+  component = mount(Login, { target });
+  await settle();
+  setValue(target.querySelector('input[name="email"]')!, 'a@b.com');
+  await settle();
+  submitForm(target);           // email step -> pin step
+  await settle();
+
+  const submit = target.querySelector('form button[type="submit"]') as HTMLButtonElement | null;
+  expect(submit).not.toBeNull();
+  expect(submit!.classList.contains('full')).toBe(true);
+  expect(target.querySelector('[role="radiogroup"]')?.getAttribute('aria-label')).toBe('Stay signed in for');
 });

@@ -179,7 +179,7 @@ def test_course_response_is_admin_false_for_enrolled_student(auth_client, admin_
         "/api/courses", json={"slug": "c2", "name": "C2", "description": ""}
     ).json()
     version = admin_client.post(
-        f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+        f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}
     ).json()
     admin_client.post(f"/api/versions/{version['id']}/publish")
     db.add(StudentEnrollment(user_id=test_user.id, version_id=version["id"], is_active=True))

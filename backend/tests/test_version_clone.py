@@ -12,7 +12,7 @@ from mathion.models import AnswerOption, Asset, AssetReference, Block, CourseVer
 
 def _mk_course_version(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "vc", "name": "VC", "description": ""}).json()
-    v = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    v = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     return course, v
 
 
@@ -61,7 +61,7 @@ def test_copy_version_assets_missing_file_raises_500(admin_client, db):
 
 def test_collect_referenced_filenames_aggregates_all_owners(admin_client, db):
     course = admin_client.post("/api/courses", json={"slug": "crf", "name": "C", "description": ""}).json()
-    v = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    v = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     version = db.get(CourseVersion, v["id"])
     # Set info_md via ORM, NOT the create API: create_version renders info_md
     # eagerly (render_with_assets in create_version) and 422s on an asset that isn't uploaded.
@@ -99,7 +99,7 @@ def _build_full_source(admin_client, db):
     types + options, version info referencing an asset, and a block with info.
     Returns (course, version_dict, {asset filenames}). Assets uploaded via API."""
     course = admin_client.post("/api/courses", json={"slug": "full", "name": "F", "description": ""}).json()
-    v = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    v = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     for name in ("logo.png", "sp.png", "vid.png", "quiz.png", "tq.png", "exp.png"):
         admin_client.post(
             f"/api/versions/{v['id']}/assets",

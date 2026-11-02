@@ -11,7 +11,7 @@ from mathion.api.text_utils import to_utc_aware
 from mathion.api.lookups import get_or_404
 from mathion.api.authz import is_run_admin_or_teacher, require_course_admin, require_run_admin_or_teacher
 from mathion.api.asset_render import render_with_run_assets, sync_run_asset_references
-from mathion.api.submission_files import mini_project_visible_to_student, submission_storage_dir
+from mathion.api.submission_files import submission_storage_dir
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import (
@@ -114,13 +114,14 @@ def list_mini_projects(
     user: User = Depends(get_current_user),
 ):
     run = get_or_404(db, Run, run_id)
-    is_priv = is_run_admin_or_teacher(db, user, run)
+    # D81 (user): all three deadlines are for the run's admins and teachers;
+    # students read theirs from /api/courses/{slug}/mini-projects (one date).
+    if not is_run_admin_or_teacher(db, user, run):
+        raise HTTPException(status_code=403, detail="Not a teacher of this run")
 
     mps = db.execute(
         select(MiniProject).where(MiniProject.run_id == run_id).order_by(MiniProject.block_id)
     ).scalars().all()
-    if not is_priv:
-        mps = [mp for mp in mps if mini_project_visible_to_student(run, mp)]
     return [_serialize_mini_project(db, mp) for mp in mps]
 
 
@@ -132,10 +133,9 @@ def get_mini_project(
 ):
     mp = get_or_404(db, MiniProject, mp_id)
     run = db.get(Run, mp.run_id)
-    is_priv = is_run_admin_or_teacher(db, user, run)
-
-    if not is_priv and not mini_project_visible_to_student(run, mp):
-        raise HTTPException(status_code=403, detail="Mini-project not visible")
+    # D81 (user): admins and teachers only (all three deadlines).
+    if not is_run_admin_or_teacher(db, user, run):
+        raise HTTPException(status_code=403, detail="Not a teacher of this run")
     return _serialize_mini_project(db, mp)
 
 
@@ -196,9 +196,11 @@ def patch_mini_project(
                 .values(is_late=False)
             )
         else:
+            # D81 (user): a resubmission is never late (bound only by the
+            # resubmission deadline), so it keeps is_late=False.
             db.execute(
                 Submission.__table__.update()
-                .where(Submission.mini_project_id == mp.id)
+                .where(Submission.mini_project_id == mp.id, Submission.is_resubmission.is_(False))
                 .values(is_late=(Submission.submitted_at > new_soft))
             )
 

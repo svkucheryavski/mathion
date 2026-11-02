@@ -41,4 +41,14 @@ describe('StatusBadge', () => {
       expect(inlineStyle).toContain(`--badge-fg: var(--status-${cssKey}-fg)`);
     });
   }
+
+  it('a label prop overrides the text; the status and colours stay (6a)', () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    component = mount(StatusBadge, { target: host, props: { status: 'awaiting_eval', label: 'awaiting eval' } });
+    flushSync();
+    const el = host.querySelector('.status-badge') as HTMLElement;
+    expect(el.textContent).toBe('awaiting eval');
+    expect(el.getAttribute('data-status')).toBe('awaiting_eval');
+  });
 });

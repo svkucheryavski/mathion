@@ -2,11 +2,14 @@
   import { ApiError } from '../lib/api';
   import { currentCourse, loadCourse, recordItemVisit } from '../stores/currentCourse.svelte';
   import { currentRoute, navigate } from '../lib/router.svelte';
+  import { routeClick } from '../lib/routeClick';
   import ItemRouter from '../components/items/ItemRouter.svelte';
   import ItemIcon from '../components/course/ItemIcon.svelte';
-  import Spinner from '../components/ui/Spinner.svelte';
+  import Skeleton from '../components/ui/Skeleton.svelte';
+  import EmptyState from '../components/ui/EmptyState.svelte';
+  import ErrorState from '../components/ui/ErrorState.svelte';
   import Button from '../components/ui/Button.svelte';
-  import type { SequenceContent, Item } from '../lib/types';
+  import type { SequenceContent, Item, ItemMarkState } from '../lib/types';
 
   let { courseSlug, sequenceId }: { courseSlug: string; sequenceId: string } = $props();
 
@@ -39,6 +42,9 @@
       (b) => b.sequences.some((s) => String(s.id) === sequenceId),
     ) ?? null,
   );
+  // Its place in the course, as the course page and the editor number it
+  // (`order` keeps gaps after a block delete).
+  const blockNo = $derived(currentBlock ? (currentCourse.value?.blocks.indexOf(currentBlock) ?? -1) + 1 : 0);
 
   // Initial item resolution: hash → last_visited_at → first.
   function resolveInitialItemId(seq: SequenceContent): number | null {
@@ -63,8 +69,12 @@
 
   let currentItemId = $state<number | null>(null);
 
+  // C6: an in-app link to another sequence without #item= keeps this player
+  // (same route), so the previous sequence's item must not stay selected.
   $effect(() => {
-    if (sequence && currentItemId === null) {
+    const stale = currentItemId !== null && !currentRoute.hash.startsWith('#item=')
+      && !sequence?.items.some((it) => it.id === currentItemId);
+    if (sequence && (currentItemId === null || stale)) {
       const initial = resolveInitialItemId(sequence);
       if (initial !== null) {
         navigate(`/courses/${courseSlug}/seq/${sequenceId}#item=${initial}`, { replace: true });
@@ -98,12 +108,12 @@
 
   // Flat course-wide ordering: every item paired with its sequence id, in display order.
   // Used by Previous/Next so they advance across sequence (and block) boundaries.
-  type FlatRef = { itemId: number; sequenceId: number };
+  type FlatRef = { itemId: number; sequenceId: number; title: string };
   const flatItems = $derived<FlatRef[]>(
     currentCourse.value
       ? currentCourse.value.blocks.flatMap((b) =>
           b.sequences.flatMap((s) =>
-            s.items.map((it) => ({ itemId: it.id, sequenceId: s.id })),
+            s.items.map((it) => ({ itemId: it.id, sequenceId: s.id, title: it.title })),
           ),
         )
       : [],
@@ -124,53 +134,83 @@
     if (flatIndex >= 0 && flatIndex < flatItems.length - 1) gotoFlat(flatItems[flatIndex + 1]);
   }
 
-  function iconState(itemId: number): 'covered' | 'current' | 'not-yet' {
+  // D4 footer: three-way primary predicate.
+  const isAtFlatEnd = $derived(flatIndex >= 0 && flatIndex === flatItems.length - 1);
+  const nextRef = $derived<FlatRef | null>(
+    flatIndex >= 0 && flatIndex < flatItems.length - 1 ? flatItems[flatIndex + 1] : null,
+  );
+  // Blank whitespace-only titles fall back to a plain "Next item" (D93: the
+  // round Next button's name).
+  const nextTitle = $derived(nextRef && nextRef.title.trim() !== '' ? nextRef.title : '');
+  const nextName = $derived(nextTitle ? `Next: ${nextTitle}` : 'Next item');
+
+  function finish(): void {
+    navigate(`/courses/${courseSlug}`);
+  }
+
+  function iconState(itemId: number): ItemMarkState {
     if (itemId === currentItemId) return 'current';
     if (currentCourse.value?.state.items[String(itemId)]?.is_covered) return 'covered';
     return 'not-yet';
   }
+
+  // Page-level error copy (Slice-4 §2), text verbatim from the former branches.
+  const errorTitle = $derived.by(() => {
+    if (error === null) return '';
+    return error.status === 404 || error.status === 403 ? 'Sequence not available' : "Couldn't load";
+  });
+  const errorMessage = $derived.by(() => {
+    if (error === null) return '';
+    return error.status === 404 || error.status === 403 ? "This sequence isn't available to you." : error.message;
+  });
 </script>
+
+{#snippet crumbs(seq: SequenceContent)}
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a href={`/courses/${courseSlug}`}
+      onclick={(e) => routeClick(e, `/courses/${courseSlug}`)}>
+      {currentCourse.value?.course.name}
+    </a>
+    {#if currentBlock}
+      <span class="sep" aria-hidden="true">/</span>
+      <!-- "1. Title", as the course page numbers its blocks (user, 2026-10-08). -->
+      <span class="crumb">{blockNo}. {currentBlock.title}</span>
+      <span class="sep" aria-hidden="true">/</span>
+    {/if}
+    <!-- Ends with the sequence TITLE, in bold (user, 2026-10-08): the course page
+         no longer shows S{order} codes, and this crumb now names the page, so
+         the visible h1 is gone (it stays for screen readers, below). -->
+    <span class="current" aria-current="page">{seq.title}</span>
+  </nav>
+{/snippet}
 
 <div class="page">
   {#if loading}
-    <Spinner />
+    <Skeleton />
   {:else if error}
-    {#if error.status === 404 || error.status === 403}
-      <h1>Sequence not available</h1>
-      <p>This sequence isn't available to you.</p>
-    {:else}
-      <h1>Couldn't load</h1>
-      <p>{error.message}</p>
-    {/if}
-    <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}`)}>← Course</Button>
+    <ErrorState variant="page" title={errorTitle} message={errorMessage}>
+      {#snippet action()}
+        <Button variant="secondary" onclick={() => navigate(`/courses/${courseSlug}`)}>Back to course</Button>
+      {/snippet}
+    </ErrorState>
   {:else if !sequence}
-    <h1>Sequence not found</h1>
-    <Button variant="ghost" onclick={() => navigate(`/courses/${courseSlug}`)}>← Course</Button>
+    <ErrorState variant="page" title="Sequence not found">
+      {#snippet action()}
+        <Button variant="secondary" onclick={() => navigate(`/courses/${courseSlug}`)}>Back to course</Button>
+      {/snippet}
+    </ErrorState>
   {:else if sequence.items.length === 0}
-    <header>
-      <a class="crumb course" href={`/courses/${courseSlug}`}
-        onclick={(e) => { e.preventDefault(); navigate(`/courses/${courseSlug}`); }}>
-        ← {currentCourse.value?.course.name}
-      </a>
-      {#if currentBlock}<div class="crumb block">B{currentBlock.order}. {currentBlock.title}</div>{/if}
-      <h1>S{sequence.order}. {sequence.title}</h1>
-    </header>
-    <p class="empty">This sequence has no items yet.</p>
+    {@render crumbs(sequence)}
+    <h1 class="seq-title sr-only">{sequence.title}</h1>
+    <EmptyState title="This sequence has no items yet." />
   {:else}
-    <header>
-      <a class="crumb course" href={`/courses/${courseSlug}`}
-        onclick={(e) => { e.preventDefault(); navigate(`/courses/${courseSlug}`); }}>
-        ← {currentCourse.value?.course.name}
-      </a>
-      {#if currentBlock}<div class="crumb block">B{currentBlock.order}. {currentBlock.title}</div>{/if}
-      <h1>S{sequence.order}. {sequence.title}</h1>
-    </header>
+    {@render crumbs(sequence)}
+    <h1 class="seq-title sr-only">{sequence.title}</h1>
 
     <nav class="strip" aria-label="Items">
       {#each sequence.items as it (it.id)}
         <ItemIcon item={it} state={iconState(it.id)} onclick={() => selectItem(it.id)} />
       {/each}
-      <span class="counter">Item {currentIndex + 1} of {sequence.items.length}</span>
     </nav>
 
     <main class="content">
@@ -179,31 +219,206 @@
       {/if}
     </main>
 
-    <footer>
-      <Button variant="secondary" onclick={previous} disabled={flatIndex <= 0}>← Previous</Button>
-      <Button variant="secondary" onclick={next} disabled={flatIndex < 0 || flatIndex >= flatItems.length - 1}>Next →</Button>
+    <!-- D93 (user, Safari pass): Previous and Next are round arrows in a bar
+         pinned to the window's bottom edge, in the page column, with the item
+         count between them, so they stay put whatever the item's length. The
+         names are in aria-label; the title gives a disabled arrow's reason. -->
+    <footer class="player-nav">
+      <button
+        type="button"
+        class="nav-btn prev"
+        onclick={previous}
+        disabled={flatIndex <= 0}
+        aria-label="Previous item"
+        title={flatIndex < 0 ? 'Loading…' : flatIndex === 0 ? "You're on the first item" : 'Previous item'}
+      >
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10,3.5 5.5,8 10,12.5" /></svg>
+      </button>
+      <span class="counter">Item {currentIndex + 1} of {sequence.items.length}</span>
+      {#if isAtFlatEnd}
+        <span class="finish"><Button variant="primary" onclick={finish}>Finish sequence</Button></span>
+      {:else}
+        <button
+          type="button"
+          class="nav-btn next"
+          onclick={next}
+          disabled={flatIndex < 0}
+          aria-label={nextName}
+          title={flatIndex < 0 ? 'Loading…' : nextName}
+        >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6,3.5 10.5,8 6,12.5" /></svg>
+        </button>
+      {/if}
     </footer>
   {/if}
 </div>
 
 <style>
-  .page { max-width: 960px; margin: 0 auto; padding: var(--space-3); }
-  header { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-3); }
-  header h1 { margin: var(--space-1) 0 0 0; }
-  .crumb { font-size: 0.9rem; line-height: 1.3; }
-  .crumb.course { color: var(--primary); text-decoration: none; align-self: flex-start; }
-  .crumb.course:hover { text-decoration: underline; }
-  .crumb.block { color: var(--muted); }
+  .page { max-width: var(--page-max); margin: 0 auto; padding: var(--space-3); }
+  /* D93: room below the sheet for the bottom bar, so the end of an item scrolls
+     clear of it, and the same room as the root's scroll padding, so a control
+     reached by Tab scrolls clear of the bar too. 72px = the bar's 56px (36px
+     arrows, 10px above and below) + 16px. Both only while the bar is on the
+     page: the `.player-nav` inside :has() stays scoped. */
+  .page:has(.player-nav) { padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
+  :global(html):has(.player-nav) { scroll-padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
+  /* Breadcrumb — scoped to .crumbs so it never reaches the sibling
+     <nav class="strip"> Items row. flex-wrap is a mechanism addition
+     (Constraint 5b) so a long block title wraps the row, not its own column. */
+  /* `baseline`, not `center`: the last crumb is 14px against 12.5px, and
+     centring would sit the smaller text visibly low. */
+  .crumbs {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px; /* ref 2107 */
+    font-size: 12.5px; /* ref 2107 */
+    color: var(--muted);
+    margin-bottom: 14px; /* the gap the removed h1 left (ref 2110) */
+  }
+  /* Without this the course link inherits the global a{color:var(--primary)}
+     and renders blue; ref 2108 shows --muted. The scoped `.crumbs a`
+     (specificity 0,2,1) out-specifies the global `a:hover` (0,1,1), so the
+     hover underline is re-asserted here explicitly (it will not inherit). */
+  .crumbs a { color: var(--muted); text-decoration: none; }
+  .crumbs a:hover { color: var(--text); text-decoration: underline; }
+  .crumbs .sep { color: var(--faint); }
+  .crumbs .current { color: var(--text); font-size: 14px; font-weight: 600; }
+  /* The page's h1, for screen-reader heading navigation only: the crumb above
+     names the page visually. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+  /* D62: the strip stands on the sheet. The marks sit on its bottom edge so
+     the current item's tab (ItemMark) can overlap the sheet's top border; the
+     12px inset keeps a tab off the sheet's rounded corner, and z-index lifts
+     the strip over the sheet. */
   .strip {
     display: flex;
-    gap: var(--space-2);
-    padding: var(--space-2) 0;
-    border-bottom: 1px solid var(--border);
-    align-items: center;
+    gap: 6px; /* ref 2112 — no --space token is 6px */
+    padding: 0 0 0 12px;
+    margin-bottom: 0;
+    align-items: flex-end;
     flex-wrap: wrap;
+    position: relative;
+    z-index: 1;
   }
-  .counter { margin-left: auto; color: var(--muted); font-size: 0.875rem; }
-  .content { padding: var(--space-3) 0; min-height: 200px; }
-  footer { display: flex; justify-content: space-between; padding-top: var(--space-3); border-top: 1px solid var(--border); }
-  .empty { color: var(--muted); }
+  /* 12.5px, NOT ref 2117's 11.5px — a deliberate, user-directed deviation
+     applied to BOTH mono "N of M" counters so they stay consistent: this one and
+     QuizItem's .q-counter sit ~40px apart on this screen, and 11.5px was
+     reported as too small to scan on the real stack (2026-09-04). Deviating on
+     one alone would have shipped two different sizes for the same kind of
+     positional chrome. NOTE this reverses spec:379's converged revA-I3, which
+     pinned mono counts product-wide at 11.5px citing mathion-visual-spec.md:250-251
+     — a citation that is still normative in the VENDORED handoff, which is
+     deliberately not edited; spec §124(c) records the deviation instead.
+     THE RULE, split by KIND rather than by scope: a POSITIONAL counter
+     ("Item N of M", "Question N of M") is 12.5px; a PROGRESS RATIO
+     ({covered}/{total}) stays 11.5px. So CourseCard.svelte:105 keeps 11.5px
+     because it is a ratio ("14/22 items"), and so does SequenceLink's `.pct`
+     — which is IN this slice, so "CourseCard is the one place left at 11.5px"
+     (an earlier revision of this comment, and of spec:124) is FALSE. The two
+     families never share a screen: ratios live on CourseList and CourseView,
+     positions on the player. */
+  /* D93: the item count, a pill between the arrows; the border and shadow
+     keep it readable over the white sheet. 12.5px mono pairs it with the quiz
+     counter. */
+  .counter {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    padding: 3px 10px;
+    box-shadow: 0 2px 8px rgba(20,24,35,.18);
+    pointer-events: auto;
+  }
+  /* No max-width here — the measure lives on the components that have prose to
+     measure (QuizItem, PageItem), not on the player's content slot.
+     WHY THE CAP MOVED, precisely, because the first two attempts at this were
+     both wrong: ref 2120 is `max-width:68ch` on the quiz column of artboard 2c,
+     which is `width:900px` (reference-screens.dc.html:2087) — NOT the 1180px an
+     earlier revision of this comment claimed; 1180px is artboard 2d, a different
+     screen. Inside 2c the card border and its `padding:16px 20px 20px` leave an
+     858px column, so the reference's quiz occupies 76% of its column. The
+     reference document sets no root font-size (its whole stylesheet is
+     `*{box-sizing}` + `body{margin,background}` + `a{color}` — the <style> block
+     is :15-19, its three rules :16-18), so its 68ch resolved at 16px.
+     THE FONT IS LOAD-BEARING, and an earlier revision of this comment implied
+     the opposite by calling those three rules the document's "entire
+     stylesheet": :14 is a <link> to Google Fonts pulling IBM Plex Sans, and
+     `ch` is the advance of "0" in the ELEMENT's font. IBM Plex Sans's zero is
+     exactly 0.6em, so 68 x 0.6 x 16 = 652.8px (measured live: 652.797px). With
+     that link absent the same document falls back to generic sans-serif and the
+     element measures 605px — so a reader who believed there was no stylesheet
+     beyond three rules would port 605, not 653. Rounded to 652px below.
+     Note this app does not touch the root either: --font-size-base:14px is set
+     on `body` (base.css:5), never on html/:root, so `rem` is NOT exposed to this
+     bug — only units resolving against the INHERITED size, i.e. `ch`. A sweep of
+     the whole reference found this was its only such value (revD Part 1). Porting the literal `68ch` into this app,
+     whose base is 14px (theme-default.css:67), silently re-resolved it to 571px
+     — 61.5% of our 928px column, which is exactly the "2/3 of the width" a user
+     reported on the real stack (2026-09-04). The bug was the UNIT, not the cap,
+     so the cap is restored at 652px as a px literal in the two components below;
+     video and interactive apps stay uncapped because they are UI, not prose, and
+     the reference gives them no measure. Do not "simplify" 652px back to a ch
+     value: that is the round trip that caused this. */
+  /* D56: the white reading sheet. The padding is artboard 2c's card (measured
+     above); the crumbs, the strip and the footer stay on the ground. D62: a 2px
+     border, shared with the current item's tab. --sheet-pad-x repeats the
+     inline padding for QuizItem's edge-to-edge separator (D75); keep the two equal. */
+  .content { background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius-lg); padding: 16px 20px 20px; min-height: 200px; --sheet-pad-x: 20px; }
+  /* D93: the bar is pinned to the window's bottom edge, in the page column
+     (the page's width and side padding), over the content. Only the arrows,
+     Finish and the count take clicks, so a slider or option beside them stays
+     usable, and a tap on the count never reaches a control hidden under it
+     (user). z-index 2 lifts it over the strip (1) as the page scrolls. */
+  .player-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 2;
+    box-sizing: border-box;
+    max-width: var(--page-max);
+    margin: 0 auto;
+    padding: 10px var(--space-3) calc(10px + env(safe-area-inset-bottom, 0px));
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    pointer-events: none;
+  }
+  .finish { pointer-events: auto; }
+  /* Round, 36px (user), with a 44px tap area from the ::before: its insets
+     count from the 34px padding box (inside the 1px border), so -5px gives 44. */
+  .nav-btn {
+    position: relative;
+    box-sizing: border-box;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 2px 8px rgba(20,24,35,.18);
+    color: var(--primary);
+    cursor: pointer;
+    pointer-events: auto;
+  }
+  .nav-btn::before { content: ''; position: absolute; inset: -5px; border-radius: 50%; }
+  .nav-btn svg { width: 15px; height: 15px; }
+  .nav-btn.next { background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
+  .nav-btn:disabled { background: var(--disabled-bg); border-color: var(--border-faint); color: var(--faint); box-shadow: none; cursor: not-allowed; }
 </style>

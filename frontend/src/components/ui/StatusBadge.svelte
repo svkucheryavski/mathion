@@ -2,7 +2,8 @@
 <script lang="ts">
   import { STATUS_LABEL, type MpGroupStatus } from '../../lib/dashboards';
 
-  let { status }: { status: MpGroupStatus } = $props();
+  // `label` overrides the text only (Slice-6a Submissions passes the short label).
+  let { status, label = undefined }: { status: MpGroupStatus; label?: string } = $props();
 
   // Map status enum to CSS variable name (underscores → dashes).
   const cssKey = $derived(status.replace(/_/g, '-'));
@@ -12,7 +13,7 @@
   class="status-badge"
   data-status={status}
   style="--badge-bg: var(--status-{cssKey}-bg); --badge-fg: var(--status-{cssKey}-fg);"
->{STATUS_LABEL[status]}</span>
+>{label ?? STATUS_LABEL[status]}</span>
 
 <style>
   /* Reference visual-system badge metrics (§5): 11px / 500 / 3px 8px / pill

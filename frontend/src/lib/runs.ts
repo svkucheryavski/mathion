@@ -23,8 +23,8 @@ export function updateRun(runId: number, body: RunUpdateRequest): Promise<RunRes
   return api.patch<RunResponse>(`/api/runs/${runId}`, body);
 }
 
-export function deleteRun(runId: number): Promise<void> {
-  return api.delete(`/api/runs/${runId}`);
+export function deleteRun(runId: number, opts: { force?: boolean } = {}): Promise<void> {
+  return api.delete(`/api/runs/${runId}${opts.force ? '?force=true' : ''}`);
 }
 
 export function publishRun(runId: number): Promise<RunResponse> {

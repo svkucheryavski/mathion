@@ -1,17 +1,17 @@
 <script lang="ts">
-  import { getContext } from 'svelte';
-  import AccordionHeader from './AccordionHeader.svelte';
+  import { getContext, onDestroy, tick } from 'svelte';
+  import AccordionHeader, { type HeaderMode } from './AccordionHeader.svelte';
   import ItemRow from './ItemRow.svelte';
-  import ItemTypePicker from './ItemTypePicker.svelte';
-  import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
-  import { makeDirtyTracker } from '../../lib/dirty.svelte';
-  import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
+  import TreeAskRow from './TreeAskRow.svelte';
+  import { useTreeAsk, settleTo, moveOn, withdraw, firstUsable, focusAfter, type Ask } from '../../lib/askInPlace.svelte';
+  import NewItemModal from './NewItemModal.svelte';
+  import { DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../../lib/dirtyRegistry.svelte';
   import { versionPermissions } from '../../lib/versionPermissions';
+  import { unsavedSuffix } from '../../lib/editorReasons';
   import { navigate } from '../../lib/router.svelte';
   import { api, ApiError } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
-  import Button from '../ui/Button.svelte';
   import type { AdminTreeBlock, AdminTreeSequence } from '../../lib/types';
 
   type Props = {
@@ -23,12 +23,18 @@
     sequenceCount: number;
     routeBid: string | null;
     routeSid: string | null;
+    // The parent BlockAccordion's version guard (`alive && vid === savedVid`).
+    // Required: this component is rendered inside the block's {#if expanded}
+    // body, so its own lifetime ends when the block collapses — a reload
+    // gated on its own `alive` would be skipped and leave a deleted sequence
+    // or an old title in the store. The parent stays mounted while the block
+    // is in the tree. No `() => true` default: that would silently reload a
+    // torn-down version.
+    stillOnVid: (savedVid: number) => boolean;
     onMoveUp: () => void;
     onMoveDown: () => void;
-    // parentBusy locks inputs while a parent (BlockAccordion / VersionEditPage)
-    // mutation is in flight, so the user can't type into the title or the
-    // create form between our own dirty checks and the tracker.reset() that
-    // follows a refresh. Same convention as VersionMetaForm.
+    // parentBusy disables this sequence's controls while a parent
+    // (BlockAccordion / VersionEditPage) mutation is in flight.
     parentBusy?: boolean;
   };
 
@@ -41,6 +47,7 @@
     sequenceCount,
     routeBid,
     routeSid,
+    stillOnVid,
     onMoveUp,
     onMoveDown,
     parentBusy = false,
@@ -50,33 +57,26 @@
   if (!dirty) throw new Error('DIRTY_REGISTRY_KEY context missing — SequenceAccordion must mount under VersionEditPage');
 
   const expanded = $derived(String(block.id) === routeBid && String(seq.id) === routeSid);
-  const headerId = `seq-${String(seq.id)}-header`;
-  const panelId = `seq-${String(seq.id)}-panel`;
+  // Slice-5c D1/D4: a sequence is only visible while its block is open; it is
+  // "outside" only while a SIBLING really is open — a stale route id (about
+  // to fall back) keeps the rows at the focus level, controls included.
+  const siblingOpen = $derived(routeSid !== null && block.sequences.some((s) => String(s.id) === routeSid));
+  const mode: HeaderMode = $derived(expanded ? 'open-focus' : (siblingOpen ? 'row-outside' : 'row-focus'));
+  const headerId = $derived(`seq-${String(seq.id)}-header`);
+  const panelId = $derived(`seq-${String(seq.id)}-panel`);
+
+  // Polish 1 #3, #4 (R53): the tree's one question, keyed by node.
+  const treeAsk = useTreeAsk();
+  const seqKey = $derived(`seq-${String(seq.id)}`);
+  let cardEl = $state<HTMLDivElement>();
+  const seqTrash = () => cardEl?.querySelector<HTMLElement>('[data-action="delete-sequence"]');
+  const itemTrash = (id: number) =>
+    document.getElementById(`item-${id}-open`)?.closest('li')?.querySelector<HTMLElement>('[data-action="delete-item"]');
 
   const version = $derived(currentEditorVersion.value?.version ?? null);
   const perms = $derived(version ? versionPermissions(version) : null);
-  const canEdit = $derived(perms?.canEditTextFields ?? false);
   const canStructure = $derived(perms?.canEditStructure ?? false);
-
-  type Meta = { title: string };
-  const tracker = makeDirtyTracker<Meta>({ title: seq.title });
-
-  // Defensive rebuild on seq.id change (belt-and-suspenders — child body
-  // unmounts via {#if expanded} so a sid change typically remounts the
-  // whole component).
-  let trackerSid = $state(seq.id);
-  $effect(() => {
-    if (seq.id !== trackerSid) {
-      tracker.reset({ title: seq.title });
-      trackerSid = seq.id;
-    }
-  });
-
-  $effect(() => {
-    if (!expanded) return;
-    dirty.register(tracker);
-    return () => dirty.unregister(tracker);
-  });
+  const canEditTitle = $derived(perms?.canEditTextFields ?? false);
 
   function toggle() {
     if (expanded) {
@@ -88,77 +88,90 @@
 
   let busy = $state(false);
 
-  async function save() {
-    if (!tracker.isDirty) return;
-    const savedVid = vid;
-    const savedSid = seq.id;
-    const savedBid = block.id;
-    const sentTitle = tracker.current.title;
-    busy = true;
-    try {
-      await api.patch(`/api/sequences/${savedSid}`, { title: sentTitle });
-      const result = await loadAdminTree(savedVid, { force: true });
-      if (result === 'discarded') {
-        pushToast('Saved', 'success');
-      } else if (result === 'ok') {
-        const fresh = currentEditorVersion.value?.blocks.find((b) => b.id === savedBid)?.sequences.find((x) => x.id === savedSid);
-        if (fresh) tracker.reset({ title: fresh.title });
-        pushToast('Saved', 'success');
-      } else {
-        tracker.reset({ title: sentTitle });
-        pushToast('Saved (refresh failed — reload to see latest)', 'info');
-      }
-    } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
-    } finally {
-      busy = false;
-    }
-  }
+  // Own lifetime — gates only the post-delete forced navigate (§4 race guards).
+  let alive = true;
+  onDestroy(() => { alive = false; });
 
-  function discard() {
-    tracker.reset({ title: seq.title });
+  // D8: the header's inline title. One PATCH; a failure propagates to the
+  // header (inline error); only the follow-up refresh is guarded.
+  async function renameSeq(title: string) {
+    const savedVid = vid;
+    const check = stillOnVid;
+    const savedSid = seq.id;
+    await api.patch(`/api/sequences/${savedSid}`, { title });
+    if (!check(savedVid)) return;
+    const result = await loadAdminTree(savedVid, { force: true });
+    if (result === 'error') pushToast('Saved (refresh failed — reload to see latest)', 'info');
   }
 
   async function deleteSeq() {
-    if (tracker.isDirty || !canStructure || seq.items.length > 0) return;
-    if (!confirm(`Delete sequence "${seq.title}"? This cannot be undone.`)) return;
+    if (creating || !canStructure || busy || parentBusy || seq.items.length > 0) return;
     const savedVid = vid;
+    const check = stillOnVid;
     const savedBid = block.id;
     const savedSid = seq.id;
     const savedSlug = courseSlug;
+    const title = seq.title;
+    const q: Ask = {
+      // A getter: the suffix follows the page while it asks.
+      warning: () => `Delete sequence "${title}"? This cannot be undone.${unsavedSuffix(dirty.isAnyDirty())}`,
+      confirmLabel: 'Delete', tone: 'danger', layout: 'row', align: 'end', confirmDataAction: 'confirm-delete-sequence', key: seqKey,
+    };
+    const a = await treeAsk.ask(q);
+    // The trash, else (disabled meanwhile) the header: never <body>.
+    if (a === 'cancel') { void focusAfter(() => firstUsable(seqTrash(), document.getElementById(headerId))); return; }
+    if (a !== 'confirm') return;
+    // R49: the same sequence, still deletable, at the focus, on the same version.
+    if (!alive || !check(savedVid) || seq.id !== savedSid || seq.title !== title || mode !== 'open-focus'
+        || creating || !canStructure || busy || parentBusy || seq.items.length > 0) {
+      withdraw(treeAsk, q, () => firstUsable(seqTrash(), document.getElementById(headerId)));
+      return;
+    }
     busy = true;
     try {
       await api.delete(`/api/sequences/${savedSid}`);
-      // Refresh the store BEFORE navigating — the parent page stays mounted
-      // on the same vid, so without an explicit reload the deleted sequence
-      // would remain in currentEditorVersion until some later refetch.
-      await loadAdminTree(savedVid, { force: true });
-      void navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}`);
+      // R54: the row goes with the reload, so the question settles now and
+      // focus moves to the block header (never disabled) before the navigate.
+      await settleTo(treeAsk, q, () => document.getElementById(`block-${savedBid}-header`));
+      // Navigate FIRST (no spurious "Sequence not found."), only while the
+      // live route still names this sequence; `force` — already confirmed;
+      // `replace` — keep the deleted URL out of history. Then reload, gated on
+      // the parent's guard so it still runs after the block collapsed.
+      if (alive && expanded && check(savedVid)) {
+        void navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}`, { replace: true, force: true });
+      }
+      if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
-      await loadAdminTree(savedVid, { force: true });
+      if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
+      // A failure keeps the row: the question stayed busy through the reload
+      // above and settles now, back on the trash (R54). After success: nothing.
+      void settleTo(treeAsk, q, seqTrash);
     }
   }
 
   // Item-list reorder: this component owns seq.items and the API call.
+  // Not blocked by drafts (D3); a second reorder while one is in flight would
+  // see a pre-swap snapshot of seq.items.
   async function reorderItem(idx: number, dir: -1 | 1) {
-    if (tracker.isDirty) return;
+    if (busy || parentBusy) return;
     const items = [...seq.items];
     const target = idx + dir;
     if (target < 0 || target >= items.length) return;
     [items[idx], items[target]] = [items[target], items[idx]];
     const order = items.map((it, i) => ({ id: it.id, order: i + 1 }));
     const savedVid = vid;
+    const check = stillOnVid;
     const savedSid = seq.id;
     busy = true;
     try {
       await api.post(`/api/sequences/${savedSid}/items/reorder`, { order });
-      await loadAdminTree(savedVid, { force: true });
+      if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
-      await loadAdminTree(savedVid, { force: true });
+      if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
     }
@@ -166,18 +179,43 @@
 
   async function deleteItem(itemId: number, itemTitle: string) {
     if (busy || !canStructure) return;
-    if (!confirm(`Delete "${itemTitle}"? This cannot be undone.`)) return;
     const savedVid = vid;
+    const check = stillOnVid;
+    const q: Ask = {
+      warning: `Delete "${itemTitle}"? This cannot be undone.`,   // D3: never the unsaved suffix
+      confirmLabel: 'Delete', tone: 'danger', layout: 'row', align: 'end', confirmDataAction: 'confirm-delete-item', key: `item-${itemId}`,
+    };
+    const a = await treeAsk.ask(q);
+    if (a === 'cancel') { void focusAfter(() => firstUsable(itemTrash(itemId), document.getElementById(headerId))); return; }
+    if (a !== 'confirm') return;
+    // R49: re-run the gate and find the item again in the live list.
+    const ids = seq.items.map((i) => i.id);
+    const at = ids.indexOf(itemId);
+    if (!alive || !check(savedVid) || busy || !canStructure || at < 0 || seq.items[at].title !== itemTitle) {
+      withdraw(treeAsk, q, () => firstUsable(itemTrash(itemId), document.getElementById(headerId)));
+      return;
+    }
+    // R54: where focus lands once `busy` clears, resolved by id before the
+    // reload: the next item's ✎, else the previous, else "+ Add item".
+    const nextId = ids[at + 1] ?? ids[at - 1];
+    const final = () => firstUsable(nextId !== undefined ? document.getElementById(`item-${nextId}-open`) : null, addLineEl);
+    let interim: HTMLElement | null = null;
     busy = true;
     try {
       await api.delete(`/api/items/${itemId}`);
-      await loadAdminTree(savedVid, { force: true });
+      // The row goes with the reload: settle now, and hold focus on the
+      // sequence header (never disabled) meanwhile.
+      interim = await settleTo(treeAsk, q, () => document.getElementById(headerId), { preventScroll: true });
+      if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
       pushToast('Item deleted', 'success');
     } catch (e) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
-      await loadAdminTree(savedVid, { force: true });
+      if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
+      if (interim) { if (alive) void moveOn(interim, final); }
+      // A failure: the question stayed busy through the reload; back to the trash.
+      else void settleTo(treeAsk, q, () => itemTrash(itemId));
     }
   }
 
@@ -185,232 +223,148 @@
     void navigate(`/courses/${courseSlug}/edit/v/${vid}/blocks/${block.id}/sequences/${seq.id}/items/${itemId}`);
   }
 
-  // Inline create-item form
+  // D6: why the header trash is blocked (null = it may delete). The version's
+  // permission is not a reason here: without it the trash is hidden.
+  const deleteBlockedReason = $derived(seq.items.length > 0 ? 'Remove its items first' : null);
+
+  // "+ Add item" (5c D10): the line opens the New item modal. `creating` = the
+  // modal is open; the modal owns the form and its guard tracker.
   let creating = $state(false);
-  let newType = $state<'static_page' | 'video' | 'quiz' | 'interactive_app'>('static_page');
-  let newTitle = $state('');
-  let newContentMd = $state('');
-  let newVideoUrl = $state('');
-  let createErrors = $state<FieldErrors>({});
-  let createGlobalError = $state<string | null>(null);
-  let createBusy = $state(false);
-  let contentMdTouched = $state(false);
+  let addLineEl = $state<HTMLButtonElement>();
 
-  $effect(() => {
-    if (creating && newType === 'static_page' && !contentMdTouched && newTitle) {
-      newContentMd = `# ${newTitle}\n`;
-    }
-  });
-
-  // Tracker shim for the create form: synthesized isDirty getter reads
-  // current state directly — NO reset()-on-keystroke (that would always
-  // make the tracker clean and break smoke 14b).
-  const createTracker: RegisteredTracker = {
-    get isDirty() {
-      return creating && (
-        newTitle.trim() !== '' ||
-        (newType === 'static_page' && newContentMd.trim() !== '' && newContentMd !== `# ${newTitle}\n`) ||
-        (newType === 'video' && newVideoUrl.trim() !== '')
-      );
-    },
-  };
-
-  $effect(() => {
-    if (!creating) return;
-    dirty.register(createTracker);
-    return () => dirty.unregister(createTracker);
-  });
-
-  // Close + reset the create form if structure permission is revoked while
-  // the form is open (e.g., parent publishes the version mid-edit). Without
-  // this, the form would stay submittable even though the underlying
-  // permission has flipped.
-  $effect(() => {
-    if (!canStructure && creating) {
-      resetCreateForm();
-      creating = false;
-    }
-  });
-
-  function resetCreateForm() {
-    newType = 'static_page';
-    newTitle = '';
-    newContentMd = '';
-    newVideoUrl = '';
-    contentMdTouched = false;
-    createErrors = {};
-    createGlobalError = null;
-  }
-
-  function toggleCreate() {
-    // Defense-in-depth: refuse mid-flight toggles. The toggle button is
-    // already disabled in these states, but a stale/programmatic click
-    // would otherwise unmount the form during an in-flight POST,
-    // discarding validation errors and unregistering the create tracker.
-    if (createBusy || busy || parentBusy) return;
-    if (creating) resetCreateForm();
-    creating = !creating;
-  }
-
-  async function submitCreate() {
-    if (createBusy || busy || parentBusy || !canStructure || !newTitle.trim()) return;
+  // The modal owns the form; this owns the request, the reload and the
+  // navigation into the new item's editor (R1: push, so the item's × is Back).
+  // A failure throws back into the modal, which shows it on the fields.
+  async function createItem(body: Record<string, unknown>) {
     const savedVid = vid;
+    const check = stillOnVid;
     const savedBid = block.id;
     const savedSid = seq.id;
     const savedSlug = courseSlug;
-    const body: Record<string, unknown> = { title: newTitle, type: newType };
-    if (newType === 'static_page') body.content_md = newContentMd;
-    if (newType === 'video') body.video_url = newVideoUrl;
-    createErrors = {};
-    createGlobalError = null;
-    createBusy = true;
-    try {
-      const item = await api.post<{ id: number }>(`/api/sequences/${savedSid}/items`, body);
-      await loadAdminTree(savedVid, { force: true });
-      resetCreateForm();
-      creating = false;
-      void navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}/sequences/${savedSid}/items/${item.id}`);
-    } catch (e) {
-      const known = newType === 'static_page'
-        ? ['title', 'content_md', 'type']
-        : newType === 'video'
-          ? ['title', 'video_url', 'type']
-          : ['title', 'type'];
-      const mapped = mapCreateError(e, known);
-      createErrors = mapped.fieldErrors;
-      // Fall back to a generic message if mapper produced nothing — without
-      // this, a 500 with no validation body silently swallows the failure.
-      createGlobalError = mapped.globalMessage
-        ?? (Object.keys(mapped.fieldErrors).length === 0 ? 'Create failed' : null);
-      if (createGlobalError && Object.keys(mapped.fieldErrors).length === 0) {
-        pushToast(createGlobalError, 'error');
-      }
-    } finally {
-      createBusy = false;
-    }
+    const item = await api.post<{ id: number }>(`/api/sequences/${savedSid}/items`, body);
+    if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
+    creating = false;
+    // Let the modal unmount first: its guard tracker (dirty — the typed
+    // title) unregisters on teardown; navigating before that would prompt.
+    await tick();
+    // Gated like the reload: a late success must not pull the author back
+    // into the old version's item editor.
+    if (!check(savedVid)) return;
+    // 5b D18: closing the new item's editor focuses its ✎. The modal's
+    // teardown just handed focus back to its opener ("+ Add item" in Chrome,
+    // where a click focuses buttons; whatever held focus before in Safari);
+    // drop it, so the editor opens with no opener and its close falls through
+    // to the new item's ✎.
+    (document.activeElement as HTMLElement | null)?.blur();
+    void navigate(`/courses/${savedSlug}/edit/v/${savedVid}/blocks/${savedBid}/sequences/${savedSid}/items/${item.id}`);
   }
+
+  async function closeNewItem() {
+    creating = false;
+    await tick();
+    addLineEl?.focus();
+  }
+
+  // Leaving the sequence or losing structure permission closes the modal.
+  $effect(() => { if (creating && (!expanded || !canStructure)) creating = false; });
 </script>
 
-<div class="sequence">
+<div class="seq-card" bind:this={cardEl} class:at-focus={mode === 'row-focus'} class:focus={mode === 'open-focus'}>
   <AccordionHeader
     {headerId}
     {panelId}
     level="sequence"
+    {mode}
     title={seq.title}
     slug={seq.slug}
     {index}
     {expanded}
-    dirty={tracker.isDirty}
-    busy={busy || createBusy || parentBusy}
-    canReorderUp={canStructure && index > 1}
-    canReorderDown={canStructure && index < sequenceCount}
+    busy={busy || parentBusy}
+    {canStructure}
+    {canEditTitle}
+    canReorderUp={index > 1}
+    canReorderDown={index < sequenceCount}
+    {deleteBlockedReason}
     onToggle={toggle}
     {onMoveUp}
     {onMoveDown}
+    onDelete={() => void deleteSeq()}
+    onRename={renameSeq}
   />
+  <!-- #3: the delete question, under the header. -->
+  <TreeAskRow ask={treeAsk} askKey={seqKey} live={mode === 'open-focus'}
+              fallback={() => document.getElementById(`block-${block.id}-header`)} />
 
   {#if expanded}
-    <div id={panelId} role="region" aria-labelledby={headerId} class="accordion-body">
-      {#if canEdit}
-        <section class="meta">
-          <label>Sequence title <input bind:value={tracker.current.title} required disabled={busy || createBusy || parentBusy} /></label>
-          <div class="row">
-            <Button onclick={save} disabled={!tracker.isDirty || busy || createBusy || parentBusy} loading={busy}>Save</Button>
-            <Button variant="ghost" onclick={discard} disabled={!tracker.isDirty || busy || createBusy || parentBusy}>Discard</Button>
-          </div>
-        </section>
+    <div id={panelId} role="region" aria-labelledby={headerId} class="acc-body">
+      {#if seq.items.length === 0}
+        <p class="empty">{canStructure ? 'No items yet.' : 'No items.'}</p>
+      {:else}
+        <ul class="items-list">
+          {#each seq.items as item, i (item.id)}
+            <li>
+              <ItemRow
+                {item}
+                index={i + 1}
+                {canStructure}
+                canReorderUp={i > 0}
+                canReorderDown={i < seq.items.length - 1}
+                busy={busy || parentBusy}
+                onMoveUp={() => void reorderItem(i, -1)}
+                onMoveDown={() => void reorderItem(i, 1)}
+                onOpen={() => openItem(item.id)}
+                onDelete={() => void deleteItem(item.id, item.title)}
+              />
+              <!-- #4: under its row; it goes with the row (R49). -->
+              <TreeAskRow ask={treeAsk} askKey={`item-${item.id}`} fallback={() => document.getElementById(headerId)} />
+            </li>
+          {/each}
+        </ul>
       {/if}
 
-      <section class="items">
-        <div class="head">
-          <h4>Items</h4>
-          {#if canStructure}
-            <Button
-              disabled={tracker.isDirty || busy || createBusy || parentBusy}
-              title={tracker.isDirty ? 'Save or discard changes first' : ''}
-              onclick={toggleCreate}
-            >{creating ? 'Cancel' : '+ New item'}</Button>
-          {/if}
-        </div>
-
-        {#if creating}
-          <form class="create" onsubmit={(e) => { e.preventDefault(); void submitCreate(); }}>
-            <ItemTypePicker bind:value={newType} />
-            <div class="field">
-              <input placeholder="Title" bind:value={newTitle} required disabled={createBusy || busy || parentBusy} oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; }} />
-              {#if createErrors.title}<small class="field-err">{createErrors.title}</small>{/if}
-            </div>
-            {#if newType === 'static_page'}
-              <div class="field">
-                <textarea placeholder="Content (markdown)" rows="4" bind:value={newContentMd} disabled={createBusy || busy || parentBusy} oninput={() => { contentMdTouched = true; if (createErrors.content_md) createErrors = { ...createErrors, content_md: '' }; }} required></textarea>
-                {#if createErrors.content_md}<small class="field-err">{createErrors.content_md}</small>{/if}
-              </div>
-            {:else if newType === 'video'}
-              <div class="field">
-                <input type="url" placeholder="Video URL (https://…)" bind:value={newVideoUrl} required disabled={createBusy || busy || parentBusy} oninput={() => { if (createErrors.video_url) createErrors = { ...createErrors, video_url: '' }; }} />
-                {#if createErrors.video_url}<small class="field-err">{createErrors.video_url}</small>{/if}
-              </div>
-            {/if}
-            {#if createGlobalError}<p class="form-err" role="alert">{createGlobalError}</p>{/if}
-            <Button type="submit" disabled={tracker.isDirty || createBusy || busy || parentBusy || !canStructure || !newTitle.trim()} loading={createBusy}>Create</Button>
-          </form>
-        {/if}
-
-        {#if seq.items.length === 0}
-          <p class="empty">
-            {canStructure ? 'No items yet — pick a type above to add one.' : 'No items.'}
-          </p>
-        {:else}
-          <ul class="items-list">
-            {#each seq.items as item, i (item.id)}
-              <li>
-                <ItemRow
-                  {item}
-                  index={i + 1}
-                  {canStructure}
-                  canReorderUp={canStructure && i > 0}
-                  canReorderDown={canStructure && i < seq.items.length - 1}
-                  parentDirty={tracker.isDirty}
-                  busy={busy || createBusy || parentBusy}
-                  onMoveUp={() => void reorderItem(i, -1)}
-                  onMoveDown={() => void reorderItem(i, 1)}
-                  onOpen={() => openItem(item.id)}
-                  onDelete={() => void deleteItem(item.id, item.title)}
-                />
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </section>
-
       {#if canStructure}
-        <section class="danger">
-          <Button
-            variant="ghost"
-            disabled={tracker.isDirty || busy || createBusy || parentBusy || seq.items.length > 0}
-            title={tracker.isDirty ? 'Save or discard changes first' : seq.items.length > 0 ? 'Remove items first' : ''}
-            onclick={deleteSeq}
-          >Delete this sequence</Button>
-        </section>
+        <!-- After the list: new items land at the end (user, T3). -->
+        <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} onclick={() => (creating = true)}>+ Add item</button>
+      {/if}
+      {#if creating}
+        <NewItemModal
+          blockTitle={block.title}
+          seqTitle={seq.title}
+          position={seq.items.length + 1}
+          onCreate={createItem}
+          onClose={() => void closeNewItem()}
+        />
       {/if}
     </div>
   {/if}
 </div>
 
 <style>
-  .sequence { border: 1px solid var(--border); border-radius: var(--radius); margin: var(--space-2) 0; }
-  .accordion-body { padding: var(--space-3); border-top: 1px solid var(--border); }
-  .meta { margin-bottom: var(--space-3); }
-  .meta label { display: block; margin: var(--space-2) 0; }
-  .meta input { width: 100%; }
-  .row { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-  .head { display: flex; justify-content: space-between; align-items: center; }
-  .create { display: grid; gap: var(--space-2); margin: var(--space-2) 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); }
-  .create input, .create textarea { width: 100%; }
-  .create .field { display: flex; flex-direction: column; }
-  .field-err { color: var(--danger); font-size: 0.85rem; margin-top: var(--space-1); display: block; }
-  .form-err { color: var(--danger); font-size: 0.9rem; margin: 0; }
-  .items-list { list-style: none; padding: 0; margin: 0; }
-  .empty { color: var(--muted); }
-  .danger { padding-top: var(--space-3); border-top: 1px solid var(--border); margin-top: var(--space-3); }
+  .seq-card {
+    border: 1px solid var(--focus-line);
+    border-radius: var(--radius);
+    background: transparent;
+    overflow: hidden;
+  }
+  /* 5c T5 (user): a focus-level row inside the open (white) block is tinted. */
+  .seq-card.at-focus { background: var(--focus-row); }
+  .seq-card.focus {
+    background: var(--focus-0);
+    border-color: var(--focus-line-strong);
+    box-shadow: var(--focus-shadow);
+  }
+  .acc-body { padding: 12px 14px; border-top: 1px solid var(--border-soft); /* ref 1578 */ }
+  .add-line {
+    margin-top: 8px;
+    padding: 4px 2px;
+    border: 0;
+    background: transparent;
+    color: var(--primary);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .add-line:disabled { color: var(--muted); cursor: default; }
+  .empty { margin: 0; font-size: 14px; color: var(--muted); }
+  .items-list { display: flex; flex-direction: column; gap: 4px; list-style: none; padding: 0; margin: 0; }
 </style>

@@ -1,12 +1,19 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { ApiError } from '../../lib/api';
   import { runAssetContext } from '../../lib/assetContext';
   import { localInputToISO, isoToLocalInput, localTzLabel } from '../../lib/datetime';
   import { createMiniProject, updateMiniProject, publishMiniProject } from '../../lib/miniProjects';
+  import { blockPositions } from '../../lib/blockNumbers';
+  import { focusFirst } from '../../lib/focusFirst';
+  import { pushToast } from '../../stores/toasts.svelte';
   import MarkdownEditor from '../editor/MarkdownEditor.svelte';
+  import DirtyGuard from '../editor/DirtyGuard.svelte';
+  import { DISCARD, DISCARD_CONTINUE } from '../../lib/editorReasons';
+  import { refused, type GuardAsk } from '../../lib/askInPlace.svelte';
+  import Button from '../ui/Button.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
-  import FocusTrap from '../ui/FocusTrap.svelte';
+  import Modal from '../ui/Modal.svelte';
   import type { Course, MiniProjectResponse, BlockResponse, ValidationErrorDetail } from '../../lib/types';
 
   let {
@@ -19,8 +26,10 @@
     versionIsDisabled,
     runEndDate,
     course,
+    blocks = [],
     onClose,
     onSaved,
+    onCreated = undefined,
     onNavigateToTab,
   }: {
     runId: number;
@@ -32,12 +41,22 @@
     versionIsDisabled: boolean;
     runEndDate: string | null;
     course: Course;
+    // R21 / P4: the pinned version's blocks, for position numbers. Without
+    // them the "Block {n} — " prefix drops.
+    blocks?: BlockResponse[];
     onClose: () => void;
     onSaved: () => Promise<void>;
+    // Create hands the new mini-project over before the refresh, so the tab
+    // can focus its row once the modal closes (§Focus › After Create).
+    onCreated?: (mp: MiniProjectResponse) => void;
     onNavigateToTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster') => void;
   } = $props();
 
+  const uid = $props.id();
   const assetContext = $derived(runAssetContext(runId));
+  const UPLOAD_WAIT = 'Wait for the upload to finish';
+  // R23: "GMT+2", without localTzLabel's parentheses.
+  const zone = localTzLabel().slice(1, -1);
 
   // The modal is `{#if modalMode != null}`-gated by the parent: it unmounts
   // and remounts whenever mode/initial/availableBlocks change, so a one-shot
@@ -63,7 +82,10 @@
 
   let submitting = $state(false);
   let mounted = $state(false);
+  let uploading = $state(false);
   let uploadAbortController = $state<AbortController | null>(null);
+  let titleEl = $state<HTMLElement>();
+  let publishEl = $state<HTMLButtonElement>();
 
   function currentFormSnapshot() {
     return {
@@ -74,51 +96,46 @@
       assignment_md: formData.assignment_md,
     };
   }
-  // Initialized inline at module-init time (after formData) so the dirty
-  // $derived sees a defined snapshot on first evaluation. Setting this in
-  // onMount would leave dirty stale until the first formData mutation.
-  const initialFormSnapshot = currentFormSnapshot();
-
-  function onWindowKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeForCurrentStage();
-    }
-  }
+  // D19: the saved values the form compares against. An edit Save re-bases it
+  // to the values it sent: the fields were frozen, so they equal the screen.
+  let baseline = $state(currentFormSnapshot());
 
   onMount(() => {
     mounted = true;
-    window.addEventListener('keydown', onWindowKeydown);
   });
   onDestroy(() => {
     mounted = false;
-    window.removeEventListener('keydown', onWindowKeydown);
   });
 
   let pendingClose = $state(false);
-  let discarding = $state(false);
+  // Polish 1 (D37): the × question also asks for a navigation ('nav'), which waits on it.
+  let closeSource = $state<'close' | 'nav'>('close');
+  let navAnswer: ((ok: boolean) => void) | null = null;
+  function answerNav(ok: boolean) {
+    const r = navAnswer;
+    navAnswer = null;
+    r?.(ok);
+  }
+  let pendingPublishConfirm = $state(false);
+  let publishing = $state(false);
 
-  const tzLabel = $derived(localTzLabel());
-  const dirty = $derived(
-    JSON.stringify(currentFormSnapshot()) !== JSON.stringify(initialFormSnapshot),
+  const dirty = $derived(JSON.stringify(currentFormSnapshot()) !== JSON.stringify(baseline));
+  const saving = $derived(submitting && !publishing);
+  const confirmOpen = $derived(pendingClose || pendingPublishConfirm);
+
+  // R21: blocks are numbered by position; a block missing from `blocks` drops the prefix.
+  const positions = $derived(blockPositions(blocks));
+  function blockLabel(b: BlockResponse): string {
+    const n = positions.get(b.id);
+    return n === undefined ? b.title : `Block ${n} — ${b.title}`;
+  }
+  const heading = $derived(
+    mode === 'create'
+      ? 'New mini-project'
+      : currentBlock
+        ? `Edit — ${blockLabel(currentBlock)}`
+        : 'Edit mini-project',
   );
-
-  function closeForCurrentStage() {
-    if (submitting) return;
-    if (dirty && !pendingClose && !discarding) {
-      pendingClose = true;
-      return;
-    }
-    uploadAbortController?.abort();
-    onClose();
-    discarding = false;
-  }
-
-  function confirmDiscard() {
-    discarding = true;
-    pendingClose = false;
-    closeForCurrentStage();
-  }
 
   const saveError = $derived.by((): string | null => {
     if (mode === 'create' && formData.block_id == null) {
@@ -152,28 +169,16 @@
   }
 
   // Publish flow (T6b). publishCheckResult lists unmet preconditions per spec
-  // §"Validation" lines 491-510. Each bullet has optional `field` — when set,
-  // the bullet's rendered <li> gets a stable ID and the corresponding form
-  // input adds it to aria-describedby (spec line 512). Bullets containing
-  // "Open Overview" render with that substring as a link to
-  // onNavigateToTab('overview'). publishAttempted flips on the first Publish
-  // click so the "Cannot publish" banner only appears after the user tries.
-  // pendingPublishConfirm renders the InlineConfirm row. publishing flips
-  // while POST is in flight (drives the "Publishing…" button label and is
-  // distinct from save-submitting so the Save label stays "Save").
-  type FieldKey = 'assignment_md' | 'soft_deadline' | 'hard_deadline' | 'resubmission_deadline';
-  // `adminOnly` flags a bullet whose "Open Overview" affordance is only
-  // actionable by course-admins (e.g. publishing the run, re-enabling a
-  // disabled course version). Bullets containing "Open Overview" render
-  // that substring as a clickable <button> for users who can act
-  // (course.is_admin OR not adminOnly); otherwise it renders as plain
-  // text. The surrounding bullet text is rendered verbatim in either case.
+  // §"Validation" lines 491-510, computed from the values on screen. Each
+  // bullet has optional `field` — when set, the bullet's <li> gets a stable ID
+  // and the corresponding input adds it to aria-describedby (spec line 512).
+  // Bullets containing "Open Overview" render that substring as a link to
+  // onNavigateToTab('overview'). D13: the box shows up front whenever a
+  // precondition is unmet. `adminOnly` flags a bullet whose "Open Overview" affordance only a
+  // course admin can act on; for a teacher it renders as plain text.
   // Spec §6.2 RunMiniProjectsTab + MiniProjectModal teacher-gating.
+  type FieldKey = 'assignment_md' | 'soft_deadline' | 'hard_deadline' | 'resubmission_deadline';
   type PreconditionBullet = { text: string; field?: FieldKey; adminOnly?: boolean };
-
-  let publishAttempted = $state(false);
-  let pendingPublishConfirm = $state(false);
-  let publishing = $state(false);
 
   const publishCheckResult = $derived.by((): PreconditionBullet[] | null => {
     if (mode !== 'edit' || initial?.is_published) return null;
@@ -224,31 +229,39 @@
     if (!runIsPublished) {
       unmet.push({ text: 'Run must be published — Open Overview to publish.', adminOnly: true });
     }
-    // Spec line 548: versionIsDisabled blocks the modal-only publish. Without
-    // this check, a modal already open when versionIsDisabled flips to true
-    // could still publish; T7 disables row [Edit] only.
+    // Spec line 548: versionIsDisabled blocks the modal-only publish, even for
+    // a modal already open when it flips.
     if (versionIsDisabled) {
       unmet.push({ text: "This run's course version is disabled — Open Overview to re-enable it.", adminOnly: true });
     }
-    // T9-smoke catch: the publish backend reads deadlines from the persisted
-    // MP, but every other check above reads `formData` (the unsaved inputs).
-    // If the user fills deadlines and clicks Publish without Save, the
-    // form-side checks pass while the backend rejects with "hard_deadline
-    // required at publish". Gate Publish on `!dirty` so the user is told to
-    // save first.
-    if (dirty) {
-      unmet.push({ text: 'Save your changes before publishing.' });
-    }
+    // R22: unsaved edits are not a bullet. The backend publishes the persisted
+    // mini-project, so Publish is disabled while dirty ("Save your changes
+    // first") and the confirm's recheck refuses while dirty.
     return unmet;
   });
 
+  // D13 / D21: the box shows while editing an unpublished mini-project with an
+  // unmet precondition, computed from the values on screen.
+  const boxShows = $derived(!!publishCheckResult && publishCheckResult.length > 0);
+
+  // R20: when reasons overlap the first wins; a loading button ignores them.
+  const saveReason = $derived(uploading ? UPLOAD_WAIT : (saveError ?? (dirty ? null : 'No changes to save')));
+  // C18: Discard waits for an upload too: the finished upload would re-dirty the form.
+  const discardReason = $derived(uploading ? UPLOAD_WAIT : (dirty ? null : 'No changes to discard'));
+  const publishReason = $derived(
+    uploading
+      ? UPLOAD_WAIT
+      : boxShows
+        ? 'Resolve the listed preconditions first'
+        : dirty
+          ? 'Save your changes first'
+          : null,
+  );
+
   // Stable bullet IDs grouped by field, used for aria-describedby on inputs.
-  // Banner is only rendered when publishAttempted is true, so the IDs only
-  // exist in the DOM then — but computing them unconditionally is fine; the
-  // input attribute is set to undefined when no IDs apply.
   const preconditionIdsByField = $derived.by((): Record<string, string> => {
     const result: Record<string, string[]> = {};
-    if (!publishAttempted || !publishCheckResult) return {};
+    if (!boxShows || !publishCheckResult) return {};
     publishCheckResult.forEach((b, idx) => {
       if (b.field) {
         const id = `precondition-${idx}`;
@@ -265,31 +278,138 @@
     return ids.length > 0 ? ids.join(' ') : undefined;
   }
 
-  function handlePublishClick() {
+  const DEADLINES = [
+    { field: 'soft_deadline', local: 'soft_local', label: 'Soft deadline' },
+    { field: 'hard_deadline', local: 'hard_local', label: 'Hard deadline' },
+    { field: 'resubmission_deadline', local: 'resub_local', label: 'Resubmission' },
+  ] as const;
+  // R20: a failed request focuses the first errored field, in screen order.
+  const FIELD_ORDER = ['block_id', 'assignment_md', 'soft_deadline', 'hard_deadline', 'resubmission_deadline'];
+
+  // Modal owns the frame; the modal's own nodes are found from the title.
+  function panel(): HTMLElement | null {
+    return titleEl?.closest<HTMLElement>('section.modal-panel') ?? null;
+  }
+  function closeX(): HTMLElement | null {
+    return panel()?.querySelector<HTMLElement>('header.modal-head button[aria-label="Close"]') ?? null;
+  }
+  // The assignment textarea exists only in the editor's Edit mode; its Edit
+  // tab is the fallback (MarkdownEditor.svelte:285-296).
+  function assignmentField(): HTMLElement | null {
+    return panel()?.querySelector<HTMLElement>('.modal-body textarea') ?? null;
+  }
+  function editTab(): HTMLElement | null {
+    return panel()?.querySelector<HTMLElement>('.modal-body button[data-action="edit"]') ?? null;
+  }
+  function focusFirstError() {
+    focusFirst(
+      FIELD_ORDER.filter((k) => fieldErrors[k]).map((k) =>
+        panel()?.querySelector<HTMLElement>(`.modal-body [aria-describedby~="err-${k}"]`),
+      ),
+    );
+  }
+
+  function focusConfirmCancel() {
+    const c = panel()?.querySelector<HTMLElement>('.modal-foot .inline-confirm button.cancel');
+    c?.closest('.inline-confirm')?.scrollIntoView?.({ block: 'nearest' });
+    c?.focus();
+  }
+
+  // ×, Esc and create-mode Cancel. While a confirm shows they never close:
+  // focus goes back to the confirm's Cancel.
+  function requestClose() {
     if (submitting) return;
-    publishAttempted = true;
-    if (publishCheckResult && publishCheckResult.length > 0) return;
+    if (confirmOpen) {
+      focusConfirmCancel();
+      return;
+    }
+    if (dirty) {
+      closeSource = 'close';
+      pendingClose = true;
+      return;
+    }
+    uploadAbortController?.abort();
+    onClose();
+  }
+
+  // DirtyGuard's `ask`. While the publish or × question is open, a navigation
+  // is refused and focus goes back to that question (R53).
+  function askNav(): GuardAsk {
+    if (confirmOpen) {
+      focusConfirmCancel();
+      return refused();
+    }
+    closeSource = 'nav';
+    pendingClose = true;
+    const promise = new Promise<boolean>((r) => { navAnswer = r; });
+    return {
+      promise,
+      dismiss: () => {
+        if (!navAnswer) return;
+        pendingClose = false;
+        answerNav(false);
+      },
+      focusCancel: focusConfirmCancel,
+    };
+  }
+
+  async function cancelClose() {
+    pendingClose = false;
+    answerNav(false);
+    await tick();
+    closeX()?.focus();
+  }
+
+  function confirmDiscard() {
+    pendingClose = false;
+    uploadAbortController?.abort();
+    // A navigation goes ahead and unmounts the modal; × closes it.
+    if (closeSource === 'nav') {
+      answerNav(true);
+      return;
+    }
+    onClose();
+  }
+
+  // D12: put back the saved values (§Focus › After Discard).
+  async function discard() {
+    if (submitting || uploading || !dirty) return;
+    Object.assign(formData, $state.snapshot(baseline));
+    serverError = null;
+    fieldErrors = {};
+    await tick();
+    focusFirst([assignmentField(), editTab(), closeX()]);
+  }
+
+  function handlePublishClick() {
+    if (submitting || publishReason) return;
     pendingPublishConfirm = true;
   }
 
-  async function confirmPublish() {
+  async function cancelPublish() {
     pendingPublishConfirm = false;
-    // Re-check preconditions: versionIsDisabled (or runIsPublished, etc.) may
-    // have flipped from the parent between Publish-click and confirm-click.
-    if (publishCheckResult && publishCheckResult.length > 0) {
-      publishAttempted = true;
+    await tick();
+    focusFirst([publishEl, closeX()]);
+  }
+
+  async function confirmPublish() {
+    if (submitting) return;
+    pendingPublishConfirm = false;
+    // Re-check: the parent may have flipped versionIsDisabled (or
+    // runIsPublished) since the click, and R22 refuses while dirty.
+    if (boxShows || dirty) {
+      await tick();
+      focusFirst([publishEl, closeX()]);
       return;
     }
-    if (submitting) return;
     submitting = true;
     publishing = true;
     serverError = null;
+    // P11: the confirm's buttons unmount under the focus; the busy Publish takes it.
+    await tick();
+    publishEl?.focus();
     try {
       await publishMiniProject(initial!.id);
-      if (!mounted) return;
-      await onSaved();
-      if (!mounted) return;
-      onClose();
     } catch (e: unknown) {
       if (!mounted) return;
       if (e instanceof ApiError) {
@@ -298,49 +418,56 @@
         const eo = e as { message?: unknown } | null | undefined;
         serverError = typeof eo?.message === 'string' ? eo.message : 'Publish failed';
       }
-    } finally {
-      if (mounted) {
-        submitting = false;
-        publishing = false;
-      }
+      submitting = false;
+      publishing = false;
+      return;
     }
+    if (!mounted) return;
+    // D19, as for Save and Create: the publish succeeded and cannot be undone,
+    // so a failed list refresh is only a toast and the modal still closes (a
+    // retry would hit the already-published 409).
+    let refreshFailed = false;
+    try {
+      await onSaved();
+    } catch {
+      refreshFailed = true;
+    }
+    if (!mounted) return;
+    if (refreshFailed) pushToast('Published (refresh failed — reload to see latest)', 'info');
+    submitting = false;
+    publishing = false;
+    onClose();
   }
 
   async function handleSave() {
-    if (saveError) return;
+    if (submitting || saveReason) return;
+    const sent = currentFormSnapshot();
     submitting = true;
     serverError = null;
     fieldErrors = {};
+    let created: MiniProjectResponse | null = null;
     try {
       const body = {
-        block_id: formData.block_id!,
-        assignment_md: formData.assignment_md,
-        soft_deadline: formData.soft_local ? localInputToISO(formData.soft_local) : null,
-        hard_deadline: formData.hard_local ? localInputToISO(formData.hard_local) : null,
-        resubmission_deadline: formData.resub_local ? localInputToISO(formData.resub_local) : null,
+        block_id: sent.block_id!,
+        assignment_md: sent.assignment_md,
+        soft_deadline: sent.soft_local ? localInputToISO(sent.soft_local) : null,
+        hard_deadline: sent.hard_local ? localInputToISO(sent.hard_local) : null,
+        resubmission_deadline: sent.resub_local ? localInputToISO(sent.resub_local) : null,
       };
       if (mode === 'create') {
-        await createMiniProject(runId, body);
+        created = await createMiniProject(runId, body);
       } else {
         const { block_id: _block_id, ...patchBody } = body;
         await updateMiniProject(initial!.id, patchBody);
       }
-      if (!mounted) return;
-      await onSaved();
-      if (!mounted) return;
-      onClose();
     } catch (e: unknown) {
       if (!mounted) return;
       if (e instanceof ApiError && e.status === 404) {
         serverError =
           'This mini-project has been deleted. Select-all (Ctrl/Cmd+A) and copy (Ctrl/Cmd+C) from the assignment textarea if you want to preserve your work before closing.';
-        // T9 smoke catch: the MP is gone server-side; the parent's list still
-        // shows the stale row until something refetches. Fire the same
-        // refetch callback the save-success path uses so the list reflects
-        // reality by the time the user clicks Discard. Fire-and-forget by
-        // design (a refetch-of-refetch failure isn't worth blocking the
-        // user's copy flow); explicit .catch swallows rejection so it
-        // doesn't surface as an unhandled promise warning.
+        // T9 smoke catch: the MP is gone server-side; refresh the parent's
+        // list so the stale row goes. Fire-and-forget by design; the explicit
+        // .catch keeps a refresh failure from surfacing as unhandled.
         onSaved().catch(() => {});
       } else if (e instanceof ApiError && e.status === 409) {
         serverError = `${e.displayMessage} Refresh the page to see latest.`;
@@ -354,203 +481,314 @@
         const eo = e as { message?: unknown } | null | undefined;
         serverError = typeof eo?.message === 'string' ? eo.message : 'Save failed';
       }
-    } finally {
-      if (mounted) submitting = false;
+      // R20: un-freeze, then focus the first errored field, or stay on Save.
+      submitting = false;
+      await tick();
+      focusFirstError();
+      return;
     }
+    if (!mounted) return;
+    if (mode === 'create') {
+      if (created) onCreated?.(created);
+    } else {
+      baseline = sent;
+    }
+    // D19: the write succeeded; a failed list refresh is only a toast. The
+    // modal stays frozen through the refresh (R20).
+    let refreshFailed = false;
+    try {
+      await onSaved();
+    } catch {
+      refreshFailed = true;
+    }
+    if (!mounted) return;
+    if (mode === 'create') {
+      if (refreshFailed) pushToast('Created (refresh failed — reload to see latest)', 'info');
+      submitting = false;
+      onClose();
+      return;
+    }
+    // P3: one toast, once the refresh settles (5b's order).
+    if (refreshFailed) pushToast('Saved (refresh failed — reload to see latest)', 'info');
+    else pushToast('Saved', 'success');
+    submitting = false;
+    await tick();
+    // §Focus › After Save: Save itself just became disabled.
+    focusFirst([publishEl, assignmentField(), editTab(), closeX()]);
   }
 </script>
 
-<div class="backdrop" data-role="backdrop" onclick={closeForCurrentStage} role="presentation"></div>
-<FocusTrap autofocusSelector="textarea">
-<div class="modal" role="dialog" aria-modal="true" aria-labelledby="mp-modal-title">
-  <header>
-    <h2 id="mp-modal-title">
-      {mode === 'create'
-        ? 'New mini-project'
-        : `Edit — Block ${currentBlock?.order ?? '?'} — ${currentBlock?.title ?? ''}`}
-    </h2>
-    <button type="button" data-action="close-x" onclick={closeForCurrentStage} aria-label="Close">×</button>
-  </header>
-  <div class="body">
+<DirtyGuard isDirty={() => dirty && !submitting} ask={askNav} />
+
+{#snippet head()}
+  <h2 id="mp-modal-title" class="mpm-heading" title={heading} bind:this={titleEl}>{heading}</h2>
+{/snippet}
+
+{#snippet foot()}
+  <span class="mpm-dirty mono">{mode === 'edit' && dirty ? 'unsaved changes' : ''}</span>
+  {#if pendingClose}
+    <InlineConfirm
+      row
+      takeFocus
+      warning={closeSource === 'nav' ? DISCARD_CONTINUE : DISCARD}
+      confirmLabel="Discard"
+      confirmDataAction="confirm-discard"
+      onCancel={() => void cancelClose()}
+      onConfirm={confirmDiscard}
+    />
+  {:else if pendingPublishConfirm}
+    <InlineConfirm
+      row
+      takeFocus
+      tone="primary"
+      warning="Once published, this cannot be undone. To remove a published mini-project, use force-delete (also removes submissions)."
+      confirmLabel="Publish"
+      confirmDataAction="confirm-publish"
+      onCancel={() => void cancelPublish()}
+      onConfirm={() => void confirmPublish()}
+    />
+  {:else if mode === 'create'}
+    <Button variant="ghost" data-action="cancel" onclick={requestClose}>Cancel</Button>
+    <Button
+      variant="primary"
+      data-action="save"
+      loading={saving}
+      disabled={!saving && !!saveReason}
+      title={saving ? undefined : (saveReason ?? undefined)}
+      onclick={() => void handleSave()}
+    >{saving ? 'Creating…' : 'Create'}</Button>
+  {:else}
+    {#if initial && !initial.is_published}
+      <Button
+        variant="secondary"
+        data-action="publish"
+        loading={publishing}
+        disabled={!publishing && !!publishReason}
+        title={publishing ? undefined : (publishReason ?? undefined)}
+        bind:element={publishEl}
+        onclick={handlePublishClick}
+      >{publishing ? 'Publishing…' : 'Publish'}</Button>
+    {/if}
+    <Button
+      variant="ghost"
+      data-action="discard"
+      disabled={!!discardReason}
+      title={discardReason ?? undefined}
+      onclick={() => void discard()}
+    >Discard</Button>
+    <Button
+      variant="primary"
+      data-action="save"
+      loading={saving}
+      disabled={!saving && !!saveReason}
+      title={saving ? undefined : (saveReason ?? undefined)}
+      onclick={() => void handleSave()}
+    >{saving ? 'Saving…' : 'Save'}</Button>
+  {/if}
+{/snippet}
+
+<Modal
+  labelledby="mp-modal-title"
+  width={820}
+  maxHeight={720}
+  onRequestClose={requestClose}
+  closeDisabled={submitting}
+  bodyInert={confirmOpen}
+  autofocusSelector={'textarea, header.modal-head button[aria-label="Close"]'}
+  header={head}
+  footer={foot}
+>
+  <div class="mpm-block">
     {#if mode === 'create'}
-      <label>
-        Block
-        <select
-          bind:value={formData.block_id}
-          disabled={submitting}
-          aria-describedby={fieldErrors.block_id ? 'err-block_id' : undefined}
-        >
-          {#each availableBlocks as b (b.id)}
-            <option value={b.id}>Block {b.order} — {b.title}</option>
-          {/each}
-        </select>
-      </label>
-      {#if fieldErrors.block_id}
-        <span id="err-block_id" class="field-error" role="alert">{fieldErrors.block_id}</span>
+      <label class="mpm-key" for="{uid}-block">Block</label>
+      <select
+        id="{uid}-block"
+        class="mpm-input"
+        class:mpm-invalid={!!fieldErrors.block_id}
+        bind:value={formData.block_id}
+        disabled={submitting}
+        aria-invalid={fieldErrors.block_id ? 'true' : undefined}
+        aria-describedby={fieldErrors.block_id ? 'err-block_id' : undefined}
+      >
+        {#each availableBlocks as b (b.id)}
+          <option value={b.id}>{blockLabel(b)}</option>
+        {/each}
+      </select>
+    {:else}
+      <span class="mpm-key">Block</span>
+      {#if currentBlock}
+        <span class="mpm-block-name" title={blockLabel(currentBlock)}>{blockLabel(currentBlock)}</span>
+      {:else}
+        <span class="mpm-block-name mpm-none">—</span>
       {/if}
     {/if}
-    <label>
-      Soft deadline {tzLabel}
-      <input
-        type="datetime-local"
-        bind:value={formData.soft_local}
-        disabled={submitting}
-        aria-describedby={ariaDescribedFor('soft_deadline')}
-      />
-    </label>
-    {#if fieldErrors.soft_deadline}
-      <span id="err-soft_deadline" class="field-error" role="alert">{fieldErrors.soft_deadline}</span>
-    {/if}
-    <label>
-      Hard deadline {tzLabel}
-      <input
-        type="datetime-local"
-        bind:value={formData.hard_local}
-        disabled={submitting}
-        aria-describedby={ariaDescribedFor('hard_deadline')}
-      />
-    </label>
-    {#if fieldErrors.hard_deadline}
-      <span id="err-hard_deadline" class="field-error" role="alert">{fieldErrors.hard_deadline}</span>
-    {/if}
-    <label>
-      Resubmission deadline {tzLabel}
-      <input
-        type="datetime-local"
-        bind:value={formData.resub_local}
-        disabled={submitting}
-        aria-describedby={ariaDescribedFor('resubmission_deadline')}
-      />
-    </label>
-    {#if fieldErrors.resubmission_deadline}
-      <span id="err-resubmission_deadline" class="field-error" role="alert"
-        >{fieldErrors.resubmission_deadline}</span
-      >
-    {/if}
+  </div>
+  {#if fieldErrors.block_id}
+    <span id="err-block_id" class="field-error mpm-error" role="alert">{fieldErrors.block_id}</span>
+  {/if}
+
+  <div class="mpm-field">
+    <span class="mpm-label">Assignment</span>
     <MarkdownEditor
       {assetContext}
       bind:value={formData.assignment_md}
-      disabled={submitting}
+      frozen={submitting}
+      bind:uploading
       bind:uploadAbortController
+      ariaLabel="Assignment"
       ariaDescribedby={ariaDescribedFor('assignment_md')}
     />
     {#if fieldErrors.assignment_md}
-      <span id="err-assignment_md" class="field-error" role="alert">{fieldErrors.assignment_md}</span>
-    {/if}
-    {#if serverError}
-      <div class="banner banner-error" role="alert">{serverError}</div>
-    {/if}
-    {#if publishAttempted && publishCheckResult && publishCheckResult.length > 0}
-      <div class="banner banner-error precondition-banner" data-testid="publish-preconditions" role="alert">
-        <p>Cannot publish:</p>
-        <ul>
-          {#each publishCheckResult as bullet, idx (bullet.text)}
-            {#if bullet.text.includes('Open Overview')}
-              {@const linkIdx = bullet.text.indexOf('Open Overview')}
-              {@const before = bullet.text.slice(0, linkIdx)}
-              {@const after = bullet.text.slice(linkIdx + 'Open Overview'.length)}
-              <!-- Render the bullet text verbatim. The "Open Overview"
-                   substring becomes a <button> when the viewer can act on
-                   the precondition (admin, or non-admin-only bullet); for
-                   admin-only bullets viewed by a teacher it falls back to
-                   plain text so the sentence stays grammatical. -->
-              <li id={`precondition-${idx}`}
-                >{before}{#if !bullet.adminOnly || course.is_admin}<button
-                    type="button"
-                    class="linklike"
-                    data-action="publish-nav-overview"
-                    onclick={() => onNavigateToTab('overview')}>Open Overview</button
-                  >{:else}Open Overview{/if}{after}</li
-              >
-            {:else}
-              <li id={`precondition-${idx}`}>{bullet.text}</li>
-            {/if}
-          {/each}
-        </ul>
-      </div>
+      <span id="err-assignment_md" class="field-error mpm-error" role="alert">{fieldErrors.assignment_md}</span>
     {/if}
   </div>
-  <footer>
-    {#if pendingClose}
-      <InlineConfirm
-        warning="Discard unsaved changes?"
-        confirmLabel="Discard"
-        confirmDataAction="confirm-discard"
-        onCancel={() => {
-          pendingClose = false;
-        }}
-        onConfirm={confirmDiscard}
-      />
-    {:else if pendingPublishConfirm}
-      <InlineConfirm
-        warning="Once published, this cannot be undone. To remove a published mini-project, use force-delete (also removes submissions)."
-        confirmLabel="Publish"
-        confirmDataAction="confirm-publish"
-        onCancel={() => {
-          pendingPublishConfirm = false;
-        }}
-        onConfirm={confirmPublish}
-      />
-    {:else}
-      <button type="button" onclick={closeForCurrentStage}>Cancel</button>
-      <button type="button" data-action="save" disabled={submitting || !!saveError} onclick={handleSave}>
-        {submitting && !publishing ? 'Saving…' : 'Save'}
-      </button>
-      {#if mode === 'edit' && initial && !initial.is_published}
-        <button type="button" data-action="publish" disabled={submitting} onclick={handlePublishClick}>
-          {publishing ? 'Publishing…' : 'Publish…'}
-        </button>
-      {/if}
-    {/if}
-  </footer>
-</div>
-</FocusTrap>
+
+  <div class="mpm-deadlines">
+    {#each DEADLINES as d (d.field)}
+      <div class="mpm-field">
+        <label class="mpm-label" for="{uid}-{d.field}">{d.label} <span class="mpm-zone mono">{zone}</span></label>
+        <input
+          id="{uid}-{d.field}"
+          class="mpm-input mpm-date"
+          class:mpm-invalid={!!fieldErrors[d.field]}
+          type="datetime-local"
+          bind:value={formData[d.local]}
+          readonly={submitting}
+          aria-invalid={fieldErrors[d.field] ? 'true' : undefined}
+          aria-describedby={ariaDescribedFor(d.field)}
+        />
+        {#if fieldErrors[d.field]}
+          <span id="err-{d.field}" class="field-error mpm-error" role="alert">{fieldErrors[d.field]}</span>
+        {/if}
+      </div>
+    {/each}
+  </div>
+
+  {#if serverError}
+    <div class="banner banner-error mpm-banner" role="alert">{serverError}</div>
+  {/if}
+  {#if boxShows && publishCheckResult}
+    <div class="mpm-box precondition-banner" data-testid="publish-preconditions">
+      <p class="mpm-box-head">Cannot publish yet</p>
+      <ul class="mpm-box-list">
+        {#each publishCheckResult as bullet, idx (bullet.text)}
+          {#if bullet.text.includes('Open Overview')}
+            {@const linkIdx = bullet.text.indexOf('Open Overview')}
+            {@const before = bullet.text.slice(0, linkIdx)}
+            {@const after = bullet.text.slice(linkIdx + 'Open Overview'.length)}
+            <!-- Render the bullet text verbatim. The "Open Overview"
+                 substring becomes a <button> when the viewer can act on
+                 the precondition (admin, or non-admin-only bullet); for
+                 admin-only bullets viewed by a teacher it falls back to
+                 plain text so the sentence stays grammatical. -->
+            <li id={`precondition-${idx}`}
+              >{before}{#if !bullet.adminOnly || course.is_admin}<button
+                  type="button"
+                  class="linklike"
+                  data-action="publish-nav-overview"
+                  onclick={() => onNavigateToTab('overview')}>Open Overview</button
+                >{:else}Open Overview{/if}{after}</li
+            >
+          {:else}
+            <li id={`precondition-${idx}`}>{bullet.text}</li>
+          {/if}
+        {/each}
+      </ul>
+    </div>
+  {/if}
+</Modal>
 
 <style>
-  .modal {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+  .mpm-heading {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mpm-block {
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    align-items: center;
+    gap: 12px;
+  }
+  .mpm-key {
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .mpm-block-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--text); }
+  .mpm-none { color: var(--muted); }
+  .mpm-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .mpm-label {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-3);
+  }
+  .mpm-deadlines {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .mpm-zone {
+    font-size: 10.5px;
+    font-weight: 400;
+    color: var(--muted);
+  }
+  .mpm-input {
     box-sizing: border-box;
-    width: min(1100px, 95vw);
-    max-height: 90vh;
-    overflow: auto;
-    background: var(--surface, white);
-    border-radius: var(--radius, 8px);
-    padding: var(--space-4, 24px);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-    z-index: 101;
+    width: 100%;
+    height: var(--control-h);
+    padding: 0 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
   }
-  .modal > header {
-    position: sticky;
-    top: 0;
-    background: inherit;
-    z-index: 1;
+  .mpm-date { font-family: var(--font-mono); font-size: 12.5px; }
+  .mpm-input.mpm-invalid {
+    border-color: var(--danger);
   }
-  .modal > footer {
-    position: sticky;
-    bottom: 0;
-    background: inherit;
-    z-index: 1;
+  .mpm-error { font-size: 12px; color: var(--danger); }
+  .mpm-banner {
+    margin: 0;
+    padding: 8px 12px;
+    background: var(--danger-panel-bg);
+    border-left: 3px solid var(--danger);
+    border-radius: var(--radius);
+    font-size: 13px;
+    color: var(--danger-panel-fg);
   }
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.4);
-    z-index: 100;
+  .mpm-box {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 8px 10px;
+    background: var(--status-needs-revision-bg);
+    border-left: 3px solid var(--gold);
+    border-radius: 0 5px 5px 0;
+    font-size: 12.5px;
+    color: var(--status-needs-revision-fg);
   }
-  .field-error {
-    color: var(--err, #a33);
-    font-size: 0.85em;
+  .mpm-box-head {
+    margin: 0;
+    font-weight: 600;
   }
-  .banner-error {
-    background: #fdecea;
-    border-left: 3px solid #c62828;
-    color: #7c1f1f;
-    padding: var(--space-2);
+  .mpm-box-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    line-height: 1.5;
   }
-  .precondition-banner ul { margin: var(--space-1) 0 0 var(--space-3); padding: 0; }
+  /* P2: the "·" is drawn, so a bullet's text stays the sentence alone. */
+  .mpm-box-list li::before { content: '· '; }
   .linklike {
     background: none;
     border: 0;
@@ -561,8 +799,11 @@
     font: inherit;
   }
   .linklike:hover { text-decoration: none; }
+  .mpm-dirty {
+    flex: 1;
+    font-size: 11.5px;
+    color: var(--status-needs-revision-fg);
+  }
   /* The 880px responsive-stack rule belongs on MarkdownEditor's `.edit-content`
-     (textarea + sidebar split) — see `MarkdownEditor.svelte`'s media query.
-     The modal `.body` is already a single-column flow; an @media on it would
-     be a no-op. Codex T6a round-1 caught the misleading placement. */
+     (textarea + sidebar split) — see `MarkdownEditor.svelte`'s media query. */
 </style>

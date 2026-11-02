@@ -40,8 +40,8 @@ function seedCourse() {
     course: { id: 1, slug: 'c', name: 'C' },
     version: { id: 5 } as never,
     blocks: [],
-    state: { version_id: 5, current_item_id: null, items: { '7': { is_covered: false, time_spent_seconds: 0, last_visited_at: null, last_answers: null, attempt_count: 0, score_correct: null, score_total: null } } } as never,
-    miniProjectsByBlockId: {},
+    state: { version_id: 5, current_item_id: null, items: { '7': { is_covered: false, time_spent: 0, last_visited_at: null, last_answers: null, attempt_count: 0, max_attempts: 3, last_score: null } } } as never,
+    miniProjectsByBlockId: {}, teachers: [],
   });
 }
 
@@ -138,4 +138,66 @@ it('a /track that resolves after unmount does NOT flip is_covered in the store (
   // Post-teardown store write guard: the resolved /track must NOT flip coverage.
   expect(currentCourse.value?.state.items['7'].is_covered).toBe(false);
   void target;
+});
+
+// --- T5: the ready-only coverage hint (enumerated (B)16) --------------------
+// Ref 10h/1047 shows this line, and it describes real behaviour: coverage is
+// credited in the fetch-success continuation. It is rendered in the READY state
+// only — a "marked covered once opened" promise shown beside "couldn't be
+// loaded" would be a lie, which is why each failure branch asserts its absence
+// rather than relying on one positive case.
+it('renders the cover hint in the ready state', async () => {
+  const target = mountItem({ item: appItem(), isCovered: false });
+  await settle();
+  const hint = target.querySelector('.cover-hint');
+  expect(hint).not.toBeNull();
+  expect(hint?.tagName).toBe('P');
+  expect(hint?.textContent).toBe('Marked covered once opened.');
+});
+
+it('does NOT render the cover hint on fetch failure', async () => {
+  fetchSpy.mockImplementation(routed(404));
+  const target = mountItem({ item: appItem(), isCovered: false });
+  await settle();
+  expect(target.textContent).toContain("couldn't be loaded");
+  expect(target.querySelector('.cover-hint')).toBeNull();
+});
+
+it('does NOT render the cover hint when no app is uploaded', async () => {
+  const target = mountItem({ item: appItem({ script_url: null }), isCovered: false });
+  await settle();
+  expect(target.textContent).toContain('No app uploaded yet.');
+  expect(target.querySelector('.cover-hint')).toBeNull();
+});
+
+it('does NOT render the cover hint while still loading', () => {
+  // No settle(): the source fetch is still in flight, so status is neither
+  // ready nor a failure branch. flushSync() alone renders the initial state.
+  const target = mountItem({ item: appItem(), isCovered: false });
+  expect(target.querySelector('iframe')).toBeNull();
+  expect(target.querySelector('.cover-hint')).toBeNull();
+});
+
+it('puts the fetch-failure copy inside .notice (the class the gate anchors on)', async () => {
+  // Structural presence ONLY. This test used to assert
+  // `getComputedStyle(notice).fontStyle !== 'italic'`, which was vacuous:
+  // vite.config.ts sets no `css: true` for the test environment, so a
+  // component's <style> never reaches jsdom — re-adding `font-style: italic`
+  // to `.notice` left all of these green. Same trap the repo documents at
+  // MiniProjectModal.create-edit.svelte.test.ts:548-551. The dropped italic is
+  // guarded where it IS observable — in the built CSS, by the slice's per-task
+  // dist gate (spec:197, T5 targets): a negative `font-style:italic` assertion
+  // hash-coupled to the `.interactive-app` anchor. (Until Slice 5b the editor
+  // authored a `.notice` too; its AppBody successor renamed it `.app-hint`.)
+  fetchSpy.mockImplementation(routed(404));
+  const target = mountItem({ item: appItem(), isCovered: false });
+  await settle();
+  const notice = target.querySelector('.notice');
+  expect(notice).not.toBeNull();
+  // Binds the BRANCH to the CLASS, which is the one fact neither the 404 test
+  // above nor the dist gate can see: the gate proves a `.notice` rule exists
+  // and compiles, and the 404 test proves the copy renders — but `.notice`
+  // could sit on the "No app uploaded yet" branch alone with this one a bare
+  // <p>, and both would still pass.
+  expect(notice!.textContent).toContain("couldn't be loaded");
 });

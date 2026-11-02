@@ -7,7 +7,7 @@ from mathion.config import settings
 
 def _create_published_version(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "asset-course", "name": "AC", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -328,7 +328,7 @@ def test_delete_asset_disabled_version_rejected(admin_client, asset_tmpdir):
 
 def test_item_save_resolves_asset_refs(admin_client, db, asset_tmpdir):
     course = admin_client.post("/api/courses", json={"slug": "md-course", "name": "M", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     admin_client.post(
         f"/api/versions/{version['id']}/assets",
         files={"file": ("chart.png", io.BytesIO(b"png"), "image/png")},
@@ -344,7 +344,7 @@ def test_item_save_resolves_asset_refs(admin_client, db, asset_tmpdir):
 
 def test_item_save_rejects_missing_asset(admin_client, asset_tmpdir):
     course = admin_client.post("/api/courses", json={"slug": "md2", "name": "M", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     response = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -357,7 +357,7 @@ def test_item_save_rejects_missing_asset(admin_client, asset_tmpdir):
 
 def test_item_update_tracks_references(admin_client, db, asset_tmpdir):
     course = admin_client.post("/api/courses", json={"slug": "md3", "name": "M", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     admin_client.post(
         f"/api/versions/{version['id']}/assets",
         files={"file": ("a.png", io.BytesIO(b"a"), "image/png")},
@@ -389,7 +389,7 @@ def test_item_update_tracks_references(admin_client, db, asset_tmpdir):
 
 def test_item_no_asset_refs_works(admin_client, asset_tmpdir):
     course = admin_client.post("/api/courses", json={"slug": "md4", "name": "M", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -404,7 +404,7 @@ def test_item_no_asset_refs_works(admin_client, asset_tmpdir):
 
 def test_version_copy_assets(admin_client, db, asset_tmpdir):
     course = admin_client.post("/api/courses", json={"slug": "copy-course", "name": "C", "description": ""}).json()
-    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
 
     admin_client.post(
         f"/api/versions/{v1['id']}/assets",
@@ -417,7 +417,7 @@ def test_version_copy_assets(admin_client, db, asset_tmpdir):
 
     v2 = admin_client.post(
         f"/api/courses/{course['id']}/versions",
-        json={"info_md": "", "copy_assets_from": v1["id"]},
+        json={"label": "L", "info_md": "", "copy_assets_from": v1["id"]},
     ).json()
 
     assets = admin_client.get(f"/api/versions/{v2['id']}/assets").json()
@@ -433,11 +433,11 @@ def test_version_copy_assets(admin_client, db, asset_tmpdir):
 def test_version_copy_assets_wrong_course_rejected(admin_client, asset_tmpdir):
     c1 = admin_client.post("/api/courses", json={"slug": "c1", "name": "C1", "description": ""}).json()
     c2 = admin_client.post("/api/courses", json={"slug": "c2", "name": "C2", "description": ""}).json()
-    v1 = admin_client.post(f"/api/courses/{c1['id']}/versions", json={"info_md": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{c1['id']}/versions", json={"label": "L", "info_md": ""}).json()
 
     response = admin_client.post(
         f"/api/courses/{c2['id']}/versions",
-        json={"info_md": "", "copy_assets_from": v1["id"]},
+        json={"label": "L", "info_md": "", "copy_assets_from": v1["id"]},
     )
     assert response.status_code == 400
 
@@ -447,7 +447,7 @@ def test_version_copy_assets_size_check(admin_client, asset_tmpdir):
     settings.max_course_size = 10
     try:
         course = admin_client.post("/api/courses", json={"slug": "sc", "name": "S", "description": ""}).json()
-        v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+        v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
         # Bypass max_course_size for the source upload — it's a pre-existing version.
         # Use max_file_size only by temporarily restoring max_course_size for upload.
         settings.max_course_size = 10000
@@ -458,7 +458,7 @@ def test_version_copy_assets_size_check(admin_client, asset_tmpdir):
         settings.max_course_size = 10
         response = admin_client.post(
             f"/api/courses/{course['id']}/versions",
-            json={"info_md": "", "copy_assets_from": v1["id"]},
+            json={"label": "L", "info_md": "", "copy_assets_from": v1["id"]},
         )
     finally:
         settings.max_course_size = original
@@ -468,10 +468,10 @@ def test_version_copy_assets_size_check(admin_client, asset_tmpdir):
 
 def test_version_copy_no_assets_is_noop(admin_client, asset_tmpdir):
     course = admin_client.post("/api/courses", json={"slug": "empty", "name": "E", "description": ""}).json()
-    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     v2 = admin_client.post(
         f"/api/courses/{course['id']}/versions",
-        json={"info_md": "", "copy_assets_from": v1["id"]},
+        json={"label": "L", "info_md": "", "copy_assets_from": v1["id"]},
     ).json()
     assets = admin_client.get(f"/api/versions/{v2['id']}/assets").json()
     assert len(assets) == 0
@@ -482,7 +482,7 @@ def test_question_asset_marks_referenced(admin_client, asset_tmpdir):
     on the asset list, and force-delete must be required to remove it.
     """
     course = admin_client.post("/api/courses", json={"slug": "qref", "name": "Q", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     asset = admin_client.post(
         f"/api/versions/{version['id']}/assets",
         files={"file": ("chart.png", io.BytesIO(b"png"), "image/png")},
@@ -512,7 +512,7 @@ def test_publish_rerenders_and_fails_on_missing_asset(admin_client, asset_tmpdir
     referenced asset no longer exists.
     """
     course = admin_client.post("/api/courses", json={"slug": "rerender", "name": "R", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     upload = admin_client.post(
         f"/api/versions/{version['id']}/assets",
         files={"file": ("chart.png", io.BytesIO(b"png"), "image/png")},
@@ -536,7 +536,7 @@ def test_publish_rerenders_and_fails_on_missing_asset(admin_client, asset_tmpdir
 
 def test_publish_bumps_content_updated_at(admin_client, db, asset_tmpdir):
     course = admin_client.post("/api/courses", json={"slug": "bump", "name": "B", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -554,7 +554,7 @@ def test_publish_bumps_content_updated_at(admin_client, db, asset_tmpdir):
 
 def test_item_save_bumps_content_updated_at(admin_client, db, asset_tmpdir):
     course = admin_client.post("/api/courses", json={"slug": "ibump", "name": "I", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
 
@@ -573,14 +573,14 @@ def test_item_save_bumps_content_updated_at(admin_client, db, asset_tmpdir):
 def test_version_info_asset_marks_referenced(admin_client, asset_tmpdir):
     """An asset only used in a version's info_md must also block non-force delete."""
     course = admin_client.post("/api/courses", json={"slug": "vref", "name": "V", "description": ""}).json()
-    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     admin_client.post(
         f"/api/versions/{v1['id']}/assets",
         files={"file": ("logo.png", io.BytesIO(b"png"), "image/png")},
     )
     v2 = admin_client.post(
         f"/api/courses/{course['id']}/versions",
-        json={"info_md": "Welcome ![logo](logo.png)", "copy_assets_from": v1["id"]},
+        json={"label": "L", "info_md": "Welcome ![logo](logo.png)", "copy_assets_from": v1["id"]},
     ).json()
 
     assets = admin_client.get(f"/api/versions/{v2['id']}/assets").json()
@@ -593,7 +593,7 @@ def test_version_info_asset_marks_referenced(admin_client, asset_tmpdir):
 
 def test_question_save_resolves_asset_refs(admin_client, asset_tmpdir):
     course = admin_client.post("/api/courses", json={"slug": "qmd", "name": "Q", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     admin_client.post(
         f"/api/versions/{version['id']}/assets",
         files={"file": ("chart.png", io.BytesIO(b"png"), "image/png")},
@@ -614,7 +614,7 @@ def test_question_save_resolves_asset_refs(admin_client, asset_tmpdir):
 
 def test_question_save_rejects_missing_asset(admin_client, asset_tmpdir):
     course = admin_client.post("/api/courses", json={"slug": "qmd2", "name": "Q", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
     seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
     item = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
@@ -634,7 +634,7 @@ def test_version_info_resolves_asset_refs(admin_client, asset_tmpdir):
     uploaded, then info_md is set via patch... but there's no PATCH endpoint
     yet for info_md. Cover at create-time using copy_assets_from."""
     course = admin_client.post("/api/courses", json={"slug": "vimg", "name": "V", "description": ""}).json()
-    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     admin_client.post(
         f"/api/versions/{v1['id']}/assets",
         files={"file": ("logo.png", io.BytesIO(b"png"), "image/png")},
@@ -642,7 +642,7 @@ def test_version_info_resolves_asset_refs(admin_client, asset_tmpdir):
     # A new version copies the assets, then references one in its info_md
     v2 = admin_client.post(
         f"/api/courses/{course['id']}/versions",
-        json={
+        json={"label": "L",
             "info_md": "Welcome ![logo](logo.png)",
             "copy_assets_from": v1["id"],
         },
@@ -654,7 +654,7 @@ def test_version_info_rejects_missing_asset(admin_client, asset_tmpdir):
     course = admin_client.post("/api/courses", json={"slug": "vimg2", "name": "V", "description": ""}).json()
     response = admin_client.post(
         f"/api/courses/{course['id']}/versions",
-        json={"info_md": "Use ![x](nope.png)"},
+        json={"label": "L", "info_md": "Use ![x](nope.png)"},
     )
     assert response.status_code == 422
     assert "nope.png" in response.json()["detail"]
@@ -666,7 +666,7 @@ def test_version_copy_fails_if_source_file_missing(admin_client, asset_tmpdir):
     """
     import os
     course = admin_client.post("/api/courses", json={"slug": "miss", "name": "M", "description": ""}).json()
-    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     admin_client.post(
         f"/api/versions/{v1['id']}/assets",
         files={"file": ("a.png", io.BytesIO(b"data"), "image/png")},
@@ -676,7 +676,71 @@ def test_version_copy_fails_if_source_file_missing(admin_client, asset_tmpdir):
 
     response = admin_client.post(
         f"/api/courses/{course['id']}/versions",
-        json={"info_md": "", "copy_assets_from": v1["id"]},
+        json={"label": "L", "info_md": "", "copy_assets_from": v1["id"]},
     )
     assert response.status_code == 500
     assert "missing" in response.json()["detail"].lower()
+
+
+# Polish 3 D84, C12: the browser shows a PDF or an image in the tab; every
+# other type downloads. Both file endpoints send nosniff.
+_INLINE_CASES = [
+    ("doc.pdf", b"%PDF-1.4\n", "application/pdf"),
+    ("pic.png", b"png-bytes", "image/png"),
+    ("pic.jpg", b"jpeg-bytes", "image/jpeg"),
+    ("pic.gif", b"gif-bytes", "image/gif"),
+]
+
+
+def _upload_course_file(admin_client, version, name, content, mime):
+    r = admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": (name, io.BytesIO(content), mime)},
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+@pytest.mark.parametrize("name,content,mime", _INLINE_CASES)
+def test_inline_types_are_inline(admin_client, asset_tmpdir, name, content, mime):
+    _, version = _create_published_version(admin_client)
+    _upload_course_file(admin_client, version, name, content, mime)
+    response = admin_client.get(f"/assets/{version['id']}/{name}")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(mime)
+    disposition = response.headers["content-disposition"]
+    assert disposition.startswith("inline;")
+    assert f'filename="{name}"' in disposition
+
+
+# A guard: green before Task 9 too (attachment was the default); pins that
+# only the four inline types change.
+@pytest.mark.parametrize("name,content,mime", [
+    ("data.csv", b"a,b\n1,2\n", "text/csv"),
+    ("app.js", b"console.log(1)", "text/javascript"),
+])
+def test_csv_and_js_download(admin_client, asset_tmpdir, name, content, mime):
+    _, version = _create_published_version(admin_client)
+    _upload_course_file(admin_client, version, name, content, mime)
+    response = admin_client.get(f"/assets/{version['id']}/{name}")
+    assert response.status_code == 200
+    assert response.headers["content-disposition"].startswith("attachment;")
+
+
+def test_pdf_with_uppercase_extension_is_inline(admin_client, asset_tmpdir):
+    _, version = _create_published_version(admin_client)
+    asset = _upload_course_file(admin_client, version, "Notes.PDF", b"%PDF-1.4\n", "application/pdf")
+    assert asset["filename"] == "notes.pdf"
+    response = admin_client.get(f"/assets/{version['id']}/notes.pdf")
+    assert response.status_code == 200
+    assert response.headers["content-disposition"].startswith("inline;")
+
+
+def test_asset_file_response_has_nosniff(admin_client, asset_tmpdir):
+    _, version = _create_published_version(admin_client)
+    _upload_course_file(admin_client, version, "data.csv", b"a,b\n", "text/csv")
+    _upload_course_file(admin_client, version, "pic.png", b"png-bytes", "image/png")
+    for name in ("data.csv", "pic.png"):
+        response = admin_client.get(f"/assets/{version['id']}/{name}")
+        assert response.status_code == 200
+        assert response.headers["x-content-type-options"] == "nosniff"

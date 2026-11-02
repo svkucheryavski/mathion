@@ -3,52 +3,61 @@
   // quiz, and interactive_app. Narrower than the full backend item-type union,
   // which also includes 'mini_project' (not authored via this picker). Widen
   // this union if the product scope expands.
+  import ItemMark from '../course/ItemMark.svelte';
+
   type ItemType = 'static_page' | 'video' | 'quiz' | 'interactive_app';
   // Canonical Svelte 5 form: `$bindable()` without a type argument; the
-  // prop type `value: ItemType` constrains it. The previous
-  // `$bindable<ItemType>('static_page')` default is dead code — every call
-  // site (SequenceAccordion) binds `value`, so the default never lands.
+  // prop type `value: ItemType` constrains it. Every call site
+  // (NewItemModal) binds `value`, so no default is needed.
   let { value = $bindable() }: { value: ItemType } = $props();
+
+  const TYPES: { value: ItemType; label: string }[] = [
+    { value: 'static_page', label: 'Page' },
+    { value: 'video', label: 'Video' },
+    { value: 'quiz', label: 'Quiz' },
+    { value: 'interactive_app', label: 'Interactive app' },
+  ];
 </script>
 
-<fieldset class="picker">
+<fieldset class="type-picker">
   <legend>Item type</legend>
-  <label class:selected={value === 'static_page'}>
-    <input type="radio" name="item-type" value="static_page" bind:group={value} />
-    <span class="glyph" aria-hidden="true">📄</span>
-    <span>Page</span>
-  </label>
-  <label class:selected={value === 'video'}>
-    <input type="radio" name="item-type" value="video" bind:group={value} />
-    <span class="glyph" aria-hidden="true">▶️</span>
-    <span>Video</span>
-  </label>
-  <label class:selected={value === 'quiz'}>
-    <input type="radio" name="item-type" value="quiz" bind:group={value} />
-    <span class="glyph" aria-hidden="true">❓</span>
-    <span>Quiz</span>
-  </label>
-  <label class:selected={value === 'interactive_app'}>
-    <input type="radio" name="item-type" value="interactive_app" bind:group={value} />
-    <span class="glyph" aria-hidden="true">🧩</span>
-    <span>Interactive app</span>
-  </label>
+  <div class="cards">
+    {#each TYPES as t (t.value)}
+      <label class:selected={value === t.value}>
+        <input type="radio" name="item-type" value={t.value} bind:group={value} />
+        <ItemMark type={t.value} state="not-yet" />
+        <span>{t.label}</span>
+      </label>
+    {/each}
+  </div>
 </fieldset>
 
 <style>
-  .picker { display: flex; gap: var(--space-3); border: 0; padding: 0; margin: 0; }
-  legend { padding: 0; margin-bottom: var(--space-2); font-weight: 600; }
-  /* position: relative anchors the visually-hidden radio inside the label
-     so its focus ring (when shown) and any future :focus styling stay
-     scoped — without this the absolute-positioned input escapes to the
-     nearest positioned ancestor (typically <body>). */
-  label { position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--space-1);
-    padding: var(--space-2); border: 2px solid var(--border); border-radius: var(--radius); cursor: pointer; min-width: 96px; }
-  label.selected { border-color: var(--primary); }
-  /* Visible focus indicator for keyboard users: the radio itself is
-     opacity:0, so without :focus-within on the label there is no
-     indication of which option has focus when tabbing/arrow-keying. */
-  label:focus-within { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .type-picker { border: 0; padding: 0; margin: 0; min-width: 0; }
+  legend { padding: 0; margin-bottom: 4px; /* the 4px label/field step */ font-size: 12.5px; color: var(--muted); }
+  .cards { display: flex; flex-wrap: wrap; gap: 8px; /* the 8px create-form gap (spec §4) */ }
+  /* position: relative anchors the visually-hidden radio inside its card. */
+  label {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  label.selected { border-color: var(--primary); background: var(--primary-soft); }
+  /* D12 exception — the established sr-only-radio focus idiom (Login .segment,
+     quiz .opt): --primary is visible on both --surface and --primary-soft. */
+  label:has(input:focus-visible) { box-shadow: inset 0 0 0 2px var(--primary); }
+  /* Constraint 2: the sr-only idiom for a still-focusable radio, not a dim. */
   label input { position: absolute; opacity: 0; pointer-events: none; }
-  .glyph { font-size: 1.5rem; }
+  @media (forced-colors: active) {
+    label.selected { border: 2px solid Highlight; }
+    label:has(input:focus-visible) { outline: 2px solid Highlight; outline-offset: -2px; }
+  }
 </style>

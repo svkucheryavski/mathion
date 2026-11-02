@@ -70,7 +70,7 @@ def test_unauth_cannot_access_content(client, db):
 
 def test_unauth_cannot_create_version(client, db):
     course, _ = _make_draft_course(db)
-    response = client.post(f"/api/courses/{course.id}/versions", json={"info_md": ""})
+    response = client.post(f"/api/courses/{course.id}/versions", json={"label": "L", "info_md": ""})
     assert response.status_code == 401
 
 
@@ -124,7 +124,7 @@ def test_regular_user_cannot_update_course(auth_client, db):
 def test_regular_user_cannot_create_version(auth_client, db):
     """Regular user who is not a course admin gets 403 when creating a version."""
     course, _ = _make_draft_course(db)
-    response = auth_client.post(f"/api/courses/{course.id}/versions", json={"info_md": ""})
+    response = auth_client.post(f"/api/courses/{course.id}/versions", json={"label": "L", "info_md": ""})
     assert response.status_code == 403
 
 
@@ -213,7 +213,7 @@ def test_course_admin_can_create_version(auth_client, db, test_user):
     db.add(ca)
     db.commit()
 
-    response = auth_client.post(f"/api/courses/{course.id}/versions", json={"info_md": "New version"})
+    response = auth_client.post(f"/api/courses/{course.id}/versions", json={"label": "L", "info_md": "New version"})
     assert response.status_code == 201
 
 

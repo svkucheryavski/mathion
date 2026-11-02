@@ -12,7 +12,7 @@ def has_submissions(db: Session, run) -> bool:
 
     Used by:
     - `runs.py:patch_run` — to block lowering `end_date` past `now()` while submissions exist
-    - `runs.py:delete_run` — to block deletion when submissions exist (force flag bypasses)
+    - `runs.py:delete_run` — to block deletion when submissions exist (force bypasses this; a published run is never deleted)
     """
     from sqlalchemy import exists
     from mathion.models import MiniProject, Submission

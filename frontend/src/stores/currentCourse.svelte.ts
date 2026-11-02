@@ -4,6 +4,7 @@ import { fetchListSwallow403 } from '../lib/studentMiniProjects';
 import type {
   BlockContent,
   ItemStateEntry,
+  QuizSubmitResponse,
   StudentMiniProjectListItem,
   VersionContent,
   VersionState,
@@ -20,6 +21,10 @@ type CourseSnapshot = {
   // guard checks `item` presence before mutating, so an empty map (e.g.,
   // 403-swallow case) is safe.
   miniProjectsByBlockId: Record<string, StudentMiniProjectListItem>;
+  // D80: the names of the teachers of the student's run (the course page's
+  // Teachers card). Reference only: any failed load leaves [] (no card) and
+  // never fails the course load.
+  teachers: string[];
 };
 
 export const currentCourse = $state<{ value: CourseSnapshot | null }>({ value: null });
@@ -56,10 +61,12 @@ export function loadCourse(slug: string): Promise<void> {
         `/api/courses/${encodeURIComponent(startedSlug)}/my-version`,
         { signal: controller.signal },
       );
-      const [content, state, miniProjectsByBlockId] = await Promise.all([
+      const [content, state, miniProjectsByBlockId, teachers] = await Promise.all([
         api.get<VersionContent>(`/api/versions/${my.version_id}/content`, { signal: controller.signal }),
         api.get<VersionState>(`/api/versions/${my.version_id}/state`, { signal: controller.signal }),
         fetchListSwallow403(startedSlug, controller.signal),
+        api.get<{ full_name: string }[]>(`/api/courses/${encodeURIComponent(startedSlug)}/my-teachers`, { signal: controller.signal })
+          .then((rows) => rows.map((r) => r.full_name), () => [] as string[]),
       ]);
       // Stale-write guard.
       if (inflight?.slug !== startedSlug) return;
@@ -71,6 +78,7 @@ export function loadCourse(slug: string): Promise<void> {
         blocks: content.blocks,
         state,
         miniProjectsByBlockId,
+        teachers,
       };
     } catch (e: unknown) {
       if (e instanceof DOMException && e.name === 'AbortError') return;
@@ -100,6 +108,37 @@ export function markItemCovered(itemId: number): void {
   entry.is_covered = true; // deep mutation: $state proxies make this reactive
 }
 
+// C13: a submit's attempt is written into the store, so a remounted quiz
+// shows the right attempts left, or loads the reveal once they are used up.
+// D89: the answers sent go in too, so it can show that result again, as the
+// backend's own `last_answers` does after a reload.
+// A page load straight onto a never-visited quiz records the visit before the
+// course is loaded, so the entry may be missing: create it, as a visit does.
+export function recordQuizAttempt(
+  res: QuizSubmitResponse,
+  answers: Record<string, number[] | string>,
+): void {
+  if (currentCourse.value === null) return;
+  const items = currentCourse.value.state.items;
+  const key = String(res.item_id);
+  items[key] ??= {
+    is_covered: true,
+    time_spent: 0,
+    last_visited_at: new Date().toISOString(),
+    attempt_count: 0,
+    max_attempts: res.max_attempts,
+    last_score: null,
+    last_answers: null,
+  };
+  // Read it back: the assignment evaluates to the literal, not the proxy.
+  const entry = items[key]!;
+  entry.attempt_count = res.attempt_count;
+  entry.max_attempts = res.max_attempts;
+  entry.last_score = { correct: res.score_correct, total: res.score_total };
+  entry.last_answers = answers;
+  entry.is_covered = true;
+}
+
 export function recordItemVisit(itemId: number): void {
   if (currentCourse.value === null) return;
   const entry: ItemStateEntry | undefined = currentCourse.value.state.items[String(itemId)];
@@ -109,12 +148,12 @@ export function recordItemVisit(itemId: number): void {
     // First visit — populate the slot so resume-here heuristic sees it.
     currentCourse.value.state.items[String(itemId)] = {
       is_covered: false,
-      time_spent_seconds: 0,
+      time_spent: 0,
       last_visited_at: new Date().toISOString(),
-      last_answers: null,
       attempt_count: 0,
-      score_correct: null,
-      score_total: null,
+      max_attempts: currentCourse.value.version.max_quiz_attempts,
+      last_score: null,
+      last_answers: null,
     };
   }
 }

@@ -4,6 +4,7 @@
   import { formatRef } from '../../lib/assets';
   import type { AssetContext, AssetItem } from '../../lib/assetContext';
   import AssetSidebar from './AssetSidebar.svelte';
+  import { externalLinks } from '../../lib/externalLinks';
 
   type UploadProgress = { current: number; total: number; filename: string } | null;
   type UploadError = { detail: string; stoppedAt?: { n: number; m: number } } | null;
@@ -19,6 +20,11 @@
     uploadError = $bindable<UploadError>(null),
     uploadAbortController = $bindable<AbortController | null>(null),
     ariaDescribedby = undefined,
+    ariaLabel = undefined,
+    plain = false,
+    frozen = false,
+    noAssets = false,
+    variant = 'page',
   }: {
     assetContext: AssetContext;
     value?: string;
@@ -30,6 +36,22 @@
     uploadError?: UploadError;
     uploadAbortController?: AbortController | null;
     ariaDescribedby?: string;
+    // Slice-5b R10: the textarea's accessible name. The editor used to sit
+    // inside a <label>; the modal's bodies have none (PageBody: "Content").
+    ariaLabel?: string;
+    // Slice-5b D6: read-only source text — no tabs, no sidebar, no /render call
+    // (a disabled version's /render is a deliberate 403). Wins over readOnly.
+    plain?: boolean;
+    // Slice-5b D10/D9: a Save or a delete is in flight. The textarea turns
+    // readonly WITHOUT blurring (disabled would blur, readOnly would unmount it),
+    // and drops / sidebar inserts / uploads are blocked. Tabs stay usable.
+    frozen?: boolean;
+    // Slice-5d D11: the explanation editor. Edit/Preview stay; there is no
+    // sidebar and no upload path. The window file-drop guard still runs.
+    noAssets?: boolean;
+    // Polish 2 D51: which student surface the rendered preview matches, in
+    // class (`prose`, `prose compact`) and text metrics.
+    variant?: 'page' | 'prompt' | 'explanation';
   } = $props();
 
   let _mode = $state<'edit' | 'preview'>('edit');
@@ -58,13 +80,13 @@
   }
 
   function insertAtCursor(text: string, atOffset?: number) {
-    // §7.2: while the editor is frozen (`disabled`, e.g. an in-flight option
-    // mutation flipped the two-way lock mid-upload), no programmatic insert may
+    // §7.2: while the editor is frozen (`disabled`, or `frozen` while a save is
+    // in flight and an upload resolves late), no programmatic insert may
     // mutate the markdown. The old readOnly path unmounted the textarea so a
     // late drop/sidebar upload no-op'd on `!textareaEl`; now the textarea stays
     // mounted, so this guard is what preserves the freeze. Central here so it
     // covers every caller (textarea drop + sidebar insert).
-    if (!textareaEl || disabled) return;
+    if (!textareaEl || disabled || frozen) return;
     const offset = atOffset ?? lastOffset;
     const before = value.slice(0, offset);
     const after = value.slice(offset);
@@ -108,6 +130,7 @@
     file: File,
     batch?: { current: number; total: number },
   ): Promise<AssetItem | null> {
+    if (frozen || noAssets) return null;
     if (uploading) { flashOverlay(); return null; }
     const controller = new AbortController();
     uploadAbortController = controller;
@@ -181,7 +204,7 @@
   async function handleTextareaDrop(e: DragEvent) {
     e.preventDefault();
     e.stopPropagation();
-    if (disabled) return;
+    if (disabled || frozen || noAssets) return;
     const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length === 0) return;
     let offset = dropOffsetFromPoint(e);
@@ -201,7 +224,7 @@
   }
   async function handleWrapperDrop(e: DragEvent) {
     e.preventDefault();
-    if (disabled) return;
+    if (disabled || frozen || noAssets) return;
     const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length === 0) return;
     for (let i = 0; i < files.length; i++) {
@@ -240,7 +263,7 @@
 
   onMount(() => {
     editorMounted = true;
-    if (readOnly) void loadPreview();
+    if (readOnly && !plain) void loadPreview();
     window.addEventListener('dragover', guardFileDropNavigation);
     window.addEventListener('drop', guardFileDropNavigation);
   });
@@ -253,62 +276,87 @@
   });
 </script>
 
-<div class="editor">
-  {#if !readOnly}
-    <div class="tabs">
-      <button type="button" data-action="edit" aria-pressed={mode === 'edit'} disabled={disabled} onclick={() => setMode('edit')}>Edit</button>
-      <button type="button" data-action="preview" aria-pressed={mode === 'preview'} disabled={disabled} onclick={() => setMode('preview')}>Preview</button>
-    </div>
-  {/if}
-  {#if mode === 'edit' && !readOnly}
-    <div
-      class="edit-content"
-      role="region"
-      aria-label="Markdown editor"
-      ondragover={handleWrapperDragOver}
-      ondrop={handleWrapperDrop}
-      class:flash={flashUntil > 0}
-    >
-      <textarea
-        bind:this={textareaEl}
-        bind:value
-        rows="14"
-        spellcheck="false"
-        disabled={disabled}
-        aria-describedby={ariaDescribedby}
-        ondragover={handleTextareaDragOver}
-        ondrop={handleTextareaDrop}
-        onfocus={onTextareaFocus}
-        onblur={onTextareaBlur}
-        onselectionchange={onTextareaSelectionChange}
-      ></textarea>
-      <AssetSidebar
-        {assetContext}
-        {disabled}
-        onInsert={handleSidebarInsert}
-        onUploadFile={uploadOne}
-        {refreshKey}
-        {cursorReady}
-        bind:uploading
-        bind:uploadProgress
-        bind:uploadError
-      />
-    </div>
-  {:else if loading}
-    <div class="preview"><em>Rendering…</em></div>
-  {:else if error}
-    <div class="preview err">{error}</div>
+<div class="md-card">
+  {#if plain}
+    <pre class="plain-src" data-testid="markdown-plain">{value}</pre>
   {:else}
-    <div class="preview">{@html html ?? ''}</div>
+    {#if !readOnly}
+      <div class="tabs">
+        <button type="button" data-action="edit" aria-pressed={mode === 'edit'} disabled={disabled} onclick={() => setMode('edit')}>Edit</button>
+        <button type="button" data-action="preview" aria-pressed={mode === 'preview'} disabled={disabled} onclick={() => setMode('preview')}>Preview</button>
+      </div>
+    {/if}
+    {#if mode === 'edit' && !readOnly}
+      <div
+        class="edit-content"
+        role="region"
+        aria-label="Markdown editor"
+        ondragover={handleWrapperDragOver}
+        ondrop={handleWrapperDrop}
+        class:flash={flashUntil > 0}
+      >
+        <textarea
+          bind:this={textareaEl}
+          bind:value
+          rows="14"
+          spellcheck="false"
+          disabled={disabled}
+          readonly={frozen}
+          aria-label={ariaLabel}
+          aria-describedby={ariaDescribedby}
+          ondragover={handleTextareaDragOver}
+          ondrop={handleTextareaDrop}
+          onfocus={onTextareaFocus}
+          onblur={onTextareaBlur}
+          onselectionchange={onTextareaSelectionChange}
+        ></textarea>
+        {#if !noAssets}
+          <AssetSidebar
+            {assetContext}
+            disabled={disabled || frozen}
+            onInsert={handleSidebarInsert}
+            onUploadFile={uploadOne}
+            {refreshKey}
+            {cursorReady}
+            bind:uploading
+            bind:uploadProgress
+            bind:uploadError
+          />
+        {/if}
+      </div>
+    {:else if loading}
+      <div class="preview"><em>Rendering…</em></div>
+    {:else if error}
+      <div class="preview err">{error}</div>
+    {:else}
+      <div class="preview prose pv-{variant}" class:compact={variant !== 'page'} {@attach externalLinks(html ?? '')}>{@html html ?? ''}</div>
+    {/if}
   {/if}
 </div>
 
 <style>
-  .editor { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; }
-  .tabs { display: flex; border-bottom: 1px solid var(--border); }
-  .tabs button { background: none; border: 0; padding: var(--space-2) var(--space-3); cursor: pointer; }
-  .tabs button[aria-pressed="true"] { background: var(--surface, #f7f7f7); font-weight: 600; }
-  .edit-content { display: flex; flex-direction: row; min-height: 0; }
+  .md-card {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface); /* ref 1702 */
+  }
+  .tabs { display: flex; border-bottom: 1px solid var(--border); /* ref 1703 */ }
+  .tabs button {
+    padding: 8px 14px;
+    border: 0;
+    background: none;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--muted);
+    cursor: pointer; /* ref 1705 */
+  }
+  .tabs button[aria-pressed="true"] { background: var(--surface-2); font-weight: 600; color: var(--text); /* ref 1704 */ }
+  .tabs button:disabled { color: var(--faint); cursor: not-allowed; }
+  .tabs button:focus-visible { outline-offset: -2px; }
+  .edit-content { display: flex; flex-direction: row; align-items: stretch; min-height: 0; /* ref 1707 */ }
   /* Spec (mini-projects-frontend §"Layout") mandates the textarea + asset
      sidebar collapse to a single column below 880px (50%-split-screen on
      1920px + small-laptop split scenarios). The split lives here, NOT in
@@ -316,8 +364,39 @@
   @media (max-width: 880px) {
     .edit-content { flex-direction: column; }
   }
-  textarea { flex: 1 1 0; min-width: 0; border: 0; padding: var(--space-3); font-family: ui-monospace, monospace; }
-  .preview { padding: var(--space-3); min-height: 200px; }
-  .preview.err { color: #a33; }
-  .edit-content.flash { box-shadow: inset 0 0 0 2px #c62828; }
+  textarea {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 230px;
+    padding: 12px 14px;
+    border: 0;
+    background: var(--surface);
+    font: 13px/1.7 var(--font-mono);
+    color: var(--text-2);
+    caret-color: var(--primary);
+    resize: vertical; /* ref 1708 */
+  }
+  /* The card shows the textarea's focus (:has, not :focus-within, so a focused
+     tab does not). The halo would be clipped by the card and paint over the
+     tabs; (0,3,1) beats the global field rule. In High Contrast the outline is
+     drawn inside the clip. */
+  .md-card:has(textarea:focus-visible) { border-color: var(--primary); }
+  .md-card textarea:focus-visible { box-shadow: none; outline-offset: -2px; }
+  /* The rendered preview matches the student surface (Polish 2 D51): content.css's
+     `.prose` plus that surface's text metrics. Line breaks still differ: the
+     preview is narrower than the 652px measure. */
+  .preview { min-height: 200px; padding: 12px 14px; }
+  .preview.pv-page { font-size: 14px; line-height: 1.6; color: var(--text-2); /* PageItem .content */ }
+  .preview.pv-prompt { font-size: 14.5px; line-height: 1.6; color: var(--text-2); /* the quiz prompt */ }
+  .preview.pv-explanation { font-size: 13px; color: var(--text-2); /* QuizItem .exp */ }
+  .preview.err { color: var(--danger); }
+  .plain-src {
+    margin: 0;
+    padding: 12px 14px;
+    font: 13px/1.7 var(--font-mono);
+    color: var(--text-2);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere; /* ref 1708 — the pane, read-only */
+  }
+  .edit-content.flash { box-shadow: inset 0 0 0 2px var(--danger); }
 </style>

@@ -5,7 +5,7 @@ import InteractiveFrame from '../components/items/InteractiveFrame.svelte';
 let cleanup: (() => void) | null = null;
 afterEach(() => { cleanup?.(); cleanup = null; document.body.innerHTML = ''; });
 
-function mountFrame(props: { scriptSource: string; title: string }) {
+function mountFrame(props: { scriptSource: string; title: string; height?: number }) {
   const target = document.createElement('div');
   document.body.appendChild(target);
   const sprops = $state(props);
@@ -35,4 +35,13 @@ it('sets referrerpolicy=no-referrer and omits allowfullscreen', () => {
   const f = mountFrame({ scriptSource: 'x', title: 't' });
   expect(f.getAttribute('referrerpolicy')).toBe('no-referrer');
   expect(f.hasAttribute('allowfullscreen')).toBe(false);
+});
+
+it('height: the fixed modifier and --frame-h; the default has neither (Slice-5b D14)', () => {
+  const sized = mountFrame({ scriptSource: 'x', title: 't', height: 360 }).parentElement!;
+  expect(sized.classList.contains('fixed')).toBe(true);
+  expect(sized.style.getPropertyValue('--frame-h')).toBe('360px');
+  cleanup?.(); cleanup = null;
+  const plain = mountFrame({ scriptSource: 'x', title: 't' }).parentElement!;
+  expect(plain.classList.contains('fixed')).toBe(false);
 });

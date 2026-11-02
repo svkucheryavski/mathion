@@ -1,3 +1,4 @@
+import pytest
 import os
 
 from mathion.config import settings
@@ -89,23 +90,24 @@ def test_duplicate_dangling_referenced_asset_409_no_orphan_dir(admin_client, db)
 
 def test_duplicate_empty_source_201(admin_client, db):
     course = admin_client.post("/api/courses", json={"slug": "empty", "name": "E", "description": ""}).json()
-    src = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    src = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     r = admin_client.post(f"/api/versions/{src['id']}/duplicate", json={"label": "e"})
     assert r.status_code == 201
     assert db.query(Block).filter(Block.version_id == r.json()["id"]).count() == 0
 
 
-def test_duplicate_omitted_body_defaults_label_empty(admin_client, db):
+# The label is mandatory (user, 2026-10-08): no body, empty or whitespace-only is a 422.
+@pytest.mark.parametrize("body", [None, {}, {"label": ""}, {"label": "   "}])
+def test_duplicate_requires_label(admin_client, db, body):
     course = admin_client.post("/api/courses", json={"slug": "nob", "name": "N", "description": ""}).json()
-    src = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
-    r = admin_client.post(f"/api/versions/{src['id']}/duplicate")  # no body
-    assert r.status_code == 201
-    assert r.json()["label"] == ""
+    src = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
+    r = admin_client.post(f"/api/versions/{src['id']}/duplicate", json=body)
+    assert r.status_code == 422
 
 
 def test_duplicate_label_too_long_422(admin_client, db):
     course = admin_client.post("/api/courses", json={"slug": "lng", "name": "N", "description": ""}).json()
-    src = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    src = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     r = admin_client.post(f"/api/versions/{src['id']}/duplicate", json={"label": "x" * 201})
     assert r.status_code == 422
 

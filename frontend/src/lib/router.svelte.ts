@@ -17,6 +17,11 @@ export function defaultLandingPath(user: User | null): string {
   return '/courses';
 }
 
+/** The name of a landing path, for a button that goes there (Polish 3: the 404). */
+export function landingLabel(path: string): string {
+  return path === '/teaching' ? 'Back to teaching' : 'Back to courses';
+}
+
 export type Route = {
   path: string;            // pattern: '/courses/:courseSlug'
   component: string;       // logical name; App.svelte maps to imported component
@@ -97,27 +102,32 @@ function isHashOnlyChange(path: string): boolean {
 // F6: Added `force?: boolean` option. When true, guards are bypassed entirely.
 // Used by auth redirects (401 logout flow) where form state is already cleared
 // and a DirtyGuard cancel would be wrong.
+// C6: resolves true only when this call moved the route; false for the current
+// address, a guard's Cancel, or a newer navigate that overtook it.
 export async function navigate(
   path: string,
   opts: { replace?: boolean; force?: boolean } = {}
-): Promise<void> {
-  // F3: Capture the generation token before any async work.
-  const myGen = ++navGen;
-
+): Promise<boolean> {
   const target = path;
   const current = currentRoute.path + currentRoute.search + currentRoute.hash;
-  if (target === current) return;
+  if (target === current) return false;
+
+  // F3: Capture the generation token before any async work. After the
+  // same-target return: a navigate to where we are must not outdate one that
+  // waits on a guard's question (Polish 1 R47).
+  const myGen = ++navGen;
 
   // F5: hash-only changes bypass guards; F6: force:true also bypasses guards.
-  if (!opts.force && !isHashOnlyChange(target) && !(await runGuards())) return;
+  if (!opts.force && !isHashOnlyChange(target) && !(await runGuards())) return false;
 
   // F3: After awaiting guards, abort if a newer navigate() has already run.
-  if (myGen !== navGen) return;
+  if (myGen !== navGen) return false;
 
   if (opts.replace) history.replaceState(null, '', path);
   else history.pushState(null, '', path);
   applyLocationToRoute();
   lastResolvedPath = location.pathname + location.search + location.hash;
+  return true;
 }
 
 // F2: Extract handlers into named variables so Vite HMR dispose can remove them.

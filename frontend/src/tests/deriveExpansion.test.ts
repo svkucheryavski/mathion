@@ -118,3 +118,43 @@ describe('deriveExpansion', () => {
     expect(r.staleSid).toBe(false);
   });
 });
+
+describe('deriveExpansion — the item level (Slice-5b D19)', () => {
+  const item = (id: number, sequence_id: number) => ({
+    id, sequence_id, title: `I${id}`, slug: `i${id}`, order: 1, type: 'static_page' as const,
+    content_md: '', content_html: '', video_url: null, script_url: null, questions_count: 0,
+  });
+  function treeWithItems() {
+    const t = makeTree();
+    t.blocks[0].sequences[0].items = [item(5000, 1000)];
+    t.blocks[0].sequences[1].items = [item(5001, 1001)];
+    return t;
+  }
+
+  it('no item id: expandedItem null, not stale', () => {
+    const e = deriveExpansion('100', '1000', treeWithItems());
+    expect(e.expandedItem).toBeNull();
+    expect(e.staleIid).toBe(false);
+  });
+
+  it('an item of the expanded sequence is expanded', () => {
+    const e = deriveExpansion('100', '1000', treeWithItems(), '5000');
+    expect(e.expandedItem?.id).toBe(5000);
+    expect(e.staleIid).toBe(false);
+  });
+
+  it('an item that is missing, or belongs to another sequence, is stale', () => {
+    expect(deriveExpansion('100', '1000', treeWithItems(), '9999').staleIid).toBe(true);
+    const other = deriveExpansion('100', '1000', treeWithItems(), '5001');
+    expect(other.staleIid).toBe(true);
+    expect(other.expandedItem).toBeNull();
+  });
+
+  it('a non-canonical id ("abc", "05000") is stale; a stale sequence wins over the item', () => {
+    expect(deriveExpansion('100', '1000', treeWithItems(), 'abc').staleIid).toBe(true);
+    expect(deriveExpansion('100', '1000', treeWithItems(), '05000').staleIid).toBe(true);
+    const e = deriveExpansion('100', '9999', treeWithItems(), '5000');
+    expect(e.staleSid).toBe(true);
+    expect(e.staleIid).toBe(false);
+  });
+});

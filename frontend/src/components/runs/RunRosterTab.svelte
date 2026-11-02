@@ -1,6 +1,7 @@
 <script lang="ts">
+  import { tick, untrack } from 'svelte';
   import { SvelteSet, SvelteMap } from 'svelte/reactivity';
-  import { ApiError } from '../../lib/api';
+  import { ApiError, OFFLINE_MESSAGE } from '../../lib/api';
   import {
     addRunStudent,
     removeRunStudent,
@@ -8,15 +9,22 @@
     bulkMoveRunStudents,
     bulkDeleteRunStudents,
   } from '../../lib/runRoster';
+  import { focusFirst } from '../../lib/focusFirst';
+  import { repairFocus } from '../../lib/askInPlace.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
+  import Button from '../ui/Button.svelte';
+  import EmptyState from '../ui/EmptyState.svelte';
+  import IconButton from '../ui/IconButton.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import type { GroupResponse, RunStudentResponse, BulkRosterErrorCode } from '../../lib/types';
-  import type { ActiveTab } from '../../pages/runs/RunDetailPage.svelte';
+  import type { ActiveTab } from '../../lib/runTabs';
 
   type BulkOpKind = 'move' | 'delete';
   type BulkRowErrorMeta = { error_code?: BulkRosterErrorCode | null; detail?: string | null };
   type BulkOpResult = {
     kind: 'idle' | 'in-flight' | 'success' | 'partial' | 'cancelled';
+    // How many students the op was asked to process ("Moving 236…").
+    total: number;
     succeededIds: number[];
     chunkErrorRowIds: number[];
     cancelledIds: number[];
@@ -32,6 +40,7 @@
   let {
     runId,
     runIsPublished,
+    isAdmin,
     courseSlug: _courseSlug,
     onNavigateToTab,
     students,
@@ -45,6 +54,7 @@
   }: {
     runId: number;
     runIsPublished: boolean;
+    isAdmin: boolean;
     courseSlug: string;
     onNavigateToTab: (tab: ActiveTab) => void;
     students: RunStudentResponse[];
@@ -57,25 +67,83 @@
     onOpenImport: () => void;
   } = $props();
 
+  const uid = $props.id();
+  // The draft banner's id: a test hook, and the description of every add
+  // control a draft disables.
+  const DRAFT_HINT_ID = 'roster-draft-publish-hint';
+  const BUSY_TITLE = 'Wait for the current change to finish';
+  const draftTitle = $derived(
+    isAdmin ? 'Publish this run before adding students' : 'A course admin must publish this run first',
+  );
+  const enabledGroups = $derived(groups.filter((g) => !g.is_disabled));
+  const unassignedCount = $derived(students.filter((s) => s.group_id === null).length);
+  const colCount = $derived(groupsEnabled ? 5 : 4);
+
+  // R38: every roster group select reads "Group A · 7/10" (a native option
+  // cannot set the count in mono).
+  function groupLabel(g: GroupResponse): string {
+    return `${g.name} · ${g.student_count}/10`;
+  }
+
+  let searchEl = $state<HTMLInputElement>();
+  let toggleEl = $state<HTMLButtonElement>();
+  let emailEl = $state<HTMLInputElement>();
+  let stripEl = $state<HTMLDivElement>();
+  let bulkTrashEl = $state<HTMLButtonElement>();
+  let bannerEl = $state<HTMLDivElement>();
+  let retryMoveEl = $state<HTMLSelectElement>();
+  let retryDeleteEl = $state<HTMLButtonElement>();
+  let retryCancelledSelectEl = $state<HTMLSelectElement>();
+  let retryCancelledBtnEl = $state<HTMLButtonElement>();
+  let dismissEl = $state<HTMLButtonElement>();
+  const trashEls: Record<number, HTMLButtonElement | undefined> = $state({});
+
+  // The empty-roster link unmounts once an import fills the roster, so the
+  // modal could not return focus to it. Hand focus to the toolbar's Import
+  // roster first: that is the opener the modal returns to after Done.
+  let importBtnEl = $state<HTMLButtonElement>();
+  function openImportFromLink() {
+    importBtnEl?.focus({ preventScroll: true });
+    onOpenImport();
+  }
+
   let search = $state('');
   let newEmail = $state('');
   let newGroupId = $state<number | '__unassigned'>('__unassigned');
   let addError: string | null = $state(null);
   let pendingDelete = $state<number | null>(null);
+  let removing = $state(false);
+
+  // D25: + opens the add row under the toolbar. `adding` spans the POST and
+  // its refetch: Add stays focusable but inert, the field read-only (6b R20).
+  let addOpen = $state(false);
+  let adding = $state(false);
+  const addShown = $derived(addOpen && runIsPublished);
+  // F8: a draft flip unmounts the open add row and disables the toolbar's
+  // buttons under focus. `.pre`: read where focus is before the DOM changes.
+  let toolsEl = $state<HTMLElement>();
+  let emptyLinksEl = $state<HTMLElement>();
+  $effect.pre(() => {
+    if (runIsPublished) return;
+    untrack(() => {
+      const a = document.activeElement;
+      if (addOpen || toolsEl?.contains(a) || emptyLinksEl?.contains(a)) void repairFocus(toggleEl, searchEl);
+    });
+  });
 
   const pendingGroupId = new SvelteMap<number, number | null>();
   const selected = new SvelteSet<number>();
 
-  // Bulk-op state (T14). Exposed by-reference to T15's banner via component scope.
-  // `rowErrorBorders` flags per-row red border; `rowErrorMeta` drives the tooltip.
+  // Bulk-op state (T14), read by the strip and the result banner.
+  // `rowErrorBorders` marks the rows that failed; `rowErrorMeta` drives their reason.
   // We reassign new instances (not `.clear()`) on each dispatch so Svelte's
   // reactivity tracker treats the change as a fresh reference, even though
   // SvelteSet/SvelteMap mutations would also notify.
-  // `bulkOpResult` is mutated by `dispatchBulkOp` and consumed by T15's banner.
-  // Already used here to disable the action-strip buttons during in-flight ops,
-  // preventing the user from queueing a second bulk-op before the first refetch.
+  // While `bulkInFlight`, every bulk and retry control ignores input (R44), so a
+  // second bulk op cannot start before the first one's refetch.
   let bulkOpResult = $state<BulkOpResult>({
     kind: 'idle',
+    total: 0,
     succeededIds: [],
     chunkErrorRowIds: [],
     cancelledIds: [],
@@ -85,73 +153,99 @@
   let rowErrorBorders = $state(new SvelteSet<number>());
   let rowErrorMeta = $state(new SvelteMap<number, BulkRowErrorMeta>());
   let bulkDeleteConfirm = $state(false);
-  // Bind-value for the bulk-move select. Resetting to '' inside `bulkMoveSelected`
-  // lets the user pick the same group twice in a row (sticky-select UX defect
-  // avoidance — see deviation #7 in the T14 brief).
-  let bulkMoveSelectValue = $state('');
-  // Same sticky-select defect avoidance for the T15 retry <select>s. Plan uses
-  // a literal `value=""` attribute on the retry-move and retry-cancelled selects;
-  // jsdom's `<select>` does not reset to "" after onchange just because the
-  // attribute says so, so we bind to a state variable and reset to '' inside
-  // the change handler — identical pattern to `bulkMoveSelectValue`.
-  let retryMoveSelectValue = $state('');
-  let retryCancelledSelectValue = $state('');
+  // Rows the teacher fixed by hand since the last bulk op (their own group
+  // change or removal succeeded): they lose their mark and the retries leave
+  // them out (user, 6c Safari pass).
+  let fixedByHand = $state(new SvelteSet<number>());
+  const retryFailedIds = $derived(bulkOpResult.chunkErrorRowIds.filter((id) => !fixedByHand.has(id)));
+  const retryCancelledIds = $derived(bulkOpResult.cancelledIds.filter((id) => !fixedByHand.has(id)));
+
+  function markFixed(userId: number) {
+    // A bulk op that is still running has the newer word on this row.
+    if (bulkInFlight) return;
+    fixedByHand.add(userId);
+    rowErrorBorders.delete(userId);
+    rowErrorMeta.delete(userId);
+    // Nothing left to retry: the banner has done its job.
+    const open = bulkOpResult.kind === 'partial' || bulkOpResult.kind === 'cancelled';
+    if (open && retryFailedIds.length === 0 && retryCancelledIds.length === 0) {
+      bulkOpResult = { ...bulkOpResult, kind: 'idle' };
+    }
+  }
+
+  // An emptied selection unmounts the strip; its confirm must not come back
+  // open with the next selection.
+  $effect(() => {
+    if (selected.size === 0) bulkDeleteConfirm = false;
+  });
 
   // Banner auto-dismiss state. Re-set to false at the start of each new
   // success run (so a previously-dismissed banner reappears for a fresh op);
   // flipped to true 5s after `bulkOpResult.kind` lands on 'success'. The
   // $effect's cleanup clears the timer when kind transitions away from
-  // 'success' before the 5s elapses, preventing a stale dismiss.
+  // 'success' before the 5s elapses, preventing a stale dismiss. §Focus: when
+  // focus was inside the banner, it goes to the search field.
   let bannerDismissed = $state(false);
 
   $effect(() => {
     if (bulkOpResult.kind === 'success') {
       bannerDismissed = false;
-      const t = setTimeout(() => (bannerDismissed = true), 5000);
+      const t = setTimeout(() => {
+        const hadFocus = bannerEl?.contains(document.activeElement) ?? false;
+        bannerDismissed = true;
+        if (hadFocus) void tick().then(() => searchEl?.focus());
+      }, 5000);
       return () => clearTimeout(t);
     }
   });
 
   function summaryText(): string {
     const r = bulkOpResult;
+    if (r.kind === 'in-flight') return `${r.lastOp === 'move' ? 'Moving' : 'Removing'} ${r.total}…`;
     const total = r.succeededIds.length + r.chunkErrorRowIds.length + r.cancelledIds.length;
-    const verb = r.lastOp === 'move' ? 'Moved' : 'Deleted';
+    const verb = r.lastOp === 'move' ? 'Moved' : 'Removed';
+    const hint = retryFailedIds.length > 0 ? ' Hover a marked row for the reason.' : '';
     if (r.kind === 'success') return `${verb} ${r.succeededIds.length} of ${total} — 0 failed.`;
-    if (r.kind === 'partial') return `${verb} ${r.succeededIds.length} of ${total} — ${r.chunkErrorRowIds.length} failed.`;
+    if (r.kind === 'partial') return `${verb} ${r.succeededIds.length} of ${total} — ${r.chunkErrorRowIds.length} failed.${hint}`;
     if (r.kind === 'cancelled') {
-      return `${verb} ${r.succeededIds.length} of ${total} — ${r.chunkErrorRowIds.length} failed, ${r.cancelledIds.length} cancelled (connection issue).`;
+      return `${verb} ${r.succeededIds.length} of ${total} — ${r.chunkErrorRowIds.length} failed, ${r.cancelledIds.length} cancelled (connection issue).${hint}`;
     }
     return '';
   }
 
+  // R44: a native <select> cannot be aria-disabled. The bulk and retry selects
+  // snap back to their placeholder after every change, and the choice is
+  // ignored while a bulk op runs. Returns the group (null = Unassign), or
+  // undefined when there is nothing to do.
+  function takeChoice(event: Event): number | null | undefined {
+    const el = event.currentTarget as HTMLSelectElement;
+    const raw = el.value;
+    el.value = '';
+    if (raw === '' || bulkInFlight) return undefined;
+    return raw === '__unassigned' ? null : Number(raw);
+  }
+
   function retryMove(event: Event) {
-    const raw = (event.currentTarget as HTMLSelectElement).value;
-    if (raw === '') return;
-    const target: number | null = raw === '__unassigned' ? null : Number(raw);
-    const ids = bulkOpResult.chunkErrorRowIds;
-    retryMoveSelectValue = '';
-    dispatchBulkOp('move', ids, target);
+    const groupId = takeChoice(event);
+    if (groupId === undefined) return;
+    void dispatchBulkOp('move', retryFailedIds, groupId);
   }
 
   function retryDelete() {
-    dispatchBulkOp('delete', bulkOpResult.chunkErrorRowIds);
+    if (bulkInFlight) return;
+    void dispatchBulkOp('delete', retryFailedIds);
   }
 
+  // The "not processed" retries send the cancelled and the failed students.
   function retryCancelledMove(event: Event) {
-    const raw = (event.currentTarget as HTMLSelectElement).value;
-    if (raw === '') return;
-    const target: number | null = raw === '__unassigned' ? null : Number(raw);
-    const ids = [...bulkOpResult.cancelledIds, ...bulkOpResult.chunkErrorRowIds];
-    retryCancelledSelectValue = '';
-    dispatchBulkOp('move', ids, target);
+    const groupId = takeChoice(event);
+    if (groupId === undefined) return;
+    void dispatchBulkOp('move', [...retryCancelledIds, ...retryFailedIds], groupId);
   }
 
   function retryCancelledDelete() {
-    // Only the chunk-level-cancelled bulk-DELETE branch uses this helper. The
-    // move branch re-enters dispatchBulkOp via `retryCancelledMove` (a separate
-    // helper so the select can reset its bind-value before dispatching).
-    const ids = [...bulkOpResult.cancelledIds, ...bulkOpResult.chunkErrorRowIds];
-    dispatchBulkOp('delete', ids);
+    if (bulkInFlight) return;
+    void dispatchBulkOp('delete', [...retryCancelledIds, ...retryFailedIds]);
   }
 
   function bulkErrorTooltip(meta: BulkRowErrorMeta | undefined): string {
@@ -164,6 +258,13 @@
     return meta.detail ? meta.detail : 'Unknown error.';
   }
 
+  // §Focus: a settled op moves focus only from where the op left it (<body>,
+  // the strip or the banner); a teacher who moved on keeps their place.
+  function focusIsOurs(): boolean {
+    const a = document.activeElement;
+    return !a || a === document.body || !!stripEl?.contains(a) || !!bannerEl?.contains(a);
+  }
+
   async function dispatchBulkOp(
     kind: BulkOpKind,
     userIds: number[],
@@ -172,8 +273,10 @@
     // Step 1: clear borders/meta for this op (new instances → guaranteed reactivity).
     rowErrorBorders = new SvelteSet<number>();
     rowErrorMeta = new SvelteMap<number, BulkRowErrorMeta>();
+    fixedByHand = new SvelteSet<number>();
     bulkOpResult = {
       kind: 'in-flight',
+      total: userIds.length,
       succeededIds: [],
       chunkErrorRowIds: [],
       cancelledIds: [],
@@ -215,7 +318,9 @@
     }
 
     // Refetch roster + groups so capacity badges and group_id reflect the server.
-    await onRefetchRosterData();
+    // A failed refetch still settles the banner and unlocks (Polish 3): the
+    // operations' results above are what the banner reports.
+    try { await onRefetchRosterData(); } catch { /* the roster shows what it had */ }
 
     // Selection book-keeping: remove succeeded, keep errored/cancelled selected.
     for (const id of succeededIds) selected.delete(id);
@@ -232,6 +337,7 @@
 
     bulkOpResult = {
       kind: finalKind,
+      total: userIds.length,
       succeededIds,
       chunkErrorRowIds,
       cancelledIds,
@@ -239,20 +345,57 @@
       lastTargetGroupId: groupId,
       error: chunkLevelError,
     };
+
+    // §Focus: the strip's 🗑 if the strip is still there, else the banner's
+    // first retry control, else Dismiss. Failed and cancelled rows stay
+    // selected, so while a retry control exists the strip does too: the retry
+    // entries are defensive, kept to match the spec's chain.
+    await tick();
+    if (focusIsOurs()) {
+      focusFirst([bulkTrashEl, retryMoveEl, retryDeleteEl, retryCancelledSelectEl, retryCancelledBtnEl, dismissEl]);
+    }
   }
 
   function bulkMoveSelected(event: Event) {
-    const raw = (event.currentTarget as HTMLSelectElement).value;
-    if (raw === '') return; // disabled placeholder; ignore.
-    const target: number | null = raw === '__unassigned' ? null : Number(raw);
-    // Reset the select immediately so the same group can be chosen again later.
-    bulkMoveSelectValue = '';
-    dispatchBulkOp('move', Array.from(selected), target);
+    const groupId = takeChoice(event);
+    if (groupId === undefined) return;
+    void dispatchBulkOp('move', Array.from(selected), groupId);
   }
 
-  function bulkDeleteSelected() {
-    dispatchBulkOp('delete', Array.from(selected));
+  function askBulkDelete() {
+    if (bulkInFlight) return;
+    bulkDeleteConfirm = true;
+  }
+
+  async function cancelBulkDelete() {
     bulkDeleteConfirm = false;
+    await tick();
+    bulkTrashEl?.focus();
+  }
+
+  async function bulkDeleteSelected() {
+    if (bulkInFlight) return;
+    bulkDeleteConfirm = false;
+    const op = dispatchBulkOp('delete', Array.from(selected));
+    // The confirm unmounts under focus: hold focus on the strip's 🗑
+    // (aria-disabled while the op runs) until the op settles.
+    await tick();
+    bulkTrashEl?.focus();
+    await op;
+  }
+
+  async function clearSelection() {
+    selected.clear();
+    await tick();
+    searchEl?.focus();
+  }
+
+  async function dismissBanner() {
+    bulkOpResult = { ...bulkOpResult, kind: 'idle' };
+    rowErrorBorders = new SvelteSet<number>();
+    rowErrorMeta = new SvelteMap<number, BulkRowErrorMeta>();
+    await tick();
+    searchEl?.focus();
   }
 
   function selectValueFor(s: RunStudentResponse): number | '__unassigned' {
@@ -289,9 +432,49 @@
     if (search && rosterPrefilter !== null) onPrefilterClear();
   }
 
+  // §Focus: chip ×, Clear filter and Clear search → the search field.
+  async function clearPrefilter() {
+    onPrefilterClear();
+    await tick();
+    searchEl?.focus();
+  }
+
+  async function clearSearch() {
+    search = '';
+    await tick();
+    searchEl?.focus();
+  }
+
+  async function openAdd() {
+    if (!runIsPublished) return;
+    addOpen = true;
+    await tick();
+    emailEl?.focus();
+  }
+
+  // Closing keeps the typed e-mail; it is ignored while an add runs.
+  async function closeAdd() {
+    if (adding) return;
+    addOpen = false;
+    addError = null;
+    await tick();
+    toggleEl?.focus();
+  }
+
+  function toggleAdd() {
+    if (addShown) void closeAdd();
+    else void openAdd();
+  }
+
+  function onAddKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    void closeAdd();
+  }
+
   async function submitAdd(event: SubmitEvent) {
     event.preventDefault();
-    if (!runIsPublished) return;
+    if (adding || !runIsPublished) return;
     addError = null;
     const email = newEmail.trim().toLowerCase();
     if (!email) return;
@@ -300,6 +483,7 @@
       addError = `${newEmail} is already enrolled. Edit their group in the table.`;
       return;
     }
+    adding = true;
     try {
       const groupId: number | null = newGroupId === '__unassigned' ? null : newGroupId;
       await addRunStudent(runId, newEmail.trim(), groupId);
@@ -310,27 +494,54 @@
       // Surface every ApiError (4xx/5xx) inline via the backend-supplied
       // displayMessage — covers run_unpublished, student_already_active_in_course,
       // capacity_reached, group_disabled, and any future error_code without
-      // per-branch wiring. Non-ApiError exceptions (e.g., TypeError from a
-      // fetch network failure) are silently dropped, matching confirmDelete
-      // and onGroupChange below.
-      if (e instanceof ApiError) {
-        addError = e.displayMessage;
-      }
+      // per-branch wiring. A network failure (a fetch TypeError) says so (Polish 3).
+      addError = e instanceof ApiError ? e.displayMessage : OFFLINE_MESSAGE;
+    } finally {
+      adding = false;
     }
+    // Success: ready for the next student. Failure: the field the error is about.
+    await tick();
+    emailEl?.focus();
   }
 
-  async function confirmDelete(userId: number) {
+  function askRemove(userId: number) {
+    if (removing) return;
+    pendingDelete = userId;
+  }
+
+  async function cancelRemove(userId: number) {
+    pendingDelete = null;
+    await tick();
+    trashEls[userId]?.focus();
+  }
+
+  // §Focus (6a's chain): Remove → the next row's 🗑, else the previous row's,
+  // else the add toggle, else the search field; a failure → this row's 🗑.
+  async function confirmRemove(userId: number) {
+    if (removing) return;
+    removing = true;
+    const idx = visible.findIndex((s) => s.user_id === userId);
     try {
       await removeRunStudent(runId, userId);
+      selected.delete(userId);
+      markFixed(userId);
       pendingDelete = null;
       await onRefetchRosterData();
+      await tick();
+      const next = visible[idx];
+      const prev = idx > 0 ? visible[idx - 1] : undefined;
+      focusFirst([next && trashEls[next.user_id], prev && trashEls[prev.user_id], toggleEl, searchEl]);
     } catch (e) {
       pendingDelete = null;
-      if (e instanceof ApiError) pushToast(e.displayMessage, 'error');
+      pushToast(e instanceof ApiError ? e.displayMessage : OFFLINE_MESSAGE, 'error');
+      await tick();
+      focusFirst([trashEls[userId], toggleEl, searchEl]);
+    } finally {
+      removing = false;
     }
   }
 
-  async function onGroupChange(s: RunStudentResponse, raw: string) {
+  async function onGroupChange(s: RunStudentResponse, raw: string, sel: HTMLSelectElement) {
     const targetGroupId: number | null = raw === '__unassigned' ? null : Number(raw);
     pendingGroupId.set(s.user_id, targetGroupId);
     try {
@@ -340,6 +551,9 @@
       // keeps the row's group_id in sync until the next full roster refetch.
       s.group_id = updated.group_id;
       pendingGroupId.delete(s.user_id);
+      markFixed(s.user_id);
+      // F8: the select is enabled again; focus goes back now, not after the groups refetch.
+      void repairFocus(sel, searchEl);
       await onRefetchGroupsOnly();
     } catch (e) {
       // Delete from pendingGroupId on EVERY error path (incl. network failures),
@@ -356,7 +570,13 @@
         } else {
           pushToast(e.displayMessage, 'error');
         }
+      } else {
+        pushToast(OFFLINE_MESSAGE, 'error');
       }
+    } finally {
+      // F8: the select is natively disabled while its request runs, which drops focus.
+      // A newer change of the same select still in flight repairs for itself.
+      if (!pendingGroupId.has(s.user_id)) void repairFocus(sel, searchEl);
     }
   }
 
@@ -374,304 +594,527 @@
   });
 </script>
 
-<section class="roster-tab">
+<section class="ro-tab">
   {#if !runIsPublished}
-    <div
-      id="roster-draft-publish-hint"
-      class="banner"
-      role="status"
-      data-action="draft-publish-hint"
-    >
-      Publish this run before adding students. You can still move or remove students already on the roster.
-      <button
-        type="button"
-        class="linklike"
-        data-action="nav-overview-publish-roster"
-        onclick={() => onNavigateToTab('overview')}
-      >Publish on Overview</button>
+    <div id={DRAFT_HINT_ID} class="ro-info" role="status" data-action="draft-publish-hint">
+      {#if isAdmin}
+        Publish this run before adding students. You can still move or remove students already on the roster.
+        <button
+          type="button"
+          class="ro-link"
+          data-action="nav-overview-publish-roster"
+          onclick={() => onNavigateToTab('overview')}
+        >Publish on Overview</button>
+      {:else}
+        This run is not published yet. A course admin publishes it; then students can be added. You can still move or remove students already on the roster.
+      {/if}
     </div>
   {/if}
 
-  <header class="roster-toolbar">
+  <div class="ro-toolbar">
+    <label class="vh" for="{uid}-search">Search students</label>
     <input
+      id="{uid}-search"
+      class="ro-input ro-search"
       name="roster-search"
-      placeholder="Search by name or email…"
+      placeholder="Search name or email…"
+      autocomplete="off"
       value={search}
       oninput={onSearchInput}
+      bind:this={searchEl}
     />
     {#if rosterPrefilter === 'unassigned'}
-      {@const n = students.filter((s) => s.group_id === null).length}
-      <span class="prefilter-pill">
-        Showing: Unassigned ({n})
-        <button data-action="clear-prefilter" aria-label="Clear filter" onclick={onPrefilterClear}>×</button>
+      <span class="ro-chip">
+        Unassigned ({unassignedCount})
+        <button
+          type="button"
+          class="ro-chip-x"
+          data-action="clear-prefilter"
+          aria-label="Clear filter"
+          title="Clear filter"
+          onclick={clearPrefilter}
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4.4" y1="4.4" x2="11.6" y2="11.6" /><line x1="11.6" y1="4.4" x2="4.4" y2="11.6" /></svg>
+        </button>
       </span>
     {/if}
-    <button data-action="open-import" disabled={!runIsPublished} aria-describedby={!runIsPublished ? 'roster-draft-publish-hint' : undefined} onclick={onOpenImport}>Import roster</button>
-  </header>
+    <div class="ro-tools-right" bind:this={toolsEl}>
+      <Button
+        variant="secondary"
+        data-action="open-import"
+        disabled={!runIsPublished}
+        title={runIsPublished ? undefined : draftTitle}
+        aria-describedby={runIsPublished ? undefined : DRAFT_HINT_ID}
+        bind:element={importBtnEl}
+        onclick={onOpenImport}
+      >Import roster</Button>
+      <IconButton
+        glyph={addShown ? 'close' : 'plus'}
+        primary={!addShown}
+        size="sm"
+        title={!runIsPublished ? draftTitle : addShown ? 'Close add row' : 'Add student'}
+        aria-label={addShown ? 'Close add row' : 'Add student'}
+        disabled={!runIsPublished}
+        describedby={runIsPublished ? undefined : DRAFT_HINT_ID}
+        aria-expanded={addShown}
+        aria-controls={addShown ? `${uid}-add` : undefined}
+        data-action="toggle-add-student"
+        bind:element={toggleEl}
+        onclick={toggleAdd}
+      />
+    </div>
+  </div>
 
-  {#if students.length === 0}
-    <p class="empty">
-      No students yet. Add one below or
-      <button data-action="open-import-link" disabled={!runIsPublished} aria-describedby={!runIsPublished ? 'roster-draft-publish-hint' : undefined} onclick={onOpenImport}>Import roster from CSV</button>.
-    </p>
-  {/if}
-
-  {#if bulkOpResult.kind !== 'idle' && !(bulkOpResult.kind === 'success' && bannerDismissed)}
-    <div class="bulk-banner bulk-banner-{bulkOpResult.kind}">
-      <span>{summaryText()}</span>
-
-      {#if bulkOpResult.kind === 'partial' && bulkOpResult.lastOp === 'move'}
-        <select
-          data-action="retry-move-select"
-          bind:value={retryMoveSelectValue}
-          onchange={retryMove}
-          disabled={bulkInFlight}
-        >
-          <option value="" disabled>Retry {bulkOpResult.chunkErrorRowIds.length} → group…</option>
-          <option value="__unassigned">Unassign</option>
-          {#each groups.filter((g) => !g.is_disabled) as g (g.id)}
-            <option value={g.id}>{g.name} ({g.student_count}/10)</option>
+  {#if addShown}
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <form id="{uid}-add" class="ro-add" onsubmit={submitAdd} onkeydown={onAddKeydown}>
+      <label class="vh" for="{uid}-email">Student email</label>
+      <input
+        id="{uid}-email"
+        class="ro-input ro-email"
+        name="new-email"
+        type="email"
+        maxlength="254"
+        placeholder="student@example.com"
+        autocomplete="off"
+        readonly={adding}
+        aria-invalid={addError ? 'true' : undefined}
+        aria-describedby={addError ? `${uid}-add-err` : undefined}
+        bind:value={newEmail}
+        oninput={() => { addError = null; }}
+        bind:this={emailEl}
+      />
+      {#if groupsEnabled}
+        <label class="vh" for="{uid}-group">Group</label>
+        <select id="{uid}-group" class="ro-select" bind:value={newGroupId}>
+          <option value="__unassigned">Unassigned</option>
+          {#each enabledGroups as g (g.id)}
+            <option value={g.id}>{groupLabel(g)}</option>
           {/each}
         </select>
-      {:else if bulkOpResult.kind === 'partial' && bulkOpResult.lastOp === 'delete'}
-        <button data-action="retry-delete" onclick={retryDelete} disabled={bulkInFlight}>
-          Retry {bulkOpResult.chunkErrorRowIds.length} delete
-        </button>
-      {:else if bulkOpResult.kind === 'cancelled'}
-        {#if bulkOpResult.lastOp === 'move'}
-          <select
-            data-action="retry-cancelled"
-            bind:value={retryCancelledSelectValue}
-            onchange={retryCancelledMove}
-            disabled={bulkInFlight}
-          >
-            <option value="" disabled>Retry cancelled → group…</option>
-            <option value="__unassigned">Unassign</option>
-            {#each groups.filter((g) => !g.is_disabled) as g (g.id)}
-              <option value={g.id}>{g.name} ({g.student_count}/10)</option>
-            {/each}
-          </select>
-        {:else}
-          <button data-action="retry-cancelled" onclick={retryCancelledDelete} disabled={bulkInFlight}>
-            Retry cancelled
-          </button>
-        {/if}
       {/if}
-
-      {#if bulkOpResult.kind !== 'in-flight'}
-        <button
-          data-action="dismiss-banner"
-          onclick={() => (bulkOpResult = { ...bulkOpResult, kind: 'idle' })}
-        >
-          Dismiss
-        </button>
-      {/if}
-    </div>
+      <Button
+        type="submit"
+        variant="primary"
+        data-action="add-student"
+        loading={adding}
+        aria-disabled={adding}
+        disabled={!adding && !newEmail.trim()}
+        title={adding ? BUSY_TITLE : newEmail.trim() ? undefined : 'Enter an email address'}
+      >Add</Button>
+      <Button variant="secondary" data-action="cancel-add-student" onclick={closeAdd}>Cancel</Button>
+    </form>
+    {#if addError}<p id="{uid}-add-err" class="ro-err error" role="alert">{addError}</p>{/if}
   {/if}
 
   {#if selected.size > 0}
-    <div data-strip="bulk" class="bulk-strip">
-      <span>
-        {selected.size} selected{visible.length < students.length
-          ? ` (${visible.filter((s) => selected.has(s.user_id)).length} visible)`
-          : ''}
-      </span>
-      {#if groupsEnabled}
-        <select
-          data-action="bulk-move-select"
-          bind:value={bulkMoveSelectValue}
-          onchange={bulkMoveSelected}
-          disabled={bulkInFlight}
-        >
-          <option value="" disabled>Move to group…</option>
-          <option value="__unassigned">Unassign</option>
-          {#each groups.filter((g) => !g.is_disabled) as g (g.id)}
-            <option value={g.id}>{g.name} ({g.student_count}/10)</option>
-          {/each}
-        </select>
-      {/if}
+    <div data-strip="bulk" class="ro-strip" bind:this={stripEl}>
+      <span class="ro-count">{selected.size} selected{visible.length < students.length ? ` (${selectedVisibleCount} visible)` : ''}</span>
       {#if bulkDeleteConfirm}
         <InlineConfirm
-          confirmLabel={`Confirm Delete — ${selected.size} students will be removed.`}
+          row
+          takeFocus
+          warning={selected.size === 1 ? 'Remove 1 student from this run?' : `Remove ${selected.size} students from this run?`}
+          confirmLabel="Remove"
           confirmDataAction="confirm-bulk-delete"
           onConfirm={bulkDeleteSelected}
-          onCancel={() => (bulkDeleteConfirm = false)}
+          onCancel={cancelBulkDelete}
         />
       {:else}
-        <button
+        {#if groupsEnabled}
+          <label class="vh" for="{uid}-bulk-move">Move selected to a group</label>
+          <select id="{uid}-bulk-move" class="ro-select" data-action="bulk-move-select" onchange={bulkMoveSelected}>
+            <option value="" disabled selected>Move to group…</option>
+            <option value="__unassigned">Unassign</option>
+            {#each enabledGroups as g (g.id)}
+              <option value={g.id}>{groupLabel(g)}</option>
+            {/each}
+          </select>
+        {/if}
+        <IconButton
+          glyph="trash"
+          size="sm"
+          danger
+          title={bulkInFlight ? BUSY_TITLE : 'Remove selected'}
+          aria-label="Remove selected"
+          aria-disabled={bulkInFlight}
           data-action="bulk-delete"
-          disabled={bulkInFlight}
-          onclick={() => (bulkDeleteConfirm = true)}
-        >
-          Delete selected
-        </button>
+          bind:element={bulkTrashEl}
+          onclick={askBulkDelete}
+        />
+        <button type="button" class="ro-text-btn ro-clear" data-action="clear-selection" onclick={clearSelection}>Clear selection</button>
       {/if}
-      <button data-action="clear-selection" onclick={() => selected.clear()}>× clear</button>
     </div>
   {/if}
 
-  <table>
-    <thead>
-      <tr>
-        <th>
-          <input
-            type="checkbox"
-            data-header-checkbox
-            checked={headerChecked}
-            onclick={onHeaderClick}
-            bind:indeterminate={() => headerIndeterminate, () => {}}
-          />
-        </th>
-        <th>Email</th>
-        <th>Full name</th>
-        <th>Group</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {#each visible as s (s.user_id)}
-        <tr
-          data-row="student"
-          data-user-id={s.user_id}
-          class:row-error={rowErrorBorders.has(s.user_id)}
-          title={bulkErrorTooltip(rowErrorMeta.get(s.user_id))}
-        >
-          <td>
-            <input
-              type="checkbox"
-              data-row-checkbox
-              checked={selected.has(s.user_id)}
-              onchange={(e) => {
-                if ((e.currentTarget as HTMLInputElement).checked) selected.add(s.user_id);
-                else selected.delete(s.user_id);
-              }}
-            />
-          </td>
-          <td>{s.user_email}</td>
-          <td>{s.user_full_name || '—'}</td>
-          <td>
-            {#if groupsEnabled}
-              <select
-                value={selectValueFor(s)}
-                disabled={pendingGroupId.has(s.user_id)}
-                onchange={(e) => onGroupChange(s, (e.currentTarget as HTMLSelectElement).value)}
-              >
-                <option value="__unassigned">Unassigned</option>
-                {#each groups as g (g.id)}
-                  <option value={g.id}>{g.name} ({g.student_count}/10){g.is_disabled ? ' (disabled)' : ''}</option>
-                {/each}
-              </select>
-            {:else}
-              —
-            {/if}
-          </td>
-          <td>
-            {#if pendingDelete === s.user_id}
-              <InlineConfirm
-                confirmLabel="Confirm Delete"
-                confirmDataAction="confirm-delete-student"
-                onConfirm={() => confirmDelete(s.user_id)}
-                onCancel={() => (pendingDelete = null)}
-              />
-            {:else}
-              <button data-action="delete-student" onclick={() => (pendingDelete = s.user_id)}>Delete</button>
-            {/if}
-          </td>
-        </tr>
-      {/each}
-    </tbody>
-  </table>
+  {#if bulkOpResult.kind !== 'idle' && !(bulkOpResult.kind === 'success' && bannerDismissed)}
+    <div
+      class="ro-banner"
+      class:ro-banner-info={bulkOpResult.kind === 'in-flight'}
+      class:ro-banner-ok={bulkOpResult.kind === 'success'}
+      class:ro-banner-warn={bulkOpResult.kind === 'partial' || bulkOpResult.kind === 'cancelled'}
+      role="status"
+      bind:this={bannerEl}
+    >
+      <span class="ro-banner-text">{summaryText()}</span>
+      {#if bulkOpResult.kind === 'partial' && bulkOpResult.lastOp === 'move'}
+        {@const n = retryFailedIds.length}
+        <label class="vh" for="{uid}-retry-move">Move the {n} failed {n === 1 ? 'student' : 'students'} to a group</label>
+        <select id="{uid}-retry-move" class="ro-retry" data-action="retry-move-select" bind:this={retryMoveEl} onchange={retryMove}>
+          <option value="" disabled selected>Retry {n} &rarr; group…</option>
+          <option value="__unassigned">Unassign</option>
+          {#each enabledGroups as g (g.id)}
+            <option value={g.id}>{groupLabel(g)}</option>
+          {/each}
+        </select>
+      {:else if bulkOpResult.kind === 'partial'}
+        <button type="button" class="ro-retry" data-action="retry-delete" bind:this={retryDeleteEl} onclick={retryDelete}>Retry removing {retryFailedIds.length}</button>
+      {:else if bulkOpResult.kind === 'cancelled'}
+        {@const m = retryCancelledIds.length + retryFailedIds.length}
+        {#if bulkOpResult.lastOp === 'move'}
+          <label class="vh" for="{uid}-retry-cancelled">Move the {m} not processed {m === 1 ? 'student' : 'students'} to a group</label>
+          <select id="{uid}-retry-cancelled" class="ro-retry" data-action="retry-cancelled" bind:this={retryCancelledSelectEl} onchange={retryCancelledMove}>
+            <option value="" disabled selected>Move the {m} not processed…</option>
+            <option value="__unassigned">Unassign</option>
+            {#each enabledGroups as g (g.id)}
+              <option value={g.id}>{groupLabel(g)}</option>
+            {/each}
+          </select>
+        {:else}
+          <button type="button" class="ro-retry" data-action="retry-cancelled" bind:this={retryCancelledBtnEl} onclick={retryCancelledDelete}>Retry the {m} not processed</button>
+        {/if}
+      {/if}
+      {#if bulkOpResult.kind !== 'in-flight'}
+        <button type="button" class="ro-text-btn ro-dismiss" data-action="dismiss-banner" bind:this={dismissEl} onclick={dismissBanner}>Dismiss</button>
+      {/if}
+    </div>
+  {/if}
 
-  {#if visible.length === 0 && students.length > 0}
-    <p class="empty">
+  {#if visible.length > 0}
+    <div class="ro-table-wrap">
+      <table class="ro-table">
+        <thead>
+          <tr>
+            <th class="ro-col-check">
+              <input
+                type="checkbox"
+                data-header-checkbox
+                aria-label="Select all visible students"
+                checked={headerChecked}
+                onclick={onHeaderClick}
+                bind:indeterminate={() => headerIndeterminate, () => {}}
+              />
+            </th>
+            <th>Email</th>
+            <th class="ro-col-name">Full name</th>
+            {#if groupsEnabled}<th class="ro-col-group">Group</th>{/if}
+            <th class="ro-col-actions"><span class="vh">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each visible as s (s.user_id)}
+            {@const marked = rowErrorBorders.has(s.user_id)}
+            {@const reason = bulkErrorTooltip(rowErrorMeta.get(s.user_id))}
+            <tr
+              data-row="student"
+              data-user-id={s.user_id}
+              class:row-error={marked}
+              class:ro-selected={selected.has(s.user_id)}
+              title={reason || undefined}
+            >
+              <td class:ro-mark={marked}>
+                <input
+                  type="checkbox"
+                  data-row-checkbox
+                  aria-label="Select {s.user_email}"
+                  checked={selected.has(s.user_id)}
+                  onchange={(e) => {
+                    if ((e.currentTarget as HTMLInputElement).checked) selected.add(s.user_id);
+                    else selected.delete(s.user_id);
+                  }}
+                />
+              </td>
+              <td class="ro-email-cell">{s.user_email}{#if marked}<span class="vh"> Failed: {reason}</span>{/if}</td>
+              <td>{#if s.user_full_name}{s.user_full_name}{:else}<span class="ro-none">—</span>{/if}</td>
+              {#if groupsEnabled}
+                <td>
+                  <select
+                    class="ro-select"
+                    aria-label="Group for {s.user_email}"
+                    value={selectValueFor(s)}
+                    disabled={pendingGroupId.has(s.user_id)}
+                    onchange={(e) => onGroupChange(s, e.currentTarget.value, e.currentTarget)}
+                  >
+                    <option value="__unassigned">Unassigned</option>
+                    {#each groups as g (g.id)}
+                      <option value={g.id}>{groupLabel(g)}{g.is_disabled ? ' · disabled' : ''}</option>
+                    {/each}
+                  </select>
+                </td>
+              {/if}
+              <td class="ro-actions">
+                <IconButton
+                  glyph="trash"
+                  size="sm"
+                  danger
+                  title="Remove from run"
+                  aria-label="Remove {s.user_email}"
+                  data-action="delete-student"
+                  bind:element={trashEls[s.user_id]}
+                  onclick={() => askRemove(s.user_id)}
+                />
+              </td>
+            </tr>
+            {#if pendingDelete === s.user_id}
+              <tr class="ro-confirm-row">
+                <td colspan={colCount}>
+                  <InlineConfirm
+                    row
+                    align="end"
+                    takeFocus
+                    warning="Remove {s.user_email} from this run?"
+                    confirmLabel="Remove"
+                    confirmDataAction="confirm-delete-student"
+                    onConfirm={() => confirmRemove(s.user_id)}
+                    onCancel={() => cancelRemove(s.user_id)}
+                  />
+                </td>
+              </tr>
+            {/if}
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  {/if}
+
+  {#if students.length === 0}
+    <EmptyState title="No students yet.">
+      {#snippet action()}
+        <span class="ro-empty-links" bind:this={emptyLinksEl}>
+          <button
+            type="button"
+            class="ro-link"
+            data-action="open-import-link"
+            disabled={!runIsPublished}
+            title={runIsPublished ? undefined : draftTitle}
+            aria-describedby={runIsPublished ? undefined : DRAFT_HINT_ID}
+            onclick={openImportFromLink}
+          >Import roster</button>
+          <button
+            type="button"
+            class="ro-link"
+            data-action="open-add-link"
+            disabled={!runIsPublished}
+            title={runIsPublished ? undefined : draftTitle}
+            aria-describedby={runIsPublished ? undefined : DRAFT_HINT_ID}
+            onclick={openAdd}
+          >Add student</button>
+        </span>
+      {/snippet}
+    </EmptyState>
+  {:else if visible.length === 0}
+    <p class="ro-nomatch">
       {#if rosterPrefilter === 'unassigned'}
         No students are unassigned.
-        <button data-action="clear-prefilter-link" onclick={onPrefilterClear}>Clear filter</button>.
+        <button type="button" class="ro-link" data-action="clear-prefilter-link" onclick={clearPrefilter}>Clear filter</button>.
       {:else}
         No students match '{search}'.
-        <button data-action="clear-search-link" onclick={() => (search = '')}>Clear search</button>.
+        <button type="button" class="ro-link" data-action="clear-search-link" onclick={clearSearch}>Clear search</button>.
       {/if}
     </p>
   {/if}
-
-  <form class="add-row" onsubmit={submitAdd}>
-    <input name="new-email" type="email" maxlength="254" bind:value={newEmail} placeholder="student@example.com" />
-    {#if groupsEnabled}
-      <select bind:value={newGroupId}>
-        <option value="__unassigned">Unassigned</option>
-        {#each groups.filter((g) => !g.is_disabled) as g (g.id)}
-          <option value={g.id}>{g.name} ({g.student_count}/10)</option>
-        {/each}
-      </select>
-    {:else}
-      —
-    {/if}
-    <button data-action="add-student" type="submit" disabled={!runIsPublished || !newEmail.trim()} aria-describedby={!runIsPublished ? 'roster-draft-publish-hint' : undefined}>Add</button>
-  </form>
-  {#if addError}<p class="error" role="alert">{addError}</p>{/if}
 </section>
 
 <style>
-  .banner {
-    margin: 0.5rem 0;
-    padding: 0.5rem 0.75rem;
-    background: var(--surface-muted, #f4f4f4);
-    border-left: 3px solid var(--accent, #888);
-    border-radius: 2px;
-  }
+  .ro-tab { display: flex; flex-direction: column; gap: 10px; }
 
-  .roster-tab { display: flex; flex-direction: column; gap: 12px; }
-  .roster-toolbar { display: flex; gap: 8px; align-items: center; }
-  .prefilter-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
-    background: var(--surface-muted, #f5f5f5);
-    border-radius: 999px;
-    font-size: 0.85em;
+  /* The 6a info precondition banner. */
+  .ro-info {
+    padding: 8px 12px;
+    background: var(--surface-2);
+    border-left: 3px solid var(--primary);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    font-size: 13px;
+    color: var(--text-2);
   }
-  .prefilter-pill button { background: transparent; border: 0; cursor: pointer; padding: 0 4px; font-size: 1em; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 6px 8px; border-bottom: 1px solid var(--border, #eee); text-align: left; }
-  thead th { position: sticky; top: 0; background: var(--surface, #fff); }
-  .add-row { display: flex; gap: 8px; align-items: center; }
-  .empty { color: var(--muted, #666); }
-  .error { color: var(--danger, #c00); }
-  .bulk-strip {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    padding: 6px 8px;
-    background: var(--surface-muted, #f5f5f5);
-    border-radius: 4px;
-  }
-  .bulk-banner {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    padding: 6px 8px;
-    border-radius: 4px;
-    background: var(--surface-muted, #f5f5f5);
-  }
-  .bulk-banner-success { background: var(--success-soft, #e6f6ea); }
-  .bulk-banner-partial { background: var(--warn-soft, #fff4e0); }
-  .bulk-banner-cancelled { background: var(--danger-soft, #fdecea); }
-  .row-error {
-    box-shadow: inset 4px 0 0 0 var(--danger, #c00);
-  }
-
-  .linklike {
+  .ro-link {
     background: none;
     border: 0;
     padding: 0;
-    margin-left: 0.5rem;
+    font: inherit;
+    color: var(--primary);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .ro-link:disabled { color: var(--faint); text-decoration: none; cursor: not-allowed; }
+
+  .ro-toolbar { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .ro-tools-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  /* R40: native fields in the 6a field style (RunTeachersTab's .t-input). */
+  .ro-input {
+    box-sizing: border-box;
+    height: var(--control-h-sm);
+    padding: 0 var(--control-pad-x);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--control-font);
+  }
+  .ro-input[aria-invalid='true'] { border-color: var(--danger); }
+  .ro-search { width: 230px; max-width: 100%; }
+  .ro-email { flex: 1 1 240px; min-width: 0; max-width: 360px; }
+  .ro-select {
+    box-sizing: border-box;
+    height: 26px;
+    max-width: 100%;
+    padding: 0 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 12.5px;
+  }
+  .ro-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 4px 0 10px;
+    border-radius: 13px;
+    background: var(--surface-2);
+    font-size: 12px;
+    color: var(--text-3);
+  }
+  .ro-chip-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .ro-chip-x:hover { background: var(--border); color: var(--text); }
+
+  /* D25: the 6a add-row look. */
+  .ro-add {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .ro-err { margin: 0; font-size: 12px; color: var(--danger); overflow-wrap: anywhere; }
+
+  .ro-strip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    background: var(--primary-soft);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .ro-count { font-size: 12.5px; font-weight: 600; color: var(--text); }
+  .ro-text-btn {
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .ro-text-btn:hover { text-decoration: underline; }
+  .ro-clear { margin-left: auto; }
+
+  /* The result banner: info while in flight, the accepted tint on success,
+     the 6a warning banner for a partial or cancelled op. */
+  .ro-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    border-left: 3px solid var(--primary);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    font-size: 12.5px;
+  }
+  .ro-banner-info { background: var(--surface-2); color: var(--text-2); }
+  .ro-banner-ok {
+    background: var(--status-accepted-bg);
+    border-left-color: var(--success);
+    color: var(--status-accepted-fg);
+  }
+  .ro-banner-warn {
+    background: var(--status-needs-revision-bg);
+    border-left-color: var(--gold);
+    color: var(--status-needs-revision-fg);
+  }
+  .ro-banner-text { flex: 1 1 auto; min-width: 0; }
+  /* Text-styled retries: the banner's colour, underlined. */
+  .ro-retry {
+    appearance: none;
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
     color: inherit;
     text-decoration: underline;
     cursor: pointer;
-    font: inherit;
   }
-  .linklike:hover {
-    text-decoration: none;
+  /* A select drawn as a link has no border to colour: it takes the ring (P97). */
+  .ro-retry:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; box-shadow: none; }
+  .ro-dismiss { color: inherit; }
+
+  /* The 6a table look; the wrapper scrolls sideways on a narrow window. */
+  .ro-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
   }
+  .ro-table { width: 100%; min-width: 640px; border-collapse: collapse; }
+  .ro-table th {
+    padding: 8px 12px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-3);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .ro-table td {
+    padding: 4px 12px;
+    border-top: 1px solid var(--border-soft);
+    font-size: 13px;
+    color: var(--text);
+    vertical-align: middle;
+  }
+  .ro-col-check { width: 26px; }
+  .ro-col-name { width: 150px; }
+  .ro-col-group { width: 172px; }
+  .ro-col-actions { width: 30px; }
+  .ro-actions { text-align: right; }
+  .ro-selected { background: var(--primary-soft); }
+  /* A row that failed its last bulk op: a 3px rule on its first cell. */
+  .ro-mark { box-shadow: inset 3px 0 0 0 var(--danger); }
+  .ro-email-cell { overflow-wrap: anywhere; }
+  .ro-none { color: var(--muted); }
+  .ro-confirm-row td { padding: 0 12px 10px; border-top: 0; }
+
+  .ro-nomatch { margin: 0; font-size: 13px; color: var(--muted); }
+  .ro-empty-links { display: inline-flex; gap: 16px; }
+  .vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 </style>

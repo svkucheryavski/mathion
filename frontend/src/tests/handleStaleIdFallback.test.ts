@@ -53,3 +53,35 @@ describe('handleStaleIdFallback', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 });
+
+describe('handleStaleIdFallback — the item level (Slice-5b D19, D9)', () => {
+  const ctx = { courseSlug: 'cs101', vid: '10', bid: '100', sid: '1000', iid: '5000' };
+
+  it('staleIid: toast "Item not found." + replace+force to the sequence URL', () => {
+    const { pushToast, navigate } = setup();
+    handleStaleIdFallback({ staleBid: false, staleSid: false, staleIid: true }, ctx, { pushToast, navigate });
+    expect(pushToast).toHaveBeenCalledWith('Item not found.', 'info');
+    expect(navigate).toHaveBeenCalledWith('/courses/cs101/edit/v/10/blocks/100/sequences/1000', { replace: true, force: true });
+  });
+
+  it('staleSid beats staleIid', () => {
+    const { pushToast, navigate } = setup();
+    handleStaleIdFallback({ staleBid: false, staleSid: true, staleIid: true }, ctx, { pushToast, navigate });
+    expect(pushToast).toHaveBeenCalledWith('Sequence not found.', 'info');
+    expect(pushToast).toHaveBeenCalledTimes(1);
+  });
+
+  it('the item we just deleted (deletedIid) is an expected close: no toast, no navigation', () => {
+    const { pushToast, navigate } = setup();
+    handleStaleIdFallback({ staleBid: false, staleSid: false, staleIid: true }, { ...ctx, deletedIid: 5000 }, { pushToast, navigate });
+    expect(pushToast).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('a deletedIid for a different item does not suppress', () => {
+    const { pushToast, navigate } = setup();
+    handleStaleIdFallback({ staleBid: false, staleSid: false, staleIid: true }, { ...ctx, deletedIid: 7 }, { pushToast, navigate });
+    expect(pushToast).toHaveBeenCalledWith('Item not found.', 'info');
+    expect(navigate).toHaveBeenCalledTimes(1);
+  });
+});

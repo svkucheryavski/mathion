@@ -2,10 +2,22 @@
 
 :root {
   /* --- surfaces --- */
-  --bg: #FBFBFC;              /* page background */
+  --bg: #F2F3F6;              /* the page ground (D50): white cards and the header read as steps above it */
   --surface: #FFFFFF;         /* cards, rows, inputs */
   --surface-2: #F5F6F9;       /* table headers, accordion header strips */
-  --surface-3: #FCFCFD;       /* nested/inset panels */
+  --surface-3: #FCFCFD;       /* a near-white tint inside a white surface; never on the ground */
+  --surface-ground: #FDFDFE;  /* near-white boxes that sit ON the page ground: the course info, closed blocks (D76) */
+  --disabled-bg: #FBFBFC;     /* disabled and blocked controls: a step above the ground (D50) */
+  /* Slice-5c focus by depth: the open container is --focus-0; each level
+     further out is one step darker (spec D1/D2). */
+  --focus-0: var(--surface);
+  --focus-row: #F4F5F8;      /* a row inside an open (white) container: a tint, so it stands out (user, T5) */
+  --focus-page: var(--bg);   /* the page with nothing open is the page ground (D50). A theme that changes --bg keeps it below --focus-1 and --focus-2, which stay literals. */
+  --focus-1: #EEF0F3;
+  --focus-2: #E1E4E9;
+  --focus-line: rgba(20, 24, 35, 0.11);      /* borders that stay visible on every shade */
+  --focus-line-strong: #B9C2CF;              /* the focus container's border */
+  --focus-shadow: 0 1px 4px rgba(20, 24, 35, 0.08);
 
   /* --- text --- */
   --text: #16181D;
@@ -14,17 +26,22 @@
   --muted: #5A616E;           /* ALL functional secondary text — AA on white */
   --faint: #B4B9C4;           /* disabled glyphs, breadcrumb separators ONLY */
   --placeholder: #9AA0AC;     /* input placeholders ONLY */
+  --ordinal: #959BA7;         /* block numbers "1." ONLY: lighter than --muted, near --placeholder (user, 2026-10-08). Below AA (~2.9:1) ON PURPOSE: decorative, aria-hidden, the list order carries the position. Don't "fix" it. */
 
   /* --- lines --- */
   --border: #E3E5EA;          /* card and section borders */
   --border-strong: #DDE1E9;   /* interactive controls */
   --border-soft: #F0F1F4;     /* row separators inside a card */
   --border-faint: #EDEFF2;    /* disabled control borders */
+  --border-ground: #C9CED7;   /* structural lines drawn on the page ground (--bg), e.g. under the run tabs (D71); the editor's focus-by-depth shades use --focus-line instead */
+  --border-box: #D5D9E0;      /* the edge of a --surface-ground box on the page ground (D76) */
 
   /* --- accent --- */
   --primary: #3F5C77;         /* steel blue */
   --primary-text: #fff;
-  --primary-soft: #EAEFF4;    /* code badges, current item, hover fills */
+  --primary-soft: #EAEFF4;    /* code badges, current item, selected fills (the course page rows hover --row-hover, D77) */
+  --row-hover: #F8F9FC;       /* hover fill of the course page's sequence and mini-project rows: lighter than the open block's --surface-2 strip, still visible on white (D77) */
+  --primary-press: #2F465B;   /* a pressed primary confirm (Polish 1 D31) */
 
   /* --- gold: the logo's second peak, and chrome that marks "you are here" ---
      Decorative only. It never carries state and never carries body text.     */
@@ -33,7 +50,9 @@
   --gold-text: #7A5410;       /* label on --gold-soft (6.6:1) */
 
   /* --- semantic --- */
-  --danger: #991B1B;
+  --danger: #C8102E;          /* 5.9:1 on white, 4.6:1 on --focus-2 (Polish 1 D32) */
+  --danger-press: #A50D26;    /* a pressed danger button */
+  --due-near: #C2410C;        /* D80: a deadline 7-13 days away (orange), 5.2:1 on white */
   --success: #065F46;
 
   /* --- geometry --- */
@@ -57,9 +76,19 @@
      A disabled Force delete stays recognisably destructive: it keeps the red
      family and only loses saturation. Never grey it out — the operator must
      still read it as the dangerous button while it is unarmed. */
-  --danger-off-bg: #FFFAFA;
-  --danger-off-border: #F2D9D9;
-  --danger-off-text: #C99B9B;
+  --danger-off-bg: #FFF7F8;
+  --danger-off-border: #F4D2D8;
+  --danger-off-text: #DFA3AE;
+
+  /* --- confirm buttons (Polish 1 D31): Cancel's outline and fills --- */
+  --cancel-border: #71839E;   /* Polish 3 C2: the lightest grey of --focus-line-strong's hue at >=3:1 on all 12 grounds and fills a Cancel meets (probe contrast.py), from 3.03 on --focus-2 (its press fill) to 3.86 on --surface; --danger-panel-bg 3.48 */
+  --cancel-hover: var(--focus-1);
+  --cancel-press: var(--focus-2);
+
+  /* --- the danger panel (Polish 1 D40): its text is 9.2:1 on its background,
+     --danger 5.3:1, --text-2 12.1:1. The status badges keep --status-rejected-*. --- */
+  --danger-panel-bg: #FDF0F2;
+  --danger-panel-fg: #7A1F2B;
 
   /* --- type --- */
   --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -77,6 +106,10 @@
   --space-3: 1rem;
   --space-4: 1.5rem;
   --space-6: 3rem;
+
+  /* --- page column: one width for the student, authoring and teaching pages
+     (the teacher drawings' content, 1180 artboard minus 20px gutters) --- */
+  --page-max: 1140px;
 
   /* --- progress heatmap: single-hue ramp, replaces the hsl() sweep --- */
   --surface-muted: #F5F6F9;   /* no data */
@@ -105,6 +138,4 @@
      contrast step below its neighbours while every element stays above 5.5:1.
      Opacity would composite the whole row — including live action glyphs —
      against the page and push the text to 2.7:1. */
-
-  /* TODO(version-slice): reconcile the disabled-version treatment with design — spec §4 prose uses --dimmed #6B7280; this reference deliberately omits --dimmed and uses --state-disabled-fg #5A616E. */
 }

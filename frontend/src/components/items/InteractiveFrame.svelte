@@ -23,15 +23,18 @@
   // interaction telemetry it collects) — accepted because the upload is
   // admin-authored (the app legitimately observes its own in-frame interaction).
   import { buildAppSrcdoc } from '../../lib/interactiveHost';
-  let { scriptSource, title }: { scriptSource: string; title: string } = $props();
+  // Slice-5b D14: an optional `height` (the editor's 360px preview) replaces
+  // the 600px default and zeroes the frame's own bottom margin (R3).
+  let { scriptSource, title, height }: { scriptSource: string; title: string; height?: number } = $props();
   const srcdoc = $derived(buildAppSrcdoc(scriptSource));
 </script>
 
-<div class="frame">
+<div class="frame" class:fixed={height !== undefined} style:--frame-h={height !== undefined ? `${height}px` : undefined}>
   <iframe {srcdoc} {title} sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
 </div>
 
 <style>
   .frame { width: 100%; height: 600px; margin-bottom: var(--space-3); }
+  .frame.fixed { height: var(--frame-h); margin-bottom: 0; /* (c): the caller sizes it */ }
   .frame iframe { width: 100%; height: 100%; border: 0; }
 </style>

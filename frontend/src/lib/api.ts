@@ -31,6 +31,9 @@ export class ApiError extends Error {
   }
 }
 
+/** Polish 3: what a write that never reached the server (a fetch TypeError) says. */
+export const OFFLINE_MESSAGE = 'Could not reach server. Check your connection.';
+
 export type RequestOpts = RequestInit & { skipAuthRedirect?: boolean };
 
 async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {

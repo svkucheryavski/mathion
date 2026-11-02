@@ -65,7 +65,7 @@ def test_progress_sequences_shape_and_order(admin_client, db):
     from mathion.models import Block, Sequence, Item, Question, AnswerOption
 
     course = admin_client.post("/api/courses", json={"slug": "p1", "name": "P1", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
 
     # Block 1, two sequences. Sequence 1.1: 2 static + 1 quiz. Sequence 1.2: 1 static.
     b1 = Block(version_id=version["id"], title="B1", slug="b1", order=1)
@@ -118,7 +118,7 @@ def test_progress_coverage_cell_math(admin_client, db):
     from mathion.models_auth import User, UserItemState
 
     course = admin_client.post("/api/courses", json={"slug": "cov", "name": "Cov", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = Block(version_id=version["id"], title="B", slug="b", order=1)
     db.add(block); db.flush()
     seq = Sequence(block_id=block.id, title="S", slug="s", order=1)
@@ -160,7 +160,7 @@ def test_progress_quiz_cell_math(admin_client, db):
     from mathion.models_auth import User, UserItemState
 
     course = admin_client.post("/api/courses", json={"slug": "qz", "name": "Qz", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = Block(version_id=version["id"], title="B", slug="b", order=1)
     db.add(block); db.flush()
     seq = Sequence(block_id=block.id, title="S", slug="s", order=1)

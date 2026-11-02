@@ -8,7 +8,7 @@ export interface AuthoringOption {
 }
 
 // Mirrors the flat QuestionResponse — options are NOT embedded (§3.4). Each
-// QuestionAccordion fetches/owns its own options (Plan B), not via this type.
+// quiz card's ChoiceAnswers fetches its own options (Slice 5d), not via this type.
 export interface AuthoringQuestion {
   id: number; item_id: number; text_md: string; text_html: string;
   type: QuestionType; order: number;

@@ -65,4 +65,64 @@ describe('Button', () => {
     expect(btn.disabled).toBe(true);
     expect(btn.getAttribute('data-variant')).toBe('danger-off');
   });
+
+  // §2a full-width primary (Login "Sign in"). ONE render() per test — the helper
+  // reassigns the module-level host/component, so afterEach cleans up only the last.
+  it('full adds the full class', () => {
+    expect(render({ full: true }).classList.contains('full')).toBe(true);
+  });
+  it('omits the full class by default', () => {
+    expect(render({}).classList.contains('full')).toBe(false);
+  });
+
+  it('forwards data-action (6a P2)', () => {
+    const btn = render({ 'data-action': 'download-csv' });
+    expect(btn.getAttribute('data-action')).toBe('download-csv');
+  });
+  // Slice-6b R17 / P1: pass-throughs for the run modals.
+  it('forwards form, so a footer button can submit a form it sits outside of', () => {
+    expect(render({ type: 'submit', form: 'f1' }).getAttribute('form')).toBe('f1');
+  });
+  it('omits form by default', () => {
+    expect(render({}).hasAttribute('form')).toBe(false);
+  });
+  it('marks data-autofocus when asked, so ui/Modal focuses it on open', () => {
+    expect(render({ 'data-autofocus': true }).hasAttribute('data-autofocus')).toBe(true);
+  });
+  it('omits data-autofocus by default', () => {
+    expect(render({}).hasAttribute('data-autofocus')).toBe(false);
+  });
+  it('forwards aria-describedby', () => {
+    expect(render({ 'aria-describedby': 'sum' }).getAttribute('aria-describedby')).toBe('sum');
+  });
+
+  it('aria-disabled: not natively disabled, marked blocked, onclick still fires (R44)', () => {
+    const onclick = vi.fn();
+    const btn = render({ 'aria-disabled': true, title: 'Wait for the current change to save', onclick });
+    expect(btn.disabled).toBe(false);
+    expect(btn.getAttribute('aria-disabled')).toBe('true');
+    expect(btn.classList.contains('blocked')).toBe(true);
+    btn.click();
+    expect(onclick).toHaveBeenCalledTimes(1);
+  });
+  it('loading sets aria-busy and keeps the variant look (P23)', () => {
+    const btn = render({ loading: true, 'aria-disabled': true });
+    expect(btn.getAttribute('aria-busy')).toBe('true');
+    expect(btn.getAttribute('aria-disabled')).toBe('true');
+    expect(btn.classList.contains('blocked')).toBe(false);
+    expect(btn.querySelector('.spinner')).not.toBeNull();
+  });
+  it('omits aria-disabled and aria-busy by default', () => {
+    const btn = render({});
+    expect(btn.hasAttribute('aria-disabled')).toBe(false);
+    expect(btn.hasAttribute('aria-busy')).toBe(false);
+  });
+
+  it('forwards data-test (6c P48)', () => {
+    expect(render({ 'data-test': 'edit-evaluation' }).getAttribute('data-test')).toBe('edit-evaluation');
+  });
+
+  it('omits data-test by default', () => {
+    expect(render({}).hasAttribute('data-test')).toBe(false);
+  });
 });

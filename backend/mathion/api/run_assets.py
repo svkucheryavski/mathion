@@ -291,6 +291,7 @@ def serve_run_asset(
         media_type=asset.mime_type,
         filename=filename,
         content_disposition_type="inline",
+        headers={"X-Content-Type-Options": "nosniff"},  # Polish 3 C12
     )
 
 

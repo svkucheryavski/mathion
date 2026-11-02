@@ -1,11 +1,12 @@
 <!-- frontend/src/components/runs/SubmissionThreadEntry.svelte -->
-<!-- Read-only historical submission entry for the DashboardSidePanel thread.
-     Newest entry is rendered by the panel itself; this renders thread[1..]. -->
+<!-- One earlier submission in the side panel's "Earlier submissions" card (9b):
+     a disclosure row, and when open the read-only content indented under it.
+     The newest submission is the panel's own "Latest submission" card. -->
 <script lang="ts">
-  import { type ThreadSubmission, resultToStatus } from '../../lib/dashboards';
+  import { type ThreadSubmission, resultToStatus, STATUS_SHORT_LABEL } from '../../lib/dashboards';
   import StatusBadge from '../ui/StatusBadge.svelte';
-  import { formatLocalWithTz } from '../../lib/datetime';
-  import { formatFileSize } from '../../lib/format';
+  import { formatLocalShortDate } from '../../lib/datetime';
+  import { submissionChips, submissionContent, evaluationContent, evaluatedLine } from './SubmissionCards.svelte';
 
   let { submission, expanded, onToggle }: {
     submission: ThreadSubmission;
@@ -14,71 +15,82 @@
   } = $props();
 
   const evaluation = $derived(submission.evaluation);
-  const summaryDate = $derived(
-    submission.submitted_at ? formatLocalWithTz(submission.submitted_at) : '—',
-  );
+  const status = $derived(resultToStatus(evaluation?.result ?? null));
 </script>
 
-<div class="thread-entry" data-test="thread-entry" data-submission-id={submission.id}>
+<div class="te-entry" data-test="thread-entry" data-submission-id={submission.id}>
   <button
     type="button"
-    class="thread-entry-summary"
+    class="te-toggle"
     data-test="thread-entry-toggle"
     aria-expanded={expanded}
     onclick={onToggle}
   >
-    <span>Submission {submission.submission_number}</span>
-    <span aria-hidden="true">·</span>
-    <span>{summaryDate}</span>
-    <span aria-hidden="true">·</span>
-    <StatusBadge status={resultToStatus(evaluation?.result ?? null)} />
+    <svg class="te-chev" class:open={expanded} width="12" height="12" viewBox="0 0 16 16" fill="none"
+         stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="6.6,4.6 10,8 6.6,11.4" />
+    </svg>
+    <span class="te-name">Submission {submission.submission_number}</span>
+    <span class="te-date">{submission.submitted_at ? formatLocalShortDate(submission.submitted_at) : '—'}</span>
+    <span class="te-badge"><StatusBadge {status} label={STATUS_SHORT_LABEL[status]} /></span>
   </button>
 
   {#if expanded}
-    <section class="submission-block">
-      <h4>Submission</h4>
-      <p>Number: {submission.submission_number}</p>
-      <p>Submitted at: {submission.submitted_at ? formatLocalWithTz(submission.submitted_at) : '—'}</p>
-      <p>Submitted by: {submission.submitted_by?.full_name ?? submission.submitted_by?.user_id ?? '—'}</p>
-      <p>Late: {submission.is_late ? 'Yes' : 'No'}</p>
-      <p>Resubmission: {submission.is_resubmission ? 'Yes' : 'No'}</p>
-      <p>File size: {formatFileSize(submission.file_size)}</p>
-      <a class="download-link" href={`/api/submissions/${submission.id}/file`} download>Download submission</a>
-    </section>
-
-    {#if submission.is_resubmission}
-      <div role="status" class="banner-info">
-        Auto-accepted on resubmission. No manual evaluation needed.
-      </div>
-    {/if}
-
-    {#if evaluation}
-      <section class="evaluation-block">
-        <h4>Evaluation</h4>
-        <p>Evaluated at: {evaluation.evaluated_at ? formatLocalWithTz(evaluation.evaluated_at) : '—'}</p>
-        <p>Evaluated by: {evaluation.evaluated_by?.full_name ?? evaluation.evaluated_by?.user_id ?? '—'}</p>
-        <p>Result: {evaluation.result}</p>
-        <p>Score: {evaluation.score ?? '—'}</p>
-        <p>Feedback: {evaluation.feedback_text ?? '—'}</p>
-        {#if evaluation.has_feedback_file}
-          <a class="download-link" href={`/api/evaluations/${evaluation.id}/feedback-file`} download>Download feedback file</a>
-        {/if}
-      </section>
-    {:else}
-      <p data-test="awaiting-evaluation-placeholder">Awaiting evaluation</p>
-    {/if}
+    <div class="te-body">
+      {#if submission.is_resubmission || submission.is_late}
+        <div class="te-chips">{@render submissionChips(submission)}</div>
+      {/if}
+      {@render submissionContent(submission)}
+      {#if submission.is_resubmission}
+        <p class="te-info banner-info" role="status">Auto-accepted on resubmission. No manual evaluation needed.</p>
+      {/if}
+      {#if evaluation}
+        <h4 class="te-h">Evaluation</h4>
+        {@render evaluationContent(evaluation, evaluatedLine(evaluation))}
+      {:else}
+        <p class="te-muted" data-test="awaiting-evaluation-placeholder">Awaiting evaluation</p>
+      {/if}
+    </div>
   {/if}
 </div>
 
 <style>
-  .thread-entry-summary {
-    display: flex; align-items: center; gap: 0.5rem;
-    width: 100%; text-align: left; background: none; border: none;
-    padding: 0.5rem 0; cursor: pointer; font: inherit;
+  .te-entry { border-bottom: 1px solid var(--border-soft); }
+  .te-entry:last-child { border-bottom: 0; }
+  .te-toggle {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 9px 12px;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
   }
-  .banner-info {
-    padding: 0.75rem 1rem; border-radius: 4px;
-    background: #e0f2f8; color: #044d6c; border-left: 4px solid #0a7ea4;
-    margin-bottom: 1rem;
+  .te-chev { flex: 0 0 auto; color: var(--muted); }
+  .te-chev.open { transform: rotate(90deg); }
+  .te-name { font-size: 13px; color: var(--text); }
+  .te-date {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--muted);
   }
+  .te-badge { margin-left: auto; }
+  /* Indented under the row's name (12px padding + 12px chevron + 9px gap). */
+  .te-body { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px 33px; }
+  .te-chips { display: flex; gap: 6px; }
+  .te-info {
+    margin: 0;
+    padding: 8px 12px;
+    background: var(--surface-2);
+    border-left: 3px solid var(--primary);
+    border-radius: var(--radius);
+    font-size: 13px;
+    color: var(--text-2);
+  }
+  .te-h { margin: 4px 0 0; font-size: 12.5px; font-weight: 600; color: var(--text); }
+  .te-muted { margin: 0; font-size: 13px; color: var(--muted); }
 </style>

@@ -19,3 +19,12 @@ export function runStatus(
   if (now > endOfDayLocal(run.end_date)) return 'ended';
   return 'active';
 }
+
+// The chip and filter-pill labels (spec §Run status chip). The key `ended`
+// stays; only the visible word is "finished".
+export const RUN_STATUS_LABEL: Record<RunStatus, string> = {
+  active: 'active',
+  upcoming: 'upcoming',
+  ended: 'finished',
+  draft: 'draft',
+};

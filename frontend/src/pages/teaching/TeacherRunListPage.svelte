@@ -2,16 +2,39 @@
   import { onMount } from 'svelte';
   import { ApiError } from '../../lib/api';
   import { listTeachingRuns, type TeachingRunRow } from '../../lib/teaching';
-  import { runStatus } from '../../lib/runStatus';
-  import { navigate } from '../../lib/router.svelte';
-  import LoadingPlaceholder from '../../components/ui/LoadingPlaceholder.svelte';
+  import { runStatus, RUN_STATUS_LABEL } from '../../lib/runStatus';
+  import { formatShortDate } from '../../lib/datetime';
+  import { routeClick } from '../../lib/routeClick';
+  import { currentRoute, navigate } from '../../lib/router.svelte';
+  import Skeleton from '../../components/ui/Skeleton.svelte';
+  import EmptyState from '../../components/ui/EmptyState.svelte';
+  import ErrorState from '../../components/ui/ErrorState.svelte';
+  import FilterPills from '../../components/ui/FilterPills.svelte';
+  import RunStatusChip from '../../components/runs/RunStatusChip.svelte';
 
   type Status = 'active' | 'upcoming' | 'ended' | 'draft';
 
   let rows = $state<TeachingRunRow[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let pill = $state<Status | 'all'>('active');
+  // C18: the pill lives in the address (?status=, none for the default), so
+  // Back from a run restores it. A click sets it at once (a writable derived);
+  // the address follows, replaced, as the run page's ?tab= does.
+  const PILLS = ['active', 'upcoming', 'ended', 'draft', 'all'] as const;
+  type Pill = (typeof PILLS)[number];
+  function statusFrom(search: string): Pill {
+    const v = new URLSearchParams(search).get('status');
+    return (PILLS as readonly string[]).includes(v ?? '') ? (v as Pill) : 'active';
+  }
+  let pill = $derived<Pill>(statusFrom(currentRoute.search));
+  function setPill(k: Pill) {
+    pill = k;
+    const p = new URLSearchParams(currentRoute.search);
+    if (k === 'active') p.delete('status');
+    else p.set('status', k);
+    const q = p.toString();
+    void navigate(currentRoute.path + (q ? `?${q}` : '') + currentRoute.hash, { replace: true });
+  }
 
   async function load() {
     loading = true; error = null;
@@ -74,91 +97,78 @@
     return byStatus[pill];
   });
 
-  const displayLabel = (s: string) => s[0].toUpperCase() + s.slice(1);
-  const runUrl = (slug: string, id: number) => `/courses/${slug}/runs/${id}`;
-  function onCellClick(e: MouseEvent, slug: string, id: number) {
-    e.preventDefault();
-    navigate(runUrl(slug, id));
-  }
+  const pillLabel = (p: Status | 'all') => (p === 'all' ? 'all' : RUN_STATUS_LABEL[p]);
+  const cap = (s: string) => s[0]!.toUpperCase() + s.slice(1);
+  const pillOptions = $derived(PILLS.map((p) => ({ key: p, label: cap(pillLabel(p)), count: counts[p] })));
+  const runUrl = (slug: string, id: number) => `/teaching/${slug}/runs/${id}`;
+  const courseUrl = (slug: string) => `/teaching/${slug}`;
 </script>
 
-<h1>Teaching</h1>
+<div class="teach-page">
+  <h1>Teaching</h1>
 
-{#if loading}
-  <LoadingPlaceholder label="Loading runs…" />
-{:else if error}
-  <div class="error-banner" role="alert">
-    <p>Could not load runs: {error}</p>
-    <button type="button" onclick={load}>Try again</button>
-  </div>
-{:else if rows.length === 0}
-  <p class="empty">You're not assigned to any runs yet. When a course admin
-    adds you as a teacher, the run will appear here.</p>
-{:else}
-  <div class="pills">
-    {#each (['active','upcoming','ended','draft','all'] as const) as p}
-      <button type="button"
-              aria-pressed={pill === p}
-              onclick={() => pill = p}>
-        {displayLabel(p)} ({counts[p]})
-      </button>
-    {/each}
-  </div>
-
-  {#if visible.length === 0}
-    <p class="empty">No {displayLabel(pill)} runs. You have
-      {counts.active} active, {counts.upcoming} upcoming,
-      {counts.ended} ended, and {counts.draft} draft.</p>
+  {#if loading}
+    <Skeleton rows={3} label="Loading runs…" />
+  {:else if error}
+    <ErrorState title="Could not load runs." message={error} onretry={load} retryLabel="Try again" />
+  {:else if rows.length === 0}
+    <EmptyState title="No runs yet. Runs you teach or administer appear here." />
   {:else}
-    <table>
-      <thead>
-        <tr>
-          <th scope="col">Course</th>
-          <th scope="col">Run title</th>
-          <th scope="col">Status</th>
-          <th scope="col">Start–End</th>
-          <th scope="col">Students</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each visible as { row, status } (row.run.id)}
-          {@const href = runUrl(row.course_slug, row.run.id)}
-          <tr>
-            <td><a {href} onclick={(e) => onCellClick(e, row.course_slug, row.run.id)}>{row.course_name}</a></td>
-            <td><a {href} onclick={(e) => onCellClick(e, row.course_slug, row.run.id)}>{row.run.title}</a></td>
-            <td><a {href} onclick={(e) => onCellClick(e, row.course_slug, row.run.id)}>
-              <span class="badge badge-{status}">{displayLabel(status)}</span>
-            </a></td>
-            <td><a {href} onclick={(e) => onCellClick(e, row.course_slug, row.run.id)}>
-              {row.run.start_date} → {row.run.end_date}
-            </a></td>
-            <td><a {href} onclick={(e) => onCellClick(e, row.course_slug, row.run.id)}>{row.student_count}</a></td>
-          </tr>
-        {/each}
-      </tbody>
-    </table>
+    <FilterPills label="Filter by status" options={pillOptions} value={pill} onchange={(k) => setPill(k as Pill)} />
+
+    {#if visible.length === 0}
+      <p class="empty">No {pillLabel(pill)} runs.</p>
+    {:else}
+      <div class="table-scroll">
+        <table class="teach-table">
+          <thead>
+            <tr>
+              <th scope="col">Title</th>
+              <th scope="col">Course</th>
+              <th scope="col">Status</th>
+              <th scope="col">Students</th>
+              <th scope="col">Start</th>
+              <th scope="col">End</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each visible as { row, status } (row.run.id)}
+              <tr>
+                <td><a href={runUrl(row.course_slug, row.run.id)} onclick={(e) => routeClick(e, runUrl(row.course_slug, row.run.id))}>{row.run.title}</a></td>
+                <td><a class="course-link" href={courseUrl(row.course_slug)} onclick={(e) => routeClick(e, courseUrl(row.course_slug))}>{row.course_name}</a></td>
+                <td><RunStatusChip {status} /></td>
+                <td class="num">{row.student_count}</td>
+                <td class="num">{formatShortDate(row.run.start_date)}</td>
+                <td class="num">{formatShortDate(row.run.end_date)}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   {/if}
-{/if}
+</div>
 
 <style>
-  .pills { display: flex; gap: var(--space-2); margin-bottom: var(--space-3); }
-  .pills button[aria-pressed="true"] {
-    background: var(--accent-soft, var(--bg));
-    border-color: var(--accent, var(--primary));
+  .teach-page { max-width: var(--page-max); margin: 0 auto; padding: var(--space-3) var(--space-3) var(--space-4); }
+  h1 { margin: 0 0 14px; font-size: 22px; font-weight: 600; color: var(--text); }
+  .empty { margin: 14px 0 0; color: var(--muted); font-size: 13px; }
+  /* Polish 3 (table corners): the outer border and radius sit on a scroll wrapper,
+     as on Progress and Submissions. It clips the grey header corners, which a
+     table's own radius does not, and scrolls a table wider than its container. */
+  .table-scroll { overflow-x: auto; margin-top: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  .teach-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+  .teach-table th {
+    text-align: left;
+    padding: 8px 12px;
+    background: var(--surface-2);
+    color: var(--text-3);
+    font-size: 12px;
+    font-weight: 600;
   }
-  .error-banner {
-    padding: var(--space-3);
-    background: var(--danger-soft, #fee);
-    border: 1px solid var(--danger);
-    border-radius: var(--radius);
-  }
-  .empty { color: var(--muted); padding: var(--space-3); }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: var(--space-2); border-bottom: 1px solid var(--border); }
-  td a { color: inherit; text-decoration: none; display: block; }
-  .badge { padding: 2px 8px; border-radius: 999px; font-size: 0.85em; }
-  .badge-active   { background: #d1fae5; color: #065f46; }
-  .badge-upcoming { background: #e0e7ff; color: #3730a3; }
-  .badge-ended    { background: #e5e7eb; color: #374151; }
-  .badge-draft    { background: #fef3c7; color: #92400e; }
+  .teach-table td { padding: 8px 12px; border-top: 1px solid var(--border-soft); font-size: 13px; color: var(--text-2); }
+  .teach-table td a { color: var(--primary); text-decoration: none; }
+  .teach-table td a.course-link { color: var(--text-2); font-weight: 400; }
+  .teach-table td a:hover { text-decoration: underline; }
+  .num { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
 </style>

@@ -3,7 +3,6 @@ import {
   fetchListSwallow403,
   fetchDetail,
   submit,
-  rewriteExternalLinks,
 } from '../lib/studentMiniProjects';
 import { ApiError } from '../lib/api';
 import * as events from '../lib/events';
@@ -32,9 +31,9 @@ function makeListItem(over: Partial<StudentMiniProjectListItem> = {}): StudentMi
     block_slug: 'intro',
     block_order: 0,
     block_title: 'Intro',
-    hard_deadline: null,
-    soft_deadline: null,
-    resubmission_deadline: null,
+    deadline: null,
+    deadline_kind: null,
+    deadline_open: true,
     latest_status: 'not_submitted',
     ...over,
   };
@@ -48,9 +47,9 @@ function makeDetail(over: Partial<StudentMiniProjectDetail> = {}): StudentMiniPr
     block_slug: 'intro',
     block_title: 'Intro',
     assignment_html: '<p>do it</p>',
-    soft_deadline: null,
-    hard_deadline: null,
-    resubmission_deadline: null,
+    deadline: null,
+    deadline_kind: null,
+    deadline_open: true,
     group: null,
     submission_history: [],
     latest_status: 'not_submitted',
@@ -227,61 +226,5 @@ describe('submit', () => {
     fetchMock.mockResolvedValue(nonJsonResp(503, 'Service Unavailable'));
     await expect(submit(42, pdf)).rejects.toBeInstanceOf(ApiError);
     await expect(submit(42, pdf)).rejects.toMatchObject({ status: 503 });
-  });
-});
-
-describe('rewriteExternalLinks', () => {
-  it('adds target=_blank rel=noopener noreferrer to https:// links', () => {
-    const container = document.createElement('div');
-    container.innerHTML = '<a href="https://example.com">x</a>';
-    rewriteExternalLinks(container);
-    const a = container.querySelector('a')!;
-    expect(a.getAttribute('target')).toBe('_blank');
-    expect(a.getAttribute('rel')).toBe('noopener noreferrer');
-  });
-
-  it('adds target/rel to http:// links', () => {
-    const container = document.createElement('div');
-    container.innerHTML = '<a href="http://example.com">x</a>';
-    rewriteExternalLinks(container);
-    const a = container.querySelector('a')!;
-    expect(a.getAttribute('target')).toBe('_blank');
-    expect(a.getAttribute('rel')).toBe('noopener noreferrer');
-  });
-
-  it('rewrites protocol-relative // links', () => {
-    const container = document.createElement('div');
-    container.innerHTML = '<a href="//cdn.example.com/x">x</a>';
-    rewriteExternalLinks(container);
-    const a = container.querySelector('a')!;
-    expect(a.getAttribute('target')).toBe('_blank');
-    expect(a.getAttribute('rel')).toBe('noopener noreferrer');
-  });
-
-  it('leaves /api/runs/... same-origin asset links unchanged', () => {
-    const container = document.createElement('div');
-    container.innerHTML = '<a href="/api/runs/1/assets/x.png">asset</a>';
-    rewriteExternalLinks(container);
-    const a = container.querySelector('a')!;
-    expect(a.hasAttribute('target')).toBe(false);
-    expect(a.hasAttribute('rel')).toBe(false);
-  });
-
-  it('leaves mailto: links unchanged', () => {
-    const container = document.createElement('div');
-    container.innerHTML = '<a href="mailto:t@x.com">mail</a>';
-    rewriteExternalLinks(container);
-    const a = container.querySelector('a')!;
-    expect(a.hasAttribute('target')).toBe(false);
-    expect(a.hasAttribute('rel')).toBe(false);
-  });
-
-  it('leaves tel: links unchanged', () => {
-    const container = document.createElement('div');
-    container.innerHTML = '<a href="tel:+15551234">phone</a>';
-    rewriteExternalLinks(container);
-    const a = container.querySelector('a')!;
-    expect(a.hasAttribute('target')).toBe(false);
-    expect(a.hasAttribute('rel')).toBe(false);
   });
 });

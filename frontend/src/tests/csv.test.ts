@@ -89,6 +89,37 @@ describe('parseCsv — normalization', () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.rows[0].parsed.email).toBe('a@x.com');
   });
+  // A sheet row whose first cell is empty starts with a tab; the cells keep
+  // their columns (10f row 4: no name, "—").
+  it('ignores a leading column that is empty on every row', () => {
+    const r = parseCsv('\tAnna\ta@x.com\tG1\n\tBen\tb@x.com\tG2', [], []);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.rows.map((x) => x.valid)).toEqual([true, true]);
+      expect(r.rows[0].parsed).toEqual({ name: 'Anna', email: 'a@x.com', group: 'G1' });
+    }
+  });
+
+  it('a comma paste whose first line starts with a tab stays comma-separated', () => {
+    const r = parseCsv('\tAnna,a@x.com\nBen,b@x.com', [], []);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.rows[0].parsed).toEqual({ name: 'Anna', email: 'a@x.com', group: null });
+  });
+
+  it('a trailing tab adds no cell', () => {
+    const r = parseCsv('Anna\ta@x.com\tG1\t', [], []);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.rows[0].parsed).toEqual({ name: 'Anna', email: 'a@x.com', group: 'G1' });
+  });
+
+  it('keeps an empty first cell of a tab-separated row', () => {
+    const r = parseCsv('Anna\ta@x.com\tG1\n\tb@x.com\tG2', [], []);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.rows[1].valid).toBe(true);
+      expect(r.rows[1].parsed).toEqual({ name: null, email: 'b@x.com', group: 'G2' });
+    }
+  });
 });
 
 describe('parseCsv — validation, duplicates, already-enrolled, willCreateGroups', () => {

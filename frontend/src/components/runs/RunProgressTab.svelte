@@ -1,18 +1,26 @@
 <script lang="ts">
-  import { getProgressDashboard,
+  import { getProgressDashboard, heatToken,
            type DashboardProgressResponse } from '../../lib/dashboards';
   import { toCSV, downloadCSV, sanitizeTitle } from '../../lib/csvWrite';
-  import LoadingPlaceholder from '../ui/LoadingPlaceholder.svelte';
+  import { blockPositions } from '../../lib/blockNumbers';
+  import type { BlockResponse } from '../../lib/types';
+  import Skeleton from '../ui/Skeleton.svelte';
+  import ErrorState from '../ui/ErrorState.svelte';
+  import IconButton from '../ui/IconButton.svelte';
+  import Button from '../ui/Button.svelte';
+  import SortMark from '../ui/SortMark.svelte';
   import DashboardSidePanel from './DashboardSidePanel.svelte';
 
   let {
     runId,
     isAdmin = false,
     isTeacher = false,
+    blocks = [],
   }: {
     runId: number;
     isAdmin?: boolean;
     isTeacher?: boolean;
+    blocks?: BlockResponse[];
   } = $props();
 
   let data = $state<DashboardProgressResponse | null>(null);
@@ -45,6 +53,7 @@
     nameQuery = '';
     panelOpen = false;
     panelTarget = null;
+    data = null;          // another run's rows never stand in while this one loads
     loading = true;
     error = null;
     getProgressDashboard(runId, { signal: ctl.signal })
@@ -185,19 +194,99 @@
     return Array.from(blocks.values());
   });
 
+  // R13: B{n} is the block's position in the pinned version's `blocks`; S{n}
+  // the sequence's position within its block in this payload.
+  const blockPos = $derived(blockPositions(blocks));
+  const seqPos = $derived.by(() => {
+    const m = new Map<number, number>();
+    for (const bg of blockGroupedSequences) bg.sequences.forEach((s, i) => m.set(s.sequence_id, i + 1));
+    return m;
+  });
+  function blockLabel(blockId: number, title: string): string {
+    const n = blockPos.get(blockId);
+    return n === undefined ? title : `B${n} · ${title}`;
+  }
+
+  // D79 (user): a compact table. The headers read "B1" / "S1"; the full names
+  // stay in the accessible text (visually hidden) and show in ONE tooltip on
+  // hover and on keyboard focus. It is position: fixed and rendered outside
+  // .table-scroll, whose overflow would clip it (a one-row table above all).
+  // aria-hidden: a screen reader already hears the full names.
+  // Placed on the header's VISIBLE part (right of the pinned Student + Group
+  // columns, inside the scroll box): it starts at that part's left edge, or ends
+  // at its right edge when the part's centre is on the window's right half, and
+  // keeps 8px from the window edge. Within 48px of the window top (the tip is
+  // one or two 17px lines plus padding) it flips below the header.
+  // A scroll or resize hides a hover tip. A focus tip follows its header
+  // instead: focusing an out-of-view header scrolls it in, and that scroll event
+  // comes AFTER the focus (round 2, both lanes). While no part of the header
+  // shows there is no tip, but its source stays, so the scroll that brings the
+  // header in shows it. A mouse-out returns the tip to the keyboard-focused header; Escape
+  // dismisses it until a header is focused or hovered again (round 3).
+  let tip = $state<{ text: string; top: number; below: boolean; left?: number; right?: number } | null>(null);
+  type TipSrc = { el: HTMLElement; text: string };
+  let tipSrc: TipSrc | null = null;
+  let focusSrc: TipSrc | null = null;
+  function showTip(e: Event, text: string) {
+    tipSrc = { el: e.currentTarget as HTMLElement, text };
+    placeTip(tipSrc.el, text);
+  }
+  // Only keyboard focus keeps a tip: Chrome and Firefox also focus a button on a
+  // click (a sort), without :focus-visible, and that tip stays a hover tip.
+  function focusTip(e: Event, text: string) {
+    showTip(e, text);
+    focusSrc = tipSrc?.el.matches(':focus-visible') ? tipSrc : null;
+  }
+  function blurTip(e: Event) {
+    if (focusSrc?.el === e.currentTarget) focusSrc = null;
+    if (tipSrc?.el === e.currentTarget) hideTip();
+  }
+  function placeTip(el: HTMLElement, text: string) {
+    const r = el.getBoundingClientRect();
+    const box = el.closest('.table-scroll')?.getBoundingClientRect();
+    const pin = el.closest('table')?.querySelector('thead .sticky-group')?.getBoundingClientRect();
+    const visL = Math.max(r.left, pin?.right ?? -Infinity, box?.left ?? -Infinity);
+    const visR = Math.min(r.right, box?.right ?? Infinity);
+    if (visR < visL || r.bottom < 0 || r.top > window.innerHeight) { tip = null; return; }
+    const below = r.top < 48;
+    const top = below ? r.bottom + 6 : r.top - 6;
+    const w = window.innerWidth;
+    tip = (visL + visR) / 2 > w / 2
+      ? { text, top, below, right: Math.max(8, w - visR) }
+      : { text, top, below, left: Math.max(8, visL) };
+  }
+  function hideTip() { tip = null; tipSrc = null; }
+  // Mouse-out, scroll, resize: the focused header's tip if it still has focus, else none.
+  function restoreTip() {
+    if (focusSrc && document.activeElement === focusSrc.el) {
+      tipSrc = focusSrc;
+      placeTip(focusSrc.el, focusSrc.text);
+    } else hideTip();
+  }
+  function tipKey(e: KeyboardEvent) {
+    if (e.key === 'Escape') { hideTip(); focusSrc = null; }
+  }
+  function seqTipText(seq: DashboardProgressResponse['sequences'][number]): string {
+    return `${blockLabel(seq.block_id, seq.block_title)} — S${seqPos.get(seq.sequence_id)} · ${seq.sequence_title}`;
+  }
+  const legendName = $derived(`${mode === 'coverage' ? 'Coverage' : 'Score'} scale, 0 to 100 percent`);
+
   // --- Cell helpers ---
 
+  // Five steps (heatToken); no data gives no style, so the cell has no fill.
   function cellInlineStyle(
     s: DashboardProgressResponse['students'][number],
     i: number,
     m: Mode,
-  ): string {
+  ): string | undefined {
     const cell = m === 'coverage' ? s.coverage[i] : s.quizzes[i];
-    if (!cell) return '';
-    const ratio = computeRatio(cell, m);
-    if (ratio === null) return '';
-    const hue = 120 * ratio;
-    return `--cell-bg: hsl(${hue} 70% 80%);`;
+    if (!cell) return undefined;
+    const token = heatToken(computeRatio(cell, m));
+    return token === null ? undefined : `--cell-bg: var(${token})`;
+  }
+
+  function sortAria(key: SortKey): 'ascending' | 'descending' | 'none' {
+    return sortKey === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
   }
 
   function cellText(
@@ -275,32 +364,31 @@
   }
 </script>
 
+<!-- D79: Escape anywhere dismisses the tip (a hover tip too); a page scroll or
+     resize would leave the fixed tip behind, so they hide a hover tip and
+     re-place a focus tip (restoreTip). -->
+<svelte:window onkeydown={tipKey} onscroll={restoreTip} onresize={restoreTip} />
+
 <div class="tab-container">
-  {#if loading}<LoadingPlaceholder />{/if}
+  <!-- D86/C17: the Skeleton is the first load only; a Refresh over data keeps
+       the table and says so beside the control. -->
+  {#if loading && !data}<Skeleton rows={6} />{/if}
   {#if error}
-    <div class="banner banner-error" role="alert">
-      {error} <button onclick={refresh}>Retry</button>
-    </div>
+    <ErrorState title="Could not load progress." message={error} onretry={refresh} />
   {/if}
 
   {#if data}
     {#if data.run.version_is_disabled}
-      <div class="banner banner-warning" role="status">
-        This run's course version is disabled. Coverage data reflects last-known state.
-      </div>
+      <p class="pg-note">Coverage data reflects last-known state.</p>
     {/if}
 
-    <div class="controls">
-      <fieldset class="mode-switch" aria-label="Heatmap mode">
-        <button type="button"
-                aria-pressed={mode === 'coverage'}
-                onclick={() => mode = 'coverage'}>Coverage</button>
-        <button type="button"
-                aria-pressed={mode === 'quiz'}
-                onclick={() => mode = 'quiz'}>Quiz</button>
-      </fieldset>
+    <div class="pg-toolbar">
+      <div class="seg" role="group" aria-label="Heatmap mode">
+        <button type="button" class="seg-btn" aria-pressed={mode === 'coverage'} onclick={() => (mode = 'coverage')}>Coverage</button>
+        <button type="button" class="seg-btn" aria-pressed={mode === 'quiz'} onclick={() => (mode = 'quiz')}>Quiz</button>
+      </div>
 
-      <select bind:value={groupFilter} aria-label="Filter by group">
+      <select class="pg-control" bind:value={groupFilter} aria-label="Filter by group">
         <option value="all">All groups</option>
         {#if hasUngroupedStudents}
           <option value="ungrouped">(Ungrouped)</option>
@@ -310,39 +398,53 @@
         {/each}
       </select>
 
-      <input type="search" bind:value={nameQuery} placeholder="Search student" aria-label="Search student" />
+      <input class="pg-control pg-search" type="search" bind:value={nameQuery} placeholder="Search student" aria-label="Search student" />
 
-      <button class="refresh-button" onclick={refresh} aria-label="Refresh">Refresh</button>
-      <button class="csv-button" onclick={handleDownloadCSV} data-action="download-csv">Download CSV</button>
+      <div class="pg-right">
+        <span class="heat-legend" role="img" aria-label={legendName}>
+          <span class="hl-end">0%</span>
+          <span class="hl-bar">
+            <span class="hl-sw s0"></span><span class="hl-sw s1"></span><span class="hl-sw s2"></span><span class="hl-sw s3"></span><span class="hl-sw s4"></span>
+          </span>
+          <span class="hl-end">100%</span>
+        </span>
+        <!-- Mounted while the table is: a live region inserted with its text is often not announced. -->
+        <span class="refreshing" role="status">{loading ? 'Refreshing…' : ''}</span>
+        <IconButton glyph="refresh" title="Refresh" onclick={refresh} />
+        <Button variant="secondary" data-action="download-csv" onclick={handleDownloadCSV}>Download CSV</Button>
+      </div>
     </div>
 
     {#if data.sequences.length === 0}
       <div class="empty">No sequences in this run.</div>
     {:else}
-    <div class="table-scroll">
+    <div class="table-scroll" onscroll={restoreTip}>
       <table class="progress-grid">
         <thead>
           <tr class="block-row">
-            <th class="sticky-name" scope="col" rowspan="2"
-                aria-sort={sortKey === 'name' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-              <button onclick={() => toggleSort('name')}>Student {#if sortKey === 'name'}{sortDir === 'asc' ? '▲' : '▼'}{/if}</button>
+            <th class="sticky-name" scope="col" rowspan="2" aria-sort={sortAria('name')}>
+              <button type="button" onclick={() => toggleSort('name')}>Student{#if sortKey === 'name'}<SortMark dir={sortDir} />{/if}</button>
             </th>
-            <th class="sticky-group" scope="col" rowspan="2"
-                aria-sort={sortKey === 'group' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-              <button onclick={() => toggleSort('group')}>Group {#if sortKey === 'group'}{sortDir === 'asc' ? '▲' : '▼'}{/if}</button>
+            <th class="sticky-group" scope="col" rowspan="2" aria-sort={sortAria('group')}>
+              <button type="button" onclick={() => toggleSort('group')}>Group{#if sortKey === 'group'}<SortMark dir={sortDir} />{/if}</button>
             </th>
             {#each blockGroupedSequences as bg (bg.block_id)}
-              <th class="block-header" scope="colgroup" colspan={bg.sequences.length}>{bg.block_title}</th>
+              {@const bn = blockPos.get(bg.block_id)}
+              {#if bn === undefined}
+                <th class="block-header" scope="colgroup" colspan={bg.sequences.length}>{bg.block_title}</th>
+              {:else}
+                <th class="block-header" scope="colgroup" colspan={bg.sequences.length}
+                    onmouseenter={(e) => showTip(e, blockLabel(bg.block_id, bg.block_title))} onmouseleave={restoreTip}>B{bn}<span class="sr-only">{` · ${bg.block_title}`}</span></th>
+              {/if}
             {/each}
           </tr>
           <tr class="seq-row">
             {#each data.sequences as seq (seq.sequence_id)}
-              <th class="seq-header"
-                  scope="col"
-                  aria-sort={sortKey === `seq:${seq.sequence_id}` ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                <button onclick={() => toggleSort(`seq:${seq.sequence_id}`)}>
-                  {seq.sequence_title}
-                  {#if sortKey === `seq:${seq.sequence_id}`}{sortDir === 'asc' ? '▲' : '▼'}{/if}
+              <th class="seq-header" scope="col" aria-sort={sortAria(`seq:${seq.sequence_id}`)}>
+                <button type="button" onclick={() => toggleSort(`seq:${seq.sequence_id}`)}
+                        onmouseenter={(e) => showTip(e, seqTipText(seq))} onmouseleave={restoreTip}
+                        onfocus={(e) => focusTip(e, seqTipText(seq))} onblur={blurTip}>
+                  <span class="seq-n">S{seqPos.get(seq.sequence_id)}</span><span class="sr-only">{` ${seq.sequence_title}`}</span>{#if sortKey === `seq:${seq.sequence_id}`}<SortMark dir={sortDir} />{/if}
                 </button>
               </th>
             {/each}
@@ -350,14 +452,19 @@
         </thead>
         <tbody>
           {#each visibleStudents as s (s.user_id)}
-            <tr class:disabled-row={s.user_is_disabled || s.group_is_disabled}>
+            {@const off = s.user_is_disabled || s.group_is_disabled}
+            <tr>
               <th scope="row" class="sticky-name">
-                {s.full_name ?? s.email}
-                {#if s.user_is_disabled}<span class="badge-muted">disabled</span>{/if}
+                <div class="name-box">
+                  <span class="pg-name" class:off>{s.full_name ?? s.email}</span>
+                  {#if s.user_is_disabled}<span class="chip-disabled">disabled</span>{/if}
+                </div>
               </th>
               <td class="sticky-group">
-                {s.group_name ?? '—'}
-                {#if s.group_is_disabled}<span class="badge-muted">disabled</span>{/if}
+                <div class="group-box">
+                  {s.group_name ?? '—'}
+                  {#if s.group_is_disabled}<span class="chip-disabled">disabled</span>{/if}
+                </div>
               </td>
               {#each data.sequences as seq, i (seq.sequence_id)}
                 <td class="cell" style={cellInlineStyle(s, i, mode)}>
@@ -381,6 +488,10 @@
       </table>
     </div>
     {/if}
+    {#if tip}
+      <!-- The ONE inline style here besides the cells': the tip's place is data. -->
+      <div class="pg-tip" class:below={tip.below} aria-hidden="true" style="top:{tip.top}px;{tip.left !== undefined ? `left:${tip.left}px` : `right:${tip.right}px`}">{tip.text}</div>
+    {/if}
 
     {#if panelOpen && panelTarget}
       <DashboardSidePanel
@@ -395,42 +506,146 @@
 </div>
 
 <style>
-  .progress-grid { border-collapse: separate; border-spacing: 0; }
+  .pg-note { margin: 0 0 10px; font-size: 12.5px; color: var(--muted); }
+  .pg-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .pg-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+  .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; }
+  .seg-btn {
+    height: var(--control-h-sm);
+    padding: 0 12px;
+    background: var(--surface);
+    color: var(--text-2);
+    border: 0;
+    font: inherit;
+    font-size: var(--control-font);
+    cursor: pointer;
+  }
+  .seg-btn + .seg-btn { border-left: 1px solid var(--border-strong); }
+  .seg-btn[aria-pressed='true'] { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
+  .seg-btn:focus-visible { outline-offset: -2px; }
+
+  .pg-control {
+    box-sizing: border-box;
+    height: var(--control-h-sm);
+    padding: 0 var(--control-pad-x);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--control-font);
+  }
+  .pg-search { width: 220px; }
+
+  .heat-legend { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .hl-bar { display: inline-flex; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+  .hl-sw { width: 18px; height: 12px; }
+  .hl-sw.s0 { background: var(--surface-muted); }
+  .hl-sw.s1 { background: var(--heat-1); }
+  .hl-sw.s2 { background: var(--heat-2); }
+  .hl-sw.s3 { background: var(--heat-3); }
+  .hl-sw.s4 { background: var(--heat-4); }
+
+  /* D73: keyboard focus scrolls a cell into view beside the pinned Student + Group
+     columns (14rem + 6rem), not under them. */
+  .table-scroll { overflow-x: auto; scroll-padding-left: 20rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  .progress-grid { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
+  .progress-grid th, .progress-grid td { padding: 0; border-bottom: 1px solid var(--border-soft); text-align: left; }
+  .progress-grid thead th { background: var(--surface-2); color: var(--text-3); font-size: 12px; font-weight: 600; }
+  .progress-grid th button { padding: 8px 12px; }
   .sticky-name {
     position: sticky;
     left: 0;
     width: 14rem;
-    background: var(--bg, #fff);
+    background: var(--surface);
+    border-right: 1px solid var(--border-soft);
     z-index: 2;
   }
   .sticky-group {
     position: sticky;
     left: 14rem;
-    width: 10rem;
-    background: var(--bg, #fff);
+    width: 6rem;
+    background: var(--surface);
+    border-right: 1px solid var(--border-soft);
     z-index: 2;
   }
-  .block-header, .seq-header {
-    position: sticky;
-    top: 0;
-    background: var(--bg, #fff);
-    z-index: 1;
-  }
+  tbody .sticky-name, tbody .sticky-group { padding: 6px 12px; font-size: 13px; font-weight: 400; color: var(--text); }
+  .block-header, .seq-header { position: sticky; top: 0; z-index: 1; }
   .block-row .sticky-name, .block-row .sticky-group { top: 0; z-index: 3; }
-
-  .disabled-row { opacity: 0.55; font-style: italic; }
-
-  .badge-muted {
-    display: inline-block;
-    margin-left: 0.4em;
-    padding: 0.05em 0.4em;
-    font-size: 0.75em;
-    font-style: normal;
+  /* Qualified by .progress-grid so these outrank `.progress-grid thead th`
+     and `.progress-grid th` (padding 0) above. */
+  .progress-grid .block-header {
+    padding: 6px 12px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
     font-weight: 500;
-    line-height: 1.3;
-    color: var(--muted, #6b7280);
-    background: var(--surface-muted, #f3f4f6);
-    border-radius: 0.25em;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  /* One line per header (2d): a wide run scrolls sideways inside .table-scroll
+     with Student and Group pinned, instead of squeezing every title. D79: the
+     headers are short ("S1"), so the cells set each column's width; every
+     sequence column keeps 4rem, so the columns line up and stay easy to click. */
+  .progress-grid .seq-header { font-weight: 500; white-space: nowrap; min-width: 4rem; }
+  .seq-n { font-family: var(--font-mono); }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+  /* D79: the header tooltip, above its header (translateY -100%), on top of the
+     sticky header cells. Its place comes from the header's on-screen box. */
+  .pg-tip {
+    position: fixed;
+    z-index: 10;
+    transform: translateY(-100%);
+    max-width: min(320px, calc(100vw - 16px));
+    overflow-wrap: anywhere;
+    padding: 4px 8px;
+    border-radius: var(--radius);
+    background: var(--text);
+    color: var(--surface);
+    font-size: 12px;
+    line-height: 1.4;
+    pointer-events: none;
+  }
+  .pg-tip.below { transform: none; }
+  /* Its fill is repainted in High Contrast; an edge keeps it apart from the header. */
+  @media (forced-colors: active) {
+    .pg-tip { border: 1px solid CanvasText; }
+  }
+
+  /* Holds the Student column at exactly 14rem (the sticky Group's left offset)
+     under the table's max-content width: a long name or email wraps here
+     instead of widening the column under the Group cell. 25px = the cell's
+     12px side paddings + its 1px right border. */
+  .name-box { width: calc(14rem - 25px); white-space: normal; overflow-wrap: anywhere; }
+  /* C4: the same for the Group column (6rem): a long group name wraps instead of
+     widening the column, so the 20rem scroll padding (D73) holds. */
+  .group-box { width: calc(6rem - 25px); overflow-wrap: anywhere; }
+  .refreshing { font-size: 12px; color: var(--muted); }
+  /* At rest the empty status takes no room: -8px cancels .pg-right's 8px gap. */
+  .refreshing:empty { margin-left: -8px; }
+  .pg-name.off { font-style: italic; color: var(--muted); }
+  .chip-disabled {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 6px;
+    border-radius: var(--radius-pill);
+    background: var(--state-disabled-bg);
+    color: var(--state-disabled-fg);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-style: normal;
     vertical-align: middle;
   }
 
@@ -439,15 +654,16 @@
     border: none;
     font: inherit;
     color: inherit;
-    padding: 0;
     cursor: pointer;
     text-align: inherit;
     width: 100%;
     height: 100%;
   }
-
-  .cell { background-color: var(--cell-bg, var(--surface-muted, #f3f4f6)); color: var(--text, #1f2937); }
-  .empty { color: var(--muted, #6b7280); padding: 1rem; text-align: center; }
-  .banner-error { background: var(--status-rejected-bg); color: var(--status-rejected-fg); padding: 0.5rem 1rem; border-radius: 4px; }
-  .banner-warning { background: var(--status-needs-revision-bg); color: var(--status-needs-revision-fg); padding: 0.5rem 1rem; border-radius: 4px; }
+  /* D61: the ring sits on the heat fill, where --primary is 2.38:1 on --heat-4; the cell text colour is 6:1 or more. */
+  .cell-btn { padding: 6px 12px; font-family: var(--font-mono); font-size: 11.5px; --ring: var(--heat-fg); }
+  /* Flush in `padding: 0` cells inside .table-scroll: inset, or the clip eats the ring. */
+  .cell-btn:focus-visible { outline-offset: -2px; }
+  .progress-grid th button:focus-visible { outline-offset: -2px; }
+  .cell { background: var(--cell-bg, none); color: var(--heat-fg); }
+  .empty { color: var(--muted); padding: 1rem; text-align: center; }
 </style>

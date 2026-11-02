@@ -8,6 +8,7 @@
     autocomplete = undefined as HTMLInputAttributes['autocomplete'],
     autofocus = false,
     name = '',
+    mono = false,
   } = $props();
 </script>
 
@@ -20,6 +21,7 @@
   {name}
   class="input"
   class:error={!!error}
+  class:mono={mono}
 />
 
 <style>
@@ -34,4 +36,6 @@
   }
   .input::placeholder { color: var(--placeholder); }
   .input.error { border-color: var(--danger); }
+  /* PIN/code display — IBM Plex Mono, reference #2a line 1997. */
+  .input.mono { font-family: var(--font-mono); font-size: 17px; letter-spacing: .34em; }
 </style>

@@ -398,6 +398,14 @@ def _unpublish_and_clear_roster(db, run_id):
     db.commit()
 
 
+def _unpublish(db, run_id):
+    """D28: make a run force-deletable (a published run is never deleted). Unlike
+    _unpublish_and_clear_roster it keeps the roster, which the force tests need."""
+    run_obj = db.get(Run, run_id)
+    run_obj.is_published = False
+    db.commit()
+
+
 def test_delete_run_nonforce_race_reproduces_fk_23503_rollback_intact(
     concurrency, monkeypatch, db, seed_run_with_published_mp
 ):
@@ -623,6 +631,8 @@ def test_delete_run_force_race_reproduces_fk_23503(
     tb = concurrency.spawn(submit_b)  # B: refetches mp (exists), parks at submission_pending
     assert b_parked.wait(timeout=10), "submit B never reached submission_pending"
 
+    _unpublish(db, run["id"])  # B already past its checks
+
     # A force-deletes the run to a full commit (mini-projects + groups gone).
     admin = db.execute(select(User).where(User.email == "admin@example.com")).scalar_one()
     delete_run(run["id"], force=True, db=db, user=admin)
@@ -694,6 +704,8 @@ def test_delete_run_force_lock_blocks_submit_then_404(
 
     tb = concurrency.spawn(submit_b)  # B: past up-front checks (published/enrolled), parks
     assert b_at_lock.wait(timeout=10), "submit B never reached the MINIPROJECT acquire"
+
+    _unpublish(db, run["id"])  # B already past its checks
 
     ta = concurrency.spawn(delete_a)  # A: acquires + holds MINIPROJECT
     assert a_holds.wait(timeout=10), "delete A never acquired MINIPROJECT"

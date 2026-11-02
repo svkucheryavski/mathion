@@ -2,6 +2,7 @@
 // Spec: docs/superpowers/specs/2026-05-31-teacher-dashboards-design.md §6.1, §6.2
 
 import { api } from './api';  // existing project-wide fetch helper
+import type { EvaluationResult } from './evaluations';
 
 // --- Status enum ---
 
@@ -18,6 +19,17 @@ export const STATUS_LABEL: Record<MpGroupStatus, string> = {
   needs_revision: 'Needs revision',
   accepted: 'Accepted',
   rejected: 'Rejected',
+};
+
+// Lowercase short labels for the Submissions grid cells, the side panel's
+// badge and its earlier-submission rows. STATUS_LABEL stays for the cells'
+// accessible names.
+export const STATUS_SHORT_LABEL: Record<MpGroupStatus, string> = {
+  not_submitted: 'not submitted',
+  awaiting_eval: 'awaiting eval',
+  needs_revision: 'needs revision',
+  accepted: 'accepted',
+  rejected: 'rejected',
 };
 
 // Teacher-action-priority sort order (asc puts most-attention-needed first).
@@ -41,6 +53,34 @@ export function resultToStatus(result: string | null): MpGroupStatus {
   if (result === 'accepted') return 'accepted';
   if (result === 'rejected') return 'rejected';
   return 'awaiting_eval';
+}
+
+
+// Each result in its own words, for the read-only Evaluation rows and the
+// Result radios (6c R37); the badge colour still comes from resultToStatus.
+export const RESULT_LABEL: Record<EvaluationResult, string> = {
+  accepted: 'Accepted',
+  minor_revision: 'Minor revision',
+  major_revision: 'Major revision',
+  rejected: 'Rejected',
+};
+
+// The thread's `result` is a plain string; an unknown one shows raw.
+export function resultLabel(result: string): string {
+  return Object.prototype.hasOwnProperty.call(RESULT_LABEL, result)
+    ? RESULT_LABEL[result as EvaluationResult]
+    : result;
+}
+
+// The Progress heatmap's five steps (spec §Heatmap): the token that fills a
+// cell, or null for a cell with no data (no fill).
+export function heatToken(ratio: number | null): string | null {
+  if (ratio === null) return null;
+  if (ratio <= 0) return '--surface-muted';
+  if (ratio <= 0.25) return '--heat-1';
+  if (ratio <= 0.5) return '--heat-2';
+  if (ratio <= 0.75) return '--heat-3';
+  return '--heat-4';
 }
 
 // ---- Progress dashboard ----
@@ -159,6 +199,23 @@ export interface SequenceItemStateResponse {
   sequence: { sequence_id: number; sequence_title: string; block_id: number; block_title: string };
   student: { user_id: number; full_name: string | null; email: string };
   items: SequenceItemState[];
+}
+
+// The drill-down's item types and their readable names (6c §Progress variant);
+// `static_page` reads "Page", its authoring name.
+export type DrillItemType = 'static_page' | 'video' | 'quiz' | 'interactive_app';
+
+export const ITEM_TYPE_NAME: Record<DrillItemType, string> = {
+  static_page: 'Page',
+  video: 'Video',
+  quiz: 'Quiz',
+  interactive_app: 'Interactive app',
+};
+
+// Narrows the wire's `item_type` before it reaches ItemMark; anything else is
+// null (an own key only, so "toString" is not a type).
+export function drillItemType(t: string): DrillItemType | null {
+  return Object.prototype.hasOwnProperty.call(ITEM_TYPE_NAME, t) ? (t as DrillItemType) : null;
 }
 
 // ---- Wire functions ----

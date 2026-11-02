@@ -90,4 +90,28 @@ describe('normalizeVideoUrl', () => {
         .toBe('https://example.com/v');
     });
   });
+
+  // Polish 3 C18 (slice5b T3c, slice5c T4): the backend's check is case-sensitive.
+  describe('scheme-less and upper-case input', () => {
+    it('youtu.be/x and www.youtube.com/watch?v=x and player.vimeo.com/video/1 gain https://', () => {
+      expect(normalizeVideoUrl('youtu.be/x')).toBe('https://www.youtube.com/embed/x');
+      expect(normalizeVideoUrl('www.youtube.com/watch?v=x')).toBe('https://www.youtube.com/embed/x');
+      expect(normalizeVideoUrl('player.vimeo.com/video/1')).toBe('https://player.vimeo.com/video/1');
+      expect(normalizeVideoUrl('vimeo.com/123')).toBe('https://player.vimeo.com/video/123');
+      expect(normalizeVideoUrl('www.youtube.com/embed/x?rel=0')).toBe('https://www.youtube.com/embed/x?rel=0');
+      expect(normalizeVideoUrl('youtube.com/playlist?list=PL1')).toBe('https://youtube.com/playlist?list=PL1');
+    });
+
+    it('HTTPS://example.com/v.mp4 returns https://example.com/v.mp4 and leaves the rest as typed', () => {
+      expect(normalizeVideoUrl('HTTPS://example.com/v.mp4')).toBe('https://example.com/v.mp4');
+      expect(normalizeVideoUrl('Http://Example.com/V.MP4?A=B')).toBe('http://Example.com/V.MP4?A=B');
+      expect(normalizeVideoUrl('HTTPS://player.vimeo.com/video/1')).toBe('https://player.vimeo.com/video/1');
+      expect(normalizeVideoUrl('HTTPS://www.youtube.com/embed/AbC')).toBe('https://www.youtube.com/embed/AbC');
+    });
+
+    it('an unknown scheme-less host is returned as typed', () => {
+      expect(normalizeVideoUrl('example.com/v.mp4')).toBe('example.com/v.mp4');
+      expect(normalizeVideoUrl('  Example.com/V  ')).toBe('Example.com/V');
+    });
+  });
 });

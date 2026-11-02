@@ -31,8 +31,9 @@ def _student_url(ctx) -> str:
 
 
 def _staff_url(ctx) -> str:
-    """Teacher/admin-facing URL — lands on the run detail page."""
-    return f"{ctx.base_url}/courses/{ctx.course_slug}/runs/{ctx.run.id}"
+    """Teacher/admin-facing URL — lands on the run detail page (Polish 3 C9:
+    the /teaching address; the old /courses/… route still redirects)."""
+    return f"{ctx.base_url}/teaching/{ctx.course_slug}/runs/{ctx.run.id}"
 
 
 def _evaluation_received(ctx):

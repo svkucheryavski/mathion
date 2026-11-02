@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runStatus } from '../lib/runStatus';
+import { runStatus, RUN_STATUS_LABEL } from '../lib/runStatus';
 
 describe('runStatus', () => {
   it('returns draft when !is_published regardless of dates', () => {
@@ -31,5 +31,13 @@ describe('runStatus', () => {
     const r = { is_published: true, start_date: '2026-06-10', end_date: '2026-06-20' };
     // 2026-06-21T00:00:00 local is just past end-of-day on 2026-06-20.
     expect(runStatus(r, new Date('2026-06-21T00:00:00'))).toBe('ended');
+  });
+});
+
+describe('RUN_STATUS_LABEL', () => {
+  it('labels each status in lowercase; the key "ended" reads "finished"', () => {
+    expect(RUN_STATUS_LABEL).toEqual({
+      active: 'active', upcoming: 'upcoming', ended: 'finished', draft: 'draft',
+    });
   });
 });

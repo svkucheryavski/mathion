@@ -1,0 +1,1438 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mount, unmount, flushSync } from 'svelte';
+import VersionEditPage from '../pages/editor/VersionEditPage.svelte';
+import { clearEditorVersion, loadAdminTree } from '../stores/currentEditorVersion.svelte';
+import { navigate, currentRoute, matchRoute, __resetGuardsForTests } from '../lib/router.svelte';
+import { routes } from '../routes';
+import { toasts, clearToasts } from '../stores/toasts.svelte';
+import type { AdminTree, AdminTreeBlock, AdminTreeItem, AdminTreeSequence, AdminTreeVersion } from '../lib/types';
+import type { DirtyRegistry } from '../lib/dirtyRegistry.svelte';
+
+// Capture the page's real registry so a test can register a dirty tracker
+// without depending on which body a block renders.
+const hoisted = vi.hoisted(() => ({ registry: null as DirtyRegistry | null }));
+vi.mock('../lib/dirtyRegistry.svelte', async (importOriginal) => {
+  const m = await importOriginal<typeof import('../lib/dirtyRegistry.svelte')>();
+  return { ...m, createDirtyRegistry: () => (hoisted.registry = m.createDirtyRegistry()) };
+});
+
+// Real router + real store; only fetch is stubbed (SequenceAccordion.interactive idiom).
+const fetchSpy = vi.fn();
+const originalFetch = globalThis.fetch;
+function jres(body: unknown, status = 200) {
+  return Promise.resolve({
+    ok: status < 400, status,
+    json: () => Promise.resolve(body),
+    headers: new Headers({ 'content-type': 'application/json' }),
+  } as unknown as Response);
+}
+async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
+// jsdom has no scrollIntoView; the page's focus $effect calls it on route expansion.
+Element.prototype.scrollIntoView = () => {};
+// …nor scrollTo; the page row's Cancel calls it (D38).
+window.scrollTo = (() => {}) as typeof window.scrollTo;
+
+function mkVersion(over: Partial<AdminTreeVersion> = {}): AdminTreeVersion {
+  return {
+    id: 1, course_id: 1, state: 'created', is_disabled: false, info_md: '', info_html: '',
+    max_quiz_attempts: 3, label: 'Autumn 2026 revision', created_at: '2026-01-01T00:00:00Z',
+    published_at: null, archived_at: null, content_updated_at: '2026-01-01T00:00:00Z', ...over,
+  };
+}
+function mkBlock(id: number, over: Partial<AdminTreeBlock> = {}): AdminTreeBlock {
+  return { id, version_id: 1, title: `Block ${id}`, slug: `b${id}`, order: id, info: '', info_html: '', sequences: [], ...over };
+}
+
+let tree: AdminTree;
+let target: HTMLDivElement;
+let component: ReturnType<typeof mount> | null = null;
+
+// The admin-tree GET serves `tree` as it stands at call time, so a test can
+// mutate `tree` before a refresh to model the server's new state.
+function serve(extra: (url: string, init?: RequestInit) => Promise<Response> | undefined = () => undefined) {
+  fetchSpy.mockImplementation((url: string, init?: RequestInit) => {
+    const custom = extra(String(url), init);
+    if (custom) return custom;
+    if (String(url).endsWith('/admin-tree')) return jres(structuredClone(tree));
+    return jres({});
+  });
+}
+
+beforeEach(async () => {
+  __resetGuardsForTests();
+  await navigate('/courses/c/edit/v/1', { force: true });
+  tree = { course: { id: 1, name: 'Applied Linear Algebra', slug: 'c' }, version: mkVersion(), blocks: [mkBlock(10)] };
+  fetchSpy.mockReset();
+  (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
+  serve();
+  target = document.createElement('div');
+  document.body.appendChild(target);
+});
+afterEach(() => {
+  if (component) { unmount(component); component = null; }
+  if (target.parentNode) target.parentNode.removeChild(target);
+  (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
+  clearEditorVersion();
+  clearToasts();
+  __resetGuardsForTests();
+  vi.restoreAllMocks();
+});
+
+async function render(props: Record<string, string> = { courseSlug: 'c', versionId: '1' }) {
+  component = mount(VersionEditPage, { target, props: props as { courseSlug: string; versionId: string } });
+  await settle();
+}
+
+describe('VersionEditPage — heading (3b, §5.2)', () => {
+  it('leads with the course link, then " · label", the mono id and the badges', async () => {
+    await render();
+    const h1 = target.querySelector('h1')!;
+    expect(h1.textContent).toBe('Applied Linear Algebra · Autumn 2026 revision');
+    const a = h1.querySelector('a')!;
+    expect(a.getAttribute('href')).toBe('/courses/c/edit');
+    expect(a.title).toBe('Back to versions');
+    // 5c T5 (user): the id and the attempt limit are quiet chips around the state badge, not mono text.
+    expect(target.querySelector('.editor-heading .vid')).toBeNull();
+    const chips = [...target.querySelectorAll('.editor-heading .hchip, .editor-heading .vbadge')].map((c) => c.textContent);
+    expect(chips).toEqual(['v. 1', 'max 3 quiz attempts', 'created']);   // state last (user, T5); "v. N" (user, 2026-10-08)
+    // On the shaded page the state badge carries the chips' outline, or it would vanish.
+    expect(target.querySelector('.editor-heading .vbadge')!.classList.contains('outlined')).toBe(true);
+  });
+
+  it('non-empty version info shows as muted rendered text between the heading and the blocks (5c T5, user)', async () => {
+    tree.version = mkVersion({ info_md: 'Hi **all**', info_html: `<p>Hi <strong>all</strong> <a href="https://example.org/v">ext</a> <a href="${location.origin}/courses/x">page</a></p>` });
+    await render();
+    const info = target.querySelector('.vinfo')!;
+    expect(info.querySelector('strong')!.textContent).toBe('all');   // rendered, not the markdown source
+    expect(info.textContent).not.toContain('**');
+    expect(info.classList.contains('prose')).toBe(true);
+    expect(info.classList.contains('compact')).toBe(true);
+    expect(info.querySelector('a[href="https://example.org/v"]')!.getAttribute('target')).toBe('_blank');
+    expect(info.querySelector(`a[href="${location.origin}/courses/x"]`)!.hasAttribute('target')).toBe(false);
+    const heading = target.querySelector('.editor-heading')!;
+    const blocks = target.querySelector('section.blocks')!;
+    expect(heading.compareDocumentPosition(info) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(info.compareDocumentPosition(blocks) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('empty version info renders nothing', async () => {
+    await render();
+    expect(target.querySelector('.vinfo')).toBeNull();
+  });
+
+  it('a limit of one reads "max 1 quiz attempt"', async () => {
+    tree.version = mkVersion({ max_quiz_attempts: 1 });
+    await render();
+    expect([...target.querySelectorAll('.editor-heading .hchip')].map((c) => c.textContent)).toEqual(['v. 1', 'max 1 quiz attempt']);
+  });
+
+  it('without a label the h1 is the course link only', async () => {
+    tree.version = mkVersion({ label: '' });
+    await render();
+    expect(target.querySelector('h1')!.textContent).toBe('Applied Linear Algebra');
+  });
+
+  it('a plain click on the course link routes in-app', async () => {
+    await render();
+    const a = target.querySelector<HTMLAnchorElement>('h1 a')!;
+    const ev = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    a.dispatchEvent(ev);
+    await settle();
+    expect(ev.defaultPrevented).toBe(true);
+    expect(currentRoute.path).toBe('/courses/c/edit');
+  });
+
+  it('a Cmd/Ctrl-click on the course link is not intercepted', async () => {
+    await render();
+    let prevented: boolean | null = null;
+    // Runs after the app's delegated handler; it records, then blocks jsdom's own navigation.
+    const probe = (e: Event) => { prevented = e.defaultPrevented; e.preventDefault(); };
+    window.addEventListener('click', probe);
+    for (const mod of [{ ctrlKey: true }, { metaKey: true }]) {
+      target.querySelector('h1 a')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ...mod }));
+      await settle();
+      expect(prevented).toBe(false);
+      expect(currentRoute.path).toBe('/courses/c/edit/v/1');
+    }
+    window.removeEventListener('click', probe);
+  });
+
+  it('a disabled version shows the information banner', async () => {
+    tree.version = mkVersion({ is_disabled: true });
+    await render();
+    expect(target.querySelector('.banner')!.textContent).toBe('This version is disabled — editing is not allowed. Enable it first.');
+  });
+});
+
+describe('VersionEditPage — page states (9d)', () => {
+  it('an invalid id renders a page ErrorState with Back to versions', async () => {
+    await render({ courseSlug: 'c', versionId: 'abc' });
+    const es = target.querySelector('.error-state.page')!;
+    expect(es.querySelector('h1')!.textContent).toBe('Bad URL');
+    const back = [...es.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Back to versions')!;
+    back.click();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit');
+  });
+
+  it('a load failure without a tree renders "Couldn\'t load"', async () => {
+    serve((url) => (url.endsWith('/admin-tree') ? jres({ detail: 'Boom' }, 500) : undefined));
+    await render();
+    const es = target.querySelector('.error-state.page')!;
+    expect(es.querySelector('h1')!.textContent).toBe("Couldn't load");
+    expect(es.textContent).toContain('Boom');
+  });
+
+  it('shows a Skeleton until the tree arrives', async () => {
+    let release!: () => void;
+    serve((url) => (url.endsWith('/admin-tree') ? new Promise<void>((r) => { release = r; }).then(() => jres(structuredClone(tree))) : undefined));
+    component = mount(VersionEditPage, { target, props: { courseSlug: 'c', versionId: '1' } });
+    flushSync();
+    expect(target.querySelector('.skeleton')).not.toBeNull();
+    release();
+    await settle();
+    expect(target.querySelector('.skeleton')).toBeNull();
+  });
+});
+
+describe('VersionEditPage — version settings (Slice-5c T5)', () => {
+  const gear = () => target.querySelector<HTMLButtonElement>('.editor-heading button[aria-label="Version settings"]')!;
+  const settingsPanel = () => document.querySelector<HTMLElement>('section.modal-panel');
+
+  it('the heading ✎ opens the settings modal; the old Version info card is gone', async () => {
+    await render();
+    expect(target.querySelector('.meta-card')).toBeNull();
+    gear().click(); await settle();
+    expect(settingsPanel()!.querySelector('h2')!.textContent).toBe('Version settings');
+    expect(settingsPanel()!.querySelector<HTMLInputElement>('input[aria-label="Label"]')!.value).toBe('Autumn 2026 revision');
+    expect(settingsPanel()!.querySelector('footer.modal-foot')).not.toBeNull();
+  });
+
+  it.each([
+    ['published', { state: 'published' as const }],
+    ['archived', { state: 'archived' as const }],
+    ['disabled', { is_disabled: true }],
+  ])('on a %s version the modal opens read-only', async (_n, over) => {
+    tree.version = mkVersion(over);
+    await render();
+    gear().click(); await settle();
+    expect(settingsPanel()!.querySelector('footer.modal-foot')).toBeNull();
+    expect(settingsPanel()!.querySelector('input, textarea')).toBeNull();
+    expect(settingsPanel()!.textContent).toContain('Autumn 2026 revision');
+  });
+
+  it('a save PATCHes the version, refreshes the heading and returns focus to ✎', async () => {
+    serve((url, init) => {
+      if (url === '/api/versions/1' && init?.method === 'PATCH') { tree.version = mkVersion({ label: 'Spring' }); return jres(tree.version); }
+      return undefined;
+    });
+    await render();
+    gear().click(); await settle();
+    const lbl = settingsPanel()!.querySelector<HTMLInputElement>('input[aria-label="Label"]')!;
+    lbl.value = 'Spring'; lbl.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+    [...settingsPanel()!.querySelectorAll<HTMLButtonElement>('footer.modal-foot button')].find((b) => b.textContent!.trim() === 'Save')!.click();
+    await settle(); await settle();
+    expect(settingsPanel()).toBeNull();
+    expect(target.querySelector('h1')!.textContent).toBe('Applied Linear Algebra · Spring');
+    expect(document.activeElement).toBe(gear());
+  });
+
+  it('an open modal is guard-dirty once edited', async () => {
+    await render();
+    gear().click(); await settle();
+    const lbl = settingsPanel()!.querySelector<HTMLInputElement>('input[aria-label="Label"]')!;
+    lbl.value = 'X'; lbl.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+    expect(hoisted.registry!.isAnyDirty()).toBe(true);
+  });
+
+  it('switching to another version closes the modal', async () => {
+    const props = await renderReactive();
+    gear().click(); await settle();
+    expect(settingsPanel()).not.toBeNull();
+    tree = { ...tree, version: mkVersion({ id: 2 }) };
+    props.versionId = '2';
+    await settle();
+    expect(settingsPanel()).toBeNull();
+  });
+});
+
+type PageProps = { courseSlug: string; versionId: string; blockId?: string; sequenceId?: string };
+
+// Props as a $state object so a test can change the route block id in place,
+// as App.svelte does when the router matches a new URL on the same page.
+async function renderReactive(init: PageProps = { courseSlug: 'c', versionId: '1' }) {
+  const props = $state<PageProps>(init);
+  component = mount(VersionEditPage, { target, props });
+  await settle();
+  return props;
+}
+
+// Some open draft on the page (5c T5: the Version info card that used to
+// supply one is gone; any registered dirty tracker is the same to the page).
+async function makeDirty() {
+  hoisted.registry!.register({ isDirty: true });
+  await settle();
+}
+const btnByText = (text: string) =>
+  [...target.querySelectorAll<HTMLButtonElement>('.state-actions button')].find((b) => b.textContent?.trim() === text);
+const posts = () => fetchSpy.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST').map(([u]) => String(u));
+// Polish 1 (D38): the page question under the title, and in a modal's footer or body top.
+const pageRow = () => target.querySelector<HTMLElement>('.page-ask');
+const pageBtn = (k: 'confirm' | 'cancel') => target.querySelector<HTMLButtonElement>(`.page-ask .inline-confirm button.${k}`);
+const footAskBtn = (k: 'confirm' | 'cancel') =>
+  document.querySelector<HTMLButtonElement>(`section.modal-panel footer.modal-foot .inline-confirm button.${k}`);
+const bodyAskBtn = (k: 'confirm' | 'cancel') =>
+  document.querySelector<HTMLButtonElement>(`section.modal-panel .modal-body > .ask-slot .inline-confirm button.${k}`);
+// A draft the page's Discard really drops (makeDirty's tracker has no discard()).
+async function makeDraft() {
+  const t = { dirty: true, get isDirty() { return t.dirty; }, discard() { t.dirty = false; } };
+  hoisted.registry!.register(t);
+  await settle();
+  return t;
+}
+// Polish 1 #3, #4, #5: the tree's question, under the node.
+const treeBtn = (k: 'confirm' | 'cancel') => target.querySelector<HTMLButtonElement>(`.tree-ask .inline-confirm button.${k}`);
+
+describe('VersionEditPage — "+ Add block" (Slice-5c T3)', () => {
+  const addLine = () => [...target.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add block'));
+  const addInput = () => target.querySelector<HTMLInputElement>('input[aria-label="New block title"]');
+  const typeTitle = (v: string) => {
+    addInput()!.value = v;
+    addInput()!.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  };
+
+  it('shown at every depth on a created version, after the blocks list (user 2026-10-08)', async () => {
+    tree.blocks = [mkBlock(10, { sequences: [{ id: 20, block_id: 10, title: 'Seq 20', slug: 's20', order: 1, items: [] }] })];
+    const props = await renderReactive();
+    const after = () => {
+      const list = target.querySelector('section.blocks .blocks-list')!;
+      expect(list.compareDocumentPosition(addLine()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(list.contains(addLine()!)).toBe(false);
+    };
+    after();
+    expect(target.querySelector('button[aria-label="New block"]')).toBeNull();   // the T1 interim + is gone
+    props.blockId = '10';
+    await settle();
+    expect(target.querySelector('.canvas.d1')).not.toBeNull();
+    after();
+    props.sequenceId = '20';
+    await settle();
+    expect(target.querySelector('.canvas.d2')).not.toBeNull();   // a real depth 2, not a stale-id fallback
+    after();
+  });
+
+  it('an open row is not closed by a depth change (the line is not tied to the focus)', async () => {
+    // Empty row: a typed one would go through the guard prompt on a real navigate.
+    const props = await renderReactive();
+    addLine()!.click();
+    await settle();
+    props.blockId = '10';
+    await settle();
+    expect(addInput()).not.toBeNull();
+  });
+
+  it('after a create, focus returns to the line for the next one', async () => {
+    await render();
+    addLine()!.click();
+    await settle();
+    typeTitle('Matrices');
+    addInput()!.form!.requestSubmit();
+    await settle();
+    expect(document.activeElement).toBe(addLine());
+  });
+
+  // F2 (C7 point 1): the ✓ is blocked, not disabled, while the create is in flight.
+  it('a failed create from a clicked ✓ keeps focus on the ✓ (aria-disabled while busy)', async () => {
+    let release!: () => void;
+    serve((url, init) => (url === '/api/versions/1/blocks' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: 'boom' }, 500))
+      : undefined));
+    await render();
+    addLine()!.click();
+    await settle();
+    typeTitle('Matrices');
+    const ok = () => target.querySelector<HTMLButtonElement>('button[aria-label="Create block"]')!;
+    ok().focus();
+    ok().click();
+    await settle();
+    expect(ok().disabled).toBe(false);
+    expect(ok().getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(ok());
+    ok().click();   // blocked: the form's guard stops a second POST
+    await settle();
+    expect(fetchSpy.mock.calls.filter(([u, i]) => String(u) === '/api/versions/1/blocks' && (i as RequestInit)?.method === 'POST')).toHaveLength(1);
+    release();
+    await settle();
+    expect(ok().hasAttribute('aria-disabled')).toBe(false);
+    expect(document.activeElement).toBe(ok());
+  });
+
+  it('a failed create repairs a focus the browser dropped from the disabled × (review r2)', async () => {
+    let release!: () => void;
+    serve((url, init) => (url === '/api/versions/1/blocks' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: 'boom' }, 500))
+      : undefined));
+    await render();
+    addLine()!.click();
+    await settle();
+    typeTitle('Matrices');
+    addInput()!.form!.requestSubmit();
+    await settle();
+    const stand = document.createElement('button');
+    target.append(stand); stand.focus(); stand.remove();
+    release();
+    await settle();
+    expect(document.activeElement).toBe(target.querySelector('button[aria-label="Create block"]'));
+  });
+
+  it('published: no "+ Add block"', async () => {
+    tree.version = mkVersion({ state: 'published' });
+    await render();
+    expect(addLine()).toBeUndefined();
+  });
+
+  it('the line opens a focused title row; submit POSTs {title} only — no info (D7)', async () => {
+    await render();
+    addLine()!.click();
+    await settle();
+    expect(document.activeElement).toBe(addInput());
+    typeTitle('Matrices');
+    addInput()!.form!.requestSubmit();
+    await settle();
+    const post = fetchSpy.mock.calls.find(([u, i]) => String(u) === '/api/versions/1/blocks' && (i as RequestInit)?.method === 'POST')!;
+    expect(JSON.parse(String((post[1] as RequestInit).body))).toEqual({ title: 'Matrices' });   // no info (D7)
+    expect(addInput()).toBeNull();
+  });
+
+  it('Esc closes the row without a request and returns focus to the line', async () => {
+    await render();
+    addLine()!.click();
+    await settle();
+    typeTitle('x');
+    const calls = fetchSpy.mock.calls.length;
+    addInput()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await settle();
+    expect(addInput()).toBeNull();
+    expect(fetchSpy.mock.calls.length).toBe(calls);
+    expect(document.activeElement).toBe(addLine());
+  });
+
+  it('a server error shows under the row', async () => {
+    serve((url, init) => (url === '/api/versions/1/blocks' && init?.method === 'POST'
+      ? jres({ detail: [{ loc: ['body', 'title'], msg: 'Too long' }] }, 422)
+      : undefined));
+    await render();
+    addLine()!.click();
+    await settle();
+    typeTitle('x');
+    addInput()!.form!.requestSubmit();
+    await settle();
+    const err = target.querySelector('section.blocks .add-err')!;
+    expect(err.textContent).toContain('Too long');
+    expect(addInput()!.getAttribute('aria-invalid')).toBe('true');
+    expect(addInput()!.getAttribute('aria-describedby')).toBe(err.id);
+    expect(err.id).not.toBe('');
+  });
+
+  it('a failure that is not about the title shows under the row but leaves the title valid (review t5-r1)', async () => {
+    serve((url, init) => (url === '/api/versions/1/blocks' && init?.method === 'POST'
+      ? jres({ detail: 'Server exploded' }, 500)
+      : undefined));
+    await render();
+    addLine()!.click();
+    await settle();
+    typeTitle('x');
+    addInput()!.form!.requestSubmit();
+    await settle();
+    const err = target.querySelector('section.blocks .add-err')!;
+    expect(err.textContent).toContain('Server exploded');
+    expect(addInput()!.hasAttribute('aria-invalid')).toBe(false);
+    expect(addInput()!.getAttribute('aria-describedby')).toBe(err.id);
+  });
+
+  it('the line is not blocked by an open draft (D3)', async () => {
+    await render();
+    await makeDirty();
+    expect(addLine()!.disabled).toBe(false);
+  });
+
+  it('a typed title is guard-dirty; Discard on the page question drops it', async () => {
+    await render();
+    addLine()!.click();
+    await settle();
+    typeTitle('New block');
+    const nav = navigate('/courses/c/edit/v/1/blocks/10');
+    await settle();
+    expect(pageRow()!.querySelector('.warning')!.textContent!.trim()).toBe('Discard unsaved changes and continue?');
+    pageBtn('confirm')!.click();
+    await nav;
+    await settle();
+    expect(addInput()).toBeNull();
+    await navigate('/courses/c/edit/v/1');
+    await settle();
+    expect(pageRow()).toBeNull();
+  });
+
+  it('a create failure after a confirmed discard toasts and leaves no stale error for the next open', async () => {
+    clearToasts();
+    let release!: () => void;
+    serve((url, init) => (url === '/api/versions/1/blocks' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: 'Title already taken' }, 409))
+      : undefined));
+    await render();
+    addLine()!.click();
+    await settle();
+    typeTitle('Intro');
+    addInput()!.form!.requestSubmit();
+    await settle();
+    const nav = navigate('/courses/c/edit/v/1/blocks/10');
+    await settle();
+    pageBtn('confirm')!.click();
+    await nav;
+    await settle();
+    expect(addInput()).toBeNull();
+    release();
+    await settle();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Title already taken', 'error']]);
+    await navigate('/courses/c/edit/v/1');
+    await settle();
+    addLine()!.click();
+    await settle();
+    expect(addInput()!.value).toBe('');
+    expect(target.querySelector('section.blocks .add-err')).toBeNull();
+  });
+
+  it('empty: "No blocks yet" on a created version, "This version has no blocks." otherwise', async () => {
+    tree.blocks = [];
+    await render();
+    expect(target.querySelector('section.blocks .empty-state .title')!.textContent).toBe('No blocks yet');
+    unmount(component!);
+    component = null;
+    tree.version = mkVersion({ state: 'archived' });
+    clearEditorVersion();
+    await render();
+    expect(target.querySelector('section.blocks .empty-state .title')!.textContent).toBe('This version has no blocks.');
+  });
+});
+
+describe('VersionEditPage — state bar (T4)', () => {
+  const labels = () => [...target.querySelectorAll('.state-actions button')].map((b) => [b.textContent?.trim(), (b as HTMLElement).dataset.variant]);
+  // Polish 1 #20, #21: the question in place of the whole bar.
+  const barBtn = (k: 'confirm' | 'cancel') => target.querySelector<HTMLButtonElement>(`.state-actions .inline-confirm button.${k}`)!;
+  const barWarning = () => target.querySelector('.state-actions .inline-confirm .warning')!.textContent!.trim();
+  const trigger = (action: string) => target.querySelector<HTMLButtonElement>(`.state-actions [data-action="version-${action}"]`);
+
+  it('created: Publish (primary), Disable (secondary, D45), Delete (danger)', async () => {
+    await render();
+    expect(labels()).toEqual([['Publish', 'primary'], ['Disable', 'secondary'], ['Delete', 'danger']]);
+  });
+
+  it('published: Archive + Revert + Disable (secondary, D45)', async () => {
+    tree.version = mkVersion({ state: 'published' });
+    await render();
+    expect(labels()).toEqual([['Archive', 'secondary'], ['Revert', 'secondary'], ['Disable', 'secondary']]);
+  });
+
+  it('disabled created: Enable (secondary, D45) only', async () => {
+    tree.version = mkVersion({ is_disabled: true });
+    await render();
+    expect(labels()).toEqual([['Enable', 'secondary']]);
+  });
+
+  it('#20: a dirty field does not block Publish; the question replaces the bar and warns', async () => {
+    await render();
+    await makeDirty();
+    trigger('publish')!.click();
+    await settle();
+    expect(barWarning()).toBe('Publish version 1? Students will see it. Unsaved edits may be lost.');
+    expect(barBtn('confirm').textContent!.trim()).toBe('Publish');
+    expect(barBtn('confirm').classList.contains('primary')).toBe(true);
+    expect(trigger('publish')).toBeNull();
+    expect(trigger('delete')).toBeNull();
+    expect(document.activeElement).toBe(barBtn('cancel'));
+    barBtn('confirm').click();
+    await settle();
+    expect(posts()).toContain('/api/versions/1/publish');
+  });
+
+  it('#20: a publish refreshes the page to the new state; focus goes to the first button of the new bar', async () => {
+    await render();
+    tree.version = mkVersion({ state: 'published' }); // the server's state after the POST
+    trigger('publish')!.click();
+    await settle();
+    barBtn('confirm').click();
+    await settle();
+    await settle();
+    expect(target.querySelector('.editor-heading .vbadge')!.textContent).toBe('published');
+    expect(target.querySelector('.state-actions .inline-confirm')).toBeNull();
+    expect(document.activeElement).toBe(trigger('archive'));
+  });
+
+  it('#20: a failed publish returns focus to the trigger', async () => {
+    serve((url, init) => (url === '/api/versions/1/publish' && init?.method === 'POST' ? jres({ detail: 'Conflict' }, 409) : undefined));
+    await render();
+    trigger('publish')!.click();
+    await settle();
+    barBtn('confirm').click();
+    await settle();
+    await settle();
+    expect(target.querySelector('.state-actions .inline-confirm')).toBeNull();
+    expect(document.activeElement).toBe(trigger('publish'));
+  });
+
+  it('archive and disable warn when dirty; revert never does — one question at a time, Cancel back to its trigger', async () => {
+    tree.version = mkVersion({ state: 'published' });
+    await render();
+    hoisted.registry!.register({ isDirty: true });
+    const ask = async (action: string, text: string, verb: string) => {
+      trigger(action)!.click();
+      await settle();
+      expect(barWarning()).toBe(text);
+      expect(barBtn('confirm').textContent!.trim()).toBe(verb);
+      barBtn('cancel').click();
+      await settle();
+      expect(document.activeElement).toBe(trigger(action));
+    };
+    await ask('archive', 'Archive version 1? Unsaved edits may be lost.', 'Archive');
+    await ask('disable', 'Disable version 1? Unsaved edits may be lost.', 'Disable');
+    await ask('revert', 'Revert version 1 to created?', 'Revert');
+    expect(posts()).toEqual([]);
+  });
+
+  it('#20, #21: Cancel while a block reorder disables the bar lands on the course link, never <body> (whole-branch review)', async () => {
+    tree.blocks = [mkBlock(10), mkBlock(11)];
+    let release: () => void = () => {};
+    serve((url, init) => (url.endsWith('/blocks/reorder') && init?.method === 'POST'
+      ? new Promise<Response>((r) => { release = () => r(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })); })
+      : undefined));
+    await render();
+    for (const action of ['publish', 'delete']) {
+      trigger(action)!.click();
+      await settle();
+      target.querySelector<HTMLButtonElement>('[aria-label^="Move block down"]:not([disabled])')!.click();
+      await settle();
+      expect(trigger(action)).toBeNull();          // the question stands in place of the bar
+      barBtn('cancel').click();
+      await settle();
+      expect(trigger(action)!.hasAttribute('disabled')).toBe(true);
+      expect([action, document.activeElement]).toEqual([action, target.querySelector('h1 a')]);
+      release();
+      await settle();
+    }
+  });
+
+  it('enable never carries the suffix', async () => {
+    tree.version = mkVersion({ is_disabled: true });
+    await render();
+    hoisted.registry!.register({ isDirty: true }); // dirty, so a suffix would show
+    trigger('enable')!.click();
+    await settle();
+    expect(barWarning()).toBe('Enable version 1?');
+  });
+
+  it('a clean page asks without the suffix', async () => {
+    await render();
+    trigger('publish')!.click();
+    await settle();
+    expect(barWarning()).toBe('Publish version 1? Students will see it.');
+  });
+
+  it('#21: delete-version warns when dirty and navigates with force (one question only)', async () => {
+    await render();
+    await makeDirty();
+    trigger('delete')!.click();
+    await settle();
+    expect(barWarning()).toBe('Delete version v1? This cannot be undone. Unsaved edits may be lost.');
+    expect(barBtn('confirm').textContent!.trim()).toBe('Delete');
+    expect(barBtn('confirm').classList.contains('danger')).toBe(true);
+    barBtn('confirm').click();
+    await settle();
+    expect(fetchSpy.mock.calls.filter(([u, init]) => String(u) === '/api/versions/1' && (init as RequestInit).method === 'DELETE')).toHaveLength(1);
+    expect(currentRoute.path).toBe('/courses/c/edit');
+  });
+
+  it('delete-version replaces the history entry, so Back skips the deleted version', async () => {
+    await render();
+    const replaceSpy = vi.spyOn(history, 'replaceState');
+    trigger('delete')!.click();
+    await settle();
+    barBtn('confirm').click();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit');
+    expect(replaceSpy).toHaveBeenCalledWith(null, '', '/courses/c/edit');
+  });
+
+  it('R49: a version switch withdraws the bar question', async () => {
+    serve((url) => (url.endsWith('/versions/2/admin-tree')
+      ? jres({ ...structuredClone(tree), version: mkVersion({ id: 2, label: 'Second' }) })
+      : undefined));
+    const props = await renderReactive();
+    trigger('publish')!.click();
+    await settle();
+    props.versionId = '2';
+    await settle();
+    expect(target.querySelector('.state-actions .inline-confirm')).toBeNull();
+    expect(posts()).toEqual([]);
+  });
+});
+
+describe('VersionEditPage — a late transition / delete after a version switch (Review Focus 4)', () => {
+  function holdOn(match: (url: string, init?: RequestInit) => boolean) {
+    let release!: () => void;
+    const held = new Promise<Response>((r) => { release = () => r(jres({}) as unknown as Response); });
+    serve((url, init) => {
+      if (match(url, init)) return held.then(() => jres({}));
+      if (url.endsWith('/versions/2/admin-tree')) {
+        return jres({ ...structuredClone(tree), version: mkVersion({ id: 2, label: 'Second' }) });
+      }
+      return undefined;
+    });
+    return () => release();
+  }
+
+  it('a publish that lands after switching to v2 does not reload v1 over it', async () => {
+    const release = holdOn((u) => u === '/api/versions/1/publish');
+    const props = await renderReactive();
+    btnByText('Publish')!.click();
+    await settle();
+    target.querySelector<HTMLButtonElement>('.state-actions .inline-confirm button.confirm')!.click();
+    await settle();
+    props.versionId = '2';
+    await settle();
+    expect(target.querySelector('.editor-heading .hchip')!.textContent).toBe('v. 2');
+    release();
+    await settle();
+    expect(target.querySelector('.skeleton')).toBeNull();
+    expect(target.querySelector('.editor-heading .hchip')!.textContent).toBe('v. 2');
+    expect(fetchSpy.mock.calls.filter(([u]) => String(u) === '/api/versions/1/admin-tree')).toHaveLength(1);
+  });
+
+  it('a delete that lands after switching to v2 does not navigate away', async () => {
+    const release = holdOn((u, init) => u === '/api/versions/1' && init?.method === 'DELETE');
+    const props = await renderReactive();
+    btnByText('Delete')!.click();
+    await settle();
+    target.querySelector<HTMLButtonElement>('.state-actions .inline-confirm button.confirm')!.click();
+    await settle();
+    props.versionId = '2';
+    await settle();
+    release();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1');
+    expect(target.querySelector('.editor-heading .hchip')!.textContent).toBe('v. 2');
+  });
+});
+
+// Router-driven props, as App.svelte supplies them: getters over the live
+// route, so the page follows the accordions' own navigate() calls.
+async function renderRouted() {
+  const param = (k: string) => matchRoute(routes, currentRoute.path)?.params[k];
+  component = mount(VersionEditPage, {
+    target,
+    props: {
+      get courseSlug() { return param('courseSlug') ?? ''; },
+      get versionId() { return param('versionId') ?? ''; },
+      get blockId() { return param('blockId'); },
+      get sequenceId() { return param('sequenceId'); },
+      get itemId() { return param('itemId'); },
+    },
+  });
+  await settle();
+}
+
+describe('VersionEditPage — a create-sequence draft and a confirmed collapse (D3)', () => {
+  it('collapse with Discard on the page question drops the draft; re-expanding, + opens an empty form without a question', async () => {
+    await navigate('/courses/c/edit/v/1/blocks/10', { force: true });
+    await renderRouted();
+    const plus = () => [...target.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add sequence'))!;
+    const title = () => target.querySelector<HTMLInputElement>('input[aria-label="New sequence title"]');
+    plus().click();
+    await settle();
+    title()!.value = 'Draft';
+    title()!.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const nav = navigate('/courses/c/edit/v/1'); // collapse the block: the page question asks under the title
+    await settle();
+    expect(pageRow()).not.toBeNull();
+    pageBtn('confirm')!.click();
+    await nav;
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1');
+    // 5c: a collapsed block carries no "+ Add sequence" — expand it, then open the row.
+    target.querySelector<HTMLButtonElement>('#block-10-header')!.click();
+    await settle();
+    plus().click();
+    await settle();
+    expect(pageRow()).toBeNull();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/10');
+    expect(title()!.value).toBe('');
+  });
+});
+
+describe('VersionEditPage — tree deletes (T5b, Polish 1 #3, #5)', () => {
+  const seq20: AdminTreeSequence = { id: 20, block_id: 10, title: 'Seq 20', slug: 's20', order: 1, items: [] };
+
+  it('deleting the expanded block lands on the version with no "Block not found."; focus ends on "+ Add block"', async () => {
+    serve((url, init) => {
+      if (url === '/api/blocks/10' && init?.method === 'DELETE') { tree.blocks = []; return jres({}); }
+      return undefined;
+    });
+    await navigate('/courses/c/edit/v/1/blocks/10', { force: true });
+    await renderRouted();
+    target.querySelector<HTMLButtonElement>('button[aria-label="Delete block Block 10"]')!.click();
+    await settle();
+    expect(target.querySelector('.block-card > .tree-ask .warning')!.textContent!.trim())
+      .toBe('Delete block "Block 10"? This cannot be undone.');
+    treeBtn('confirm')!.click();
+    await settle();
+    await settle();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1');
+    expect(target.querySelector('#block-10-header')).toBeNull();
+    expect(toasts.list.map((t) => t.message)).not.toContain('Block not found.');
+    expect(document.activeElement).toBe(target.querySelector('[data-action="add-block"]'));
+  });
+
+  it('#5: with another block left, focus goes to its header', async () => {
+    tree.blocks = [mkBlock(10), mkBlock(11)];
+    serve((url, init) => {
+      if (url === '/api/blocks/10' && init?.method === 'DELETE') { tree.blocks = [mkBlock(11)]; return jres({}); }
+      return undefined;
+    });
+    await navigate('/courses/c/edit/v/1/blocks/10', { force: true });
+    await renderRouted();
+    target.querySelector<HTMLButtonElement>('button[aria-label="Delete block Block 10"]')!.click();
+    await settle();
+    treeBtn('confirm')!.click();
+    await settle();
+    await settle();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1');
+    expect(document.activeElement).toBe(target.querySelector('#block-11-header'));
+  });
+
+  it('deleting the expanded sequence lands on its block with no "Sequence not found."; focus on the block header', async () => {
+    tree.blocks = [mkBlock(10, { sequences: [seq20] })];
+    serve((url, init) => {
+      if (url === '/api/sequences/20' && init?.method === 'DELETE') { tree.blocks[0].sequences = []; return jres({}); }
+      return undefined;
+    });
+    await navigate('/courses/c/edit/v/1/blocks/10/sequences/20', { force: true });
+    await renderRouted();
+    target.querySelector<HTMLButtonElement>('button[aria-label="Delete sequence Seq 20"]')!.click();
+    await settle();
+    treeBtn('confirm')!.click();
+    await settle();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/10');
+    expect(target.querySelector('#seq-20-header')).toBeNull();
+    expect(toasts.list.map((t) => t.message)).not.toContain('Sequence not found.');
+    expect(document.activeElement).toBe(target.querySelector('#block-10-header'));
+  });
+
+  it('a tree question goes when the route moves on (R49), and sends nothing', async () => {
+    tree.blocks = [mkBlock(10, { sequences: [seq20] })];
+    await navigate('/courses/c/edit/v/1/blocks/10/sequences/20', { force: true });
+    await renderRouted();
+    target.querySelector<HTMLButtonElement>('button[aria-label="Delete sequence Seq 20"]')!.click();
+    await settle();
+    expect(treeBtn('cancel')).not.toBeNull();
+    target.querySelector<HTMLButtonElement>('#seq-20-header')!.click();     // collapse the sequence
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/10');
+    expect(target.querySelector('.tree-ask')).toBeNull();
+    expect(fetchSpy.mock.calls.some(([, i]) => (i as RequestInit | undefined)?.method === 'DELETE')).toBe(false);
+  });
+});
+
+// ---- Slice-5b T3b: the item modal hosted on the item route ----
+function mkItem(id: number, over: Partial<AdminTreeItem> = {}): AdminTreeItem {
+  return {
+    id, sequence_id: 20, title: `Item ${id}`, slug: `i${id}`, order: id, type: 'static_page',
+    content_md: `body ${id}`, content_html: '', video_url: null, script_url: null, questions_count: 0, ...over,
+  };
+}
+const SEQ = '/courses/c/edit/v/1/blocks/10/sequences/20';
+const ITEM = (id: number) => `${SEQ}/items/${id}`;
+// jsdom fires popstate for history.back() on the SECOND macrotask after the
+// call (probed: one setTimeout(0) is not enough), so wait two timer hops.
+const tick0 = () => new Promise((r) => setTimeout(r, 0));
+async function waitPop() { await tick0(); await tick0(); await settle(); await settle(); }
+const modal = () => document.querySelector<HTMLElement>('section.modal-panel');
+const xBtn = () => modal()!.querySelector<HTMLButtonElement>('header.modal-head button[aria-label="Close"]')!;
+const trashBtn = () => modal()!.querySelector<HTMLButtonElement>('button[aria-label="Delete item"]')!;
+const pencil = (id: number) => document.getElementById(`item-${id}-open`) as HTMLButtonElement | null;
+const titleField = () => modal()!.querySelector<HTMLInputElement>('input[aria-label="Title"]')!;
+const msgs = () => toasts.list.map((t) => t.message);
+function typeInto(el: HTMLInputElement, v: string) {
+  el.value = v;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+}
+const esc = (init: KeyboardEventInit = {}) =>
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...init }));
+// A DELETE /api/items/{id} held until release(); release() also drops the item from the served tree.
+function holdDelete(id: number) {
+  let release!: () => void;
+  serve((url, init) => {
+    if (url === `/api/items/${id}` && init?.method === 'DELETE') {
+      return new Promise<Response>((r) => {
+        release = () => {
+          const s = tree.blocks[0].sequences[0];
+          s.items = s.items.filter((x) => x.id !== id);
+          void jres({}).then(r);
+        };
+      });
+    }
+    return undefined;
+  });
+  return () => release();
+}
+
+describe('VersionEditPage — the item modal (Slice-5b T3b)', () => {
+  beforeEach(() => {
+    tree.blocks = [mkBlock(10, { sequences: [{ id: 20, block_id: 10, title: 'Seq 20', slug: 's20', order: 1, items: [mkItem(30), mkItem(31)] }] })];
+  });
+  async function openFromPage(id = 30) {
+    await navigate(SEQ, { force: true });
+    await renderRouted();
+    pencil(id)!.focus();
+    pencil(id)!.click();
+    await settle();
+  }
+
+  it('Open, then ×: the modal closes, the sequence stays open, focus is back on the pencil', async () => {
+    await openFromPage();
+    expect(currentRoute.path).toBe(ITEM(30));
+    expect(modal()!.querySelector('h2.item-name')!.textContent).toBe('Item 30');
+    expect(modal()!.querySelector('.item-ctx')!.textContent).toBe('Block 10 › Seq 20 · item 1 of 2');   // 5c D11: the path
+    xBtn().click();
+    await waitPop();
+    expect(currentRoute.path).toBe(SEQ);
+    expect(modal()).toBeNull();
+    expect(document.activeElement).toBe(pencil(30));
+  });
+
+  it('restore beats fallback: focus returns to what had it when the item opened', async () => {
+    await navigate(SEQ, { force: true });
+    await renderRouted();
+    const header = target.querySelector<HTMLElement>('#seq-20-header')!;
+    header.focus();
+    await navigate(ITEM(30));
+    await settle();
+    expect(modal()).not.toBeNull();
+    xBtn().click();
+    await waitPop();
+    expect(document.activeElement).toBe(header);
+  });
+
+  it('in-page open: ×, × and Escape call history.back() once and stop on the sequence', async () => {
+    await openFromPage();
+    const back = vi.spyOn(history, 'back');
+    xBtn().click();
+    xBtn().click();
+    esc();
+    expect(back).toHaveBeenCalledTimes(1);
+    await waitPop();
+    expect(currentRoute.path).toBe(SEQ);
+  });
+
+  it('Escape closes; an auto-repeat Escape does not', async () => {
+    await openFromPage();
+    const back = vi.spyOn(history, 'back');
+    esc({ repeat: true });
+    expect(back).not.toHaveBeenCalled();
+    esc();
+    expect(back).toHaveBeenCalledTimes(1);
+    await waitPop();
+    expect(modal()).toBeNull();
+  });
+
+  it('× with a draft asks in the item modal\'s footer (R46); Cancel re-arms × and focuses it; Discard closes', async () => {
+    await openFromPage();
+    typeInto(titleField(), 'Draft');
+    const back = vi.spyOn(history, 'back');
+    xBtn().click();
+    await waitPop();
+    expect(modal()!.querySelector('footer.modal-foot .inline-confirm .warning')!.textContent!.trim())
+      .toBe('Discard unsaved changes and continue?');
+    expect(document.activeElement).toBe(footAskBtn('cancel'));
+    expect(modal()!.querySelector('div.body-rest')!.hasAttribute('inert')).toBe(true);
+    expect(pageRow()).toBeNull();
+    footAskBtn('cancel')!.click();
+    await waitPop();
+    expect(currentRoute.path).toBe(ITEM(30));
+    expect(titleField().value).toBe('Draft');
+    expect(document.activeElement).toBe(xBtn());
+    xBtn().click();
+    await waitPop();
+    footAskBtn('confirm')!.click();
+    await waitPop();
+    expect(back).toHaveBeenCalledTimes(2);
+    expect(currentRoute.path).toBe(SEQ);
+    expect(modal()).toBeNull();
+  });
+
+  it('deep link, then ×: the address is replaced with the sequence; history.back() is never used', async () => {
+    await navigate(ITEM(30), { force: true });
+    await renderRouted();
+    const back = vi.spyOn(history, 'back');
+    const replace = vi.spyOn(history, 'replaceState');
+    xBtn().click();
+    await settle();
+    expect(back).not.toHaveBeenCalled();
+    expect(replace).toHaveBeenCalledWith(null, '', SEQ);
+    expect(currentRoute.path).toBe(SEQ);
+    expect(modal()).toBeNull();
+  });
+
+  it('deep link with a draft: × asks, Cancel keeps the draft and re-arms; Escape asks again', async () => {
+    await navigate(ITEM(30), { force: true });
+    await renderRouted();
+    typeInto(titleField(), 'Draft');
+    xBtn().click();
+    await settle();
+    expect(footAskBtn('cancel')).not.toBeNull();
+    footAskBtn('cancel')!.click();
+    await settle();
+    expect(currentRoute.path).toBe(ITEM(30));
+    expect(titleField().value).toBe('Draft');
+    esc();
+    await settle();
+    expect(footAskBtn('cancel')).not.toBeNull();
+    expect(titleField().value).toBe('Draft');
+  });
+
+  it('browser Back and the course link ask while the modal has a draft; Cancel keeps it', async () => {
+    await openFromPage();
+    typeInto(titleField(), 'Draft');
+    history.back();
+    await waitPop();
+    expect(footAskBtn('cancel')).not.toBeNull();
+    footAskBtn('cancel')!.click();
+    await waitPop();
+    expect(modal()).not.toBeNull();
+    target.querySelector<HTMLAnchorElement>('h1 a')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+    await settle();
+    expect(footAskBtn('cancel')).not.toBeNull();
+    footAskBtn('cancel')!.click();
+    await settle();
+    expect(currentRoute.path).toBe(ITEM(30));
+    expect(titleField().value).toBe('Draft');
+  });
+
+  it('a stale item address toasts "Item not found." and replaces the address with the sequence', async () => {
+    await navigate(ITEM(999), { force: true });
+    await renderRouted();
+    await settle();
+    expect(msgs()).toContain('Item not found.');
+    expect(currentRoute.path).toBe(SEQ);
+    expect(modal()).toBeNull();
+  });
+
+  it('delete: one question, frozen in flight, one replace+force close after which the reload lands, then toast and header focus', async () => {
+    const release = holdDelete(30);
+    let modalAtReload: boolean | null = null;
+    const inner = fetchSpy.getMockImplementation()!;
+    fetchSpy.mockImplementation((url: string, init?: RequestInit) => {
+      if (String(url).endsWith('/admin-tree') && modalAtReload === false) modalAtReload = modal() !== null;
+      return inner(url, init);
+    });
+    await openFromPage();
+    const back = vi.spyOn(history, 'back');
+    const replace = vi.spyOn(history, 'replaceState');
+    trashBtn().click();
+    await settle();
+    expect(modal()!.querySelector('.modal-body > .ask-slot .warning')!.textContent!.trim())
+      .toBe('Delete item "Item 30"? This cannot be undone.');
+    bodyAskBtn('confirm')!.click();
+    await settle();
+    expect(document.activeElement).toBe(bodyAskBtn('confirm'));      // R54: the busy confirm holds focus
+    expect(modal()!.querySelector('div.body-rest')!.hasAttribute('inert')).toBe(true);
+    xBtn().click();
+    esc();
+    await settle();
+    expect(back).not.toHaveBeenCalled();
+    expect(currentRoute.path).toBe(ITEM(30));
+    modalAtReload = false;           // arm: record the modal's presence at the next tree GET
+    release();
+    await settle();
+    await settle();
+    expect(back).not.toHaveBeenCalled();
+    expect(replace).toHaveBeenCalledWith(null, '', SEQ);
+    expect(currentRoute.path).toBe(SEQ);
+    expect(modal()).toBeNull();
+    expect(modalAtReload).toBe(false);   // the reload ran after the modal unmounted
+    expect(pencil(30)).toBeNull();
+    expect(msgs()).toContain('Item deleted');
+    expect(msgs()).not.toContain('Item not found.');
+    expect(document.activeElement).toBe(target.querySelector('#seq-20-header'));
+  });
+
+  it('a failed DELETE keeps the modal open and unfrozen, with focus on the trash', async () => {
+    serve((url, init) => (url === '/api/items/30' && init?.method === 'DELETE' ? jres({ detail: 'Nope' }, 409) : undefined));
+    await openFromPage();
+    trashBtn().click();
+    await settle();
+    bodyAskBtn('confirm')!.click();
+    await settle();
+    await settle();
+    expect(msgs()).toContain('Nope');
+    expect(currentRoute.path).toBe(ITEM(30));
+    expect(modal()!.querySelector('div.body-rest')!.hasAttribute('inert')).toBe(false);
+    expect(xBtn().disabled).toBe(false);
+    expect(bodyAskBtn('confirm')).toBeNull();
+    expect(document.activeElement).toBe(trashBtn());
+  });
+
+  it('browser Back during the DELETE, then another item: not frozen, × works, and the late success never navigates', async () => {
+    const release = holdDelete(30);
+    await openFromPage(30);
+    trashBtn().click();
+    await settle();
+    bodyAskBtn('confirm')!.click();
+    await settle();
+    history.back();
+    await waitPop();
+    expect(currentRoute.path).toBe(SEQ);
+    pencil(31)!.focus();
+    pencil(31)!.click();
+    await settle();
+    expect(modal()!.querySelector('h2.item-name')!.textContent).toBe('Item 31');
+    expect(modal()!.querySelector('div.body-rest')!.hasAttribute('inert')).toBe(false);
+    expect(xBtn().disabled).toBe(false);
+    const back = vi.spyOn(history, 'back');
+    release();
+    await settle();
+    await settle();
+    expect(currentRoute.path).toBe(ITEM(31));
+    expect(back).not.toHaveBeenCalled();
+    xBtn().click();
+    await waitPop();
+    expect(back).toHaveBeenCalledTimes(1);
+    expect(currentRoute.path).toBe(SEQ);
+  });
+
+  it('the page behind cannot take focus while the modal is open', async () => {
+    await openFromPage();
+    target.querySelector<HTMLElement>('#seq-20-header')!.focus();
+    expect(modal()!.contains(document.activeElement)).toBe(true);
+  });
+
+  it('after creating an item (New item modal, 5c D10) the editor opens on it; × goes Back (R1 push) and lands focus on its Open pencil', async () => {
+    serve((url, init) => {
+      if (url === '/api/sequences/20/items' && init?.method === 'POST') {
+        tree.blocks[0].sequences[0].items.push(mkItem(99, { title: 'Fresh' }));
+        return jres({ id: 99 });
+      }
+      return undefined;
+    });
+    await navigate(SEQ, { force: true });
+    await renderRouted();
+    const line = [...target.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add item'))!;
+    line.focus();   // Chrome focuses a clicked button: it becomes the New item modal's opener
+    line.click();
+    await settle();
+    expect(modal()!.querySelector('h2')!.textContent).toBe('New item');
+    const t = modal()!.querySelector<HTMLInputElement>('input[aria-label="Title"]')!;
+    typeInto(t, 'Fresh');
+    const before = history.length;
+    const create = [...modal()!.querySelectorAll<HTMLButtonElement>('footer.modal-foot button')].find((b) => b.textContent!.trim() === 'Create')!;
+    create.focus();
+    create.click();
+    await settle();
+    await settle();
+    expect(currentRoute.path).toBe(ITEM(99));
+    expect(history.length).toBe(before + 1);   // R1: a push, so the item's × is Back
+    expect(modal()!.querySelector('h2.item-name')!.textContent).toBe('Fresh');
+    xBtn().click();
+    await waitPop();
+    expect(currentRoute.path).toBe(SEQ);
+    expect(document.activeElement).toBe(pencil(99));
+  });
+
+  it('after creating an item in Safari (a click does not focus the line) × still lands focus on its Open pencil (5c D10 / 5b D18)', async () => {
+    serve((url, init) => {
+      if (url === '/api/sequences/20/items' && init?.method === 'POST') {
+        tree.blocks[0].sequences[0].items.push(mkItem(99, { title: 'Fresh' }));
+        return jres({ id: 99 });
+      }
+      return undefined;
+    });
+    await navigate(SEQ, { force: true });
+    await renderRouted();
+    // Safari model: focus sits elsewhere (here the sequence header's ✎) and the click leaves it there,
+    // so that control becomes the New item modal's opener.
+    const other = target.querySelector<HTMLButtonElement>('button[aria-label="Edit the sequence title"]')!;
+    other.focus();
+    expect(document.activeElement).toBe(other);
+    [...target.querySelectorAll<HTMLButtonElement>('button.add-line')].find((b) => b.textContent!.includes('Add item'))!.click();
+    await settle();
+    typeInto(modal()!.querySelector<HTMLInputElement>('input[aria-label="Title"]')!, 'Fresh');
+    [...modal()!.querySelectorAll<HTMLButtonElement>('footer.modal-foot button')].find((b) => b.textContent!.trim() === 'Create')!.click();
+    await settle();
+    await settle();
+    expect(currentRoute.path).toBe(ITEM(99));
+    xBtn().click();
+    await waitPop();
+    expect(currentRoute.path).toBe(SEQ);
+    expect(document.activeElement).toBe(pencil(99));
+  });
+
+  it("after a deep-link close, focus lands on the closed item's Open pencil", async () => {
+    await navigate(ITEM(31), { force: true });
+    await renderRouted();
+    xBtn().click();
+    await settle();
+    await settle();
+    expect(currentRoute.path).toBe(SEQ);
+    expect(document.activeElement).toBe(pencil(31));
+  });
+
+  it('a tree reload with focus on body does not move focus', async () => {
+    await navigate(SEQ, { force: true });
+    await renderRouted();
+    (document.activeElement as HTMLElement | null)?.blur();
+    target.querySelector<HTMLButtonElement>('button[aria-label="Move item down: Item 30"]')!.click();
+    await settle();
+    await settle();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('the item is deleted elsewhere while its modal is open: the reload closes it with "Item not found.", no error', async () => {
+    await openFromPage();
+    const errors: unknown[] = [];
+    const onErr = (e: ErrorEvent) => { errors.push(e.error ?? e.message); };
+    window.addEventListener('error', onErr);
+    tree.blocks[0].sequences[0].items = [mkItem(31)];
+    await loadAdminTree(1, { force: true });
+    await settle();
+    await settle();
+    window.removeEventListener('error', onErr);
+    expect(errors).toEqual([]);
+    expect(msgs()).toContain('Item not found.');
+    expect(currentRoute.path).toBe(SEQ);
+    expect(modal()).toBeNull();
+  });
+
+  it('× while the page question is open in the item modal focuses its Cancel and never navigates twice; × works again after Cancel', async () => {
+    await openFromPage();
+    typeInto(titleField(), 'Draft');
+    const back = vi.spyOn(history, 'back');
+    xBtn().click();
+    await waitPop();
+    xBtn().focus();
+    xBtn().click();
+    esc();
+    await waitPop();
+    expect(back).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(footAskBtn('cancel'));
+    footAskBtn('cancel')!.click();
+    await waitPop();
+    expect(document.activeElement).toBe(xBtn());
+    xBtn().click();
+    await waitPop();
+    expect(back).toHaveBeenCalledTimes(2);
+    expect(footAskBtn('cancel')).not.toBeNull();
+  });
+
+  it('R53: with the delete question open, Back with a draft elsewhere is refused; focus goes to its Cancel', async () => {
+    await openFromPage();
+    await makeDirty();               // a draft elsewhere on the page; the item itself is clean, so its trash is live
+    trashBtn().click();
+    await settle();
+    xBtn().focus();
+    history.back();
+    await waitPop();
+    expect(currentRoute.path).toBe(ITEM(30));
+    expect(location.pathname).toBe(ITEM(30));
+    expect(document.activeElement).toBe(bodyAskBtn('cancel'));
+    expect(modal()!.querySelectorAll('.inline-confirm')).toHaveLength(1);
+  });
+});
+
+// ---- Slice-5c T1: focus by depth ----
+describe('VersionEditPage — focus by depth (Slice-5c T1)', () => {
+  const seq20: AdminTreeSequence = { id: 20, block_id: 10, title: 'Seq 20', slug: 's20', order: 1, items: [] };
+  const canvas = () => target.querySelector('.canvas')!;
+  const depthOf = () => ['d0', 'd1', 'd2'].filter((c) => canvas().classList.contains(c));
+
+  it('depth classes follow navigation: d0 → d1 → d2 → d1 → d0 (Back included)', async () => {
+    tree.blocks = [mkBlock(10, { sequences: [seq20] })];
+    await renderRouted();
+    expect(depthOf()).toEqual(['d0']);
+    await navigate('/courses/c/edit/v/1/blocks/10'); await settle();
+    expect(depthOf()).toEqual(['d1']);
+    await navigate('/courses/c/edit/v/1/blocks/10/sequences/20'); await settle();
+    expect(depthOf()).toEqual(['d2']);
+    history.back(); await waitPop();
+    expect(depthOf()).toEqual(['d1']);
+    history.back(); await waitPop();
+    expect(depthOf()).toEqual(['d0']);
+    history.forward(); await waitPop();
+    expect(depthOf()).toEqual(['d1']);
+  });
+
+  it('closed blocks are white rows only at the focus level (5c T5, user): all with nothing open, none once a block is open', async () => {
+    tree.blocks = [mkBlock(10), mkBlock(11)];
+    await navigate('/courses/c/edit/v/1', { force: true });
+    await renderRouted();
+    expect(target.querySelectorAll('.block-card.at-focus').length).toBe(2);
+    await navigate('/courses/c/edit/v/1/blocks/10'); await settle();
+    expect(target.querySelectorAll('.block-card.at-focus').length).toBe(0);   // 11 is outside: the page's shade
+  });
+
+  it('sequence rows are tinted only at the focus level (5c T5, user): all with the block open, none once a sequence is open', async () => {
+    tree.blocks = [mkBlock(10, { sequences: [seq20, { ...seq20, id: 21, title: 'Seq 21', slug: 's21', order: 2 }] })];
+    await navigate('/courses/c/edit/v/1/blocks/10', { force: true });
+    await renderRouted();
+    expect(target.querySelectorAll('.seq-card.at-focus').length).toBe(2);
+    await navigate('/courses/c/edit/v/1/blocks/10/sequences/20'); await settle();
+    expect(target.querySelectorAll('.seq-card.at-focus').length).toBe(0);   // 21 is outside: the block's shade
+  });
+
+  it('exactly one container is the focus at every depth', async () => {
+    tree.blocks = [mkBlock(10, { sequences: [seq20] }), mkBlock(11)];
+    await navigate('/courses/c/edit/v/1/blocks/10/sequences/20', { force: true });
+    await renderRouted();
+    expect(target.querySelectorAll('.focus').length).toBe(1);
+    expect(target.querySelector('.seq-card.focus')).not.toBeNull();
+    expect(target.querySelectorAll('.block-card.parent').length).toBe(1);
+    await navigate('/courses/c/edit/v/1/blocks/10'); await settle();
+    expect(target.querySelectorAll('.focus').length).toBe(1);
+    expect(target.querySelector('.block-card.focus')).not.toBeNull();
+    expect(target.querySelector('.block-card.parent')).toBeNull();
+    await navigate('/courses/c/edit/v/1'); await settle();
+    expect(target.querySelectorAll('.focus, .parent').length).toBe(0);
+  });
+
+  it('an h2 named Blocks (visually hidden) labels section.blocks, so block h3s keep their parent level', async () => {
+    await render();
+    const sec = target.querySelector<HTMLElement>('section.blocks')!;
+    const h2 = document.getElementById(sec.getAttribute('aria-labelledby')!)!;
+    expect(h2.tagName).toBe('H2');
+    expect(h2.textContent).toBe('Blocks');
+    expect(h2.classList.contains('sr-only')).toBe(true);
+    expect(sec.firstElementChild).toBe(h2);
+  });
+
+  it('a stale sequence id falls back to its block: d1, the block is the one focus', async () => {
+    tree.blocks = [mkBlock(10, { sequences: [seq20] })];
+    await navigate('/courses/c/edit/v/1/blocks/10/sequences/999', { force: true });
+    await renderRouted();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/10');
+    expect(depthOf()).toEqual(['d1']);
+    expect(target.querySelectorAll('.focus').length).toBe(1);
+    expect(target.querySelector('.block-card.focus')).not.toBeNull();
+  });
+
+  it('the Blocks card head and its fold are gone', async () => {
+    await render();
+    expect(target.querySelector('.blocks-card')).toBeNull();
+    expect(target.querySelector('button[aria-label="Collapse blocks"]')).toBeNull();
+    expect(target.querySelector('section.blocks .blocks-list')).not.toBeNull();
+  });
+
+  it('a stale block id falls back and the canvas returns to d0', async () => {
+    await navigate('/courses/c/edit/v/1/blocks/999', { force: true });
+    await renderRouted();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1');
+    expect(depthOf()).toEqual(['d0']);
+  });
+});
+
+describe('VersionEditPage — the page question (Polish 1 D38, R46–R48)', () => {
+  beforeEach(() => {
+    tree.blocks = [mkBlock(10), mkBlock(11)];
+  });
+  const courseLink = () => target.querySelector<HTMLAnchorElement>('h1 a')!;
+  const gearBtn = () => target.querySelector<HTMLButtonElement>('.editor-heading button[aria-label="Version settings"]')!;
+
+  it('Enter on a block header with a draft elsewhere asks under the title; the page below freezes; Cancel returns to that header', async () => {
+    await navigate('/courses/c/edit/v/1', { force: true });
+    await renderRouted();
+    await makeDirty();
+    const header = target.querySelector<HTMLButtonElement>('#block-10-header')!;
+    header.focus();
+    header.click();                                    // keyboard activation: detail 0
+    await settle();
+    expect(pageRow()!.querySelector('.warning')!.textContent!.trim()).toBe('Discard unsaved changes and continue?');
+    expect(pageBtn('confirm')!.textContent!.trim()).toBe('Discard');
+    expect(document.activeElement).toBe(pageBtn('cancel'));
+    expect(target.querySelector('section.blocks')!.hasAttribute('inert')).toBe(true);
+    expect(target.querySelector('.state-actions')!.hasAttribute('inert')).toBe(true);
+    expect(courseLink().closest('[inert]')).toBeNull();
+    expect(gearBtn().getAttribute('aria-disabled')).toBe('true');
+    expect(gearBtn().title).toBe('Answer the question first');
+    gearBtn().click();
+    await settle();
+    expect(document.querySelector('section.modal-panel')).toBeNull();
+    pageBtn('cancel')!.click();
+    await settle();
+    expect(pageRow()).toBeNull();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1');
+    expect(target.querySelector('section.blocks')!.hasAttribute('inert')).toBe(false);
+    expect(gearBtn().getAttribute('aria-disabled')).toBeNull();
+    expect(document.activeElement).toBe(header);
+  });
+
+  it('a mouse-style trigger (nothing focused): Cancel scrolls back to where it was and focuses the course link', async () => {
+    await navigate('/courses/c/edit/v/1', { force: true });
+    await renderRouted();
+    await makeDirty();
+    (document.activeElement as HTMLElement | null)?.blur();
+    Object.defineProperty(window, 'scrollY', { value: 240, configurable: true });
+    const scrollTo = vi.spyOn(window, 'scrollTo');
+    void navigate('/courses/c/edit/v/1/blocks/10');
+    await settle();
+    pageBtn('cancel')!.click();
+    await settle();
+    expect(scrollTo).toHaveBeenCalledWith({ top: 240 });
+    expect(document.activeElement).toBe(courseLink());
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true });
+  });
+
+  it('Discard with focus left on <body>: one check focuses the course link, and only once', async () => {
+    await navigate('/courses/c/edit/v/1', { force: true });
+    await renderRouted();
+    await makeDraft();
+    (document.activeElement as HTMLElement | null)?.blur();
+    const nav = navigate('/courses/c/edit/v/1?tab=x');
+    await settle();
+    pageBtn('confirm')!.click();
+    await nav;
+    await settle();
+    await tick0();
+    expect(currentRoute.search).toBe('?tab=x');
+    expect(document.activeElement).toBe(courseLink());
+    courseLink().blur();
+    await navigate('/courses/c/edit/v/1?tab=y');
+    await tick0();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('a read-only Version settings + a navigation asks at the top of its body; Cancel → its ×', async () => {
+    tree.version = mkVersion({ state: 'published' });
+    await navigate('/courses/c/edit/v/1', { force: true });
+    await renderRouted();
+    await makeDirty();
+    gearBtn().click();
+    await settle();
+    expect(modal()!.querySelector('footer.modal-foot')).toBeNull();
+    const nav = navigate('/courses/c/edit/v/1/blocks/10');
+    await settle();
+    expect(pageRow()).toBeNull();
+    expect(bodyAskBtn('cancel')).not.toBeNull();
+    expect(modal()!.querySelector('.modal-body > .ask-slot .warning')!.textContent!.trim()).toBe('Discard unsaved changes and continue?');
+    expect(document.activeElement).toBe(bodyAskBtn('cancel'));
+    bodyAskBtn('cancel')!.click();
+    await nav;
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1');
+    expect(document.activeElement).toBe(xBtn());
+  });
+});

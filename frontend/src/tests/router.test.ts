@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { matchRoute, safeNext, defaultLandingPath } from '../lib/router.svelte';
+import { matchRoute, safeNext, defaultLandingPath, landingLabel } from '../lib/router.svelte';
 import {
   navigate,
   registerNavigationGuard,
   currentRoute,
   __resetGuardsForTests,
 } from '../lib/router.svelte';
+import { routeClick } from '../lib/routeClick';
 import { routes as appRoutes } from '../routes';
 
 describe('lib/router', () => {
@@ -51,7 +52,7 @@ describe('lib/router', () => {
       ['/courses/calc/edit/v/3',                                                  'VersionEditPage',  { courseSlug: 'calc', versionId: '3' }],
       ['/courses/calc/edit/v/3/blocks/12',                                        'VersionEditPage',  { courseSlug: 'calc', versionId: '3', blockId: '12' }],
       ['/courses/calc/edit/v/3/blocks/12/sequences/47',                           'VersionEditPage',  { courseSlug: 'calc', versionId: '3', blockId: '12', sequenceId: '47' }],
-      ['/courses/calc/edit/v/3/blocks/12/sequences/47/items/87',                  'ItemEditPage',     { courseSlug: 'calc', versionId: '3', blockId: '12', sequenceId: '47', itemId: '87' }],
+      ['/courses/calc/edit/v/3/blocks/12/sequences/47/items/87',                  'VersionEditPage',  { courseSlug: 'calc', versionId: '3', blockId: '12', sequenceId: '47', itemId: '87' }],
     ] as const)('routes.ts wires %s → %s', (path, component, params) => {
       const m = matchRoute(appRoutes, path);
       expect(m?.route.component).toBe(component);
@@ -100,6 +101,24 @@ describe('navigation guards', () => {
     currentRoute.path = '/';
     currentRoute.search = '';
     currentRoute.hash = '';
+  });
+
+  it('navigate reports whether it moved (C6)', async () => {
+    expect(await navigate('/courses')).toBe(true);
+    expect(await navigate('/courses')).toBe(false);
+    const dispose = registerNavigationGuard(() => false);
+    expect(await navigate('/teaching')).toBe(false);
+    dispose();
+    let answer!: (ok: boolean) => void;
+    const slow = registerNavigationGuard(() => new Promise<boolean>((r) => { answer = r; }));
+    const first = navigate('/teaching');
+    await Promise.resolve();
+    slow();
+    const second = navigate('/courses/x');
+    answer(true);
+    expect(await first).toBe(false);
+    expect(await second).toBe(true);
+    expect(await navigate('/courses/x#item=3')).toBe(true);
   });
 
   it('cancels navigate when a guard returns false', async () => {
@@ -322,6 +341,108 @@ describe('navigation guards', () => {
     history.pushState = realPush;
     dispose();
   });
+
+  // Polish 1 R47: DirtyGuard's `pending` — every call joins the open question.
+  function joiningGuard() {
+    let resolve: ((ok: boolean) => void) | null = null;
+    let pending: Promise<boolean> | null = null;
+    let asked = 0;
+    const dispose = registerNavigationGuard(() => {
+      if (pending) return pending;
+      asked++;
+      pending = new Promise<boolean>((r) => { resolve = r; }).then((ok) => { pending = null; return ok; });
+      return pending;
+    });
+    return { dispose, answer: (ok: boolean) => resolve!(ok), asked: () => asked };
+  }
+  // jsdom fires popstate for history.back() on the second macrotask.
+  const popTwice = async () => {
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+  };
+
+  it('R47: a navigate to the current address while asking leaves the pending navigation intact', async () => {
+    const g = joiningGuard();
+    const pending = navigate('/x');
+    await navigate('/');            // the same address: returns at once and must not outdate '/x'
+    g.answer(true);
+    await pending;
+    expect(currentRoute.path).toBe('/x');
+    g.dispose();
+  });
+
+  it('R47: a double navigate to a guarded target + Discard pushes once', async () => {
+    const g = joiningGuard();
+    const push = vi.spyOn(history, 'pushState');
+    const a = navigate('/x');
+    const b = navigate('/x');
+    g.answer(true);
+    await a;
+    await b;
+    expect(g.asked()).toBe(1);
+    expect(push.mock.calls.filter(([, , u]) => u === '/x')).toHaveLength(1);
+    expect(currentRoute.path).toBe('/x');
+    push.mockRestore();
+    g.dispose();
+  });
+
+  it('R47: Back twice while asking + Discard lands on the second target', async () => {
+    await navigate('/a');
+    await navigate('/b');
+    await navigate('/c');
+    const g = joiningGuard();
+    history.back();
+    await popTwice();
+    history.back();
+    await popTwice();
+    expect(location.pathname).toBe('/a');
+    g.answer(true);
+    await popTwice();
+    expect(g.asked()).toBe(1);
+    expect(currentRoute.path).toBe('/a');
+    g.dispose();
+  });
+
+  it('R47: Back twice while asking + Cancel restores the address once', async () => {
+    await navigate('/a');
+    await navigate('/b');
+    await navigate('/c');
+    const g = joiningGuard();
+    history.back();
+    await popTwice();
+    history.back();
+    await popTwice();
+    const push = vi.spyOn(history, 'pushState');
+    g.answer(false);
+    await popTwice();
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(location.pathname).toBe('/c');
+    expect(currentRoute.path).toBe('/c');
+    push.mockRestore();
+    g.dispose();
+  });
+
+  it('R47: a link, then Back while asking, + Discard lands on the link', async () => {
+    await navigate('/a');
+    await navigate('/b');
+    const g = joiningGuard();
+    const link = navigate('/l');
+    history.back();
+    await popTwice();
+    g.answer(true);
+    await link;
+    await popTwice();
+    expect(currentRoute.path).toBe('/l');
+    expect(location.pathname).toBe('/l');
+    g.dispose();
+  });
+});
+
+describe('landingLabel (Polish 3)', () => {
+  it('names each landing path', () => {
+    expect(landingLabel('/teaching')).toBe('Back to teaching');
+    expect(landingLabel('/courses')).toBe('Back to courses');
+  });
 });
 
 describe('defaultLandingPath', () => {
@@ -373,5 +494,68 @@ describe('safeNext fallback parameter', () => {
   });
   it('malformed pathname (%) falls back via decodeURI guard', () => {
     expect(safeNext('%', origin, '/teaching')).toBe('/teaching');
+  });
+});
+
+describe('routeClick (C6)', () => {
+  beforeEach(() => {
+    __resetGuardsForTests();
+    history.replaceState(null, '', '/');
+    currentRoute.path = '/';
+    currentRoute.search = '';
+    currentRoute.hash = '';
+  });
+
+  function clickOn(el: Element, init: MouseEventInit = {}): MouseEvent {
+    const e = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ...init });
+    el.addEventListener('click', (ev) => routeClick(ev as MouseEvent, '/courses'), { once: true });
+    el.dispatchEvent(e);
+    return e;
+  }
+
+  it('routeClick navigates on a plain click', async () => {
+    const a = document.createElement('a');
+    a.href = '/courses';
+    document.body.append(a);
+    const e = clickOn(a);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(e.defaultPrevented).toBe(true);
+    expect(currentRoute.path).toBe('/courses');
+    a.remove();
+  });
+
+  it('routeClick leaves meta/ctrl/shift/alt and middle clicks to the browser', async () => {
+    const a = document.createElement('a');
+    a.href = '/courses';
+    document.body.append(a);
+    // Runs after the handler: records what it left, then stops jsdom's own navigation.
+    const left: boolean[] = [];
+    const probe = (e: Event) => { left.push(!e.defaultPrevented); e.preventDefault(); };
+    window.addEventListener('click', probe);
+    try {
+      for (const init of [{ metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) {
+        clickOn(a, init);
+        await new Promise((r) => setTimeout(r, 0));
+        expect(currentRoute.path).toBe('/');
+      }
+      expect(left).toEqual([true, true, true, true, true]);
+    } finally {
+      window.removeEventListener('click', probe);
+      a.remove();
+    }
+  });
+
+  it('routeClick on an aria-disabled anchor prevents the default and does not navigate', async () => {
+    const a = document.createElement('a');
+    a.href = '/courses';
+    a.setAttribute('aria-disabled', 'true');
+    const inner = document.createElement('span');
+    a.append(inner);
+    document.body.append(a);
+    const e = clickOn(inner);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(e.defaultPrevented).toBe(true);
+    expect(currentRoute.path).toBe('/');
+    a.remove();
   });
 });

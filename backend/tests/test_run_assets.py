@@ -695,3 +695,14 @@ def test_force_delete_by_course_admin_cascades_RunAssetReference(
         )
     )
     assert post_count == 0
+
+
+def test_run_asset_file_response_has_nosniff(admin_client, seed_run_with_groups):
+    """Polish 3 C12: the run-file endpoint sends nosniff with every file."""
+    run, _, _ = seed_run_with_groups()
+    up = admin_client.post(f"/api/runs/{run['id']}/assets",
+                           files={"file": ("d.csv", io.BytesIO(b"hello"), "text/csv")})
+    assert up.status_code == 201, up.text
+    response = admin_client.get(f"/api/runs/{run['id']}/assets/d.csv")
+    assert response.status_code == 200
+    assert response.headers["x-content-type-options"] == "nosniff"

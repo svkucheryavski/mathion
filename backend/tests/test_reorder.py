@@ -1,6 +1,6 @@
 def _setup_course(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "c1", "name": "C", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     return course, version
 
 

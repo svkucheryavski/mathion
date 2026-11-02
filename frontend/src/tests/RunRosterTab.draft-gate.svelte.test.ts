@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import type { ComponentProps } from 'svelte';
 import RunRosterTab from '../components/runs/RunRosterTab.svelte';
@@ -17,6 +17,7 @@ type TabProps = ComponentProps<typeof RunRosterTab>;
 const BASE_PROPS: TabProps = {
   runId: 1,
   runIsPublished: false,
+  isAdmin: true,
   courseSlug: 'calc-101',
   students: [],
   groups: [],
@@ -47,18 +48,21 @@ describe('RunRosterTab draft-gate', () => {
     expect(target!.querySelector('#roster-draft-publish-hint')).toBeFalsy();
   });
 
-  it('add button disabled when draft', () => {
+  it('the add toggle and Import roster are disabled on a draft and described by the banner', () => {
     mountTab({ runIsPublished: false });
-    const btn = target!.querySelector('button[data-action="add-student"]') as HTMLButtonElement;
-    expect(btn?.disabled).toBe(true);
+    for (const action of ['toggle-add-student', 'open-import']) {
+      const btn = target!.querySelector(`button[data-action="${action}"]`) as HTMLButtonElement;
+      expect(btn.disabled).toBe(true);
+      expect(btn.getAttribute('aria-describedby')).toBe('roster-draft-publish-hint');
+    }
+    expect(target!.querySelector('input[name="new-email"]')).toBeNull();
   });
 
-  it('add button not draft-gated when published', () => {
+  it('the add toggle is not draft-gated when published', () => {
     mountTab({ runIsPublished: true });
-    // The button may still be disabled for an empty email (original behavior),
-    // but it must NOT carry the draft-gate aria-describedby when published.
-    const btn = target!.querySelector('button[data-action="add-student"]') as HTMLButtonElement;
-    expect(btn?.getAttribute('aria-describedby')).toBeNull();
+    const btn = target!.querySelector('button[data-action="toggle-add-student"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    expect(btn.getAttribute('aria-describedby')).toBeNull();
   });
 
   it('error_code constant is the exact literal', () => {
@@ -71,5 +75,27 @@ describe('RunRosterTab draft-gate', () => {
     // the bulk strip is hidden entirely. Accept conditional — no button = pass.
     const moveBtn = target!.querySelector('button[aria-label="Move student"]') as HTMLButtonElement | null;
     if (moveBtn) expect(moveBtn.disabled).toBe(false);
+  });
+});
+
+// 6b whole-branch review: the empty-roster link unmounts once the import's
+// refetch fills the roster, so FocusTrap could not return focus to it after
+// Done. The link hands focus to the toolbar's Import roster first, so the
+// modal's opener is a button that stays on the page.
+describe('RunRosterTab — the empty-roster import link', () => {
+  it('focuses the toolbar Import roster before opening the import', () => {
+    let opened = 0;
+    let focusAtOpen: Element | null = null;
+    mountTab({ runIsPublished: true, onOpenImport: () => { opened++; focusAtOpen = document.activeElement; } });
+    const link = target!.querySelector<HTMLButtonElement>('button[data-action="open-import-link"]')!;
+    const toolbar = target!.querySelector<HTMLButtonElement>('button[data-action="open-import"]')!;
+    const focusSpy = vi.spyOn(toolbar, 'focus');
+    link.focus();
+    link.click();
+    flushSync();
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
+    expect(opened).toBe(1);
+    expect(focusAtOpen).toBe(toolbar);
+    expect(document.activeElement).toBe(toolbar);
   });
 });

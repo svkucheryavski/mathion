@@ -3,7 +3,7 @@ def _make_course_with_one_item(admin_client, content_md="hello"):
         "/api/courses", json={"slug": "tree", "name": "Tree", "description": ""}
     ).json()
     version = admin_client.post(
-        f"/api/courses/{course['id']}/versions", json={"info_md": "v-info"}
+        f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": "v-info"}
     ).json()
     block = admin_client.post(
         f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": "b-info"}
@@ -77,7 +77,7 @@ def test_admin_tree_includes_questions_count(admin_client, db):
     """Quiz ItemEditPage needs `questions_count` to show 'N questions' (spec §3, ItemEditPage)."""
     from mathion.models import Block, Sequence, Item, Question
     course = admin_client.post("/api/courses", json={"slug": "q", "name": "Q", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = Block(version_id=version["id"], title="B", slug="b", order=1)
     db.add(block); db.flush()
     seq = Sequence(block_id=block.id, title="S", slug="s", order=1)
@@ -103,7 +103,7 @@ def test_admin_tree_timestamps_match_typescript_contract(admin_client):
     types `AdminTreeVersion.{created_at, content_updated_at}: string`).
     `published_at` and `archived_at` remain nullable until the version transitions."""
     course = admin_client.post("/api/courses", json={"slug": "ts", "name": "T", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     body = admin_client.get(f"/api/versions/{version['id']}/admin-tree").json()
     v = body["version"]
     assert isinstance(v["created_at"], str) and v["created_at"]

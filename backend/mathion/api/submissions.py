@@ -143,7 +143,9 @@ def create_submission(
             )
         ) or 0) + 1
         filename = build_submission_filename(block.order, group.name, next_num)
-        is_late = soft_aware is not None and now > soft_aware
+        # D81 (user): a resubmission is never late -- it is bound only by the
+        # resubmission deadline, past which the gate above refuses it.
+        is_late = not is_resubmission and soft_aware is not None and now > soft_aware
 
         sub = Submission(
             mini_project_id=mp.id, group_id=group.id, submission_number=next_num,

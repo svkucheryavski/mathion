@@ -1,50 +1,63 @@
+<script module lang="ts">
+  // Where a block / sequence header sits relative to the focus (Slice-5c D4):
+  // a row inside the focus container, a row outside it, the open node that IS
+  // the focus, or the open node above it (the block of an open sequence).
+  export type HeaderMode = 'row-focus' | 'row-outside' | 'open-focus' | 'open-parent';
+</script>
+
 <script lang="ts">
+  // Block / sequence header (Slice-5c). What it shows depends on where it sits
+  // relative to the focus (D4): a row in the focus container carries the
+  // move arrows; a row outside it is the title only; the open node that IS the
+  // focus carries edit-title, the arrows and delete (D6, D8); the open node
+  // above the focus shows its title. Version
+  // permissions HIDE what the state doesn't allow; a state-blocked control
+  // stays visible, disabled, with its reason as the title. The accessible
+  // toggle is the title button inside the section heading; the chevron is a
+  // pointer convenience only (5a D14).
+  import { getContext, onDestroy, tick } from 'svelte';
   import { labelFor } from '../../lib/labelFor';
+  import { ApiError } from '../../lib/api';
+  import { mapCreateError } from '../../lib/formErrors';
+  import { pushToast } from '../../stores/toasts.svelte';
+  import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
+  import IconButton from '../ui/IconButton.svelte';
 
   type Props = {
     headerId: string;
     panelId: string;
     level: 'block' | 'sequence';
+    mode: HeaderMode;
     title: string | null;
+    // Only for the accessible-name fallback; never shown (D5).
     slug: string | null;
     index: number;
     expanded: boolean;
-    dirty: boolean;
     busy: boolean;
-    // canReorderUp / canReorderDown gate **visibility** of each arrow.
-    // The parent passes `canStructure && index > 1` and
-    // `canStructure && index < count` respectively, so each flag is
-    // false in two cases: (a) the version is not structurally editable
-    // (published/archived/disabled — both arrows disappear), and (b)
-    // the row is at the boundary in that direction (first row has no
-    // up arrow; last row has no down arrow). Either case is "no
-    // recovery action available", so the user gets the cleaner read by
-    // omitting the control entirely. Dirty/busy disable — both cases
-    // have a recovery action (save, or wait) — keep the button visible
-    // and use the disabled attribute + tooltip instead (smoke item 22).
+    canStructure: boolean;
+    canEditTitle: boolean;
+    // "Not at the boundary in that direction": a boundary arrow is disabled
+    // with a reason instead of omitted.
     canReorderUp: boolean;
     canReorderDown: boolean;
+    // Non-null: the trash is disabled with this title (children remain, …).
+    deleteBlockedReason: string | null;
     onToggle: () => void;
     onMoveUp: () => void;
     onMoveDown: () => void;
+    onDelete: () => void;
+    // Resolves on success and THROWS on failure (the parent owns the PATCH).
+    onRename: (title: string) => Promise<void>;
   };
 
   let {
-    headerId,
-    panelId,
-    level,
-    title,
-    slug,
-    index,
-    expanded,
-    dirty,
-    busy,
-    canReorderUp,
-    canReorderDown,
-    onToggle,
-    onMoveUp,
-    onMoveDown,
+    headerId, panelId, level, mode, title, slug, index, expanded, busy,
+    canStructure, canEditTitle, canReorderUp, canReorderDown, deleteBlockedReason,
+    onToggle, onMoveUp, onMoveDown, onDelete, onRename,
   }: Props = $props();
+
+  const uid = $props.id();
+  const errId = `${uid}-err`;
 
   // Placeholder text when both title and slug are missing. Visible form
   // wraps it in parens to mark "this is a placeholder, not a real name";
@@ -53,44 +66,255 @@
   const placeholder = $derived(`${level} ${index}`);
   const ariaName = $derived(labelFor(title, slug, placeholder));
   const visibleTitle = $derived(title?.trim() || slug?.trim() || `(${placeholder})`);
+  const Level = $derived(level === 'block' ? 'Block' : 'Sequence');
+
+  const showArrows = $derived(canStructure && (mode === 'open-focus' || mode === 'row-focus'));
+  const isFocus = $derived(mode === 'open-focus');
+  const upTitle = $derived(canReorderUp ? 'Move up' : 'Move up — already first');
+  const downTitle = $derived(canReorderDown ? 'Move down' : 'Move down — already last');
+
+  // ---- D8: the inline title ----
+  let renaming = $state(false);
+  let draft = $state('');
+  let error = $state<string | null>(null);
+  // Only an error about the title marks the field invalid (red, C3); a network
+  // or server failure shows the same line under a valid title.
+  let errorIsTitle = $state(false);
+  let saving = $state(false);
+  let inputEl = $state<HTMLInputElement>();
+  let pencilEl = $state<HTMLButtonElement>();
+  let alive = true;
+  onDestroy(() => { alive = false; });
+
+  function msg(e: unknown): string {
+    return e instanceof ApiError ? (e.validationErrors()?.[0]?.msg ?? e.displayMessage) : 'Save failed';
+  }
+
+  async function startRename() {
+    if (!canEditTitle || busy || saving) return;
+    draft = title ?? '';
+    error = null;
+    renaming = true;
+    await tick();
+    if (!alive) return;
+    inputEl?.focus();
+    inputEl?.select();
+  }
+
+  async function cancelRename() {
+    renaming = false;
+    error = null;
+    await tick();
+    if (alive) pencilEl?.focus();
+  }
+
+  async function commitRename() {
+    if (saving) return;
+    const next = draft.trim();
+    if (next === '') { error = 'Title is required'; errorIsTitle = true; return; }
+    if (next === (title ?? '').trim()) { await cancelRename(); return; }
+    saving = true;
+    try {
+      await onRename(next);
+    } catch (e) {
+      saving = false;
+      // The field closed meanwhile (Back, a permission flip): nowhere to
+      // show the error inline.
+      if (!alive || !renaming) { pushToast(msg(e), 'error'); return; }
+      error = msg(e);
+      errorIsTitle = 'title' in mapCreateError(e, ['title']).fieldErrors;
+      await tick();
+      if (alive) inputEl?.focus();
+      return;
+    }
+    saving = false;
+    if (!alive || !renaming) return;
+    await cancelRename();
+  }
+
+  function onKeydown(e: KeyboardEvent) {
+    if (e.isComposing) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation(); // an enclosing handler (a modal, a guard) must not see it
+      if (!saving) void cancelRename();
+      return;
+    }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    void commitRename();
+  }
+
+  // Unsaved registration: optional outside the editor.
+  const registry = getContext<DirtyRegistry | undefined>(DIRTY_REGISTRY_KEY);
+  const tracker: RegisteredTracker = {
+    get isDirty() { return renaming && draft.trim() !== (title ?? '').trim(); },
+    discard() { renaming = false; error = null; },
+  };
+  $effect(() => {
+    if (!registry || !renaming) return;
+    registry.register(tracker);
+    return () => registry.unregister(tracker);
+  });
+
+  // Leaving the focus or losing the permission closes the field — a dirty one
+  // was already confirmed by the guard, or the version went read-only. Even
+  // mid-save: a late failure then toasts (commitRename) instead of vanishing.
+  $effect(() => {
+    if (renaming && (mode !== 'open-focus' || !canEditTitle)) { renaming = false; error = null; }
+  });
 </script>
 
-<div class="accordion-row">
+{#snippet toggle()}
   <button
     id={headerId}
+    class="toggle"
     aria-expanded={expanded}
     aria-controls={panelId}
     aria-label={ariaName}
     onclick={onToggle}
-    class="toggle"
   >
-    <span class="title">{visibleTitle}</span>
-    {#if title?.trim() && slug?.trim()}
-      <span class="slug" aria-hidden="true">/{slug}</span>
-    {/if}
+    {@render num()}<span class="title">{visibleTitle}</span>
   </button>
-  {#if canReorderUp}
-    <button
-      aria-label={`Move ${level} up: ${ariaName}`}
-      onclick={onMoveUp}
-      disabled={dirty || busy}
-      title={dirty ? 'Save or discard changes first' : ''}
-    >↑</button>
-  {/if}
-  {#if canReorderDown}
-    <button
-      aria-label={`Move ${level} down: ${ariaName}`}
-      onclick={onMoveDown}
-      disabled={dirty || busy}
-      title={dirty ? 'Save or discard changes first' : ''}
-    >↓</button>
+{/snippet}
+
+<!-- User, 2026-10-08: a block is numbered "1. Title" (its list position);
+     sequences and items are not. The accessible name stays the title, and the
+     number is aria-hidden so it isn't read before the rename field either. -->
+{#snippet num()}
+  {#if level === 'block'}<span class="num" aria-hidden="true">{index}.</span>{/if}
+{/snippet}
+
+<div class="acc-row" class:block={level === 'block'} class:seq={level === 'sequence'} class:renaming>
+  {#if renaming}
+    {@render num()}
+    <div class="rename">
+      <input
+        bind:this={inputEl}
+        class="title-input"
+        value={draft}
+        maxlength={200}
+        readonly={saving}
+        aria-label={`${Level} title`}
+        aria-invalid={error && errorIsTitle ? 'true' : undefined}
+        aria-describedby={error ? errId : undefined}
+        oninput={(e) => { draft = e.currentTarget.value; error = null; }}
+        onkeydown={onKeydown}
+      />
+      {#if error}<p class="err" role="alert" id={errId}>{error}</p>{/if}
+    </div>
+    <span class="actions">
+      <IconButton size="sm" glyph="check" primary title="Save" aria-label={`Save the ${level} title`} disabled={saving} onclick={() => void commitRename()} />
+      <IconButton size="sm" glyph="close" title="Cancel" aria-label={`Cancel editing the ${level} title`} disabled={saving} onclick={() => void cancelRename()} />
+    </span>
+  {:else}
+    {#if level === 'block'}
+      <h3 class="hd">{@render toggle()}</h3>
+    {:else}
+      <h4 class="hd">{@render toggle()}</h4>
+    {/if}
+    <span class="actions">
+      {#if isFocus && canEditTitle}
+        <IconButton
+          size="sm"
+          glyph="pencil"
+          title={`Edit the ${level} title`}
+          aria-label={`Edit the ${level} title`}
+          disabled={busy}
+          bind:element={pencilEl}
+          onclick={() => void startRename()}
+        />
+      {/if}
+      {#if showArrows}
+        <IconButton
+          size="sm"
+          glyph="up"
+          title={upTitle}
+          aria-label={`Move ${level} up: ${ariaName}`}
+          disabled={busy || !canReorderUp}
+          onclick={onMoveUp}
+        />
+        <IconButton
+          size="sm"
+          glyph="down"
+          title={downTitle}
+          aria-label={`Move ${level} down: ${ariaName}`}
+          disabled={busy || !canReorderDown}
+          onclick={onMoveDown}
+        />
+      {/if}
+      {#if isFocus && canStructure}
+        <IconButton
+          size="sm"
+          glyph="trash"
+          danger
+          title={deleteBlockedReason ?? `Delete this ${level}`}
+          aria-label={`Delete ${level} ${ariaName}`}
+          data-action={level === 'block' ? 'delete-block' : 'delete-sequence'}
+          disabled={busy || deleteBlockedReason !== null}
+          onclick={onDelete}
+        />
+      {/if}
+      {#if mode !== 'row-outside'}
+        <!-- D14: not in the tab order, not announced; mousedown is prevented so a
+             click never leaves focus on an aria-hidden element. -->
+        <IconButton
+          size="sm"
+          borderless
+          glyph={expanded ? 'chevron' : 'chevron-right'}
+          title={expanded ? 'Collapse' : 'Expand'}
+          tabindex={-1}
+          aria-hidden="true"
+          onmousedown={(e) => e.preventDefault()}
+          onclick={onToggle}
+        />
+      {/if}
+    </span>
   {/if}
 </div>
 
 <style>
-  .accordion-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); border-bottom: 1px solid var(--border); }
-  .toggle { flex: 1; display: flex; align-items: center; gap: var(--space-2); background: transparent; border: 0; cursor: pointer; text-align: left; font-size: 1rem; padding: var(--space-1) var(--space-2); }
-  .toggle:hover { background: var(--surface-hover, #f5f5f5); }
-  .title { font-weight: 600; }
-  .slug { color: var(--muted); font-size: 0.85rem; }
+  /* 5c: no strip tint — the row takes its panel's shade (D1). */
+  .acc-row { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 12px; }
+  .hd { margin: 0; flex: 1 1 auto; min-width: 0; font: inherit; }
+  .toggle {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 28px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+  }
+  .title { font-size: 15px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+  .seq .title { font-size: 14.5px; }
+  .num { flex: none; margin-right: 6px; font-size: 15px; font-weight: 600; color: var(--ordinal); font-variant-numeric: tabular-nums; }
+  .actions { display: flex; align-items: center; gap: 6px; }
+  /* D90 (Safari pass): while renaming, the row aligns to the top, and ✓/× and
+     the number keep the field's height, so an error line under the field
+     leaves them level with it instead of centring them on field + message. */
+  .acc-row.renaming { align-items: flex-start; }
+  .renaming .actions { height: var(--control-h); }
+  .renaming .num { line-height: var(--control-h); }
+  .rename { flex: 1 1 auto; min-width: 0; }
+  .title-input {
+    box-sizing: border-box;
+    width: 100%;
+    height: var(--control-h);
+    padding: 0 var(--control-pad-x);
+    border: 1.5px solid var(--primary);
+    border-radius: var(--radius);
+    box-shadow: 0 0 0 3px var(--primary-soft); /* the open-editor ring */
+    background: var(--surface);
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .seq .title-input { font-size: 14.5px; }
+  /* C3: an invalid title keeps a red edge when focused: (0,3,0) beats base.css's focus rule (0,2,1). */
+  .title-input[aria-invalid='true'] { border: 1.5px solid var(--danger); }
+  .err { margin: var(--space-1) 0 0; font-size: 12.5px; color: var(--danger); }
 </style>

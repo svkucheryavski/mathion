@@ -1,6 +1,7 @@
-import { it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import ItemRow from '../components/editor/ItemRow.svelte';
+import ItemMark from '../components/course/ItemMark.svelte';
 import type { AdminTreeItem } from '../lib/types';
 
 const item = (over: Partial<AdminTreeItem> = {}): AdminTreeItem => ({
@@ -18,7 +19,7 @@ function mountRow(over: Record<string, unknown> = {}) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const props: any = $state({
     item: item(), index: 1, canStructure: true, canReorderUp: true,
-    canReorderDown: true, parentDirty: false, busy: false,
+    canReorderDown: true, busy: false,
     onMoveUp: vi.fn(), onMoveDown: vi.fn(), onOpen: vi.fn(), onDelete: vi.fn(), ...over,
   });
   const cmp = mount(ItemRow, { target, props });
@@ -58,4 +59,110 @@ it('the count updates reactively when questions_count changes (the post-delete r
   props.item = item({ questions_count: 2 });   // loadAdminTree refresh replaces the item prop
   flushSync();
   expect(count(target)?.textContent?.trim()).toBe('2 questions');
+});
+
+// Slice-5a T6: ItemMark replaces the emoji glyph; four fixed icon slots.
+const slot = (t: HTMLElement, glyph: string) => t.querySelector<HTMLButtonElement>(`.actions button[data-glyph="${glyph}"]`)!;
+const EMOJI = /\p{Extended_Pictographic}/u;
+
+describe('ItemRow — 3b treatment (T6)', () => {
+  it('leads with a not-yet ItemMark of the item type and carries no emoji', () => {
+    const { target } = mountRow({ item: item({ type: 'video' }) });
+    flushSync();
+    const mark = target.querySelector('.item-row > .item-mark')!;
+    expect(mark.classList.contains('not-yet')).toBe(true);
+    expect(target.querySelector('.glyph')).toBeNull();
+    expect(EMOJI.test(target.textContent ?? '')).toBe(false);
+  });
+
+  it('title, and for a quiz the faint separator + mono count', () => {
+    const { target } = mountRow();
+    flushSync();
+    expect(target.querySelector('.item-title')!.textContent).toBe('Pop quiz');
+    expect(target.querySelector('.sep')!.getAttribute('aria-hidden')).toBe('true');
+    expect(count(target)!.classList.contains('mono')).toBe(true);
+  });
+
+  it('four slots in order ↑ ↓ open delete, named after the item', () => {
+    const { target } = mountRow();
+    flushSync();
+    const slots = [...target.querySelectorAll<HTMLButtonElement>('.actions button')];
+    expect(slots.map((b) => b.dataset.glyph)).toEqual(['up', 'down', 'pencil', 'trash']);
+    expect(slots.map((b) => b.getAttribute('aria-label'))).toEqual([
+      'Move item up: Pop quiz', 'Move item down: Pop quiz', 'Open Pop quiz', 'Delete Pop quiz',
+    ]);
+    expect(slots.map((b) => b.title)).toEqual(['Move up', 'Move down', 'Open', 'Delete']);
+    expect(slots.every((b) => !b.disabled)).toBe(true);
+  });
+
+  it('boundary arrows stay rendered, disabled with "already first/last"', () => {
+    const { target } = mountRow({ canReorderUp: false, canReorderDown: false });
+    flushSync();
+    expect(slot(target, 'up').disabled).toBe(true);
+    expect(slot(target, 'up').title).toBe('Move up — already first');
+    expect(slot(target, 'down').disabled).toBe(true);
+    expect(slot(target, 'down').title).toBe('Move down — already last');
+  });
+
+  it('the mark is the item\'s own type (compared with a standalone ItemMark)', () => {
+    for (const type of ['quiz', 'video'] as const) {
+      const { target } = mountRow({ item: item({ type }) });
+      flushSync();
+      const ref = document.createElement('div');
+      const m = mount(ItemMark, { target: ref, props: { type, state: 'not-yet' } });
+      flushSync();
+      expect(target.querySelector('.item-row > .item-mark')!.outerHTML).toBe(ref.querySelector('.item-mark')!.outerHTML);
+      unmount(m);
+      cleanup?.(); cleanup = null; document.body.innerHTML = '';
+    }
+  });
+
+  it('with no title and no slug: "(item N)" visibly, slot names end in the plain placeholder', () => {
+    const { target } = mountRow({ item: item({ title: '', slug: '' }), index: 2 });
+    flushSync();
+    expect(target.querySelector('.item-title')!.textContent).toBe('(item 2)');
+    expect([...target.querySelectorAll('.actions button')].map((b) => b.getAttribute('aria-label'))).toEqual([
+      'Move item up: item 2', 'Move item down: item 2', 'Open item 2', 'Delete item 2',
+    ]);
+  });
+
+  it('busy disables every slot', () => {
+    const { target } = mountRow({ busy: true });
+    flushSync();
+    expect([...target.querySelectorAll<HTMLButtonElement>('.actions button')].every((b) => b.disabled)).toBe(true);
+  });
+
+  it('each enabled slot calls its handler', () => {
+    const onMoveUp = vi.fn(), onMoveDown = vi.fn(), onOpen = vi.fn(), onDelete = vi.fn();
+    const { target } = mountRow({ onMoveUp, onMoveDown, onOpen, onDelete });
+    flushSync();
+    slot(target, 'up').click();
+    slot(target, 'down').click();
+    slot(target, 'pencil').click();
+    slot(target, 'trash').click();
+    expect([onMoveUp, onMoveDown, onOpen, onDelete].map((f) => f.mock.calls.length)).toEqual([1, 1, 1, 1]);
+  });
+});
+
+describe('ItemRow — Slice-5c T3', () => {
+  it('no slug in the row', () => {
+    const { target } = mountRow();
+    flushSync();
+    expect(target.querySelector('.item-slug')).toBeNull();
+    expect(target.textContent).not.toContain('/');
+  });
+
+  it('canStructure false (published / archived): ✎ only — no ↑ ↓ trash', () => {
+    const { target } = mountRow({ canStructure: false });
+    flushSync();
+    const labels = [...target.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'));
+    expect(labels).toEqual([expect.stringMatching(/^Open /)]);
+  });
+
+  it('canStructure true: ↑ ↓ ✎ trash in that order', () => {
+    const { target } = mountRow();
+    flushSync();
+    const glyphs = [...target.querySelectorAll('button')].map((b) => b.getAttribute('data-glyph'));
+    expect(glyphs).toEqual(['up', 'down', 'pencil', 'trash']);
+  });
 });

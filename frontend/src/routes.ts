@@ -11,8 +11,10 @@ export const routes: Route[] = [
   { path: '/courses/:courseSlug/edit/v/:versionId', component: 'VersionEditPage', auth: true },
   { path: '/courses/:courseSlug/edit/v/:versionId/blocks/:blockId', component: 'VersionEditPage', auth: true },
   { path: '/courses/:courseSlug/edit/v/:versionId/blocks/:blockId/sequences/:sequenceId', component: 'VersionEditPage', auth: true },
-  { path: '/courses/:courseSlug/edit/v/:versionId/blocks/:blockId/sequences/:sequenceId/items/:itemId', component: 'ItemEditPage', auth: true },
-  { path: '/courses/:courseSlug/runs', component: 'RunListPage', auth: true },
-  { path: '/courses/:courseSlug/runs/:runId', component: 'RunDetailPage', auth: true },
+  { path: '/courses/:courseSlug/edit/v/:versionId/blocks/:blockId/sequences/:sequenceId/items/:itemId', component: 'VersionEditPage', auth: true },
+  { path: '/courses/:courseSlug/runs', component: 'RunsRedirect', auth: true },
+  { path: '/courses/:courseSlug/runs/:runId', component: 'RunsRedirect', auth: true },
+  { path: '/teaching/:courseSlug', component: 'RunListPage', auth: true },
+  { path: '/teaching/:courseSlug/runs/:runId', component: 'RunDetailPage', auth: true },
   { path: '/superuser/:token', component: 'SuperuserShell', auth: false },
 ];

@@ -67,7 +67,7 @@ def _make_run_with_mp(admin_client, db, slug="mp"):
         "/api/courses", json={"slug": slug, "name": slug, "description": ""}
     ).json()
     version = admin_client.post(
-        f"/api/courses/{course['id']}/versions", json={"info_md": ""}
+        f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}
     ).json()
     block = Block(version_id=version["id"], title="B1", slug="b1", order=1)
     db.add(block); db.flush()
@@ -234,7 +234,7 @@ def test_mp_dashboard_counts_aggregation(admin_client, db):
     from mathion.models_auth import User
 
     course = admin_client.post("/api/courses", json={"slug": "ct", "name": "CT", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = Block(version_id=version["id"], title="B", slug="b", order=1)
     db.add(block); db.flush()
     seq = Sequence(block_id=block.id, title="S", slug="s", order=1)
@@ -306,7 +306,7 @@ def test_mp_dashboard_unpublished_mp_included(admin_client, db):
     from datetime import datetime, timezone, timedelta
     from mathion.models import (Block, Sequence, Item, Group, MiniProject)
     course = admin_client.post("/api/courses", json={"slug": "up2", "name": "UP", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = Block(version_id=version["id"], title="B", slug="b", order=1)
     db.add(block); db.flush()
     seq = Sequence(block_id=block.id, title="S", slug="s", order=1)
@@ -338,7 +338,7 @@ def test_mp_dashboard_disabled_group_visible(admin_client, db):
     from mathion.models import (Block, Sequence, Item, Group, MiniProject)
 
     course = admin_client.post("/api/courses", json={"slug": "dgmp", "name": "D", "description": ""}).json()
-    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"info_md": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
     block = Block(version_id=version["id"], title="B", slug="b", order=1)
     db.add(block); db.flush()
     seq = Sequence(block_id=block.id, title="S", slug="s", order=1)

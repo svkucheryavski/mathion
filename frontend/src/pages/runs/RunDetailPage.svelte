@@ -1,16 +1,19 @@
 <script lang="ts">
-  import { api, ApiError } from '../../lib/api';
+  import { tick, untrack } from 'svelte';
+  import { api, ApiError, OFFLINE_MESSAGE } from '../../lib/api';
   import { deleteRun, getRun, listVersions, publishRun, unpublishRun } from '../../lib/runs';
   import { listRunTeachers } from '../../lib/runTeachers';
   import { listGroups } from '../../lib/runGroups';
   import { listRunStudents } from '../../lib/runRoster';
   import { runStatus } from '../../lib/runStatus';
-  import { navigate } from '../../lib/router.svelte';
+  import { currentRoute, navigate } from '../../lib/router.svelte';
+  import { routeClick } from '../../lib/routeClick';
   import { pushToast } from '../../stores/toasts.svelte';
   import { session } from '../../stores/session.svelte';
-  import LoadingPlaceholder from '../../components/ui/LoadingPlaceholder.svelte';
-  import InlineConfirm from '../../components/ui/InlineConfirm.svelte';
-  import RunOverviewTab from '../../components/runs/RunOverviewTab.svelte';
+  import Skeleton from '../../components/ui/Skeleton.svelte';
+  import RunOverviewTab, {
+    type DeleteOutcome, type PublishOutcome, type Readiness, type ReadinessRow, type UnpublishOutcome,
+  } from '../../components/runs/RunOverviewTab.svelte';
   import RunTeachersTab from '../../components/runs/RunTeachersTab.svelte';
   import RunGroupsTab from '../../components/runs/RunGroupsTab.svelte';
   import RunRosterTab from '../../components/runs/RunRosterTab.svelte';
@@ -23,12 +26,14 @@
   import { listBlocks } from '../../lib/blocks';
   import { listMiniProjects } from '../../lib/miniProjects';
   import { listRunAssets } from '../../lib/runAssets';
+  import { RUN_TABS, isRunPath, isTabKey, parseTab, rawTab, withTab, withoutTab, type ActiveTab } from '../../lib/runTabs';
+  import ErrorState from '../../components/ui/ErrorState.svelte';
+  import RunStatusChip from '../../components/runs/RunStatusChip.svelte';
+  import TeachingCrumbs from '../../components/runs/TeachingCrumbs.svelte';
   import type {
     Course, Version, RunResponse, RunTeacherResponse, GroupResponse, RunStudentResponse,
     BlockResponse, MiniProjectResponse, RunAssetResponse, PublishConflict,
   } from '../../lib/types';
-
-  export type ActiveTab = 'overview' | 'teachers' | 'groups' | 'roster' | 'mini-projects' | 'assets' | 'progress' | 'submission';
 
   let { courseSlug, runId }: { courseSlug: string; runId: string } = $props();
 
@@ -49,7 +54,40 @@
   let pendingEditTarget = $state<MiniProjectResponse | null>(null);
   let loadError = $state<ApiError | null>(null);
 
-  let activeTab = $state<ActiveTab>('overview');
+  // R1/R10: the address is the one source of truth for the open tab.
+  const activeTab = $derived(parseTab(currentRoute.search));
+  const tabEls: Partial<Record<ActiveTab, HTMLButtonElement>> = {};
+
+  // An unknown ?tab is rewritten once, dropping only `tab` (P11: force, since
+  // nothing can be open on a tab that was never shown). A missing one is left.
+  $effect(() => {
+    const path = currentRoute.path;
+    const search = currentRoute.search;
+    if (!isRunPath(path)) return;
+    const raw = rawTab(search);
+    if (raw === null || isTabKey(raw)) return;
+    untrack(() => {
+      void navigate(path + withoutTab(search) + currentRoute.hash, { replace: true, force: true });
+    });
+  });
+
+  // Every tab switch. The registered unsaved-changes guards may cancel the
+  // navigate; the extras apply only when the address really shows `tab`.
+  // focusTab is for jumps from inside a panel (the clicked control unmounts);
+  // a tab-button click keeps its own focus. P10: focus first, then the edit
+  // target, so the modal's FocusTrap returns focus to the tab.
+  async function setTab(
+    tab: ActiveTab,
+    opts: { prefilter?: 'unassigned' | null; editTarget?: MiniProjectResponse; focusTab?: boolean } = {},
+  ): Promise<void> {
+    await navigate(currentRoute.path + withTab(currentRoute.search, tab) + currentRoute.hash, { replace: true });
+    if (parseTab(currentRoute.search) !== tab) return;
+    if (opts.prefilter !== undefined) rosterPrefilter = opts.prefilter;
+    if (!opts.focusTab && !opts.editTarget) return;
+    await tick();
+    if (opts.focusTab) tabEls[tab]?.focus();
+    if (opts.editTarget) pendingEditTarget = opts.editTarget;
+  }
   const isAdmin = $derived(course?.is_admin === true);
   const isThisRunTeacher = $derived(
     session.user != null && (teachers ?? []).some((t) => t.user_id === session.user!.id),
@@ -65,6 +103,8 @@
 
   async function loadAll(slug: string, rid: number) {
     const myToken = ++loadToken;
+    // R33: a run change, a course change or reloadRun() frees a stuck publish.
+    publishing = false; unpublishing = false;
     course = null; run = null; versions = null; teachers = null;
     groups = null; students = null; blocks = null; miniProjects = null;
     assets = null; pendingEditTarget = null;
@@ -156,6 +196,15 @@
     students = ss;
   }
 
+  // R39: the import modal outlives a tab change. Closed while another tab is
+  // open, its opener is gone and focus would fall to <body>: take the tab.
+  async function closeImport(): Promise<void> {
+    showImportModal = false;
+    await tick();
+    const active = document.activeElement;
+    if (!active || active === document.body) tabEls[activeTab]?.focus();
+  }
+
   $effect(() => {
     void courseSlug;
     if (runIdInt === null) return;
@@ -164,7 +213,6 @@
 
   $effect(() => {
     void runIdInt;
-    activeTab = 'overview';
     rosterPrefilter = null;
     showImportModal = false;
     publishModalOpen = false;
@@ -172,308 +220,315 @@
   });
 
   function gotoTab(tab: ActiveTab, prefilter?: 'unassigned' | null) {
-    activeTab = tab;
-    rosterPrefilter = prefilter ?? null;
+    void setTab(tab, { prefilter: prefilter ?? null, focusTab: true });
   }
 
   const pinned = $derived(versions?.find((v) => v.id === run?.version_id));
   const showDisabledBanner = $derived(pinned?.is_disabled === true);
   const pinnedAvailable = $derived(versions == null || pinned != null);
 
-  const runStatusBadge = $derived(run ? runStatus(run) : null);
-
-  // Rank-by-created_at to match RunListPage's `v{N} ({date})` format.
-  const versionLabel = $derived.by(() => {
-    if (!versions || !pinned) return null;
-    const sorted = [...versions].sort((a, b) => a.created_at.localeCompare(b.created_at));
-    const idx = sorted.findIndex((v) => v.id === pinned.id);
-    if (idx < 0) return null;
-    return `v${idx + 1} (${pinned.created_at.slice(0, 10)})`;
+  const metaLine = $derived.by(() => {
+    if (!run || !students || !groups) return '';
+    const parts = [`${students.length} ${students.length === 1 ? 'student' : 'students'}`];
+    if (run.groups_enabled) parts.push(`${groups.length} ${groups.length === 1 ? 'group' : 'groups'}`);
+    parts.push(`v. ${run.version_id}`);
+    return parts.join(' · ');
   });
 
-  type ChecklistState = 'ok' | 'violated' | 'na';
-  type ChecklistRow = { id: string; label: string; state: ChecklistState; hint?: string };
-
-  const readiness = $derived.by((): { checks: ChecklistRow[]; firstViolation: string | null } => {
-    const checks: ChecklistRow[] = [];
-    if (!run || teachers === null || groups === null || students === null) {
-      return { checks: [], firstViolation: null };
-    }
-    // Teacher
-    const teacherOk = teachers.length >= 1;
-    checks.push({
-      id: 'teacher',
-      label: 'At least one teacher',
-      state: teacherOk ? 'ok' : 'violated',
-      hint: teacherOk ? undefined : 'Add at least one teacher.',
-    });
-    // Students assigned
-    if (!run.groups_enabled) {
-      checks.push({ id: 'assigned', label: 'All students assigned to a group', state: 'na' });
-    } else {
-      const unassigned = students.filter((s: RunStudentResponse) => s.group_id === null).length;
+  // R34: the rows in the order of the server's publish checks (api/runs.py
+  // publish_run): a teacher, an enabled version, no unassigned student, no
+  // oversized group. No students and no groups are fine.
+  const readiness = $derived.by((): Readiness => {
+    if (!run || teachers === null || groups === null || students === null) return { checks: [] };
+    const checks: ReadinessRow[] = [];
+    const teacherLabel = 'At least one teacher assigned';
+    checks.push(teachers.length > 0
+      ? { id: 'teacher', label: teacherLabel, state: 'ok' }
+      : { id: 'teacher', label: teacherLabel, state: 'violated', hint: 'Add a teacher — open Teachers', hintTab: 'teachers', reason: 'No teacher is assigned yet' });
+    const versionLabel = 'Course version enabled';
+    if (!pinned) checks.push({ id: 'version', label: versionLabel, state: 'na' });
+    else if (pinned.is_disabled) {
       checks.push({
-        id: 'assigned',
-        label: 'All students assigned to a group',
-        state: unassigned === 0 ? 'ok' : 'violated',
-        hint: unassigned === 0 ? undefined : `${unassigned} students unassigned.`,
+        id: 'version', label: versionLabel, state: 'violated',
+        hint: isAdmin ? 'Re-enable it in the course editor' : 'Ask a course admin to re-enable it',
+        reason: 'The course version is disabled',
+      });
+    } else checks.push({ id: 'version', label: versionLabel, state: 'ok' });
+    const assignedLabel = 'Every student assigned to a group';
+    const sizesLabel = 'No group over 10 students';
+    if (!run.groups_enabled) {
+      checks.push({ id: 'assigned', label: assignedLabel, state: 'na' }, { id: 'sizes', label: sizesLabel, state: 'na' });
+      return { checks };
+    }
+    const unassigned = students.filter((s: RunStudentResponse) => s.group_id === null).length;
+    if (unassigned === 0) checks.push({ id: 'assigned', label: assignedLabel, state: 'ok' });
+    else {
+      checks.push({
+        id: 'assigned', label: assignedLabel, state: 'violated',
+        hint: groups.length === 0 ? 'No groups yet — open Groups' : `${unassigned} unassigned — open Roster`,
+        hintTab: groups.length === 0 ? 'groups' : 'roster',
+        reason: unassigned === 1 ? '1 student is still unassigned to a group' : `${unassigned} students are still unassigned to a group`,
       });
     }
-    // Group sizes — matches api/runs.py publish-gate (oversized-only).
-    // Zero groups and empty groups are OK; teachers may add groups + students post-publish.
-    if (!run.groups_enabled) {
-      checks.push({ id: 'sizes', label: 'No oversized groups (≤10 students each)', state: 'na' });
-    } else {
-      const oversized = groups.filter((g: GroupResponse) => g.student_count > 10);
-      checks.push({
-        id: 'sizes',
-        label: 'No oversized groups (≤10 students each)',
-        state: oversized.length === 0 ? 'ok' : 'violated',
-        hint: oversized.length === 0 ? undefined : oversized.map((g: GroupResponse) => `${g.name} (${g.student_count})`).join(', '),
-      });
+    const oversized = groups.filter((g: GroupResponse) => g.student_count > 10);
+    if (oversized.length === 0) checks.push({ id: 'sizes', label: sizesLabel, state: 'ok' });
+    else {
+      const list = oversized.map((g: GroupResponse) => `${g.name} (${g.student_count})`).join(', ');
+      checks.push({ id: 'sizes', label: sizesLabel, state: 'violated', hint: list, reason: `Groups over 10 students: ${list}` });
     }
-    const violated = checks.find((c) => c.state === 'violated');
-    return { checks, firstViolation: violated?.hint ?? null };
+    return { checks };
   });
 
-  const publishBlocked = $derived(readiness.firstViolation !== null || showDisabledBanner);
-  const publishTooltip = $derived(showDisabledBanner
-    ? "This run's course version is disabled. Re-enable it under Course Editor before publishing."
-    : (readiness.firstViolation ?? ''));
-
-  let unpublishConfirmOpen = $state(false);
   let publishConflicts: PublishConflict[] = $state([]);
   let publishModalOpen = $state(false);
+  // R33: one publish / unpublish request at a time. Each flag clears only on
+  // its own load token; loadAll resets both.
+  let publishing = $state(false);
+  let unpublishing = $state(false);
 
-  async function doPublish() {
-    if (runIdInt === null) return;
-    const myToken = loadToken;
+  // After a publish 409 the page may be stale: read back what the rows use.
+  async function refetchReadiness(rid: number, myToken: number): Promise<void> {
+    if (!course) return;
     try {
-      const r = await publishRun(runIdInt);
+      const [r, vs, ts, gs, ss] = await Promise.all([
+        getRun(rid), listVersions(course.id), listRunTeachers(rid), listGroups(rid), listRunStudents(rid),
+      ]);
       if (myToken !== loadToken) return;
+      run = r; versions = vs; teachers = ts; groups = gs; students = ss;
+    } catch { /* the toast already said why; the page keeps what it had */ }
+  }
+
+  async function doPublish(): Promise<PublishOutcome> {
+    if (runIdInt === null || publishing || unpublishing) return 'failed';
+    const myToken = loadToken;
+    const rid = runIdInt;
+    publishing = true;
+    try {
+      const r = await publishRun(rid);
+      if (myToken !== loadToken) return 'failed';
       run = r;
+      return 'published';
     } catch (e) {
-      if (myToken !== loadToken) return;
+      if (myToken !== loadToken) return 'failed';
       if (e instanceof ApiError && e.errorCode === 'student_already_active_in_course') {
         const raw = (e.body as { conflicts?: unknown } | undefined)?.conflicts;
         const conflicts: PublishConflict[] = Array.isArray(raw) ? (raw as PublishConflict[]) : [];
         if (conflicts.length === 0) {
           pushToast(e.displayMessage, 'error');
-          return;
+          return 'failed';
         }
         publishConflicts = conflicts;
         publishModalOpen = true;
-      } else if (e instanceof ApiError) {
-        pushToast(e.displayMessage, 'error');
+        return 'conflicts';
       }
-    }
-  }
-
-  async function onDeleteRun() {
-    if (runIdInt === null || !run) return;
-    try {
-      await deleteRun(runIdInt);
-      navigate(`/courses/${courseSlug}/runs`);
-    } catch (e) {
       if (e instanceof ApiError) {
-        const msg = typeof e.detail === 'string' ? e.detail : '';
-        if (e.status === 409 && /students/i.test(msg)) {
-          pushToast('Clear roster before deleting.', 'error');
-        } else {
-          pushToast(e.displayMessage, 'error');
+        pushToast(e.displayMessage, 'error');
+        // Published elsewhere, or a check this page missed: read the run back.
+        if (e.status === 409) {
+          await refetchReadiness(rid, myToken);
+          if (myToken === loadToken && run?.is_published) return 'published';
         }
+      } else {
+        pushToast(OFFLINE_MESSAGE, 'error');
       }
+      return 'failed';
+    } finally {
+      if (myToken === loadToken) publishing = false;
     }
   }
 
-  async function doUnpublish() {
-    if (runIdInt === null) return;
+  async function doUnpublish(): Promise<UnpublishOutcome> {
+    if (runIdInt === null || publishing || unpublishing) return 'failed';
     const myToken = loadToken;
     const rid = runIdInt;
+    unpublishing = true;
     try {
       const r = await unpublishRun(rid);
-      if (myToken !== loadToken) return;
+      if (myToken !== loadToken) return 'failed';
       run = r;
-      unpublishConfirmOpen = false;
+      return 'unpublished';
     } catch (e) {
-      if (myToken !== loadToken) return;
+      if (myToken !== loadToken) return 'failed';
       if (e instanceof ApiError) {
         pushToast(e.displayMessage, 'error');
-        // Spec §6: 409 "Run is not published" — another tab unpublished first.
-        // Refetch run so the UI flips back to Publish.
+        // 409 "Run is not published": another tab unpublished first.
         if (e.status === 409) {
           try {
             const r = await getRun(rid);
-            if (myToken !== loadToken) return;
+            if (myToken !== loadToken) return 'failed';
             run = r;
+            if (!r.is_published) return 'draft-now';
           } catch { /* refetch failed; toast already shown */ }
         }
+      } else {
+        pushToast(OFFLINE_MESSAGE, 'error');
       }
-      if (myToken !== loadToken) return;
-      unpublishConfirmOpen = false;
+      return 'failed';
+    } finally {
+      if (myToken === loadToken) unpublishing = false;
+    }
+  }
+
+  // D24 / D28 / P24: a forced delete; a 409 means the run was published meanwhile.
+  async function onDeleteRun(): Promise<DeleteOutcome> {
+    if (runIdInt === null) return { kind: 'failed', message: 'Invalid run.' };
+    const myToken = loadToken;
+    const rid = runIdInt;
+    try {
+      await deleteRun(rid, { force: true });
+      pushToast('Run deleted.', 'success');
+      void navigate(`/teaching/${encodeURIComponent(courseSlug)}`);
+      return { kind: 'deleted' };
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        try {
+          const r = await getRun(rid);
+          if (myToken === loadToken) run = r;
+        } catch { /* keep the page as it is; the toast explains */ }
+        pushToast('This run was published in the meantime. Unpublish it before deleting.', 'error');
+        return { kind: 'published-now' };
+      }
+      return { kind: 'failed', message: e instanceof ApiError ? e.displayMessage : 'Could not delete the run.' };
     }
   }
 </script>
 
-{#if runIdInt === null}
-  <div class="error">Invalid run.</div>
-{:else if loadError}
-  <div class="error">{loadError.displayMessage}</div>
-{:else if course === null || run === null || versions === null || teachers === null || groups === null || students === null || blocks === null || miniProjects === null || assets === null}
-  <LoadingPlaceholder label="Loading run…" />
-{:else}
-  <header class="run-header">
-    <nav aria-label="Breadcrumb" class="breadcrumb">
-      {#if course.is_admin}
-        <a href="/courses" onclick={(e) => { e.preventDefault(); navigate('/courses'); }}>Courses</a> ›
-        <a href={`/courses/${course.slug}`} onclick={(e) => { e.preventDefault(); navigate(`/courses/${course!.slug}`); }}>{course.name}</a> ›
-        <a href={`/courses/${course.slug}/runs`} onclick={(e) => { e.preventDefault(); navigate(`/courses/${course!.slug}/runs`); }}>Runs</a> ›
-        {run.title}
-      {:else}
-        <a href="/teaching" onclick={(e) => { e.preventDefault(); navigate('/teaching'); }}>Teaching</a> ›
-        {course.name} ›
-        {run.title}
-      {/if}
-    </nav>
-    <div class="run-meta">
-      {#if runStatusBadge}
-        <span class="badge badge-{runStatusBadge}" data-testid="status-badge">{runStatusBadge[0].toUpperCase() + runStatusBadge.slice(1)}</span>
-      {/if}
-      {#if versionLabel}
-        <span class="version-label" data-testid="version-label">{versionLabel}</span>
-      {/if}
-    </div>
-    {#if course.is_admin}
-      <div class="publish-bar">
-        {#if !run.is_published}
-          <button
-            data-action="publish"
-            disabled={publishBlocked}
-            title={publishTooltip}
-            onclick={doPublish}
-          >
-            Publish
-          </button>
-        {:else if unpublishConfirmOpen}
-          <InlineConfirm
-            confirmLabel="Confirm Unpublish"
-            warning="Students will lose access immediately. Their progress data is preserved."
-            onConfirm={doUnpublish}
-            onCancel={() => (unpublishConfirmOpen = false)}
-          />
+{#snippet backToTeaching()}
+  <a href="/teaching" onclick={(e) => routeClick(e, '/teaching')}>Back to Teaching</a>
+{/snippet}
+
+<div class="run-page">
+  {#if runIdInt === null}
+    <ErrorState variant="page" title="Invalid run." action={backToTeaching} />
+  {:else if loadError}
+    <ErrorState variant="page" title={loadError.displayMessage} action={backToTeaching} />
+  {:else if course === null || run === null || versions === null || teachers === null || groups === null || students === null || blocks === null || miniProjects === null || assets === null}
+    <Skeleton rows={3} label="Loading run…" />
+  {:else}
+    <header class="run-head">
+      <TeachingCrumbs course={course} runTitle={run.title} />
+      <div class="run-title-row">
+        <h1>{run.title}</h1>
+        <RunStatusChip status={runStatus(run)} />
+        <p class="run-meta">{metaLine}</p>
+      </div>
+    </header>
+
+    {#if showDisabledBanner}
+      <div class="run-banner-warn">
+        {#if course.is_admin}
+          This run's course version is disabled. Re-enable it under Course Editor before publishing.
         {:else}
-          <button data-action="unpublish" onclick={() => (unpublishConfirmOpen = true)}>Unpublish</button>
+          This run's course version is disabled. Some editing actions are locked until a course admin re-enables it.
         {/if}
       </div>
     {/if}
-  </header>
 
-  {#if showDisabledBanner}
-    <div class="banner-warning">
-      {#if course.is_admin}
-        This run's course version is disabled. Re-enable it under Course Editor before publishing.
-      {:else}
-        This run's course version is disabled. Some editing actions are locked until a course admin re-enables it.
+    <div class="run-tabs" role="tablist" aria-label="Run sections">
+      {#each RUN_TABS as t (t.key)}
+        <button
+          type="button"
+          class="run-tab"
+          role="tab"
+          id="run-tab-{t.key}"
+          aria-selected={activeTab === t.key}
+          aria-controls="run-panel"
+          bind:this={tabEls[t.key]}
+          onclick={() => void setTab(t.key)}
+        >{t.label}</button>
+      {/each}
+    </div>
+
+    <div class="run-panel" id="run-panel" role="tabpanel" aria-labelledby="run-tab-{activeTab}">
+      {#if activeTab === 'overview'}
+        <RunOverviewTab
+          {run}
+          setRun={(r) => { if (r.id === runIdInt) run = r; }}
+          {pinned}
+          {isAdmin}
+          {readiness}
+          publishing={publishing || unpublishing}
+          onNavigateTab={gotoTab}
+          onPublish={doPublish}
+          onUnpublish={doUnpublish}
+          {onDeleteRun}
+        />
+      {:else if activeTab === 'progress'}
+        <RunProgressTab runId={run.id} {isAdmin} isTeacher={isThisRunTeacher} blocks={blocks ?? []} />
+      {:else if activeTab === 'submissions'}
+        <RunSubmissionTab runId={run.id} {isAdmin} isTeacher={isThisRunTeacher} blocks={blocks ?? []} />
+      {:else if activeTab === 'roster'}
+        <RunRosterTab
+          runId={runIdInt!}
+          runIsPublished={run.is_published}
+          {isAdmin}
+          {courseSlug}
+          onNavigateToTab={(t) => void setTab(t, { focusTab: true })}
+          {students}
+          {groups}
+          groupsEnabled={run.groups_enabled}
+          {rosterPrefilter}
+          {onPrefilterClear}
+          onRefetchRosterData={refetchRosterData}
+          onRefetchGroupsOnly={refetchGroups}
+          onOpenImport={() => (showImportModal = true)}
+        />
+      {:else if activeTab === 'groups'}
+        <RunGroupsTab
+          runId={runIdInt!}
+          {groups}
+          groupsEnabled={run.groups_enabled}
+          onRefetchGroups={refetchGroups}
+          onRefetchGroupsAndStudents={refetchGroupsAndStudents}
+          course={course!}
+          runIsPublished={run.is_published}
+          onGotoOverview={() => void setTab('overview', { focusTab: true })}
+        />
+      {:else if activeTab === 'mini-projects'}
+        <RunMiniProjectsTab
+          runId={runIdInt!}
+          runIsPublished={run.is_published}
+          runGroupsEnabled={run.groups_enabled}
+          runEndDate={run.end_date}
+          versionIsDisabled={showDisabledBanner}
+          {pinnedAvailable}
+          blocks={blocks ?? []}
+          miniProjects={miniProjects ?? []}
+          onRefetchMiniProjects={refetchMiniProjects}
+          onRefetchAssets={refetchAssets}
+          onNavigateToTab={(t) => void setTab(t, { focusTab: true })}
+          pendingEditTarget={pendingEditTarget}
+          onPendingEditConsumed={() => (pendingEditTarget = null)}
+          course={course!}
+        />
+      {:else if activeTab === 'assets'}
+        <RunAssetsTab
+          runId={runIdInt!}
+          assets={assets ?? []}
+          miniProjects={miniProjects ?? []}
+          course={course!}
+          versionIsDisabled={showDisabledBanner}
+          onRefetchAssets={refetchAssets}
+          onRefetchMiniProjects={refetchMiniProjects}
+          onEditMiniProject={(mp) => void setTab('mini-projects', { editTarget: mp, focusTab: true })}
+          onReloadRun={reloadRun}
+          blocks={blocks ?? []}
+        />
+      {:else if activeTab === 'teachers'}
+        <RunTeachersTab runId={runIdInt!} {teachers} onRefetch={refetchTeachers} course={course!} />
       {/if}
     </div>
-  {/if}
-
-  <div class="tabs" role="tablist">
-    <button role="tab" aria-selected={activeTab === 'overview'} onclick={() => (activeTab = 'overview')}>Overview</button>
-    <button role="tab" aria-selected={activeTab === 'teachers'} onclick={() => (activeTab = 'teachers')}>Teachers</button>
-    <button role="tab" aria-selected={activeTab === 'groups'} onclick={() => (activeTab = 'groups')}>Groups</button>
-    <button role="tab" aria-selected={activeTab === 'roster'} onclick={() => (activeTab = 'roster')}>Roster</button>
-    <button role="tab" aria-selected={activeTab === 'mini-projects'} onclick={() => (activeTab = 'mini-projects')}>Mini-projects</button>
-    <button role="tab" aria-selected={activeTab === 'assets'} onclick={() => (activeTab = 'assets')}>Assets</button>
-    <button role="tab" aria-selected={activeTab === 'progress'} onclick={() => (activeTab = 'progress')}>Progress</button>
-    <button role="tab" aria-selected={activeTab === 'submission'} onclick={() => (activeTab = 'submission')}>Submission</button>
-  </div>
-
-  <section class="tab-body">
-    {#if activeTab === 'overview'}
-      <RunOverviewTab
-        {run}
-        setRun={(r) => (run = r)}
-        {teachers}
-        {groups}
-        {students}
-        {readiness}
-        onNavigateTab={gotoTab}
-        {onDeleteRun}
-        course={course!}
-      />
-    {:else if activeTab === 'teachers'}
-      <RunTeachersTab runId={runIdInt!} {teachers} onRefetch={refetchTeachers} course={course!} />
-    {:else if activeTab === 'groups'}
-      <RunGroupsTab
+    {#if showImportModal}
+      <RosterImportModal
         runId={runIdInt!}
-        {groups}
-        groupsEnabled={run.groups_enabled}
-        onRefetchGroups={refetchGroups}
-        onRefetchGroupsAndStudents={refetchGroupsAndStudents}
-        course={course!}
-        runIsPublished={run.is_published}
+        existingRoster={students}
+        existingGroups={groups}
+        onRefetchBeforeSubmit={refetchRosterData}
+        onClose={closeImport}
       />
-    {:else if activeTab === 'roster'}
-      <RunRosterTab
-        runId={runIdInt!}
-        runIsPublished={run.is_published}
-        {courseSlug}
-        onNavigateToTab={(t) => (activeTab = t)}
-        {students}
-        {groups}
-        groupsEnabled={run.groups_enabled}
-        {rosterPrefilter}
-        {onPrefilterClear}
-        onRefetchRosterData={refetchRosterData}
-        onRefetchGroupsOnly={refetchGroups}
-        onOpenImport={() => (showImportModal = true)}
-      />
-      {#if showImportModal}
-        <RosterImportModal
-          runId={runIdInt!}
-          existingRoster={students}
-          existingGroups={groups}
-          onRefetchBeforeSubmit={refetchRosterData}
-          onClose={() => (showImportModal = false)}
-        />
-      {/if}
-    {:else if activeTab === 'mini-projects'}
-      <RunMiniProjectsTab
-        runId={runIdInt!}
-        runIsPublished={run.is_published}
-        runGroupsEnabled={run.groups_enabled}
-        runEndDate={run.end_date}
-        versionIsDisabled={showDisabledBanner}
-        {pinnedAvailable}
-        blocks={blocks ?? []}
-        miniProjects={miniProjects ?? []}
-        onRefetchMiniProjects={refetchMiniProjects}
-        onRefetchAssets={refetchAssets}
-        onNavigateToTab={(t) => (activeTab = t)}
-        pendingEditTarget={pendingEditTarget}
-        onPendingEditConsumed={() => (pendingEditTarget = null)}
-        course={course!}
-      />
-    {:else if activeTab === 'assets'}
-      <RunAssetsTab
-        runId={runIdInt!}
-        assets={assets ?? []}
-        miniProjects={miniProjects ?? []}
-        course={course!}
-        versionIsDisabled={showDisabledBanner}
-        onRefetchAssets={refetchAssets}
-        onRefetchMiniProjects={refetchMiniProjects}
-        onEditMiniProject={(mp) => { pendingEditTarget = mp; activeTab = 'mini-projects'; }}
-        onReloadRun={reloadRun}
-      />
-    {:else if activeTab === 'progress'}
-      <RunProgressTab runId={run.id} {isAdmin} isTeacher={isThisRunTeacher} />
-    {:else if activeTab === 'submission'}
-      <RunSubmissionTab runId={run.id} {isAdmin} isTeacher={isThisRunTeacher} />
     {/if}
-  </section>
-{/if}
+  {/if}
+</div>
 
 <PublishConflictsModal
   open={publishModalOpen}
@@ -482,21 +537,37 @@
 />
 
 <style>
-  .run-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3, 16px); padding-bottom: var(--space-3, 16px); border-bottom: 1px solid var(--border, #eee); }
-  .publish-bar, .run-meta { display: flex; align-items: center; gap: 8px; }
-  .version-label { font-size: 0.875rem; color: var(--text-muted, #666); font-variant-numeric: tabular-nums; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 500; line-height: 1.4; }
-  .badge-draft { background: #e5e7eb; color: #374151; }
-  .badge-upcoming { background: #dbeafe; color: #1e40af; }
-  .badge-active { background: #d1fae5; color: #065f46; }
-  .badge-ended { background: #f3f4f6; color: #6b7280; }
-  .breadcrumb { color: var(--muted, #666); font-size: 0.9em; }
-  .breadcrumb a { color: var(--link, #335); text-decoration: none; }
-  .breadcrumb a:hover { text-decoration: underline; }
-  .banner-warning { background: #fff8e1; color: #8a6d00; padding: 12px; border-radius: 4px; margin: 12px 0; border: 1px solid #f0c850; }
-  div.tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border, #eee); margin-top: var(--space-3, 16px); }
-  div.tabs button { background: transparent; border: 0; padding: 12px 16px; cursor: pointer; color: var(--muted, #666); border-bottom: 2px solid transparent; }
-  div.tabs button[aria-selected="true"] { color: var(--primary, #335); border-bottom-color: var(--primary, #335); }
-  .tab-body { padding: var(--space-3, 16px) 0; }
-  .error { padding: 16px; color: var(--danger, #c00); }
+  /* Lines up with the header's own side padding (AppHeader: 0 var(--space-3)). */
+  .run-page { max-width: var(--page-max); margin: 0 auto; padding: var(--space-3) var(--space-3) var(--space-4); }
+  .run-head { display: flex; flex-direction: column; gap: 8px; }
+  .run-title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .run-title-row h1 { margin: 0; font-size: 18px; font-weight: 600; color: var(--text); }
+  .run-meta { margin: 0; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .run-banner-warn {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    background: var(--status-needs-revision-bg);
+    color: var(--status-needs-revision-fg);
+    border-left: 3px solid var(--gold);
+    border-radius: var(--radius);
+    font-size: 13px;
+  }
+  .run-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 16px; border-bottom: 1px solid var(--border-ground); /* D71: drawn on the page ground */ }
+  .run-tab {
+    padding: 9px 12px;
+    background: transparent;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    color: var(--muted);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  /* D72: a hovered tab shows its 2px line in the hairline's colour; only the selected
+     tab's line is dark. The selected rule below must stay after this one. */
+  .run-tab:hover { color: var(--text); border-bottom-color: var(--border-ground); }
+  .run-tab[aria-selected='true'] { color: var(--text); border-bottom-color: var(--primary); }
+  .run-panel { padding: 16px 0; }
 </style>

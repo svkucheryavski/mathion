@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createDirtyRegistry, DIRTY_REGISTRY_KEY, type RegisteredTracker } from '../lib/dirtyRegistry.svelte';
 
 // Fake tracker matching RegisteredTracker shape (readonly isDirty getter).
@@ -85,5 +85,31 @@ describe('dirtyRegistry', () => {
     expect(r.isAnyDirty()).toBe(true); // t2 still dirty
     r.unregister(t2);
     expect(r.isAnyDirty()).toBe(false);
+  });
+
+  it('discardAll calls discard only on DIRTY trackers (Slice-5a D3)', () => {
+    const r = createDirtyRegistry();
+    const dirtyT = { isDirty: true, discard: vi.fn() };
+    const cleanT = { isDirty: false, discard: vi.fn() };
+    r.register(dirtyT);
+    r.register(cleanT);
+    r.discardAll();
+    expect(dirtyT.discard).toHaveBeenCalledTimes(1);
+    expect(cleanT.discard).not.toHaveBeenCalled();
+  });
+
+  it('discardAll tolerates trackers without discard and unregistering mid-loop', () => {
+    const r = createDirtyRegistry();
+    const legacy = fakeTracker(true);                       // no discard (the legacy tracker shape)
+    const selfRemoving: RegisteredTracker = {
+      get isDirty() { return true; },
+      discard: () => r.unregister(selfRemoving),
+    };
+    const later = { isDirty: true, discard: vi.fn() };
+    r.register(legacy);
+    r.register(selfRemoving);
+    r.register(later);
+    expect(() => r.discardAll()).not.toThrow();
+    expect(later.discard).toHaveBeenCalledTimes(1);
   });
 });

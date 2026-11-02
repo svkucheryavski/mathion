@@ -406,6 +406,8 @@ Used uniformly for all `_full_name` fields in `StudentGroupMember`, `StudentSubm
            can_submit=True, reason=None
 ```
 
+> **Amended by D81 (Polish 2 spec, 2026-10-30):** `hard_deadline_passed` is renamed `deadline_passed` (a student never learns of the hard deadline), and the student responses send one `deadline` with `deadline_kind` and `deadline_open` instead of the three dates. See `docs/superpowers/specs/2026-10-18-visual-refresh-polish2-named-items-design.md`, D80 and D81.
+
 **`can_submit_reason_if_not` is a STABLE CODE STRING, not a human label.** Frontend maps codes → localized strings (today: English; tomorrow: i18n table). The 7 codes are: `mp_not_visible`, `pending_group_assignment`, `group_disabled`, `already_accepted`, `awaiting_evaluation`, `hard_deadline_passed`, `resubmission_deadline_passed`. **No free-text reasons** — locked policy.
 
 Frontend label map (single source of truth in `studentMiniProjects.ts`):

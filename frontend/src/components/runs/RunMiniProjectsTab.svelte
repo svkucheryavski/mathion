@@ -1,8 +1,15 @@
 <script lang="ts">
+  import { tick, untrack } from 'svelte';
   import { ApiError } from '../../lib/api';
-  import { formatLocalWithTz } from '../../lib/datetime';
+  import { deadlinesHeader, formatLocalWithTz, formatShortDeadline } from '../../lib/datetime';
   import { deleteMiniProject } from '../../lib/miniProjects';
+  import { blockPositions } from '../../lib/blockNumbers';
+  import { focusFirst } from '../../lib/focusFirst';
+  import { pushToast } from '../../stores/toasts.svelte';
   import MiniProjectModal from './MiniProjectModal.svelte';
+  import Button from '../ui/Button.svelte';
+  import DangerConfirm from '../ui/DangerConfirm.svelte';
+  import IconButton from '../ui/IconButton.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import type { Course, MiniProjectResponse, BlockResponse } from '../../lib/types';
 
@@ -45,51 +52,98 @@
     ]);
   }
 
+  type Status = 'draft' | 'published' | 'locked';
+  type Row = { mp: MiniProjectResponse; n: number; label: string; aria: string };
+
   const usedBlockIds = $derived(new Set(miniProjects.map((mp) => mp.block_id)));
   const availableBlocks = $derived(blocks.filter((b) => !usedBlockIds.has(b.id)));
-  const sortedRows = $derived(
-    miniProjects
-      .map((mp) => ({ mp, block: blocks.find((b) => b.id === mp.block_id) }))
-      .filter((r) => r.block != null)
-      .sort((a, b) => a.block!.order - b.block!.order),
-  );
+  // R13: "Block {n}" is the block's position in the pinned version. A
+  // mini-project whose block is not in the list is not shown (as before).
+  const rows = $derived.by((): Row[] => {
+    const pos = blockPositions(blocks);
+    const out: Row[] = [];
+    for (const mp of miniProjects) {
+      const block = blocks.find((b) => b.id === mp.block_id);
+      const n = pos.get(mp.block_id);
+      if (block && n !== undefined) {
+        out.push({ mp, n, label: `Block ${n} — ${block.title}`, aria: `mini-project for Block ${n}` });
+      }
+    }
+    return out.sort((a, b) => a.n - b.n);
+  });
 
-  function rowStatus(mp: MiniProjectResponse): 'draft' | 'published' | 'locked' {
+  function rowStatus(mp: MiniProjectResponse): Status {
     if (mp.first_submitted_at) return 'locked';
     if (mp.is_published) return 'published';
     return 'draft';
   }
 
+  function deadlineParts(mp: MiniProjectResponse): { kind: string; iso: string }[] {
+    const parts: { kind: string; iso: string }[] = [];
+    if (mp.soft_deadline) parts.push({ kind: 'soft', iso: mp.soft_deadline });
+    if (mp.hard_deadline) parts.push({ kind: 'hard', iso: mp.hard_deadline });
+    if (mp.resubmission_deadline) parts.push({ kind: 'resub', iso: mp.resubmission_deadline });
+    return parts;
+  }
+
+  // R12: one zone in the header when every shown deadline shares it.
+  const dlHeader = $derived(deadlinesHeader(rows.flatMap((r) => deadlineParts(r.mp).map((p) => p.iso))));
+
+  function editReason(mp: MiniProjectResponse): string | undefined {
+    if (rowStatus(mp) === 'locked') return 'Has submissions — editing is off';
+    if (versionIsDisabled) return "This run's course version is disabled.";
+    return undefined;
+  }
+
   let modalMode = $state<'create' | 'edit' | null>(null);
   let editTarget = $state<MiniProjectResponse | null>(null);
   let deleteConfirmId = $state<number | null>(null);
-  let forceCheckbox = $state(false);
+  let forceBusy = $state(false);
   let deleteError = $state<string | null>(null);
 
-  // Reset checkbox when delete-confirm switches row. Banner is NOT cleared
-  // here — handlers set it AND null deleteConfirmId in the same tick, and an
-  // effect tied to deleteConfirmId would wipe the banner before the user
-  // sees it. Banner has its own lifecycle (handler entry + Dismiss button).
-  $effect(() => {
-    void deleteConfirmId;
-    forceCheckbox = false;
-  });
+  let headingEl = $state<HTMLElement>();
+  let newEl = $state<HTMLButtonElement>();
+  const trashEls: Record<number, HTMLButtonElement | undefined> = $state({});
+  const pencilEls: Record<number, HTMLButtonElement | undefined> = $state({});
+  let createdId: number | null = null;
+
+  // §Focus › After Create: "+" may now be disabled, so focus the new row's
+  // pencil, or else the h2. Wait a tick so FocusTrap's restore has run.
+  async function closeModal() {
+    modalMode = null;
+    editTarget = null;
+    const id = createdId;
+    createdId = null;
+    if (id === null) return;
+    await tick();
+    focusFirst([pencilEls[id], headingEl]);
+  }
 
   // Parent (RunDetailPage) hands us a MP to open in edit mode when the
-  // Assets tab's [Edit] action navigates here. Stale-cascade safe: if the
-  // MP is no longer in our local list (refetch dropped it), we skip
-  // opening the modal but still fire onPendingEditConsumed so the parent
-  // clears the dangling reference. The early-return on null prevents
-  // re-entry once the parent clears pendingEditTarget.
+  // Assets tab's [Edit] action navigates here. P17: open the tab's own row
+  // (fresh from miniProjects), not the parent's copy. A locked row or a
+  // disabled version opens nothing and toasts the reason its pencil shows.
+  // A row that is gone (refetch dropped it) opens nothing. In every case
+  // onPendingEditConsumed fires so the parent clears the reference; the
+  // early-return on null prevents re-entry once it has. Only the target is
+  // tracked: pushToast writes the toast list (a read-then-write of its length),
+  // so running the body tracked would re-run the effect without end.
   $effect(() => {
-    if (!pendingEditTarget) return;
     const target = pendingEditTarget;
-    const stillExists = miniProjects.some((mp) => mp.id === target.id);
-    if (stillExists) {
-      editTarget = target;
-      modalMode = 'edit';
-    }
-    onPendingEditConsumed?.();
+    if (!target) return;
+    untrack(() => {
+      const row = miniProjects.find((mp) => mp.id === target.id);
+      if (row) {
+        const reason = editReason(row);
+        if (reason) {
+          pushToast(reason, 'info');
+        } else {
+          editTarget = row;
+          modalMode = 'edit';
+        }
+      }
+      onPendingEditConsumed?.();
+    });
   });
 
   const newDisabled = $derived(
@@ -111,14 +165,34 @@
     return '';
   });
 
+  async function focusTrash(mpId: number) {
+    await tick();
+    trashEls[mpId]?.focus();
+  }
+
+  // §Focus after a removal: the next row's trash, the previous row's, +, the h2.
+  async function focusAfterRemoval(idx: number) {
+    await tick();
+    const next = rows[idx];
+    const prev = idx > 0 ? rows[idx - 1] : undefined;
+    focusFirst([next && trashEls[next.mp.id], prev && trashEls[prev.mp.id], newEl, headingEl]);
+  }
+
+  function cancelDelete(mpId: number) {
+    deleteConfirmId = null;
+    void focusTrash(mpId);
+  }
+
   async function handleForceDelete(mpId: number) {
-    if (!forceCheckbox) return;
+    const idx = rows.findIndex((r) => r.mp.id === mpId);
     deleteError = null;
+    forceBusy = true;
     try {
       await deleteMiniProject(mpId, { force: true });
       await refetchAll();
       deleteConfirmId = null;
-      forceCheckbox = false;
+      forceBusy = false;
+      await focusAfterRemoval(idx);
     } catch (e) {
       deleteError =
         e instanceof ApiError
@@ -126,34 +200,37 @@
           : e instanceof Error
             ? e.message
             : 'Force delete failed';
-      forceCheckbox = false;
+      forceBusy = false;
+      await focusTrash(mpId);
     }
   }
 
   async function handleDeleteConfirm(mp: MiniProjectResponse) {
+    const idx = rows.findIndex((r) => r.mp.id === mp.id);
     deleteError = null;
     try {
       await deleteMiniProject(mp.id);
       await refetchAll();
       deleteConfirmId = null;
+      await focusAfterRemoval(idx);
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
         try {
           await onRefetchMiniProjects();
-          forceCheckbox = false;
           // Teachers cannot force-delete; close the inline-confirm and
           // surface a banner so they see *some* feedback instead of a
           // silent no-op (admins keep the row open so the refetch can
-          // reveal the force-confirm panel).
+          // reveal the danger panel).
           if (!course.is_admin) {
             deleteConfirmId = null;
             deleteError =
               'This mini-project now has submissions and cannot be deleted. Ask a course admin to force-delete.';
+            await focusTrash(mp.id);
           }
         } catch {
           deleteError = 'Could not refresh. Please retry.';
           deleteConfirmId = null;
-          forceCheckbox = false;
+          await focusTrash(mp.id);
         }
       } else {
         deleteError =
@@ -163,145 +240,116 @@
               ? e.message
               : 'Delete failed';
         deleteConfirmId = null;
+        await focusTrash(mp.id);
       }
     }
   }
 </script>
 
+{#snippet forceMessage()}Force delete will permanently remove all submissions and evaluations for this mini-project. This cannot be undone.{/snippet}
+
 {#if !pinnedAvailable}
-  <div class="error-banner">Cannot load — pinned version not found.</div>
+  <div class="mp-banner mp-banner-err" role="alert">Cannot load — pinned version not found.</div>
 {:else}
-  <header>
-    <h2>Mini-projects</h2>
-    <button
-      data-action="new-mp"
-      disabled={newDisabled}
-      aria-disabled={newDisabled}
-      title={newDisabledTitle}
-      onclick={() => {
-        modalMode = 'create';
-      }}
-    >
-      + New mini-project
-    </button>
-  </header>
-
-  {#if !runGroupsEnabled}
-    <div class="banner">
-      Mini-projects require groups.
-      {#if !runIsPublished || course.is_admin}
-        <button type="button" class="linklike" data-action="nav-overview-groups" onclick={() => onNavigateToTab('overview')}>Enable on Overview</button>
-      {/if}
+  <section class="mp-tab">
+    <div class="sec-head">
+      <h2 tabindex="-1" bind:this={headingEl}>Mini-projects <span class="sec-count">{rows.length} of {blocks.length} {blocks.length === 1 ? 'block' : 'blocks'}</span></h2>
+      <IconButton glyph="plus" primary size="md" aria-label="New mini-project"
+                  title={newDisabled ? newDisabledTitle : 'New mini-project'} disabled={newDisabled}
+                  data-action="new-mp" bind:element={newEl} onclick={() => (modalMode = 'create')} />
     </div>
-  {/if}
-  {#if versionIsDisabled}
-    <div class="banner">
-      This run's course version is disabled.
-      {#if course.is_admin}
+
+    {#if versionIsDisabled && course.is_admin}
+      <p class="mp-note">
         <button type="button" class="linklike" data-action="nav-overview-version" onclick={() => onNavigateToTab('overview')}>See Overview</button>
-      {/if}
-    </div>
-  {/if}
-  {#if !runIsPublished}
-    <div class="banner">
-      Run is not yet published.
-      {#if course.is_admin}
-        <button type="button" class="linklike" data-action="nav-overview-publish" onclick={() => onNavigateToTab('overview')}>Publish on Overview</button>
-      {/if}
-    </div>
-  {/if}
-  {#if deleteError}
-    <div class="banner banner-error" role="alert" data-role="delete-error-banner">
-      {deleteError}
-      <button
-        data-action="dismiss-delete-error"
-        onclick={() => {
-          deleteError = null;
-        }}
-      >
-        Dismiss
-      </button>
-    </div>
-  {/if}
+      </p>
+    {/if}
+    {#if !runGroupsEnabled}
+      <div class="mp-banner">
+        Mini-projects require groups.
+        {#if !runIsPublished || course.is_admin}
+          <button type="button" class="linklike" data-action="nav-overview-groups" onclick={() => onNavigateToTab('overview')}>Enable on Overview</button>
+        {/if}
+      </div>
+    {/if}
+    {#if !runIsPublished}
+      <div class="mp-banner">
+        Run is not yet published.
+        {#if course.is_admin}
+          <button type="button" class="linklike" data-action="nav-overview-publish" onclick={() => onNavigateToTab('overview')}>Publish on Overview</button>
+        {/if}
+      </div>
+    {/if}
+    {#if deleteError}
+      <div class="mp-banner mp-banner-err" role="alert" data-role="delete-error-banner">
+        <span>{deleteError}</span>
+        <Button variant="ghost" data-action="dismiss-delete-error" onclick={() => (deleteError = null)}>Dismiss</Button>
+      </div>
+    {/if}
 
-  {#if miniProjects.length === 0}
-    <p>
-      No mini-projects yet. A mini-project is a PDF assignment that each group submits and you grade.
-      <strong>Click + New mini-project to assign one to a block.</strong>
-    </p>
-  {:else}
-    <ul>
-      {#each sortedRows as { mp, block } (mp.id)}
-        <li data-role="mp-row">
-          <span>Block {block!.order} — {block!.title}</span>
-          <span class="deadlines">
-            {#if mp.soft_deadline}Soft: {formatLocalWithTz(mp.soft_deadline)}{/if}
-            {#if mp.hard_deadline}Hard: {formatLocalWithTz(mp.hard_deadline)}{/if}
-            {#if mp.resubmission_deadline}Resub: {formatLocalWithTz(mp.resubmission_deadline)}{/if}
-          </span>
-          <span class="pill pill-{rowStatus(mp)}"
-            >{rowStatus(mp) === 'draft'
-              ? 'Draft'
-              : rowStatus(mp) === 'published'
-                ? 'Published'
-                : 'Locked'}</span
-          >
-          {#if rowStatus(mp) !== 'locked'}
-            <button
-              data-action="edit"
-              disabled={versionIsDisabled}
-              aria-disabled={versionIsDisabled}
-              title={versionIsDisabled ? "This run's course version is disabled." : ''}
-              onclick={() => {
-                editTarget = mp;
-                modalMode = 'edit';
-              }}>Edit</button
-            >
-          {/if}
-          {#if course.is_admin || rowStatus(mp) !== 'locked'}
-            <button
-              data-action="delete"
-              onclick={() => {
-                deleteConfirmId = mp.id;
-              }}>×</button
-            >
-          {/if}
-          {#if deleteConfirmId === mp.id && rowStatus(mp) === 'locked' && course.is_admin}
-            <div class="force-confirm">
-              <p>
-                Force delete will permanently remove all submissions and evaluations for this
-                mini-project. This cannot be undone.
-              </p>
-              <label
-                ><input type="checkbox" bind:checked={forceCheckbox} /> I understand</label
-              >
-              <button
-                onclick={() => {
-                  deleteConfirmId = null;
-                  forceCheckbox = false;
-                }}>Cancel</button
-              >
-              <button
-                class="danger"
-                disabled={!forceCheckbox}
-                onclick={() => handleForceDelete(mp.id)}>Force delete</button
-              >
-            </div>
-          {:else if deleteConfirmId === mp.id && rowStatus(mp) !== 'locked'}
-            <InlineConfirm
-              warning="Delete this mini-project?"
-              confirmLabel="Delete"
-              confirmDataAction="confirm-delete"
-              onCancel={() => {
-                deleteConfirmId = null;
-              }}
-              onConfirm={() => handleDeleteConfirm(mp)}
-            />
-          {/if}
-        </li>
-      {/each}
-    </ul>
-  {/if}
+    {#if rows.length === 0}
+      <p class="mp-empty">
+        No mini-projects yet. A mini-project is a PDF assignment that each group submits and you grade.
+        <strong>Click + New mini-project to assign one to a block.</strong>
+      </p>
+    {:else}
+      <div class="table-scroll">
+        <table class="mp-table">
+          <thead>
+            <tr>
+              <th scope="col">Block</th>
+              <th scope="col">{dlHeader}</th>
+              <th scope="col">State</th>
+              <th scope="col"><span class="vh">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each rows as r (r.mp.id)}
+              {@const status = rowStatus(r.mp)}
+              {@const reason = editReason(r.mp)}
+              <tr data-role="mp-row">
+                <td class="mp-block">{r.label}</td>
+                <td class="mp-dl">
+                  {#each deadlineParts(r.mp) as p, i (p.kind)}
+                    {#if i > 0}<span class="mp-sep" aria-hidden="true">·</span>{/if}
+                    <span class="dl" title={formatLocalWithTz(p.iso)}><span class="dl-kind">{p.kind}</span> {formatShortDeadline(p.iso)}</span>
+                  {/each}
+                </td>
+                <td><span class="mp-chip chip-{status}">{status}</span></td>
+                <td class="mp-actions">
+                  <span class="row-icons">
+                    <IconButton glyph="pencil" size="sm" aria-label="Edit {r.aria}" title={reason ?? 'Edit'}
+                                disabled={reason !== undefined} data-action="edit" bind:element={pencilEls[r.mp.id]}
+                                onclick={() => { editTarget = r.mp; modalMode = 'edit'; }} />
+                    <IconButton glyph="trash" size="sm" danger aria-label="Delete {r.aria}" title="Delete"
+                                data-action="delete" bind:element={trashEls[r.mp.id]}
+                                onclick={() => (deleteConfirmId = r.mp.id)} />
+                  </span>
+                </td>
+              </tr>
+              {#if deleteConfirmId === r.mp.id}
+                <!-- Both confirms open as a full-width row under their row (Safari
+                     pass): the plain one on one line, the danger panel for a locked row. -->
+                <tr class="mp-panel-row">
+                  <td colspan="4">
+                    {#if status === 'locked'}
+                      <DangerConfirm message={forceMessage} busy={forceBusy}
+                                     disabledReason={course.is_admin ? undefined : 'Only a course admin can force delete.'}
+                                     onConfirm={() => handleForceDelete(r.mp.id)} onCancel={() => cancelDelete(r.mp.id)} />
+                    {:else}
+                      <InlineConfirm row align="end" takeFocus warning="Delete this mini-project?" confirmLabel="Delete"
+                                     confirmDataAction="confirm-delete"
+                                     onCancel={() => cancelDelete(r.mp.id)} onConfirm={() => handleDeleteConfirm(r.mp)} />
+                    {/if}
+                  </td>
+                </tr>
+              {/if}
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+  </section>
 
   {#if modalMode != null}
     <MiniProjectModal
@@ -314,10 +362,9 @@
       {versionIsDisabled}
       {runEndDate}
       {course}
-      onClose={() => {
-        modalMode = null;
-        editTarget = null;
-      }}
+      {blocks}
+      onClose={() => void closeModal()}
+      onCreated={(mp) => (createdId = mp.id)}
       onSaved={refetchAll}
       {onNavigateToTab}
     />
@@ -325,108 +372,62 @@
 {/if}
 
 <style>
-  header {
+  .mp-tab { display: flex; flex-direction: column; gap: 10px; }
+  .sec-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .sec-head h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); }
+  .sec-head h2:focus { outline: none; }
+  .sec-count { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--muted); }
+
+  .mp-note { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .mp-banner {
     display: flex;
     align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--surface-2);
+    border-left: 3px solid var(--primary);
+    border-radius: var(--radius);
+    font-size: 13px;
+    color: var(--text-2);
+  }
+  .mp-banner-err {
     justify-content: space-between;
-    gap: 0.5rem;
-    margin-bottom: 0.75rem;
+    background: var(--danger-panel-bg);
+    border-left-color: var(--danger);
+    color: var(--danger-panel-fg);
   }
+  .linklike { background: none; border: 0; padding: 0; font: inherit; color: var(--primary); text-decoration: underline; cursor: pointer; }
+  .mp-empty { margin: 0; font-size: 13px; color: var(--muted); }
 
-  h2 {
-    margin: 0;
+  /* Polish 3 (table corners): the outer border and radius sit on a scroll wrapper,
+     as on Progress and Submissions. It clips the grey header corners, which a
+     table's own radius does not, and scrolls a table wider than its container. */
+  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  .mp-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+  .mp-table th {
+    padding: 8px 12px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-3);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
   }
+  .mp-table td { padding: 6px 12px; border-top: 1px solid var(--border-soft); color: var(--text); vertical-align: middle; }
+  /* Separate borders: the header's line draws once, not again as the first row's top. */
+  .mp-table tbody tr:first-child td { border-top: 0; }
+  .mp-dl { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-2); white-space: nowrap; }
+  .mp-sep { margin: 0 6px; color: var(--faint); }
+  .mp-actions { width: 1%; white-space: nowrap; text-align: right; }
+  .row-icons { display: inline-flex; gap: 4px; }
+  .mp-panel-row td { padding: 0 12px 10px; border-top: 0; }
 
-  .banner {
-    margin: 0.5rem 0;
-    padding: 0.5rem 0.75rem;
-    background: var(--surface-muted, #f4f4f4);
-    border-left: 3px solid var(--accent, #888);
-    border-radius: 2px;
-  }
+  .mp-chip { display: inline-block; padding: 1px 8px; border-radius: var(--radius-pill); font-size: 11.5px; }
+  .chip-draft { background: var(--state-created-bg); color: var(--state-created-fg); }
+  .chip-published { background: var(--state-published-bg); color: var(--state-published-fg); }
+  .chip-locked { background: var(--state-archived-bg); color: var(--state-archived-fg); }
+  /* The label stands apart from its date (Safari pass). */
+  .dl-kind { font-weight: 600; color: var(--text); }
 
-  .linklike {
-    background: none;
-    border: 0;
-    padding: 0;
-    margin-left: 0.5rem;
-    color: inherit;
-    text-decoration: underline;
-    cursor: pointer;
-    font: inherit;
-  }
-  .linklike:hover {
-    text-decoration: none;
-  }
-
-  .banner-error {
-    background: var(--surface-error, #fdecea);
-    border-left-color: var(--danger, #b00020);
-  }
-
-  .error-banner {
-    margin: 0.5rem 0;
-    padding: 0.5rem 0.75rem;
-    background: var(--surface-error, #fdecea);
-    border-left: 3px solid var(--danger, #b00020);
-    border-radius: 2px;
-  }
-
-  ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-  }
-
-  li[data-role='mp-row'] {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.5rem 0;
-    border-bottom: 1px solid var(--border, #e0e0e0);
-    flex-wrap: wrap;
-  }
-
-  .deadlines {
-    color: var(--text-muted, #666);
-    font-size: 0.85em;
-    display: flex;
-    gap: 0.5rem;
-  }
-
-  .pill {
-    display: inline-block;
-    padding: 0.1rem 0.5rem;
-    border-radius: 999px;
-    font-size: 0.75em;
-    background: var(--surface-muted, #eee);
-  }
-  .pill-published {
-    background: var(--accent-soft, #d4edda);
-    color: var(--accent-strong, #155724);
-  }
-  .pill-locked {
-    background: var(--surface-locked, #e9ecef);
-    color: var(--text-muted, #495057);
-  }
-
-  .force-confirm {
-    width: 100%;
-    margin-top: 0.5rem;
-    padding: 0.5rem;
-    background: var(--surface-error, #fdecea);
-    border-left: 3px solid var(--danger, #b00020);
-    border-radius: 2px;
-  }
-  .force-confirm p {
-    margin: 0 0 0.5rem;
-  }
-  .danger {
-    background: var(--danger, #b00020);
-    color: white;
-  }
-  .danger:disabled {
-    background: var(--danger-disabled, #e0a0a0);
-    cursor: not-allowed;
-  }
+  .vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 </style>

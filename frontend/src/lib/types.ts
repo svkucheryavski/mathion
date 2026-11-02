@@ -54,6 +54,14 @@ export type SequenceContent = {
   items: Item[];
 };
 
+// The three completion states an item can be shown in. Shared by `ItemIcon`
+// (which puts the class on its button) and the presentational `ItemMark`
+// (which paints the box). "not started" is prose only — never a literal value.
+export type ItemMarkState = 'covered' | 'current' | 'not-yet';
+// The marks ItemMark can draw: every item type, plus `sequence` (the open book
+// on a sequence's row in the student course view, user 2026-10-08).
+export type ItemMarkType = Item['type'] | 'sequence';
+
 // ---- Items: discriminated union over backend Item.type ----
 export type Item =
   | StaticPageItem
@@ -133,14 +141,18 @@ export type VersionState = {
   items: Record<string, ItemStateEntry>; // key is item_id as string
 };
 
+// Mirrors ItemStateResponse (backend/mathion/schemas.py) field for field. It
+// used to declare `time_spent_seconds` / `score_correct` / `score_total`, which
+// the API never sent; nothing read them until the course page's quiz chip,
+// which then showed "Quiz –" for every student (student-view review r1).
 export type ItemStateEntry = {
   is_covered: boolean;
-  time_spent_seconds: number;
+  time_spent: number;
   last_visited_at: string | null; // ISO datetime
-  last_answers: Record<string, number[] | string> | null;
   attempt_count: number;
-  score_correct: number | null;
-  score_total: number | null;
+  max_attempts: number;
+  last_score: { correct: number; total: number } | null; // latest quiz attempt
+  last_answers: Record<string, number[] | string> | null;
 };
 
 // ---- Quiz submit ----
@@ -461,11 +473,14 @@ export type StudentMiniProjectListItem = {
   block_slug: string;
   block_order: number;
   block_title: string;
-  hard_deadline: string | null;        // ISO datetime
-  soft_deadline: string | null;
-  resubmission_deadline: string | null;
+  // D81 (user): ONE deadline, picked by the server; never the hidden hard one.
+  deadline: string | null;             // ISO datetime
+  deadline_kind: StudentDeadlineKind | null;
+  deadline_open: boolean;              // the deadline's window is still open, status aside (no deadline = true)
   latest_status: LatestStatus;
 };
+
+export type StudentDeadlineKind = 'due' | 'resubmit';
 
 export type StudentGroupMember = {
   user_id: number;
@@ -510,9 +525,9 @@ export type StudentMiniProjectDetail = {
   block_slug: string;
   block_title: string;
   assignment_html: string;
-  soft_deadline: string | null;
-  hard_deadline: string | null;
-  resubmission_deadline: string | null;
+  deadline: string | null;             // D81: as on the list item
+  deadline_kind: StudentDeadlineKind | null;
+  deadline_open: boolean;
   group: StudentGroupSummary | null;
   submission_history: StudentSubmissionHistoryEntry[];
   latest_status: LatestStatus;
@@ -523,7 +538,7 @@ export type StudentMiniProjectDetail = {
     | 'group_disabled'
     | 'already_accepted'
     | 'awaiting_evaluation'
-    | 'hard_deadline_passed'
+    | 'deadline_passed'
     | 'resubmission_deadline_passed'
     | null;
 };

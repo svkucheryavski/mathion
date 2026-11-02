@@ -2,6 +2,7 @@
   import type { Component } from 'svelte';
   import { currentRoute, matchRoute, navigate, defaultLandingPath } from './lib/router.svelte';
   import { routes } from './routes';
+  import { installLinkRouter } from './lib/linkRouter';
   import { session } from './stores/session.svelte';
   import Toaster from './components/chrome/Toaster.svelte';
   import AppHeader from './components/chrome/AppHeader.svelte';
@@ -14,9 +15,9 @@
   import NotFound from './pages/NotFound.svelte';
   import VersionsPage from './pages/editor/VersionsPage.svelte';
   import VersionEditPage from './pages/editor/VersionEditPage.svelte';
-  import ItemEditPage from './pages/editor/ItemEditPage.svelte';
   import RunListPage from './pages/runs/RunListPage.svelte';
   import RunDetailPage from './pages/runs/RunDetailPage.svelte';
+  import RunsRedirect from './pages/runs/RunsRedirect.svelte';
   import TeacherRunListPage from './pages/teaching/TeacherRunListPage.svelte';
   import SuperuserShell from './pages/superuser/SuperuserShell.svelte';
 
@@ -28,14 +29,17 @@
     MiniProjectDetailPage: MiniProjectDetailPage as Component<Record<string, string>>,
     VersionsPage: VersionsPage as Component<Record<string, string>>,
     VersionEditPage: VersionEditPage as Component<Record<string, string>>,
-    ItemEditPage: ItemEditPage as Component<Record<string, string>>,
     RunListPage: RunListPage as Component<Record<string, string>>,
     RunDetailPage: RunDetailPage as Component<Record<string, string>>,
+    RunsRedirect: RunsRedirect as Component<Record<string, string>>,
     TeacherRunListPage: TeacherRunListPage as Component<Record<string, string>>,
     SuperuserShell: SuperuserShell as Component<Record<string, string>>,
   };
 
   const matched = $derived(matchRoute(routes, currentRoute.path));
+
+  // C6: plain same-origin links (authored content, the course page's rows) route in-app.
+  $effect(() => installLinkRouter());
 
   // Path-level guard. Hash-only changes do not re-evaluate (intentional).
   $effect(() => {

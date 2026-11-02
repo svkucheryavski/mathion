@@ -19,7 +19,7 @@ afterEach(() => {
   component = null;
 });
 
-const GLYPHS = ['pencil','duplicate','disable','enable','trash','plus','up','down','chevron','close'] as const;
+const GLYPHS = ['pencil','duplicate','disable','enable','trash','plus','up','down','chevron','close','back','check','chevron-right','refresh','download'] as const;
 
 describe('IconButton', () => {
   it('requires and renders a title (tooltip + a11y)', () => {
@@ -40,7 +40,7 @@ describe('IconButton', () => {
 
   it('renders distinct geometry for EVERY glyph (no shared/placeholder mark)', () => {
     // Full-set distinctness: a 2-glyph spot check would let the other 8 share one
-    // arbitrary mark and still pass. Render all 10, assert every SVG body is unique.
+    // arbitrary mark and still pass. Render all 13, assert every SVG body is unique.
     const marks = GLYPHS.map((glyph) => {
       const svg = render({ glyph, title: glyph }).querySelector('svg')!.innerHTML;
       unmount(component!); component = null; host.parentNode?.removeChild(host);
@@ -70,5 +70,163 @@ describe('IconButton', () => {
   it('applies the borderless class for chevron/fold controls', () => {
     const btn = render({ glyph: 'chevron', title: 'Collapse', borderless: true });
     expect(btn.classList.contains('borderless')).toBe(true);
+  });
+
+  // ---- Slice-5a additions (spec §1.2) ----
+  it('check carries the heavier 1.9 stroke on its own element', () => {
+    const svg = render({ glyph: 'check', title: 'Save' }).querySelector('svg')!;
+    expect(svg.getAttribute('stroke-width')).toBe('1.6');
+    expect(svg.querySelector('polyline')!.getAttribute('stroke-width')).toBe('1.9');
+  });
+
+  it('applies the round and primary classes only when asked', () => {
+    const plain = render({ glyph: 'back', title: 'Back' });
+    expect(plain.classList.contains('round')).toBe(false);
+    expect(plain.classList.contains('primary')).toBe(false);
+    unmount(component!); component = null; host.parentNode?.removeChild(host);
+    const both = render({ glyph: 'plus', title: 'New', round: true, primary: true });
+    expect(both.classList.contains('round')).toBe(true);
+    expect(both.classList.contains('primary')).toBe(true);
+  });
+
+  it('a disabled primary button is still natively disabled (the :disabled rule wins in CSS — gate-pinned)', () => {
+    const btn = render({ glyph: 'plus', title: 'New', primary: true, disabled: true });
+    expect(btn.disabled).toBe(true);
+    expect(btn.classList.contains('primary')).toBe(true);
+  });
+
+  it('binds the <button> element', () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const props = $state<{ glyph: 'pencil'; title: string; element?: HTMLButtonElement }>({ glyph: 'pencil', title: 'Edit', element: undefined });
+    component = mount(IconButton, { target: host, props });
+    flushSync();
+    expect(props.element).toBe(host.querySelector('button'));
+  });
+
+  it('forwards id / tabindex / aria-* / onmousedown only when passed', () => {
+    const bare = render({ glyph: 'chevron', title: 'Collapse' });
+    for (const a of ['id', 'tabindex', 'aria-hidden', 'aria-expanded', 'aria-controls']) {
+      expect(bare.hasAttribute(a)).toBe(false);
+    }
+    unmount(component!); component = null; host.parentNode?.removeChild(host);
+    const onmousedown = vi.fn();
+    const btn = render({
+      glyph: 'chevron', title: 'Collapse', id: 'x1', tabindex: -1, 'aria-hidden': 'true',
+      'aria-expanded': false, 'aria-controls': 'panel-1', onmousedown,
+    });
+    expect(btn.id).toBe('x1');
+    expect(btn.getAttribute('tabindex')).toBe('-1');
+    expect(btn.getAttribute('aria-hidden')).toBe('true');
+    expect(btn.getAttribute('aria-expanded')).toBe('false');
+    expect(btn.getAttribute('aria-controls')).toBe('panel-1');
+    btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    expect(onmousedown).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards data-action (6a P2)', () => {
+    const btn = render({ glyph: 'trash', title: 'Delete', 'data-action': 'delete-run' });
+    expect(btn.getAttribute('data-action')).toBe('delete-run');
+  });
+  it('omits data-action when not given', () => {
+    const btn = render({ glyph: 'trash', title: 'Delete' });
+    expect(btn.hasAttribute('data-action')).toBe(false);
+  });
+
+  it('aria-disabled keeps the button focusable and marks it blocked (R44)', () => {
+    const onclick = vi.fn();
+    const btn = render({ glyph: 'trash', title: 'Wait for the current change to save', 'aria-disabled': true, onclick });
+    expect(btn.disabled).toBe(false);
+    expect(btn.getAttribute('aria-disabled')).toBe('true');
+    expect(btn.classList.contains('blocked')).toBe(true);
+    btn.focus();
+    expect(document.activeElement).toBe(btn);
+    btn.click();
+    expect(onclick).toHaveBeenCalledTimes(1);
+  });
+  it('omits aria-disabled by default', () => {
+    const btn = render({ glyph: 'trash', title: 'Delete' });
+    expect(btn.hasAttribute('aria-disabled')).toBe(false);
+    expect(btn.classList.contains('blocked')).toBe(false);
+  });
+});
+
+// Slice-5c T3: the inline "+ Add …" rows submit through their ✓ IconButton.
+describe('IconButton — type (Slice-5c T3)', () => {
+  function inForm(props: Record<string, unknown>) {
+    const form = document.createElement('form');
+    const onsubmit = vi.fn((e: Event) => e.preventDefault());
+    form.addEventListener('submit', onsubmit);
+    host = document.createElement('div');
+    host.appendChild(form);
+    document.body.appendChild(host);
+    component = mount(IconButton, { target: form, props: props as ComponentProps<typeof IconButton> });
+    flushSync();
+    return { btn: form.querySelector('button') as HTMLButtonElement, onsubmit };
+  }
+
+  it('defaults to type="button": a click does not submit its form', () => {
+    const { btn, onsubmit } = inForm({ glyph: 'check', title: 'Create' });
+    expect(btn.type).toBe('button');
+    btn.click();
+    expect(onsubmit).not.toHaveBeenCalled();
+  });
+
+  it('type="submit" submits its form', () => {
+    const { btn, onsubmit } = inForm({ glyph: 'check', title: 'Create', type: 'submit' });
+    expect(btn.type).toBe('submit');
+    btn.click();
+    expect(onsubmit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('IconButton — the link variant and describedby (6c R41)', () => {
+  function renderHost(props: Record<string, unknown>) {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    component = mount(IconButton, { target: host, props: props as ComponentProps<typeof IconButton> });
+    flushSync();
+    return host;
+  }
+  function reset() {
+    if (component) unmount(component);
+    component = null;
+    host.remove();
+  }
+
+  it('href renders an <a> with the same classes, glyph, title and name', () => {
+    const a = renderHost({ glyph: 'download', title: 'Download submission', href: '/api/files/3', download: true, size: 'sm' })
+      .querySelector('a')!;
+    expect(host.querySelector('button')).toBeNull();
+    expect(a.getAttribute('href')).toBe('/api/files/3');
+    expect(a.getAttribute('download')).toBe('');
+    expect([...a.classList]).toEqual(expect.arrayContaining(['icon-btn', 'icon-link', 'sm']));
+    expect(a.getAttribute('data-glyph')).toBe('download');
+    expect(a.getAttribute('title')).toBe('Download submission');
+    expect(a.getAttribute('aria-label')).toBe('Download submission');
+    expect(a.querySelector('svg')).not.toBeNull();
+  });
+
+  it('a string download is forwarded; without download the attribute is absent', () => {
+    let a = renderHost({ glyph: 'download', title: 'Get', href: '/f', download: 'answer.pdf' }).querySelector('a')!;
+    expect(a.getAttribute('download')).toBe('answer.pdf');
+    reset();
+    a = renderHost({ glyph: 'download', title: 'Get', href: '/f' }).querySelector('a')!;
+    expect(a.hasAttribute('download')).toBe(false);
+  });
+
+  it('a disabled control with href stays a disabled <button>', () => {
+    const h = renderHost({ glyph: 'download', title: 'No file yet', href: '/f', disabled: true });
+    expect(h.querySelector('a')).toBeNull();
+    expect((h.querySelector('button') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('describedby sets aria-describedby on the button and on the link; absent by default', () => {
+    expect(render({ glyph: 'plus', title: 'Add', describedby: 'hint-1' }).getAttribute('aria-describedby')).toBe('hint-1');
+    reset();
+    const a = renderHost({ glyph: 'download', title: 'Get', href: '/f', describedby: 'hint-2' }).querySelector('a')!;
+    expect(a.getAttribute('aria-describedby')).toBe('hint-2');
+    reset();
+    expect(render({ glyph: 'plus', title: 'Add' }).hasAttribute('aria-describedby')).toBe(false);
   });
 });

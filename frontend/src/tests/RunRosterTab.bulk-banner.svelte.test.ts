@@ -47,6 +47,7 @@ function mountTab(extra: Record<string, unknown> = {}) {
     props: {
       runId: 10,
       runIsPublished: true,
+      isAdmin: true,
       courseSlug: 'test',
       onNavigateToTab: vi.fn(),
       students: studentN(3),
@@ -129,6 +130,29 @@ describe('RunRosterTab bulk-op banner + retry', () => {
     (target.querySelector('[data-action="retry-move-select"]') as HTMLSelectElement)
       .dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
+    unmount(cmp);
+  });
+
+  // Polish 3 (slice6c T4): the refetch after the operations can fail too.
+  it('a bulk move whose refetch fails still settles the banner with Dismiss and unlocks', async () => {
+    fetchSpy.mockImplementation(() => jres({
+      results: [{ user_id: 1, status: 'ok' }, { user_id: 2, status: 'ok' }, { user_id: 3, status: 'ok' }],
+      summary: { total: 3, ok: 3, error: 0 },
+    }));
+    const { target, cmp } = mountTab({ onRefetchRosterData: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')) });
+    await settle();
+    (target.querySelector('input[data-header-checkbox]') as HTMLInputElement).click();
+    flushSync();
+    (target.querySelector('[data-action="bulk-move-select"]') as HTMLSelectElement).value = '99';
+    (target.querySelector('[data-action="bulk-move-select"]') as HTMLSelectElement)
+      .dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(target.textContent).toContain('Moved 3 of 3');
+    expect(target.textContent).not.toContain('Moving 3');
+    expect(target.querySelector('[data-action="dismiss-banner"]')).not.toBeNull();
+    (target.querySelector('input[data-header-checkbox]') as HTMLInputElement).click();
+    flushSync();
+    expect(target.querySelector('[data-action="bulk-delete"]')!.getAttribute('aria-disabled')).not.toBe('true');
     unmount(cmp);
   });
 

@@ -268,7 +268,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     expect(ta.value).toBe('orig text');
   });
 
-  it('clean close: backdrop click → onClose called', async () => {
+  it('a backdrop click leaves the modal open (D11)', async () => {
     fetchSpy.mockImplementation(() => jres([]));
     const onClose = vi.fn();
     const target = document.createElement('div');
@@ -291,10 +291,10 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
       },
     });
     await settle();
-    const backdrop = target.querySelector('[data-role="backdrop"]') as HTMLElement;
-    backdrop.click();
+    (document.querySelector('.modal-backdrop') as HTMLElement).click();
     await settle();
-    expect(onClose).toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.querySelector('section.modal-panel[role="dialog"]')).not.toBeNull();
   });
 
   it('clean close: Escape key → onClose called (spec line 483 — backdrop/X/Escape route through closeForCurrentStage)', async () => {
@@ -353,7 +353,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     ta.value = 'modified';
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     await settle();
-    (target.querySelector('button[data-action="close-x"]') as HTMLButtonElement).click();
+    (target.querySelector('header.modal-head button[aria-label="Close"]') as HTMLButtonElement).click();
     await settle();
     expect(target.textContent).toContain('Discard unsaved changes?');
     expect(onClose).not.toHaveBeenCalled();
@@ -362,7 +362,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     await settle();
     expect(target.textContent).not.toContain('Discard unsaved changes?');
     // X again → InlineConfirm again → Discard via confirmDataAction
-    (target.querySelector('button[data-action="close-x"]') as HTMLButtonElement).click();
+    (target.querySelector('header.modal-head button[aria-label="Close"]') as HTMLButtonElement).click();
     await settle();
     (target.querySelector('button[data-action="confirm-discard"]') as HTMLButtonElement).click();
     await settle();
@@ -400,6 +400,10 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
       },
     });
     await settle();
+    const edited = target.querySelector('textarea') as HTMLTextAreaElement;
+    edited.value = 'changed';
+    edited.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
     (target.querySelector('button[data-action="save"]') as HTMLButtonElement).click();
     await settle();
     unmount(cmp);
@@ -410,7 +414,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     expect(onSaved).not.toHaveBeenCalled();
   });
 
-  it('inputs disabled while submitting: textarea, datetime fields, block picker, MarkdownEditor all set disabled', async () => {
+  it('fields freeze while submitting: readonly inputs, a frozen editor, and Save keeps focus as "Saving…" (R19, R20)', async () => {
     let resolvePost!: (v: unknown) => void;
     fetchSpy.mockImplementation((url, init) => {
       if (String(url).includes('/api/mini-projects') && (init as RequestInit | undefined)?.method === 'PATCH') {
@@ -440,13 +444,23 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
       },
     });
     await settle();
-    (target.querySelector('button[data-action="save"]') as HTMLButtonElement).click();
+    const ta = target.querySelector('textarea') as HTMLTextAreaElement;
+    ta.value = 'changed';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
     await settle();
-    expect((target.querySelector('textarea') as HTMLTextAreaElement).disabled).toBe(true);
+    const save = target.querySelector('button[data-action="save"]') as HTMLButtonElement;
+    save.focus();
+    save.click();
+    await settle();
+    expect(ta.readOnly).toBe(true);
+    expect(ta.disabled).toBe(false);
     target.querySelectorAll('input[type="datetime-local"]').forEach((el) => {
-      expect((el as HTMLInputElement).disabled).toBe(true);
+      expect((el as HTMLInputElement).readOnly).toBe(true);
+      expect((el as HTMLInputElement).disabled).toBe(false);
     });
-    expect((target.querySelector('button[data-action="save"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(save.disabled).toBe(false);
+    expect(save.textContent?.trim()).toBe('Saving…');
+    expect(document.activeElement).toBe(save);
     resolvePost({ ok: true, status: 200, json: () => Promise.resolve(initial) } as Response);
     await settle();
   });
@@ -482,16 +496,20 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
       },
     });
     await settle();
+    const edited = target.querySelector('textarea') as HTMLTextAreaElement;
+    edited.value = 'changed';
+    edited.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
     (target.querySelector('button[data-action="save"]') as HTMLButtonElement).click();
     await settle();
-    (target.querySelector('button[data-action="close-x"]') as HTMLButtonElement).click();
+    (target.querySelector('header.modal-head button[aria-label="Close"]') as HTMLButtonElement).click();
     await settle();
     expect(onClose).not.toHaveBeenCalled();
     resolvePost({ ok: true, status: 200, json: () => Promise.resolve(initial) } as Response);
     await settle();
     // If save-success path didn't close, a fresh X should close cleanly.
     if (!onClose.mock.calls.length) {
-      (target.querySelector('button[data-action="close-x"]') as HTMLButtonElement).click();
+      (target.querySelector('header.modal-head button[aria-label="Close"]') as HTMLButtonElement).click();
       await settle();
       expect(onClose).toHaveBeenCalled();
     }
@@ -532,7 +550,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     const ta = target.querySelector('textarea') as HTMLTextAreaElement;
     ta.dispatchEvent(makeDropEvent([new File(['x'], 'x.png', { type: 'image/png' })]));
     await settle();
-    (target.querySelector('button[data-action="close-x"]') as HTMLButtonElement).click();
+    (target.querySelector('header.modal-head button[aria-label="Close"]') as HTMLButtonElement).click();
     await settle();
     expect(abortSpy).toHaveBeenCalled();
     // Cleanup the hanging promise so vitest doesn't hold the worker
@@ -544,11 +562,7 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     abortSpy.mockRestore();
   });
 
-  it('modal layout: container element + header + footer present (structural check, NOT computed-style)', async () => {
-    // Round-2 reviewer-3 catch: jsdom does NOT implement CSSOM well — `getComputedStyle`
-    // returns empty strings for unset properties and only echoes inline `style="..."`
-    // attributes. Layout/visual regressions belong in Playwright; here we assert
-    // structural presence only.
+  it('modal layout: ui/Modal frame with head, body and foot; no own backdrop (structural check, NOT computed-style)', async () => {
     fetchSpy.mockImplementation(() => jres([]));
     const target = document.createElement('div');
     document.body.appendChild(target);
@@ -570,10 +584,13 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
       },
     });
     await settle();
-    expect(target.querySelector('.modal')).toBeTruthy();
-    expect(target.querySelector('.modal > header')).toBeTruthy();
-    expect(target.querySelector('.modal > footer')).toBeTruthy();
-    expect(target.querySelector('.backdrop')).toBeTruthy();
+    const dialog = document.querySelector('section.modal-panel[role="dialog"]');
+    expect(dialog?.getAttribute('aria-labelledby')).toBe('mp-modal-title');
+    expect(dialog!.querySelector('header.modal-head')).toBeTruthy();
+    expect(dialog!.querySelector('div.modal-body')).toBeTruthy();
+    expect(dialog!.querySelector('footer.modal-foot')).toBeTruthy();
+    expect(document.querySelector('.modal-backdrop')).toBeTruthy();
+    expect(document.querySelector('[data-role="backdrop"], .backdrop')).toBeNull();
   });
 
   it('404 on Save: surfaces "deleted between open and Save" banner with Ctrl/Cmd+A/+C copy instructions (spec line 519)', async () => {
@@ -608,6 +625,10 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
         onNavigateToTab: vi.fn(),
       },
     });
+    await settle();
+    const edited = target.querySelector('textarea') as HTMLTextAreaElement;
+    edited.value = 'changed';
+    edited.dispatchEvent(new Event('input', { bubbles: true }));
     await settle();
     (target.querySelector('button[data-action="save"]') as HTMLButtonElement).click();
     await settle();
@@ -654,6 +675,10 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
       },
     });
     await settle();
+    const edited = target.querySelector('textarea') as HTMLTextAreaElement;
+    edited.value = 'changed';
+    edited.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
     (target.querySelector('button[data-action="save"]') as HTMLButtonElement).click();
     await settle();
     const banner = target.querySelector('.banner-error') as HTMLElement;
@@ -664,5 +689,46 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     expect(onClose).not.toHaveBeenCalled();
     // Save button re-enabled (submitting reset in finally).
     expect((target.querySelector('button[data-action="save"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // ---- Slice-5b T2 review (lane-2 I1): the run-asset sidebar's inline delete
+  // confirm owns Escape (default-prevented); the modal must not also close.
+  describe('MiniProjectModal — Escape inside the asset delete confirm', () => {
+    it('cancels the confirm and leaves the modal open', async () => {
+      fetchSpy.mockImplementation((url: string) =>
+        String(url).includes('/assets')
+          ? jres([{ id: 1, filename: 'p.png', mime_type: 'image/png', file_size: 1, is_referenced: false }])
+          : jres([]));
+      const onClose = vi.fn();
+      const target = document.createElement('div');
+      document.body.appendChild(target);
+      trackedMount(MiniProjectModal, {
+        target,
+        props: {
+          runId: 10,
+          mode: 'edit',
+          initial,
+          availableBlocks: [],
+          currentBlock: blocks[0],
+          runIsPublished: true,
+          versionIsDisabled: false,
+          runEndDate: '2026-06-30',
+          course: baseCourse,
+          onClose,
+          onSaved: vi.fn(),
+          onNavigateToTab: vi.fn(),
+        },
+      });
+      await settle();
+      target.querySelector<HTMLButtonElement>('[data-testid="delete-trash"] button')!.click();
+      await settle();
+      const cancel = target.querySelector<HTMLButtonElement>('.inline-confirm button.cancel')!;
+      expect(document.activeElement).toBe(cancel);
+      cancel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await settle();
+      expect(target.querySelector('.inline-confirm button.confirm')).toBeNull();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(target.querySelector('[data-testid="discard-confirm"], .inline-confirm')).toBeNull();
+    });
   });
 });

@@ -1,11 +1,14 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
+  import IconButton from '../ui/IconButton.svelte';
+  import InlineConfirm from '../ui/InlineConfirm.svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { ApiError } from '../../lib/api';
   import { formatRef } from '../../lib/assets';
   import type { AssetContext, AssetItem } from '../../lib/assetContext';
   import { MAX_FILE_SIZE_BYTES, ALLOWED_EXTENSIONS } from '../../lib/runAssets';
   import { formatFileSize } from '../../lib/format';
+  import { repairFocus } from '../../lib/askInPlace.svelte';
 
   type UploadProgress = { current: number; total: number; filename: string } | null;
   type UploadError = { detail: string; stoppedAt?: { n: number; m: number } } | null;
@@ -36,6 +39,8 @@
   let listError = $state<string | null>(null);
   let loading = $state(true);
   let fileInputEl = $state<HTMLInputElement | null>(null);
+  let asideEl = $state<HTMLElement | null>(null);
+  let dropZoneEl = $state<HTMLElement | null>(null);
   // Plain `let`, NOT $state — used as a gate inside $effect to skip the
   // pre-mount tick. Making it reactive would cause the $effect to re-run
   // when onMount flips it, triggering a spurious second fetchAssets.
@@ -56,10 +61,20 @@
     listError = null;
     try {
       const list = await assetContext.list();
-      if (myToken === loadToken) assets = list;
+      if (myToken === loadToken) {
+        const gone = idleQuestionGone(list);
+        assets = list;
+        if (gone) void refocusAfterDelete(gone.id, gone.idx);
+      }
     } catch (e) {
       if (myToken === loadToken) {
+        // F11: the error line takes the rows' place, with any focus in them.
+        const hadFocus = asideEl?.querySelector('ul.list')?.contains(document.activeElement) ?? false;
+        // An idle question goes with its row, or a later reload would re-open it
+        // and take focus (R57); a busy one waits for its DELETE (R54).
+        if (confirmId !== null && !deletingIds.has(confirmId)) confirmId = null;
         listError = e instanceof ApiError ? e.displayMessage : 'Could not load assets.';
+        if (hadFocus) void repairFocus(dropZoneEl, asideEl?.closest('section.modal-panel'));
       }
     } finally {
       if (myToken === loadToken) loading = false;
@@ -73,27 +88,110 @@
   // the pre-onMount tick.
   $effect(() => {
     void refreshKey;
-    void assetContext;
-    if (mountDone) void fetchAssets();
+    const ctx = assetContext;
+    if (!mountDone) return;
+    // A new context: the old rows (and a question about one) go at once, so
+    // nothing of the previous version or run can be clicked while its list loads.
+    if (ctx !== shownCtx) { shownCtx = ctx; assets = []; confirmId = null; }
+    void fetchAssets();
   });
-  onMount(() => { mountDone = true; void fetchAssets(); });
+  // The context the list shows (plain `let`, as above).
+  let shownCtx: AssetContext | null = null;
+  onMount(() => { mountDone = true; shownCtx = assetContext; void fetchAssets(); });
 
-  function askDelete(id: number) { if (disabled) return; confirmId = id; }
-  function cancelDelete() { confirmId = null; }
+  // R2: `is_referenced` counts references across the whole version (course) or
+  // the whole run, never one item — the reason says so.
+  const inUseReason = $derived(
+    assetContext.kind === 'run'
+      ? 'Remove asset — referenced by a mini-project'
+      : 'Remove asset — still referenced in this version',
+  );
+  // R7: the question (InlineConfirm, takeFocus) puts focus on its Cancel, so
+  // Escape reaches it (default-prevented, so an enclosing modal stays open), and
+  // Cancel gives it back to the row's trash.
+  const trashEls = $state<Record<number, HTMLButtonElement | undefined>>({});
+  function askDelete(id: number) {
+    if (disabled) return;
+    confirmId = id;
+  }
+  async function cancelDelete() {
+    const id = confirmId;
+    confirmId = null;
+    await tick();
+    if (id !== null) trashEls[id]?.focus();
+  }
+  // An idle question closes when the sidebar turns disabled (a save or another
+  // request froze the editor); a busy one stays until its DELETE settles (R54).
+  $effect(() => {
+    if (!disabled || confirmId === null || deletingIds.has(confirmId)) return;
+    const id = confirmId;
+    const idx = untrack(() => assets.findIndex((a) => a.id === id));
+    // This row's question: another row's busy one may be on screen too (P60).
+    const inside = asideEl?.querySelector(`[data-testid="asset-row-${id}"] .inline-confirm`)?.contains(document.activeElement) ?? false;
+    confirmId = null;
+    if (inside) void refocusAfterDelete(id, idx);
+  });
+  function questionHasFocus(): boolean {
+    return confirmId !== null
+      && (asideEl?.querySelector(`[data-testid="asset-row-${confirmId}"] .inline-confirm`)?.contains(document.activeElement) ?? false);
+  }
+  // A reload without the asked-about row (another tab deleted it) closes its
+  // idle question without acting. Read while the row is still on screen: if
+  // focus is in the question, the caller moves it on (§Focus, never <body>).
+  function idleQuestionGone(list: AssetItem[]): { id: number; idx: number } | null {
+    const id = confirmId;
+    if (id === null || deletingIds.has(id) || list.some((a) => a.id === id)) return null;
+    const idx = assets.findIndex((a) => a.id === id);
+    const hadFocus = questionHasFocus();
+    confirmId = null;
+    return hadFocus ? { id, idx } : null;
+  }
   async function confirmDelete(id: number) {
     if (disabled) return;
     if (deletingIds.has(id)) return;
     deletingIds.add(id);
     deleteErrorMsg = null;
+    let ok = false;
     try {
       await assetContext.remove(id);
+      ok = true;
     } catch (e) {
       deleteErrorMsg = e instanceof ApiError ? e.displayMessage : 'Delete failed';
     } finally {
-      if (confirmId === id) confirmId = null;
+      const closing = confirmId === id;
+      if (closing) confirmId = null;
       deletingIds.delete(id);
-      await fetchAssets();
+      const idx = assets.findIndex((a) => a.id === id);
+      // The reload keeps the list on screen: a deleted row leaves at once, so
+      // it cannot be clicked meanwhile; focus moves on now, and again only if
+      // the reload took its target away.
+      if (ok) assets = assets.filter((a) => a.id !== id);
+      const reload = fetchAssets();
+      if (closing) await refocusAfterDelete(id, idx);
+      await reload;
+      if (closing && document.activeElement === document.body) await refocusAfterDelete(id, idx);
     }
+  }
+  // R7, the Delete path: the question is gone (and the list re-rendered), so
+  // focus would fall to <body>. Land on this row's trash (failed delete), else
+  // the trash now at its position, the one before it, the drop zone, else the
+  // modal panel. Leave focus alone if the author moved it elsewhere or opened
+  // another question.
+  async function refocusAfterDelete(id: number, idx: number) {
+    await tick();
+    const active = document.activeElement;
+    if (confirmId !== null || (active && active !== document.body && !asideEl?.contains(active))) return;
+    const near: (HTMLElement | null | undefined)[] = [
+      trashEls[id], trashEls[assets[idx]?.id ?? -1], trashEls[assets[idx - 1]?.id ?? -1], dropZoneEl,
+    ];
+    const target = near.find(usable) ?? asideEl?.closest<HTMLElement>('section.modal-panel');
+    target?.focus();
+  }
+  // A focus target counts only if it is connected, enabled (natively and by
+  // aria) and not inert (Polish 1 §Focus).
+  function usable(el: HTMLElement | null | undefined): el is HTMLElement {
+    return !!el && el.isConnected && !(el as HTMLButtonElement).disabled
+      && el.getAttribute('aria-disabled') !== 'true' && !el.closest('[inert]');
   }
 
   function pickFile() { if (disabled || uploading) return; fileInputEl?.click(); }
@@ -182,7 +280,8 @@
 </script>
 
 <aside
-  class="sidebar"
+  bind:this={asideEl}
+  class="asset-sidebar"
   data-testid="asset-sidebar"
   ondragover={handleDragOver}
   ondrop={handleAsideRootDrop}
@@ -190,26 +289,23 @@
   <h3>{assetContext.kind === 'run' ? 'Run assets — shared across all MPs in this run' : 'Course assets'}</h3>
 
   {#if !cursorReady}
-    <p class="banner" data-testid="cursor-banner">
+    <p class="hint" data-testid="cursor-banner">
       Click in the editor to position the cursor, or new assets will be appended to the end.
     </p>
   {/if}
 
   {#if uploadError}
     <div class="error" data-testid="upload-error">
-      <span>
+      <span class="msg">
         {#if uploadError.stoppedAt}
           Upload stopped at file {uploadError.stoppedAt.n} of {uploadError.stoppedAt.m}: {uploadError.detail}
         {:else}
           {uploadError.detail}
         {/if}
       </span>
-      <button
-        type="button"
-        aria-label="Dismiss error"
-        data-testid="upload-error-dismiss"
-        onclick={() => (uploadError = null)}
-      >×</button>
+      <span data-testid="upload-error-dismiss">
+        <IconButton glyph="close" size="sm" borderless title="Dismiss error" onclick={() => (uploadError = null)} />
+      </span>
     </div>
   {/if}
 
@@ -225,16 +321,14 @@
 
   {#if deleteErrorMsg}
     <div class="error" data-testid="delete-error">
-      <span>{deleteErrorMsg}</span>
-      <button
-        type="button"
-        aria-label="Dismiss error"
-        onclick={() => (deleteErrorMsg = null)}
-      >×</button>
+      <span class="msg">{deleteErrorMsg}</span>
+      <IconButton glyph="close" size="sm" borderless title="Dismiss error" onclick={() => (deleteErrorMsg = null)} />
     </div>
   {/if}
 
-  {#if loading}
+  <!-- "Loading…" only on the first load: a reload keeps the list, so an open
+       question stays put and never takes focus back (R57). -->
+  {#if loading && assets.length === 0}
     <p class="muted" data-testid="loading-indicator">Loading…</p>
   {:else if listError}
     <p class="error-inline">{listError}</p>
@@ -254,12 +348,12 @@
               {#if isImage(a.mime_type)}
                 <img loading="lazy" src={assetContext.imgSrc(a)} alt="" />
               {:else}
-                <span class="chip">{extChip(a)}</span>
+                <span class="chip mono">{extChip(a)}</span>
               {/if}
             </span>
             <span class="meta">
               <span class="name" title={a.filename}>{displayName(a.filename)}</span>
-              <span class="size">{formatFileSize(a.file_size)}</span>
+              <span class="size mono">{formatFileSize(a.file_size)}</span>
             </span>
           </button>
           {#if a.is_referenced}
@@ -268,29 +362,28 @@
               data-testid="used-badge"
               title="Remove this reference from content and save to enable delete."
             >used</span>
-          {:else if confirmId === a.id}
-            <span class="confirm-pair">
-              <button
-                type="button"
-                data-testid="delete-confirm"
-                disabled={disabled || deletingIds.has(a.id)}
-                onclick={(e) => { e.stopPropagation(); void confirmDelete(a.id); }}
-              >Confirm</button>
-              <button
-                type="button"
-                data-testid="delete-cancel"
-                onclick={(e) => { e.stopPropagation(); cancelDelete(); }}
-              >Cancel</button>
+          {/if}
+          {#if confirmId === a.id || deletingIds.has(a.id)}
+            <!-- The row's own click (insert) must not run under the question. -->
+            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+            <span onclick={(e) => e.stopPropagation()}>
+              <InlineConfirm takeFocus label="Delete {a.filename}?" confirmLabel="Delete"
+                             busy={deletingIds.has(a.id)}
+                             onConfirm={() => void confirmDelete(a.id)} onCancel={() => void cancelDelete()} />
             </span>
           {:else}
-            <button
-              type="button"
-              class="trash"
-              data-testid="delete-trash"
-              disabled={disabled}
-              aria-label={`Delete ${a.filename}`}
-              onclick={(e) => { e.stopPropagation(); askDelete(a.id); }}
-            >🗑</button>
+            <span data-testid="delete-trash">
+              <IconButton
+                glyph="trash"
+                size="sm"
+                danger
+                title={a.is_referenced ? inUseReason : 'Remove asset'}
+                aria-label={`Delete ${a.filename}`}
+                disabled={disabled || a.is_referenced}
+                bind:element={trashEls[a.id]}
+                onclick={() => void askDelete(a.id)}
+              />
+            </span>
           {/if}
         </li>
       {/each}
@@ -298,6 +391,7 @@
   {/if}
 
   <div
+    bind:this={dropZoneEl}
     class="drop-zone"
     data-testid="drop-zone"
     ondragover={handleDragOver}
@@ -307,6 +401,8 @@
     onclick={pickFile}
     onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickFile(); } }}
     class:disabled={disabled || uploading}
+    aria-disabled={disabled || uploading ? 'true' : undefined}
+    title={uploading ? 'Wait for the upload to finish' : disabled ? 'Wait for the request to finish' : undefined}
   >
     Drop here or click to pick
   </div>
@@ -322,31 +418,104 @@
 </aside>
 
 <style>
-  .sidebar { flex: 0 0 280px; padding: var(--space-3); border-left: 1px solid var(--border); display: flex; flex-direction: column; gap: var(--space-2); }
-  h3 { margin: 0 0 var(--space-2) 0; }
-  .banner { background: #fff8e1; border-left: 3px solid #f9a825; padding: var(--space-2); font-size: 0.85rem; color: #5d4037; }
-  .error { display: flex; gap: var(--space-2); align-items: flex-start; background: #fdecea; border-left: 3px solid #c62828; padding: var(--space-2); color: #7c1f1f; font-size: 0.85rem; }
-  .error button { background: none; border: 0; color: inherit; cursor: pointer; font-size: 1.2em; line-height: 1; }
-  .progress { background: #e3f2fd; border-left: 3px solid #1976d2; padding: var(--space-2); color: #0d47a1; font-size: 0.85rem; }
-  .muted { color: var(--muted, #666); font-size: 0.85rem; }
-  .error-inline { color: #a33; font-size: 0.85rem; }
-  .list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-1); }
-  .row { display: flex; align-items: center; cursor: pointer; border: 1px solid transparent; border-radius: var(--radius); }
-  .row:hover { background: #f5f5f5; }
-  .row-click { flex: 1; display: flex; gap: var(--space-2); align-items: center; padding: var(--space-2); background: none; border: 0; cursor: pointer; text-align: left; }
-  .thumb { width: 32px; height: 32px; flex: 0 0 32px; display: flex; align-items: center; justify-content: center; background: #eee; border-radius: 4px; overflow: hidden; }
+  .asset-sidebar {
+    flex: 0 0 260px;
+    min-width: 0;
+    padding: 12px;
+    border-left: 1px solid var(--border);
+    background: var(--surface-3);
+    display: flex;
+    flex-direction: column;
+    gap: 8px; /* ref 1717 */
+  }
+  /* Stacked under 880px (MarkdownEditor): a full-width block, not a 260px-tall one. */
+  @media (max-width: 880px) {
+    .asset-sidebar { flex: 0 0 auto; border-left: 0; border-top: 1px solid var(--border); }
+  }
+  h3 { font-size: 12.5px; font-weight: 600; color: var(--text); /* ref 1718 */ }
+  /* D11: the information-banner colour treatment at sidebar size (ref 1719 geometry). */
+  .hint {
+    margin: 0;
+    padding: 8px 10px;
+    background: var(--surface-2);
+    border-left: 3px solid var(--primary);
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--text-3);
+  }
+  .error {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 8px 10px;
+    background: var(--surface-2);
+    border-left: 3px solid var(--danger);
+    font-size: 11.5px;
+    color: var(--danger); /* D11 treatment, error form */
+  }
+  .msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .progress {
+    padding: 8px 10px;
+    background: var(--surface-2);
+    border-left: 3px solid var(--primary);
+    font-size: 11.5px;
+    color: var(--text-3); /* D11 treatment */
+  }
+  .muted { margin: 0; font-size: 12px; color: var(--muted); }
+  .error-inline { margin: 0; font-size: 12px; color: var(--danger); }
+  .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .row { display: flex; align-items: center; gap: 9px; padding: 6px 7px; border-radius: var(--radius); /* ref 1720 */ }
+  .row:hover { background: var(--surface-2); }
+  .row-click {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 9px; /* ref 1720 */
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .row-click:disabled { cursor: not-allowed; }
+  .thumb {
+    flex: 0 0 32px;
+    width: 32px;
+    height: 28px;
+    border-radius: 4px; /* the 4px tile radius (ref 1721) */
+    background: var(--border-soft); /* ref 1721 — no fill token; --border-soft is the same value */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
   .thumb img { width: 100%; height: 100%; object-fit: cover; }
-  .chip { font-size: 0.65rem; font-weight: 600; color: #555; }
-  .meta { display: flex; flex-direction: column; flex: 1; min-width: 0; }
-  .name { font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .size { font-size: 0.7rem; color: var(--muted, #666); }
-  .used { font-size: 0.65rem; padding: 2px 6px; background: #c8e6c9; color: #1b5e20; border-radius: 999px; }
-  .drop-zone { margin-top: var(--space-2); padding: var(--space-3); border: 2px dashed var(--border); border-radius: var(--radius); text-align: center; color: var(--muted, #666); cursor: pointer; font-size: 0.85rem; }
-  .drop-zone:hover { background: #fafafa; }
-  .drop-zone.disabled { opacity: 0.5; cursor: not-allowed; }
-  .confirm-pair { display: flex; gap: var(--space-1); }
-  .confirm-pair button { font-size: 0.7rem; padding: 2px 6px; cursor: pointer; }
-  .trash { background: none; border: 0; cursor: pointer; opacity: 0; transition: opacity 80ms; font-size: 0.9rem; }
-  .row:hover .trash { opacity: 0.7; }
-  .trash:hover { opacity: 1; }
+  .chip { font-size: 9.5px; font-weight: 600; color: var(--muted); /* ref 1721 */ }
+  .meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; /* ref 1722 */ }
+  .name { font-size: 12.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; /* ref 1723 */ }
+  .size { font-size: 10.5px; color: var(--muted); /* ref 1724 */ }
+  .used {
+    padding: 3px 8px;
+    border-radius: 3px;
+    background: var(--status-accepted-bg);
+    color: var(--status-accepted-fg);
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap; /* ref 1726 */
+  }
+  .drop-zone {
+    margin-top: 2px;
+    padding: 11px 10px;
+    border: 2px dashed var(--border-strong);
+    border-radius: var(--radius);
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer; /* ref 1744 */
+  }
+  .drop-zone:hover { background: var(--surface-2); }
+  .drop-zone.disabled { color: var(--faint); border-color: var(--border-faint); cursor: not-allowed; }
 </style>

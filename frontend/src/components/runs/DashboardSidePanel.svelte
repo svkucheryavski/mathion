@@ -1,14 +1,17 @@
 <!-- frontend/src/components/runs/DashboardSidePanel.svelte -->
 <!--
-  Slide-in side drawer (NOT centered modal). Width: min(640px, 90vw).
-  Pattern: peek-and-back-to-list, not focused-edit. Deliberate divergence
-  from the existing modal pattern; see spec §6.5 line 1304.
+  The grading / progress side panel (9b): a 520px drawer on ui/Modal at the
+  right edge (6c D27, R30). × and Esc close it; a click on the dimmed page
+  does not (D29). The read-only cards come from SubmissionCards; one
+  evaluationForm snippet serves create and edit (R43).
 -->
 <script lang="ts">
   import {
     getSequenceItemState,
     getSubmissionThread,
     resultToStatus,
+    RESULT_LABEL,
+    STATUS_SHORT_LABEL,
     type MpGroupStatus,
     type SequenceItemStateResponse,
     type DashboardMpRow,
@@ -16,16 +19,28 @@
     type ThreadSubmission,
   } from '../../lib/dashboards';
   import SubmissionThreadEntry from './SubmissionThreadEntry.svelte';
-  import FocusTrap from '../ui/FocusTrap.svelte';
+  import {
+    submissionChips,
+    submissionContent,
+    evaluationContent,
+    evaluatedLine,
+    type EvaluationView,
+  } from './SubmissionCards.svelte';
+  import ProgressBreakdown from './ProgressBreakdown.svelte';
+  import Modal from '../ui/Modal.svelte';
+  import Button from '../ui/Button.svelte';
+  import IconButton from '../ui/IconButton.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import DirtyGuard from '../editor/DirtyGuard.svelte';
+  import { DISCARD, DISCARD_CONTINUE } from '../../lib/editorReasons';
+  import { refused, repairFocus, type GuardAsk } from '../../lib/askInPlace.svelte';
   import StatusBadge from '../ui/StatusBadge.svelte';
-  import { formatLocalWithTz } from '../../lib/datetime';
   import { formatFileSize } from '../../lib/format';
+  import { focusFirst } from '../../lib/focusFirst';
   import { MAX_FEEDBACK_FILE_SIZE_BYTES, type EvaluationResult, createEvaluation, patchEvaluation, type Evaluation } from '../../lib/evaluations';
   import { ApiError } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
 
   type ProgressTarget = {
     kind: 'progress';
@@ -47,16 +62,44 @@
     isAdmin = false,
     isTeacher = false,
     onRefetch = () => {},
+    blockLabel = undefined,
   }: {
     target: PanelTarget;
     onClose: () => void;
     isAdmin?: boolean;
     isTeacher?: boolean;
     onRefetch?: () => void;
+    // R35: the block's "B2" from the Submissions tab; none when the block is
+    // not in the run's pinned version.
+    blockLabel?: string;
   } = $props();
 
   const canWrite = $derived(isAdmin || isTeacher);
   let editing = $state(false);
+
+  // R37: the drawn order. No result is checked until the teacher picks one.
+  const RESULT_ORDER: EvaluationResult[] = ['accepted', 'minor_revision', 'major_revision', 'rejected'];
+  const LOCK_TEXT = 'Without a feedback file the result can only be Accepted.';
+  const SAVE_WAIT = 'Wait for the save to finish';
+  // §Focus: open → the checked Result radio, else the first radio when the
+  // form shows, else Modal's ×.
+  const AUTOFOCUS =
+    'input[name="evaluation-result"]:checked, input[name="evaluation-result"]:not(:disabled), .modal-head button[aria-label="Close"]';
+
+  const uid = $props.id();
+  const titleId = `${uid}-title`;
+  let titleEl = $state<HTMLElement>();
+  let discardEl = $state<HTMLElement>();
+  let saveEl = $state<HTMLButtonElement>();
+  let fileInputEl = $state<HTMLInputElement>();
+  // P49: Modal owns the panel and ×; the panel finds them from its title.
+  const panelEl = () => titleEl?.closest<HTMLElement>('.modal-panel') ?? null;
+  const find = <T extends HTMLElement>(sel: string) => panelEl()?.querySelector<T>(sel) ?? null;
+  const closeX = () => find<HTMLButtonElement>('.modal-head button[aria-label="Close"]');
+  const editBtn = () => find<HTMLButtonElement>('button[data-test="edit-evaluation"]');
+  const evalHead = () => document.getElementById(`${uid}-eval`);
+  const checkedRadio = () => find<HTMLInputElement>('input[name="evaluation-result"]:checked');
+  const acceptedRadio = () => find<HTMLInputElement>('input[name="evaluation-result"][value="accepted"]');
 
   let formResult = $state<EvaluationResult | ''>('');
   let formScore = $state<number | null>(null);
@@ -75,10 +118,11 @@
   let submitController: AbortController | null = null;
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
   let raceTransition = $state(false);
+  // P52: set by a 409; the winning evaluation's <h3> takes focus when it renders.
+  let raceFocusPending = false;
 
-  // Captured when Edit is clicked (T6 wires the $effect). Used by T7's dirty-guard
-  // to compare current form values against the pre-fill baseline so a clean
-  // just-opened edit is NOT dirty. `null` means create-mode (no pre-fill).
+  // Captured when Edit is clicked. The dirty check compares the form against
+  // it, so a clean just-opened edit is NOT dirty. `null` means create mode.
   let prefillSnapshot = $state<{ result: EvaluationResult | ''; score: number | null; feedback_text: string } | null>(null);
 
   // --- Submission thread (Slice B) ---
@@ -108,7 +152,7 @@
   // the next thread refetch / manual grid refresh". Primitive values → no refire when
   // the ids are unchanged (a no-op grid refresh does not refetch). After a create
   // write the cell's evaluation id changes null→N via onRefetch, so the effect DOES
-  // refire and fetches once more on top of Step 11's manual refetch; this is benign
+  // refire and fetches once more on top of the manual refetch; this is benign
   // (loadThread aborts the prior in-flight request, so the two serialize) and is the
   // same mechanism that surfaces a concurrent external evaluation.
   const submissionLatestSubId = $derived(
@@ -156,8 +200,11 @@
     getSubmissionThread(runId, mpId, groupId, { signal: ctl.signal })
       .then((res) => {
         if (ctl.signal.aborted) return;
+        const wasForm = formShown;
         threadState = res.submissions;
         threadLoading = false;
+        // F9: the thread can swap a focused create form for the evaluation card.
+        void tick().then(() => { if (wasForm && !formShown) void repairFocus(evalHead(), closeX()); });
         // Drop the post-write bridge once the refetch supersedes it: the newest
         // submission now carries its own evaluation, OR the newest is a DIFFERENT
         // submission than the bridge was created for (a concurrent resubmission
@@ -179,10 +226,13 @@
       });
   }
 
-  function retryThread() {
+  async function retryThread() {
     if (submissionRunId != null && submissionMpId != null && submissionGroupId != null) {
       loadThread(submissionRunId, submissionMpId, submissionGroupId);
     }
+    // §Focus: Retry leaves with the error line; the panel title takes focus.
+    await tick();
+    focusFirst([titleEl]);
   }
 
   function toggleThreadEntry(id: number) {
@@ -193,26 +243,40 @@
   const resultLocked = $derived(editing && effectiveEvaluation != null && !effectiveEvaluation.has_feedback_file);
 
   $effect(() => {
-    if (effectiveEvaluation != null) raceTransition = false;
+    if (effectiveEvaluation == null) return;
+    raceTransition = false;
+    if (!raceFocusPending) return;
+    raceFocusPending = false;
+    // P52: move to the winning card unless the teacher has moved on from ×.
+    tick().then(() => {
+      const active = document.activeElement;
+      if (active === document.body || active === closeX()) focusFirst([evalHead()]);
+    });
   });
 
+  // The evaluation the edit form was filled from; null when not editing.
+  let filledId: number | null = null;
+  // C18: `effectiveEvaluation` changes identity on every grid Refresh. The form
+  // re-fills only when editing starts, the evaluation's id changes, or it is
+  // clean — read untracked, so typing does not re-run this effect.
   $effect(() => {
-    if (editing && effectiveEvaluation) {
-      formResult = effectiveEvaluation.result as EvaluationResult;
-      formScore = effectiveEvaluation.score;
-      formFeedbackText = effectiveEvaluation.feedback_text ?? '';
-      formFeedbackFile = null;
-      fileError = null;
-      prefillSnapshot = {
-        result: effectiveEvaluation.result as EvaluationResult,
-        score: effectiveEvaluation.score,
-        feedback_text: effectiveEvaluation.feedback_text ?? '',
-      };
-      tick().then(() => {
-        const sel = document.querySelector('select[name="evaluation-result"]') as HTMLSelectElement | null;
-        sel?.focus();
-      });
-    }
+    const ev = effectiveEvaluation;
+    if (!editing || !ev) { if (!editing) filledId = null; return; }
+    const starting = filledId === null;
+    if (!starting && ev.id === filledId && untrack(() => isDirty)) return;
+    filledId = ev.id;
+    formResult = ev.result as EvaluationResult;
+    formScore = ev.score;
+    formFeedbackText = ev.feedback_text ?? '';
+    formFeedbackFile = null;
+    fileError = null;
+    prefillSnapshot = {
+      result: ev.result as EvaluationResult,
+      score: ev.score,
+      feedback_text: ev.feedback_text ?? '',
+    };
+    // §Focus: Edit → the checked Result radio (Accepted when locked); never on a re-fill.
+    if (starting) tick().then(() => focusFirst([checkedRadio(), acceptedRadio()]));
   });
 
   const isDirty = $derived.by(() => {
@@ -232,16 +296,79 @@
     );
   });
 
-  let confirmDiscard = $state(false);
+  // The form is on screen exactly when the template renders `evaluationForm`.
+  // Edits left in state after the form went away (a 409 race, a stale cell)
+  // are not on screen, so closing must not ask about them: the confirm lives
+  // in the form and would never show (rev 8).
+  const formShown = $derived(
+    target.kind === 'submission' &&
+      newest != null &&
+      !newest.is_resubmission &&
+      canWrite &&
+      (effectiveEvaluation ? editing : !raceTransition),
+  );
+  const dirtyOnScreen = $derived(formShown && isDirty);
 
+  // The discard confirm replaces the form's button row (user, 6c Safari pass:
+  // the drawer's footer sat at the screen's bottom edge, far from the form).
+  // R36: Discard after the form's Cancel ends the edit; after × or Esc it
+  // closes the panel. Cancel returns focus to where it was when the confirm
+  // opened. While it asks, the rest of the drawer body is inert (`freeze`).
+  let confirmDiscard = $state(false);
+  // Polish 1 (D37): a navigation asks here too ('nav') and waits on the answer.
+  let navAnswer: ((ok: boolean) => void) | null = null;
+  function answerNav(ok: boolean) {
+    const r = navAnswer;
+    navAnswer = null;
+    r?.(ok);
+  }
+  // The confirm lives in the form: when the form goes (a thread load brings an
+  // evaluation), the question goes with it and the body thaws. A waiting
+  // navigation is cancelled (R55).
   $effect(() => {
-    if (confirmDiscard) {
-      tick().then(() => {
-        const btn = document.querySelector('.inline-confirm button') as HTMLButtonElement | null;
-        btn?.focus();
-      });
+    if (!formShown && confirmDiscard) {
+      confirmDiscard = false;
+      answerNav(false);
     }
   });
+  let discardSource = $state<'cancel' | 'close' | 'nav'>('close');
+  let discardReturnEl: HTMLElement | null = null;
+
+  function focusDiscardCancel() {
+    const c = discardEl?.querySelector<HTMLButtonElement>('button.cancel');
+    c?.closest('.inline-confirm')?.scrollIntoView?.({ block: 'nearest' });
+    c?.focus();
+  }
+
+  // DirtyGuard's `ask`. While the form's Cancel or × question is open, a
+  // navigation is refused and focus goes back to that question (R53).
+  function askNav(): GuardAsk {
+    if (confirmDiscard) {
+      focusDiscardCancel();
+      return refused();
+    }
+    askDiscard('nav');
+    const promise = new Promise<boolean>((r) => { navAnswer = r; });
+    return {
+      promise,
+      dismiss: () => {
+        if (!navAnswer) return;
+        confirmDiscard = false;
+        answerNav(false);
+      },
+      focusCancel: focusDiscardCancel,
+    };
+  }
+
+  function askDiscard(source: 'cancel' | 'close' | 'nav') {
+    discardSource = source;
+    // Safari does not focus a clicked button or radio: focus stays on <body> or
+    // moves to the drawer's own panel (tabindex -1). Neither is a return target.
+    const active = document.activeElement;
+    const container = active === document.body || active?.matches('section.modal-panel');
+    discardReturnEl = active instanceof HTMLElement && !container ? active : null;
+    confirmDiscard = true;
+  }
 
   const feedbackCharCount = $derived(formFeedbackText.length);
   const counterApproaching = $derived(feedbackCharCount >= 900);
@@ -278,13 +405,58 @@
   // for UX) — the native `disabled` covers it pre-attempt.
   const valid = $derived(formResult !== '' && !errors.score && !errors.feedbackText && !errors.feedbackFile);
 
+  // Save's reason while it is disabled; the first match wins.
+  const saveTitle = $derived(
+    formResult === ''
+      ? 'Choose a result'
+      : errors.score
+        ? 'Score must be a whole number between 0 and 100'
+        : errors.feedbackText
+          ? 'Write feedback for a non-accepted result'
+          : errors.feedbackFile
+            ? 'Attach the feedback PDF'
+            : undefined,
+  );
+
+  const resultDescribedby = $derived(
+    [errors.result ? 'evaluation-result-error' : null, resultLocked ? 'evaluation-result-lock' : null]
+      .filter(Boolean)
+      .join(' ') || undefined,
+  );
+
+  function resetForm() {
+    formResult = '';
+    formScore = null;
+    formFeedbackText = '';
+    formFeedbackFile = null;
+    fileError = null;
+    prefillSnapshot = null;
+    formSubmitAttempted = false;
+  }
+
+  // §Focus: after a save, an edit's Cancel or a Discard from Cancel.
+  async function focusAfterEdit() {
+    await tick();
+    focusFirst([editBtn(), evalHead()]);
+  }
+
+  function firstErroredField(): HTMLElement | null {
+    if (errors.result) return find('input[name="evaluation-result"]:not(:disabled)');
+    if (errors.score) return find('#evaluation-score');
+    if (errors.feedbackText) return find('#evaluation-feedback');
+    if (errors.feedbackFile) return find('[data-action="attach-feedback-file"]');
+    return null;
+  }
+
   async function handleSave() {
     formSubmitAttempted = true; // surfaces errors.result = 'Result is required.' if blank
+    // R44: a second submit while saving does nothing.
     if (!valid || submitting) return;
     submitting = true;
     serverError = null;
     submitController = new AbortController();
     timeoutHandle = setTimeout(() => submitController?.abort('timeout'), SUBMIT_TIMEOUT_MS);
+    let outcome: 'saved' | 'race' | 'failed' = 'failed';
     try {
       let result: Evaluation;
       if (effectiveEvaluation == null) {
@@ -305,44 +477,32 @@
       }
       stateLatestEvaluation = result;
       editing = false;
-      // Reset form/dirty state so a subsequent × Close / Escape doesn't trip the
-      // dirty-guard against stale post-save form values. Re-opening [Edit] will
-      // re-prefill from stateLatestEvaluation via T6's $effect.
-      formResult = '';
-      formScore = null;
-      formFeedbackText = '';
-      formFeedbackFile = null;
-      fileError = null;
-      prefillSnapshot = null;
-      formSubmitAttempted = false;
+      // Reset form/dirty state so a later × or Esc doesn't trip the dirty
+      // check against stale post-save values. Edit re-prefills from the bridge.
+      resetForm();
       pushToast('Evaluation saved; group notified', 'success');
       onRefetch();
       if (submissionRunId != null && submissionMpId != null && submissionGroupId != null) {
         loadThread(submissionRunId, submissionMpId, submissionGroupId);
       }
-      await tick();
-      const editBtn = document.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement | null;
-      editBtn?.focus();
+      outcome = 'saved';
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 409) {
         raceTransition = true;
         editing = false;
+        // The lost edits go too: a later resubmission's create form starts empty.
+        resetForm();
+        raceFocusPending = true;
         onRefetch();
         if (submissionRunId != null && submissionMpId != null && submissionGroupId != null) {
           loadThread(submissionRunId, submissionMpId, submissionGroupId);
         }
-        return;
-      }
-      if ((e as { name?: string })?.name === 'AbortError') {
+        outcome = 'race';
+      } else if ((e as { name?: string })?.name === 'AbortError') {
         const reason = (submitController?.signal as AbortSignal & { reason?: unknown })?.reason;
-        if (reason === 'timeout') {
-          serverError = 'Upload timed out. Try again.';
-          return;
-        }
-        // user-cancel: silent revert
-        return;
-      }
-      if (e instanceof ApiError) {
+        // A user cancel reverts silently; a timeout says so.
+        if (reason === 'timeout') serverError = 'Upload timed out. Try again.';
+      } else if (e instanceof ApiError) {
         serverError = e.displayMessage;
       } else {
         serverError = 'Unexpected error';
@@ -353,6 +513,18 @@
       timeoutHandle = null;
       submitController = null;
     }
+    // §Focus, after the un-freeze: Edit (else the Evaluation <h3>) after a
+    // save; the <h3> (else ×) after a 409; the first errored field (else Save
+    // evaluation) after a failure or a cancelled upload.
+    await tick();
+    if (outcome === 'saved') focusFirst([editBtn(), evalHead()]);
+    else if (outcome === 'race') focusFirst([evalHead(), closeX()]);
+    else focusFirst([firstErroredField(), saveEl]);
+  }
+
+  function startEdit() {
+    raceFocusPending = false;
+    editing = true;
   }
 
   function handleCancel() {
@@ -361,42 +533,55 @@
       return;
     }
     if (isDirty) {
-      confirmDiscard = true;
+      askDiscard('cancel');
       return;
     }
     editing = false;
-    tick().then(() => {
-      const editBtn = document.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement | null;
-      editBtn?.focus();
-    });
+    resetForm();
+    void focusAfterEdit();
   }
 
   function tryClose() {
     if (submitting) return;
-    if (isDirty) {
-      confirmDiscard = true;
+    // × (or Esc on ×) while the confirm asks: go to its Cancel, don't ask twice.
+    if (confirmDiscard) {
+      focusDiscardCancel();
+      return;
+    }
+    if (dirtyOnScreen) {
+      askDiscard('close');
       return;
     }
     onClose();
   }
 
-  function discardAndClose() {
+  function discard() {
     confirmDiscard = false;
-    if (editing) {
-      editing = false;
-      formResult = '';
-      formScore = null;
-      formFeedbackText = '';
-      formFeedbackFile = null;
-      fileError = null;
-      prefillSnapshot = null;
-      formSubmitAttempted = false;
-    } else {
+    if (discardSource === 'close') {
       onClose();
+      return;
     }
+    editing = false;
+    resetForm();
+    // A navigation goes ahead; its target takes focus.
+    if (discardSource === 'nav') {
+      answerNav(true);
+      return;
+    }
+    void focusAfterEdit();
   }
 
-  function handleFileChange(e: Event) {
+  async function cancelDiscard() {
+    confirmDiscard = false;
+    answerNav(false);
+    await tick();
+    focusFirst([discardReturnEl, find<HTMLButtonElement>('button[data-test="cancel-button"]'), checkedRadio(), closeX()]);
+  }
+
+  // The attribute, not the property: jsdom lacks `inert`.
+  const freeze = (el: HTMLElement) => { el.toggleAttribute('inert', confirmDiscard); };
+
+  async function handleFileChange(e: Event) {
     const input = e.target as HTMLInputElement;
     const file = input.files?.[0] ?? null;
     fileError = null;
@@ -418,6 +603,18 @@
       formFeedbackFile = null; return;
     }
     formFeedbackFile = file;
+    // §Focus: a chosen file → its remove ×.
+    await tick();
+    focusFirst([find('[data-action="remove-feedback-file"]')]);
+  }
+
+  async function removeFile() {
+    formFeedbackFile = null;
+    fileError = null;
+    if (fileInputEl) fileInputEl.value = '';
+    // §Focus: remove → "attach PDF".
+    await tick();
+    focusFirst([find('[data-action="attach-feedback-file"]')]);
   }
 
   // Progress fetch state — only relevant when target.kind === 'progress'.
@@ -439,9 +636,8 @@
       .then((res) => { data = res; loading = false; })
       .catch((err) => {
         if (err.name === 'AbortError') return;
-        // Spec §6.5 line 1322: "Fetch error (incl. 404)" → uniform message
-        // for ALL fetch errors (404 not split from other errors).
-        error = 'Item details unavailable. The dashboard may be out of date — Refresh.';
+        // One message for every fetch error, 404 included.
+        error = 'Item details unavailable. The dashboard may be out of date — close this panel and refresh the table.';
         loading = false;
       });
     return () => ctl.abort();
@@ -480,342 +676,488 @@
   // Unmount-only cleanup for any in-flight panel fetch (mirrors the tab pattern).
   $effect(() => () => abortCtl?.abort());
 
-  // Escape handled via svelte:window per spec §6.5 line 1300 (matches the
-  // RosterImportModal.svelte:111-116 pattern). FocusTrap handles Tab/Shift+Tab
-  // cycling + previousFocus restore on unmount.
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      tryClose();
-    }
-  }
+  // The header: the block title (6a D6) and "{Group} · B2" for a submission;
+  // the student and "{Block} — {Sequence}" for progress, "Item details" until
+  // they load, so the dialog is always named.
+  const title = $derived(
+    target.kind === 'submission'
+      ? target.mp.block_title
+      : data
+        ? (data.student.full_name ?? data.student.email)
+        : 'Item details',
+  );
+  const subtitle = $derived(
+    target.kind === 'submission'
+      ? (blockLabel ? `${target.entry.group_name} · ${blockLabel}` : target.entry.group_name)
+      : data
+        ? `${data.sequence.block_title} — ${data.sequence.sequence_title}`
+        : '',
+  );
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-<div class="panel-backdrop" onclick={tryClose} role="presentation"></div>
-<FocusTrap autofocusSelector='select[name="evaluation-result"], [data-side-panel-close]' autofocusPriorityOrder>
-  <div
-    class="dashboard-side-panel"
-    role="dialog"
-    aria-modal="true"
-    aria-label={target.kind === 'progress' ? 'Item-level breakdown' : 'Submission details'}
-    data-can-write={target.kind === 'submission' && canWrite ? 'true' : undefined}
-  >
-    <button class="panel-close" onclick={tryClose} aria-label="Close panel" data-side-panel-close>
-      <span aria-hidden="true">✕</span>
-      Close
-    </button>
-
-    {#if target.kind === 'progress'}
-      {#if loading}
-        <p>Loading…</p>
-      {:else if error}
-        <p class="banner-error" role="alert">{error}</p>
-      {:else if data}
-        <header>
-          <p class="student-line">{data.student.full_name ?? data.student.email}</p>
-          <h3>{data.sequence.block_title} — {data.sequence.sequence_title}</h3>
-        </header>
-        {#if data.items.length === 0}
-          <p>No items in this sequence.</p>
-        {:else}
-          <ol class="item-list">
-            {#each data.items as it (it.item_id)}
-              <li>
-                <span class="item-covered">{it.is_covered ? '✓' : '○'}</span>
-                <span class="item-title">{it.item_title}</span>
-                <span class="item-type">{it.item_type}</span>
-                {#if it.last_score}
-                  <span class="item-score">{it.last_score.correct}/{it.last_score.total}</span>
-                {/if}
-              </li>
-            {/each}
-          </ol>
-        {/if}
-      {/if}
-    {:else}
-      <!-- submission variant: no fetch, render from passed-in target.entry -->
-      <header>
-        <h3>{target.mp.title}</h3>
-        <p class="block-subtitle">{target.mp.block_title}</p>
-        <p class="group-line">{target.entry.group_name}</p>
-      </header>
-
-      <StatusBadge status={panelStatus} />
-
-      {#if newest == null}
-        <p>Not submitted yet.</p>
-      {:else}
-        {@const sub = newest}
-        <section class="submission-block">
-          <h4>Submission</h4>
-          <p>Number: {sub.submission_number}</p>
-          <p>Submitted at: {sub.submitted_at ? formatLocalWithTz(sub.submitted_at) : '—'}</p>
-          <p>Submitted by: {sub.submitted_by?.full_name ?? sub.submitted_by?.user_id ?? '—'}</p>
-          <p>Late: {sub.is_late ? 'Yes' : 'No'}</p>
-          <p>Resubmission: {sub.is_resubmission ? 'Yes' : 'No'}</p>
-          <p>File size: {formatFileSize(sub.file_size)}</p>
-          <a class="download-link" href={`/api/submissions/${sub.id}/file`} download>Download submission</a>
-        </section>
-
-        {#if sub.is_resubmission}
-          <div role="status" class="banner-info">
-            Auto-accepted on resubmission. No manual evaluation needed.
-          </div>
-          {#if sub.evaluation}
-            {@const evalu = sub.evaluation}
-            <!-- Occurrence (a): auto-accept eval block, now backed by newest.evaluation. -->
-            <section class="evaluation-block">
-              <h4>Evaluation</h4>
-              <p>Evaluated at: {evalu.evaluated_at ? formatLocalWithTz(evalu.evaluated_at) : '—'}</p>
-              <p>Evaluated by: {evalu.evaluated_by?.full_name ?? evalu.evaluated_by?.user_id ?? '—'}</p>
-              <p>Result: {evalu.result}</p>
-              <p>Score: {evalu.score ?? '—'}</p>
-              <p>Feedback: {evalu.feedback_text ?? '—'}</p>
-              {#if evalu.has_feedback_file}
-                <a class="download-link" href={`/api/evaluations/${evalu.id}/feedback-file`} download>Download feedback file</a>
-              {/if}
-            </section>
-          {/if}
-        {:else if effectiveEvaluation}
-          {@const evalu = effectiveEvaluation}
-          <!-- Occurrence (b): Branch B. -->
-          <section class="evaluation-block">
-            <h4>Evaluation</h4>
-            <p>Evaluated at: {sub.evaluation ? (sub.evaluation.evaluated_at ? formatLocalWithTz(sub.evaluation.evaluated_at) : '—') : 'Just now'}</p>
-            <p>Evaluated by: {sub.evaluation ? (sub.evaluation.evaluated_by?.full_name ?? sub.evaluation.evaluated_by?.user_id ?? '—') : 'You'}</p>
-            <p>Result: {evalu.result}</p>
-            <p>Score: {evalu.score ?? '—'}</p>
-            <p>Feedback: {evalu.feedback_text ?? '—'}</p>
-            {#if evalu.has_feedback_file}
-              <a class="download-link" href={`/api/evaluations/${evalu.id}/feedback-file`} download>Download feedback file</a>
-            {/if}
-          </section>
-          {#if canWrite && !editing}
-            <button type="button" data-test="edit-evaluation" onclick={() => (editing = true)}>Edit evaluation</button>
-          {/if}
-          {#if canWrite && editing}
-            <h4>Edit evaluation</h4>
-            {#if serverError}<div role="alert" class="form-error">{serverError}</div>{/if}
-            <form aria-label="Write evaluation" onsubmit={(e) => { e.preventDefault(); formSubmitAttempted = true; handleSave(); }}>
-              <label for="evaluation-result">Result <span aria-hidden="true">*</span> <span id="evaluation-result-helper" class="helper-text">(required)</span></label>
-              <select id="evaluation-result" name="evaluation-result"
-                      aria-required="true"
-                      aria-describedby={[
-                        'evaluation-result-helper',
-                        errors.result ? 'evaluation-result-error' : null,
-                        resultLocked ? 'evaluation-result-lock' : null,
-                      ].filter(Boolean).join(' ')}
-                      bind:value={formResult}>
-                <option value="">Select…</option>
-                <option value="rejected" disabled={resultLocked}>Rejected</option>
-                <option value="major_revision" disabled={resultLocked}>Major revision</option>
-                <option value="minor_revision" disabled={resultLocked}>Minor revision</option>
-                <option value="accepted">Accepted</option>
-              </select>
-              {#if errors.result}<span id="evaluation-result-error" role="alert">{errors.result}</span>{/if}
-              {#if resultLocked}<span id="evaluation-result-lock" class="helper-text">Cannot change to a non-accepted result without a feedback file. Create a new evaluation instead.</span>{/if}
-
-              <label for="evaluation-score">Score <span class="helper-text">(optional, 0–100)</span></label>
-              <input id="evaluation-score" name="evaluation-score" type="number" min="0" max="100" step="1"
-                     value={formScore ?? ''}
-                     oninput={(e) => {
-                       const v = (e.currentTarget as HTMLInputElement).value;
-                       formScore = v === '' ? null : Number(v);
-                     }}
-                     aria-describedby={errors.score ? 'evaluation-score-error' : undefined} />
-              {#if errors.score}<span id="evaluation-score-error" role="alert">{errors.score}</span>{/if}
-
-              <label for="evaluation-feedback">
-                Feedback text
-                {#if formResult !== 'accepted' && formResult !== ''}
-                  <span aria-hidden="true">*</span> <span class="helper-text">(required)</span>
-                {:else}
-                  <span class="helper-text">(optional)</span>
-                {/if}
-              </label>
-              <textarea id="evaluation-feedback" name="evaluation-feedback" maxlength="1000"
-                        bind:value={formFeedbackText}
-                        aria-describedby={errors.feedbackText ? 'evaluation-feedback-count evaluation-feedback-error' : 'evaluation-feedback-count'}></textarea>
-              <span id="evaluation-feedback-count" data-test="feedback-counter-visible">
-                {feedbackCharCount} / 1000{#if counterApproaching}<strong> — approaching limit</strong>{/if}
-              </span>
-              <span class="sr-only" data-test="feedback-counter-live" aria-live="polite">{announcedCounter}</span>
-              {#if errors.feedbackText}<span id="evaluation-feedback-error" role="alert">{errors.feedbackText}</span>{/if}
-
-              {#if !editing}
-                <label for="evaluation-file">
-                  Feedback PDF
-                  {#if formResult !== 'accepted' && formResult !== ''}
-                    <span aria-hidden="true">*</span> <span class="helper-text">(required)</span>
-                  {/if}
-                </label>
-                <input id="evaluation-file" name="evaluation-file" type="file" accept=".pdf,application/pdf" onchange={handleFileChange} />
-                <span class="helper-text">PDF only, max 20 MB.</span>
-                {#if errors.feedbackFile}<span role="alert">{errors.feedbackFile}</span>{/if}
-              {:else if existingHasFeedbackFile}
-                <p class="helper-text">Existing feedback file uploaded — replace not supported (Phase 9)</p>
-              {/if}
-
-              <button type="submit" disabled={!valid || submitting} aria-busy={submitting}>Save</button>
-              {#if editing || submitting}
-                <button type="button" data-test="cancel-button" onclick={handleCancel}>{submitting ? 'Cancel upload' : 'Cancel'}</button>
-              {/if}
-            </form>
-          {/if}
-        {:else if canWrite && !raceTransition}
-          <h4>New evaluation</h4>
-          {#if serverError}<div role="alert" class="form-error">{serverError}</div>{/if}
-          <form aria-label="Write evaluation" onsubmit={(e) => { e.preventDefault(); formSubmitAttempted = true; handleSave(); }}>
-              <label for="evaluation-result">Result <span aria-hidden="true">*</span> <span id="evaluation-result-helper" class="helper-text">(required)</span></label>
-              <select id="evaluation-result" name="evaluation-result"
-                      aria-required="true"
-                      aria-describedby={[
-                        'evaluation-result-helper',
-                        errors.result ? 'evaluation-result-error' : null,
-                        resultLocked ? 'evaluation-result-lock' : null,
-                      ].filter(Boolean).join(' ')}
-                      bind:value={formResult}>
-                <option value="">Select…</option>
-                <option value="rejected" disabled={resultLocked}>Rejected</option>
-                <option value="major_revision" disabled={resultLocked}>Major revision</option>
-                <option value="minor_revision" disabled={resultLocked}>Minor revision</option>
-                <option value="accepted">Accepted</option>
-              </select>
-              {#if errors.result}<span id="evaluation-result-error" role="alert">{errors.result}</span>{/if}
-              {#if resultLocked}<span id="evaluation-result-lock" class="helper-text">Cannot change to a non-accepted result without a feedback file. Create a new evaluation instead.</span>{/if}
-
-              <label for="evaluation-score">Score <span class="helper-text">(optional, 0–100)</span></label>
-              <input id="evaluation-score" name="evaluation-score" type="number" min="0" max="100" step="1"
-                     value={formScore ?? ''}
-                     oninput={(e) => {
-                       const v = (e.currentTarget as HTMLInputElement).value;
-                       formScore = v === '' ? null : Number(v);
-                     }}
-                     aria-describedby={errors.score ? 'evaluation-score-error' : undefined} />
-              {#if errors.score}<span id="evaluation-score-error" role="alert">{errors.score}</span>{/if}
-
-              <label for="evaluation-feedback">
-                Feedback text
-                {#if formResult !== 'accepted' && formResult !== ''}
-                  <span aria-hidden="true">*</span> <span class="helper-text">(required)</span>
-                {:else}
-                  <span class="helper-text">(optional)</span>
-                {/if}
-              </label>
-              <textarea id="evaluation-feedback" name="evaluation-feedback" maxlength="1000"
-                        bind:value={formFeedbackText}
-                        aria-describedby={errors.feedbackText ? 'evaluation-feedback-count evaluation-feedback-error' : 'evaluation-feedback-count'}></textarea>
-              <span id="evaluation-feedback-count" data-test="feedback-counter-visible">
-                {feedbackCharCount} / 1000{#if counterApproaching}<strong> — approaching limit</strong>{/if}
-              </span>
-              <span class="sr-only" data-test="feedback-counter-live" aria-live="polite">{announcedCounter}</span>
-              {#if errors.feedbackText}<span id="evaluation-feedback-error" role="alert">{errors.feedbackText}</span>{/if}
-
-              {#if !editing}
-                <label for="evaluation-file">
-                  Feedback PDF
-                  {#if formResult !== 'accepted' && formResult !== ''}
-                    <span aria-hidden="true">*</span> <span class="helper-text">(required)</span>
-                  {/if}
-                </label>
-                <input id="evaluation-file" name="evaluation-file" type="file" accept=".pdf,application/pdf" onchange={handleFileChange} />
-                <span class="helper-text">PDF only, max 20 MB.</span>
-                {#if errors.feedbackFile}<span role="alert">{errors.feedbackFile}</span>{/if}
-              {:else if existingHasFeedbackFile}
-                <p class="helper-text">Existing feedback file uploaded — replace not supported (Phase 9)</p>
-              {/if}
-
-              <button type="submit" disabled={!valid || submitting} aria-busy={submitting}>Save</button>
-              {#if editing || submitting}
-                <button type="button" data-test="cancel-button" onclick={handleCancel}>{submitting ? 'Cancel upload' : 'Cancel'}</button>
-              {/if}
-          </form>
-        {:else}
-          <p>Awaiting evaluation</p>
-        {/if}
-
-        {#if threadLoading}
-          <p data-test="thread-loading">Loading previous submissions…</p>
-        {:else if threadError}
-          <p class="banner-error" role="alert" data-test="thread-error">
-            Couldn't load submission history.
-            <button type="button" data-test="thread-retry" onclick={retryThread}>Retry</button>
-          </p>
-        {:else if threadState && threadState.length > 1}
-          <h4>Previous submissions</h4>
-          <div data-test="thread-history">
-            {#each threadState.slice(1) as histSub (histSub.id)}
-              <SubmissionThreadEntry
-                submission={histSub}
-                expanded={!!expandedById[histSub.id]}
-                onToggle={() => toggleThreadEntry(histSub.id)}
-              />
-            {/each}
-          </div>
-        {/if}
-      {/if}
-    {/if}
-    {#if confirmDiscard}
-      <div class="discard-confirm">
-        <InlineConfirm
-          confirmLabel="Discard"
-          warning="Discard unsaved changes?"
-          onConfirm={discardAndClose}
-          onCancel={() => (confirmDiscard = false)}
-        />
-      </div>
-    {/if}
-    <DirtyGuard isDirty={() => isDirty && !submitting} />
+{#snippet head()}
+  <div class="sp-titles">
+    <h2 class="sp-title" id={titleId} tabindex="-1" bind:this={titleEl}>{title}</h2>
+    {#if subtitle}<p class="sp-sub">{subtitle}</p>{/if}
   </div>
-</FocusTrap>
+  {#if target.kind === 'submission'}
+    <StatusBadge status={panelStatus} label={STATUS_SHORT_LABEL[panelStatus]} />
+  {/if}
+{/snippet}
+
+{#snippet discardRow()}
+  <div class="sp-discard" bind:this={discardEl}>
+    <InlineConfirm
+      row
+      takeFocus
+      warning={discardSource === 'nav' ? DISCARD_CONTINUE : DISCARD}
+      confirmLabel="Discard"
+      confirmDataAction="confirm-discard"
+      onConfirm={discard}
+      onCancel={cancelDiscard}
+    />
+  </div>
+{/snippet}
+
+{#snippet evaluationCard(ev: EvaluationView, evaluated: string, withEdit: boolean)}
+  <section class="sp-card" aria-labelledby="{uid}-eval" data-test="evaluation-card">
+    <div class="sp-card-head">
+      <h3 class="sp-h" id="{uid}-eval" tabindex="-1">Evaluation</h3>
+      {#if withEdit}
+        <Button variant="secondary" data-test="edit-evaluation" onclick={startEdit}>Edit</Button>
+      {/if}
+    </div>
+    <div class="sp-card-body">{@render evaluationContent(ev, evaluated)}</div>
+  </section>
+{/snippet}
+
+{#snippet evaluationForm(mode: 'create' | 'edit')}
+  {@const requiredHint = formResult === 'accepted' ? '(optional)' : '(required)'}
+  <section class="sp-card sp-evaluate" aria-labelledby="{uid}-form">
+    <div class="sp-card-head sp-evaluate-head">
+      <h3 class="sp-h" id="{uid}-form">Evaluate</h3>
+    </div>
+    <form class="sp-form" aria-label="Write evaluation" onsubmit={(e) => { e.preventDefault(); void handleSave(); }}>
+      <fieldset
+        id="evaluation-result"
+        class="sp-result"
+        role="radiogroup"
+        aria-required="true"
+        aria-describedby={resultDescribedby}
+        disabled={submitting}
+        {@attach freeze}
+      >
+        <legend class="sp-legend">Result <span class="sp-hint">(required)</span></legend>
+        <div class="sp-seg">
+          {#each RESULT_ORDER as r (r)}
+            {@const locked = resultLocked && r !== 'accepted'}
+            <label class="sp-seg-opt" class:checked={formResult === r} class:locked title={locked ? LOCK_TEXT : undefined}>
+              <input
+                class="sp-radio"
+                type="radio"
+                name="evaluation-result"
+                value={r}
+                bind:group={formResult}
+                disabled={locked}
+                title={locked ? LOCK_TEXT : undefined}
+              />
+              <span>{RESULT_LABEL[r]}</span>
+            </label>
+          {/each}
+        </div>
+        {#if errors.result}<p class="sp-field-err" id="evaluation-result-error" role="alert">{errors.result}</p>{/if}
+        {#if resultLocked}<p class="sp-lock" id="evaluation-result-lock">{LOCK_TEXT}</p>{/if}
+      </fieldset>
+
+      <div class="sp-fields" {@attach freeze}>
+        <div class="sp-field">
+          <label class="sp-label" for="evaluation-feedback">Feedback <span class="sp-hint">{requiredHint}</span></label>
+          <textarea
+            id="evaluation-feedback"
+            name="evaluation-feedback"
+            class="sp-textarea"
+            maxlength="1000"
+            readonly={submitting}
+            bind:value={formFeedbackText}
+            aria-invalid={errors.feedbackText ? 'true' : undefined}
+            aria-describedby={errors.feedbackText ? 'evaluation-feedback-count evaluation-feedback-error' : 'evaluation-feedback-count'}
+          ></textarea>
+          <span id="evaluation-feedback-count" class="sp-count" data-test="feedback-counter-visible">
+            {feedbackCharCount} / 1000{#if counterApproaching}<strong> — approaching limit</strong>{/if}
+          </span>
+          <span class="sp-sr" data-test="feedback-counter-live" aria-live="polite">{announcedCounter}</span>
+          {#if errors.feedbackText}<p class="sp-field-err" id="evaluation-feedback-error" role="alert">{errors.feedbackText}</p>{/if}
+        </div>
+        <div class="sp-field">
+          <label class="sp-label" for="evaluation-score">Score <span class="sp-hint">(optional, 0–100)</span></label>
+          <input
+            id="evaluation-score"
+            name="evaluation-score"
+            class="sp-input"
+            type="number"
+            min="0"
+            max="100"
+            step="1"
+            readonly={submitting}
+            value={formScore ?? ''}
+            oninput={(e) => {
+              const v = e.currentTarget.value;
+              formScore = v === '' ? null : Number(v);
+            }}
+            aria-invalid={errors.score ? 'true' : undefined}
+            aria-describedby={errors.score ? 'evaluation-score-error' : undefined}
+          />
+          {#if errors.score}<p class="sp-field-err" id="evaluation-score-error" role="alert">{errors.score}</p>{/if}
+        </div>
+      </div>
+
+      {#if serverError}<p class="sp-error form-error" role="alert">{serverError}</p>{/if}
+
+      <div class="sp-bottom" {@attach freeze}>
+        <!-- The file control is inert while a save runs (the attribute, not the
+             property: jsdom lacks `inert`). -->
+        <div class="sp-file-ctl" {@attach (el) => { el.toggleAttribute('inert', submitting); }}>
+          {#if mode === 'create'}
+            <span class="sp-file-line">
+              <span id="{uid}-file-label">Feedback file <span class="sp-hint">{requiredHint}</span></span>
+              {#if formFeedbackFile}
+                <span class="sp-chosen">
+                  <span class="sp-chosen-name">{formFeedbackFile.name}</span>
+                  <span class="sp-chosen-size">· {formatFileSize(formFeedbackFile.size)}</span>
+                  <IconButton
+                    glyph="close"
+                    size="sm"
+                    borderless
+                    title="Remove {formFeedbackFile.name}"
+                    data-action="remove-feedback-file"
+                    onclick={removeFile}
+                  />
+                </span>
+              {:else}
+                <span aria-hidden="true">—</span>
+                <button
+                  type="button"
+                  class="sp-link"
+                  data-action="attach-feedback-file"
+                  aria-describedby="{uid}-file-label {uid}-file-help"
+                  onclick={() => fileInputEl?.click()}
+                >attach PDF</button>
+              {/if}
+            </span>
+            <input
+              bind:this={fileInputEl}
+              id="evaluation-file"
+              name="evaluation-file"
+              type="file"
+              accept=".pdf,application/pdf"
+              hidden
+              onchange={handleFileChange}
+            />
+            <span class="sp-help" id="{uid}-file-help">PDF only, max 20 MB.</span>
+            {#if errors.feedbackFile}<p class="sp-field-err" role="alert">{errors.feedbackFile}</p>{/if}
+          {:else if existingHasFeedbackFile}
+            <p class="sp-muted">The feedback file cannot be replaced.</p>
+          {/if}
+        </div>
+        {#if !confirmDiscard}
+        <div class="sp-actions">
+          {#if editing || submitting}
+            <Button variant="secondary" data-test="cancel-button" onclick={handleCancel}>{submitting ? 'Cancel upload' : 'Cancel'}</Button>
+          {/if}
+          <Button
+            type="submit"
+            bind:element={saveEl}
+            loading={submitting}
+            aria-disabled={submitting}
+            disabled={!valid && !submitting}
+            title={submitting ? SAVE_WAIT : saveTitle}
+          >{submitting ? 'Saving…' : 'Save'}</Button>
+        </div>
+        {/if}
+      </div>
+      {#if confirmDiscard}{@render discardRow()}{/if}
+    </form>
+  </section>
+{/snippet}
+
+<Modal
+  placement="right"
+  width={520}
+  labelledby={titleId}
+  closeDisabled={submitting}
+  closeTitle={SAVE_WAIT}
+  autofocusSelector={AUTOFOCUS}
+  onRequestClose={tryClose}
+  header={head}
+>
+  {#if target.kind === 'progress'}
+    {#if loading}
+      <p class="sp-muted">Loading…</p>
+    {:else if error}
+      <p class="sp-error" role="alert">{error}</p>
+    {:else if data}
+      {#if data.items.length === 0}
+        <p class="sp-muted">No items in this sequence.</p>
+      {:else}
+        <ProgressBreakdown items={data.items} />
+      {/if}
+    {/if}
+  {:else if newest == null}
+    <p class="sp-muted">Not submitted yet.</p>
+  {:else}
+    {@const sub = newest}
+    <section class="sp-card" aria-labelledby="{uid}-latest" {@attach freeze}>
+      <div class="sp-card-head">
+        <h3 class="sp-h" id="{uid}-latest">Latest submission</h3>
+        {@render submissionChips(sub)}
+      </div>
+      <div class="sp-card-body">{@render submissionContent(sub)}</div>
+    </section>
+
+    {#if sub.is_resubmission}
+      <p class="sp-info banner-info" role="status">Auto-accepted on resubmission. No manual evaluation needed.</p>
+      {#if sub.evaluation}
+        {@render evaluationCard(sub.evaluation, evaluatedLine(sub.evaluation), false)}
+      {/if}
+    {:else if effectiveEvaluation && !editing}
+      {@render evaluationCard(
+        effectiveEvaluation,
+        sub.evaluation ? evaluatedLine(sub.evaluation) : 'You · Just now',
+        canWrite,
+      )}
+    {:else if effectiveEvaluation && canWrite}
+      {@render evaluationForm('edit')}
+    {:else if !effectiveEvaluation && canWrite && !raceTransition}
+      {@render evaluationForm('create')}
+    {:else}
+      <p class="sp-muted" data-test="awaiting-evaluation-placeholder">Awaiting evaluation</p>
+    {/if}
+
+    {#if threadLoading}
+      <p class="sp-muted" data-test="thread-loading">Loading earlier submissions…</p>
+    {:else if threadError}
+      <p class="sp-error" role="alert" data-test="thread-error" {@attach freeze}>
+        Couldn't load submission history.
+        <button type="button" class="sp-link" data-test="thread-retry" onclick={retryThread}>Retry</button>
+      </p>
+    {:else if threadState && threadState.length > 1}
+      <section class="sp-card" aria-labelledby="{uid}-earlier" {@attach freeze}>
+        <div class="sp-card-head">
+          <h3 class="sp-h" id="{uid}-earlier">Earlier submissions</h3>
+          <span class="sp-count-n">{threadState.length - 1}</span>
+        </div>
+        <div data-test="thread-history">
+          {#each threadState.slice(1) as histSub (histSub.id)}
+            <SubmissionThreadEntry
+              submission={histSub}
+              expanded={!!expandedById[histSub.id]}
+              onToggle={() => toggleThreadEntry(histSub.id)}
+            />
+          {/each}
+        </div>
+      </section>
+    {/if}
+  {/if}
+  <DirtyGuard isDirty={() => dirtyOnScreen && !submitting} ask={askNav} />
+</Modal>
 
 <style>
-  .panel-backdrop {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 100;
+  .sp-titles { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+  .sp-title {
+    margin: 0;
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--text);
+    overflow-wrap: anywhere;
   }
-  .dashboard-side-panel {
-    position: fixed; top: 0; right: 0; bottom: 0;
-    width: min(640px, 90vw);
-    background: var(--bg, #fff); padding: 1.5rem;
-    overflow-y: auto; z-index: 101;
-    box-shadow: -2px 0 8px rgba(0,0,0,0.15);
+  .sp-sub {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    overflow-wrap: anywhere;
   }
-  .panel-close { float: right; font-size: 1.5em; background: none; border: none; cursor: pointer; }
-  .banner-info {
-    padding: 0.75rem 1rem;
-    border-radius: 4px;
-    background: #e0f2f8;
-    color: #044d6c;
-    border-left: 4px solid #0a7ea4;
-    margin-bottom: 1rem;
+  .sp-muted { margin: 0; font-size: 13px; color: var(--muted); }
+  /* The 6a error and info banners. */
+  .sp-error {
+    margin: 0;
+    padding: 8px 12px;
+    background: var(--danger-panel-bg);
+    border-left: 3px solid var(--danger);
+    border-radius: var(--radius);
+    font-size: 13px;
+    color: var(--danger-panel-fg);
   }
-  .banner-error {
-    padding: 0.75rem 1rem;
-    border-radius: 4px;
-    background: #fdecea;
-    color: #611a15;
-    border-left: 4px solid #c53030;
-    margin-bottom: 1rem;
+  .sp-info {
+    margin: 0;
+    padding: 8px 12px;
+    background: var(--surface-2);
+    border-left: 3px solid var(--primary);
+    border-radius: var(--radius);
+    font-size: 13px;
+    color: var(--text-2);
   }
-  .form-error {
-    background: #fdecea;
-    color: #611a15;
-    padding: 0.5rem 1rem;
-    border-radius: 4px;
-    border-left: 4px solid #c53030;
-    margin-bottom: 1rem;
+  .sp-link {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    color: var(--primary);
+    text-decoration: underline;
+    cursor: pointer;
   }
-  .helper-text {
-    color: var(--text-muted, #666);
-    font-size: 0.85em;
+  .sp-discard { padding-top: 10px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text-2); }
+
+  /* Cards (9b): a --surface-2 head strip holding an <h3>. */
+  .sp-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--surface);
   }
-  .sr-only {
+  .sp-card-head {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 12px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .sp-h {
+    flex: 1 1 auto;
+    margin: 0;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .sp-card-body { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+  .sp-count-n { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+
+  /* The Evaluate card: a --primary border with a --primary-soft halo and head. */
+  .sp-evaluate {
+    border: 1.5px solid var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-soft);
+  }
+  .sp-evaluate-head { background: var(--primary-soft); }
+  .sp-form { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+
+  /* R37: four native radios drawn as a segmented control. */
+  .sp-result { min-width: 0; margin: 0; padding: 0; border: 0; }
+  .sp-legend { margin: 0 0 6px; padding: 0; font-size: 12.5px; font-weight: 500; color: var(--text-3); }
+  .sp-hint { font-weight: 400; color: var(--muted); }
+  .sp-seg {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .sp-seg-opt {
+    position: relative;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3px 0;
+    font-size: 12.5px;
+    color: var(--muted);
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .sp-seg-opt:first-child { border-left: 0; }
+  .sp-seg-opt.checked {
+    color: var(--text);
+    font-weight: 500;
+    background: var(--primary-soft);
+  }
+  .sp-seg-opt.locked { color: var(--faint); cursor: not-allowed; }
+  .sp-seg-opt:has(.sp-radio:focus-visible) { box-shadow: inset 0 0 0 2px var(--primary); }
+  /* The radio is hidden with clip(), which clips its outline too. */
+  @media (forced-colors: active) {
+    .sp-seg-opt:has(.sp-radio:focus-visible) { outline: 2px solid Highlight; outline-offset: -2px; }
+  }
+  .sp-radio {
     position: absolute;
-    width: 1px; height: 1px;
-    padding: 0; margin: -1px;
-    overflow: hidden; clip: rect(0,0,0,0);
-    white-space: nowrap; border: 0;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
   }
+  .sp-lock { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+
+  /* P53: top-aligned, so an error or the counter under Feedback leaves Score in place. */
+  .sp-fields {
+    display: grid;
+    grid-template-columns: 1fr 96px;
+    gap: 12px;
+    align-items: start;
+  }
+  @media (max-width: 480px) {
+    .sp-fields { grid-template-columns: 1fr; }
+  }
+  .sp-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .sp-label { font-size: 12.5px; font-weight: 500; color: var(--text-3); }
+  .sp-textarea {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 54px;
+    padding: var(--control-pad-textarea);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--text-2);
+    resize: vertical;
+  }
+  .sp-textarea[aria-invalid='true'] { border-color: var(--danger); }
+  .sp-input {
+    box-sizing: border-box;
+    width: 100%;
+    height: var(--control-h);
+    padding: 0 var(--control-pad-x);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    font-family: var(--font-mono);
+    font-size: var(--control-font);
+    color: var(--text);
+  }
+  .sp-input[aria-invalid='true'] { border-color: var(--danger); }
+  .sp-count { font-size: 11.5px; color: var(--muted); }
+  .sp-field-err { margin: 0; font-size: 12px; color: var(--danger); }
+  .sp-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* The bottom row: the feedback-file control left, Save right. */
+  .sp-bottom { display: flex; align-items: center; gap: 9px; }
+  .sp-file-ctl {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .sp-file-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+  .sp-chosen { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--text); }
+  .sp-chosen-name { overflow-wrap: anywhere; }
+  .sp-chosen-size { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+  .sp-help { font-size: 11.5px; color: var(--muted); }
+  .sp-actions { display: flex; align-items: center; gap: 9px; margin-left: auto; }
 </style>

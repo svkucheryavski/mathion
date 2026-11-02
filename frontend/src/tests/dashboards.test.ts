@@ -8,6 +8,12 @@ import {
   resultToStatus,
   STATUS_LABEL,
   STATUS_PRIORITY,
+  STATUS_SHORT_LABEL,
+  heatToken,
+  ITEM_TYPE_NAME,
+  drillItemType,
+  RESULT_LABEL,
+  resultLabel,
 } from '../lib/dashboards';
 
 function mockFetch(status: number, body: unknown) {
@@ -170,5 +176,65 @@ describe('getSubmissionThread wire', () => {
     expect(url).toBe('/api/runs/5/dashboard/mini-projects/12/groups/99/submissions');
     expect(init.method).toBe('GET');
     expect(init.signal).toBe(ctrl.signal);
+  });
+});
+
+describe('STATUS_SHORT_LABEL (6a Submissions cells)', () => {
+  it('holds the lowercase short labels', () => {
+    expect(STATUS_SHORT_LABEL).toEqual({
+      accepted: 'accepted',
+      needs_revision: 'needs revision',
+      awaiting_eval: 'awaiting eval',
+      not_submitted: 'not submitted',
+      rejected: 'rejected',
+    });
+  });
+});
+
+describe('heatToken (6a Progress heatmap, five steps)', () => {
+  it('no data → null (no fill)', () => {
+    expect(heatToken(null)).toBeNull();
+  });
+  it('0 → --surface-muted', () => {
+    expect(heatToken(0)).toBe('--surface-muted');
+  });
+  it('the step edges', () => {
+    expect(heatToken(0.01)).toBe('--heat-1');
+    expect(heatToken(0.25)).toBe('--heat-1');
+    expect(heatToken(0.26)).toBe('--heat-2');
+    expect(heatToken(0.5)).toBe('--heat-2');
+    expect(heatToken(0.75)).toBe('--heat-3');
+    expect(heatToken(0.76)).toBe('--heat-4');
+    expect(heatToken(1)).toBe('--heat-4');
+  });
+});
+
+describe('ITEM_TYPE_NAME / drillItemType (6c §Progress variant)', () => {
+  it('names the four drill-down item types', () => {
+    expect(ITEM_TYPE_NAME).toEqual({
+      static_page: 'Page', video: 'Video', quiz: 'Quiz', interactive_app: 'Interactive app',
+    });
+  });
+  it('narrows a known type and refuses anything else (P55)', () => {
+    expect(drillItemType('quiz')).toBe('quiz');
+    expect(drillItemType('static_page')).toBe('static_page');
+    expect(drillItemType('mini_project')).toBeNull();
+    expect(drillItemType('toString')).toBeNull();
+  });
+});
+
+describe('RESULT_LABEL / resultLabel (6c §Already evaluated)', () => {
+  it('names each result in its own words', () => {
+    expect(RESULT_LABEL).toEqual({
+      accepted: 'Accepted',
+      minor_revision: 'Minor revision',
+      major_revision: 'Major revision',
+      rejected: 'Rejected',
+    });
+  });
+  it('maps a known result and shows anything else raw (P55)', () => {
+    expect(resultLabel('minor_revision')).toBe('Minor revision');
+    expect(resultLabel('surprise')).toBe('surprise');
+    expect(resultLabel('toString')).toBe('toString');
   });
 });
