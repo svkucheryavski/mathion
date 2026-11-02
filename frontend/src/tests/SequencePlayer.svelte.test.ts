@@ -215,40 +215,61 @@ describe('SequencePlayer breadcrumb (T1)', () => {
   });
 });
 
-describe('SequencePlayer footer (T1 / D4)', () => {
-  it('primary is "Next: {title} →" mid-sequence; Previous disabled at flat start', () => {
+describe('SequencePlayer footer (T1 / D4; D93 the bottom bar)', () => {
+  // D93 (user, Safari pass): Previous and Next are round arrow buttons in a bar
+  // pinned to the window's bottom edge, with the item count between them, so
+  // they stay put whatever the item's length. The count left the strip.
+  const prevBtn = (el: HTMLElement) => el.querySelector('footer.player-nav button.nav-btn.prev') as HTMLButtonElement;
+  const nextBtn = (el: HTMLElement) => el.querySelector('footer.player-nav button.nav-btn.next') as HTMLButtonElement;
+
+  it('D93: the item count sits in the bottom bar, between the arrows, and no longer in the strip', () => {
+    seed();
+    seedRoute(100, '#item=1001');
+    const el = render('100');
+    expect(el.querySelector('nav.strip .counter')).toBeNull();
+    const bar = el.querySelector('footer.player-nav') as HTMLElement;
+    expect(Array.from(bar.children).map((c) => c.className.split(' ').filter((k) => !k.startsWith('svelte-')).join('.')))
+      .toEqual(['nav-btn.prev', 'counter', 'nav-btn.next']);
+    expect((bar.querySelector('.counter') as HTMLElement).textContent).toBe('Item 1 of 2');
+  });
+
+  it('the arrows are icon-only: the name is in aria-label, the glyph is hidden', () => {
+    seed();
+    seedRoute(100, '#item=1002'); // flatIndex 1: both enabled
+    const el = render('100');
+    for (const b of [prevBtn(el), nextBtn(el)]) {
+      expect(b.getAttribute('type')).toBe('button');
+      expect(b.textContent!.trim()).toBe('');
+      expect(b.querySelector('svg')!.getAttribute('aria-hidden')).toBe('true');
+    }
+    expect(prevBtn(el).getAttribute('aria-label')).toBe('Previous item');
+    expect(prevBtn(el).getAttribute('title')).toBe('Previous item');
+  });
+
+  it('Next is named "Next: {title}" mid-sequence; Previous disabled at flat start', () => {
     seed();
     seedRoute(100, '#item=1001'); // flatIndex 0
     const el = render('100');
 
-    const prev = el.querySelector('footer button[data-variant="secondary"]') as HTMLButtonElement;
-    const primary = el.querySelector('footer button[data-variant="primary"]') as HTMLButtonElement;
-    expect(prev.disabled).toBe(true);
-    expect(primary.disabled).toBe(false);
-
+    expect(prevBtn(el).disabled).toBe(true);
+    expect(nextBtn(el).disabled).toBe(false);
     // D4 title reasons: disabled Previous at the first item carries the "first item"
-    // reason (NOT "Loading…"); the enabled primary carries no stale tooltip.
-    expect(prev.getAttribute('title')).toBe("You're on the first item");
-    expect(primary.getAttribute('title')).toBeNull();
-
-    const label = primary.querySelector('.next-label');
-    expect(label).not.toBeNull();
-    expect(label!.textContent).toContain('Next:');
-    expect(label!.textContent).toContain('→');
-    expect(primary.querySelector('.next-title')!.textContent).toBe('Vector notation');
+    // reason (NOT "Loading…"); its name stays "Previous item".
+    expect(prevBtn(el).getAttribute('title')).toBe("You're on the first item");
+    expect(prevBtn(el).getAttribute('aria-label')).toBe('Previous item');
+    expect(nextBtn(el).getAttribute('aria-label')).toBe('Next: Vector notation');
+    expect(nextBtn(el).getAttribute('title')).toBe('Next: Vector notation');
   });
 
   it('Next crosses the sequence boundary (title from the next flat item in another sequence)', () => {
     seed();
     seedRoute(100, '#item=1002'); // flatIndex 1, last item of seq s100
     const el = render('100');
-
-    const primary = el.querySelector('footer button[data-variant="primary"]') as HTMLButtonElement;
-    expect(primary.disabled).toBe(false);
-    expect(primary.querySelector('.next-title')!.textContent).toBe('Adding vectors'); // lives in seq s200
+    expect(nextBtn(el).disabled).toBe(false);
+    expect(nextBtn(el).getAttribute('aria-label')).toBe('Next: Adding vectors'); // lives in seq s200
   });
 
-  it('whitespace-only next title falls back to a plain "Next →"', () => {
+  it('whitespace-only next title falls back to a plain "Next item"', () => {
     __test__setSlots({
       slug: SLUG,
       versionId: 1,
@@ -265,25 +286,21 @@ describe('SequencePlayer footer (T1 / D4)', () => {
     });
     seedRoute(100, '#item=1001'); // flatIndex 0; the next flat item (1002) has a whitespace-only title
     const el = render('100');
-
-    const primary = el.querySelector('footer button[data-variant="primary"]') as HTMLButtonElement;
-    expect(primary.disabled).toBe(false);
-    expect(primary.querySelector('.next-label')).toBeNull(); // guards the nextRef.title.trim() fallback
-    expect(primary.textContent).toContain('Next →');
+    expect(nextBtn(el).disabled).toBe(false);
+    expect(nextBtn(el).getAttribute('aria-label')).toBe('Next item'); // guards the nextRef.title.trim() fallback
+    expect(nextBtn(el).getAttribute('title')).toBe('Next item');
   });
 
   it('an invalid initial hash resolves to the first item (hash-only-change resolution path)', () => {
     seed();
     seedRoute(100, '#item=999999'); // non-member initial hash → resolveInitialItemId falls back to seq.items[0]
     const el = render('100');
-
     // resolution commits synchronously (isHashOnlyChange short-circuits guards) → currentItemId = 1001, flatIndex 0
-    const primary = el.querySelector('footer button[data-variant="primary"]') as HTMLButtonElement;
-    expect(primary.disabled).toBe(false);
-    expect(primary.querySelector('.next-title')!.textContent).toBe('Vector notation');
+    expect(nextBtn(el).disabled).toBe(false);
+    expect(nextBtn(el).getAttribute('aria-label')).toBe('Next: Vector notation');
   });
 
-  it('flatIndex < 0 (unresolved item): primary disabled, plain "Next →", both buttons titled "Loading…"', () => {
+  it('flatIndex < 0 (unresolved item): Next disabled and named "Next item", both arrows titled "Loading…"', () => {
     seed();
     seedRoute(100, '#item=1001');
     const el = render('100'); // currentItemId 1001, flatIndex 0
@@ -292,13 +309,38 @@ describe('SequencePlayer footer (T1 / D4)', () => {
     currentRoute.hash = '#item=999999';
     flushSync();
 
-    const prev = el.querySelector('footer button[data-variant="secondary"]') as HTMLButtonElement;
-    const primary = el.querySelector('footer button[data-variant="primary"]') as HTMLButtonElement;
-    expect(primary.disabled).toBe(true);
-    expect(primary.querySelector('.next-label')).toBeNull();
-    expect(primary.textContent).toContain('Next →');
-    expect(primary.getAttribute('title')).toBe('Loading…');
-    expect(prev.getAttribute('title')).toBe('Loading…');
+    expect(nextBtn(el).disabled).toBe(true);
+    expect(nextBtn(el).getAttribute('aria-label')).toBe('Next item');
+    expect(nextBtn(el).getAttribute('title')).toBe('Loading…');
+    expect(prevBtn(el).getAttribute('title')).toBe('Loading…');
+  });
+
+  it('on the course\'s last item the bar holds Previous, the count and Finish, and no Next arrow', () => {
+    seed();
+    seedRoute(200, '#item=1003'); // the last flat item of the course
+    const el = render('200');
+    const bar = el.querySelector('footer.player-nav') as HTMLElement;
+    expect(Array.from(bar.children).map((c) => c.className.split(' ').filter((k) => !k.startsWith('svelte-')).join('.')))
+      .toEqual(['nav-btn.prev', 'counter', 'finish']);
+    expect(bar.querySelector('.nav-btn.next')).toBeNull();
+    const finish = bar.querySelector('.finish > button[data-variant="primary"]') as HTMLButtonElement;
+    expect(finish.textContent).toContain('Finish sequence');
+    expect(prevBtn(el).disabled).toBe(false);
+    expect((bar.querySelector('.counter') as HTMLElement).textContent).toBe('Item 1 of 1');
+  });
+
+  it('the arrows move through the sequence', () => {
+    seed();
+    seedRoute(100, '#item=1001');
+    const el = render('100');
+    nextBtn(el).click();
+    flushSync();
+    expect(currentRoute.hash).toBe('#item=1002');
+    expect((el.querySelector('footer .counter') as HTMLElement).textContent).toBe('Item 2 of 2');
+    prevBtn(el).click();
+    flushSync();
+    expect(currentRoute.hash).toBe('#item=1001');
+    expect((el.querySelector('footer .counter') as HTMLElement).textContent).toBe('Item 1 of 2');
   });
 });
 

@@ -416,6 +416,12 @@ GLOBAL_ALLOW = {
     # so the rule matches only while VersionEditPage is mounted; no quiz
     # question renders under it (the editor never mounts SequencePlayer).
     ('src/pages/editor/VersionEditPage.svelte', 'body'),
+    # Polish 3 D93: `:global(html):has(.player-nav)` -- the root's scroll
+    # padding, so a control reached by Tab scrolls clear of the player's bottom
+    # bar. The `.player-nav` inside :has() stays SCOPED, so the rule matches only
+    # while SequencePlayer shows its bar; it sets scroll-padding-bottom alone,
+    # which reaches no quiz question's look.
+    ('src/pages/SequencePlayer.svelte', 'html'),
     # Polish 2 D75: `.quiz > :global(*) { max-width: 652px }` -- the quiz measure
     # moved from the article onto each DIRECT child so the separator can span the
     # sheet. Child-combinator scoped under the hashed `.quiz`; the T3 question
@@ -1393,7 +1399,7 @@ const SPEC = {
   // the T1 strip/main/footer order and the T4 questions-before-submit order are
   // load-bearing and were invisible to every lane.
   "SequencePlayer.svelte":  { nodes: BASE.concat("EachBlock", "RenderTag", "SnippetBlock"),
-                              tags: ["a", "div", "footer", "h1", "main", "nav", "p", "span"] },
+                              tags: ["a", "button", "div", "footer", "h1", "main", "nav", "p", "polyline", "span", "svg"] },
   "QuizItem.svelte":        { nodes: BASE.concat("EachBlock", "HtmlTag", "ConstTag"),
                               tags: ["article", "div", "h2", "hr", "p", "span", "strong"],
                               attachOn: { "div:exp.prose.compact": "{@attach externalLinks(r.explanation_html)}" } },
@@ -1559,13 +1565,19 @@ const SIG = {
      "h1:seq-title.sr-only[class=\"seq-title sr-only\"]", "EmptyState:[title]", "#else:",
      "@render:crumbs", "h1:seq-title.sr-only[class=\"seq-title sr-only\"]",
      "nav:strip[class=\"strip\" aria-label]", "#each:",
-     "ItemIcon:[item={it} state={iconState(it.id)} onclick]", "span:counter[class=\"counter\"]",
+     "ItemIcon:[item={it} state={iconState(it.id)} onclick]",
      "main:content[class=\"content\"]", "#if:",
-     "ItemRouter:[item={currentItem} state={currentCourse.value.state}]", "footer:",
-     "Button:[variant=\"secondary\" onclick disabled={flatIndex <= 0} title]", "#if:",
-     "Button:[variant=\"primary\" onclick]", "#else:",
-     "Button:[variant=\"primary\" onclick disabled={flatIndex < 0} title]", "#if:",
-     "span:next-label[class=\"next-label\"]", "span:next-title[class=\"next-title\"]", "#else:"],
+     "ItemRouter:[item={currentItem} state={currentCourse.value.state}]",
+     // D93: the bottom bar -- round Previous, the item count, round Next (or
+     // Finish in its pointer-events wrapper); icon-only, the glyph hidden.
+     "footer:player-nav[class=\"player-nav\"]",
+     "button:nav-btn.prev[type=\"button\" class=\"nav-btn prev\" onclick disabled={flatIndex <= 0} aria-label title]",
+     "svg:[viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
+     "polyline:[points=\"10,3.5 5.5,8 10,12.5\"]", "span:counter[class=\"counter\"]", "#if:",
+     "span:finish[class=\"finish\"]", "Button:[variant=\"primary\" onclick]", "#else:",
+     "button:nav-btn.next[type=\"button\" class=\"nav-btn next\" onclick disabled={flatIndex < 0} aria-label title]",
+     "svg:[viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
+     "polyline:[points=\"6,3.5 10.5,8 6,12.5\"]"],
   "QuizItem.svelte":
     ["#if:", "article:quiz[class=\"quiz\"]", "h2:", "EmptyState:[title]", "#else:",
      "article:quiz[class=\"quiz\"]", "h2:", "#each:", "#if:", "hr:q-sep[class=\"q-sep\"]",
@@ -1716,8 +1728,7 @@ const TEXT = {
      "span:crumb:{expr}", "span:sep:/", "span:current:{expr}", "Button::Back to course",
      "Button::Back to course", "h1:seq-title.sr-only:{expr}", "h1:seq-title.sr-only:{expr}",
      "span:counter:Item", "span:counter:{expr}", "span:counter:of", "span:counter:{expr}",
-     "Button::← Previous", "Button::Finish sequence", "span:next-label:Next:",
-     "span:next-title:{expr}", "span:next-label:→", "Button::Next →"],
+     "Button::Finish sequence"],
   "QuizItem.svelte":
     ["h2::{expr}", "h2::{expr}",
      "span:q-counter.mono:Question", "span:q-counter.mono:{expr}", "span:q-counter.mono:of",
@@ -2765,9 +2776,9 @@ def decls(body): return {d.strip() for d in body.split(';') if d.strip()}
 # Stated in FULL. Values a reviewer would otherwise "tidy": `.crumbs a` colour is
 # --muted NOT --primary (the global `a` colour is what it exists to override, and
 # the :hover rule re-asserts the underline because the scoped rule out-specifies
-# the global one); `.next-title` max-width is 22ch, the only thing bounding the
-# footer button; `.strip` margin-bottom 20px is ref 2112; `.counter` is 12.5px
-# because it is a POSITIONAL counter, not a ratio.
+# the global one); `.strip` margin-bottom 20px is ref 2112; `.counter` is 12.5px
+# because it is a POSITIONAL counter, not a ratio. D93 retired the footer's
+# `.next-label`/`.next-title` (the Next button is round and icon-only now).
 W = '.%s' % h
 WANT = [
     ('.page' + W, 'max-width:var(--page-max);margin:0 auto;padding:var(--space-3)'),
@@ -2792,8 +2803,13 @@ WANT = [
     ('.strip' + W,
      'display:flex;gap:6px;padding:0 0 0 12px;margin-bottom:0;align-items:flex-end;'
      'flex-wrap:wrap;position:relative;z-index:1'),
+    # D93: the count left the strip for the bottom bar, as a bordered pill so
+    # it reads over the white sheet; it takes taps, so one never reaches a quiz
+    # option hidden under it (user, review r1).
     ('.counter' + W,
-     'margin-left:auto;align-self:center;font-family:var(--font-mono);font-size:12.5px;color:var(--muted)'),
+     'font-family:var(--font-mono);font-size:12.5px;color:var(--muted);background:var(--surface);'
+     'border:1px solid var(--border-strong);border-radius:999px;padding:3px 10px;'
+     'box-shadow:0 2px 8px #1418232e;pointer-events:auto'),
     # Polish 2 D56: the content slot is the white reading sheet (artboard 2c's
     # card padding). The strip's bottom rule and the footer's top rule went
     # with it: each would run parallel to the sheet's edge.
@@ -2801,12 +2817,38 @@ WANT = [
      'background:var(--surface);border:2px solid var(--border);'
      'border-radius:var(--radius-lg);padding:16px 20px 20px;min-height:200px;'
      '--sheet-pad-x: 20px'),
-    ('footer' + W,
-     'display:flex;justify-content:space-between;align-items:center;margin-top:24px'),
-    ('.next-label' + W, 'white-space:nowrap;min-width:0'),
-    ('.next-title' + W,
-     'display:inline-block;max-width:22ch;overflow:hidden;text-overflow:ellipsis;'
-     'white-space:nowrap;vertical-align:bottom'),
+    # D93 (user, Safari pass): Previous and Next stay put. Room below the sheet
+    # and as the root's scroll padding (72px = the 56px bar + 16px, plus the
+    # iPhone home-bar inset), both only while the bar is there.
+    ('.page%s:has(.player-nav:where(%s))' % (W, W),
+     'padding-bottom:calc(72px + env(safe-area-inset-bottom,0px))'),
+    ('html:has(.player-nav%s)' % W,
+     'scroll-padding-bottom:calc(72px + env(safe-area-inset-bottom,0px))'),
+    # The bar: fixed to the window's bottom edge in the page column, over the
+    # strip (z-index 1); only its buttons and the count take clicks.
+    ('.player-nav' + W,
+     'position:fixed;left:0;right:0;bottom:0;z-index:2;box-sizing:border-box;'
+     'max-width:var(--page-max);margin:0 auto;'
+     'padding:10px var(--space-3) calc(10px + env(safe-area-inset-bottom,0px));'
+     'display:flex;justify-content:space-between;align-items:center;pointer-events:none'),
+    ('.finish' + W, 'pointer-events:auto'),
+    # Round 36px arrows (user) with a 44px tap area: the ::before insets count
+    # from the 34px padding box (inside the 1px border), so -5px gives 44.
+    ('.nav-btn' + W,
+     'position:relative;box-sizing:border-box;width:36px;height:36px;padding:0;'
+     'border-radius:50%;display:inline-flex;align-items:center;justify-content:center;'
+     'background:var(--surface);border:1px solid var(--border-strong);'
+     'box-shadow:0 2px 8px #1418232e;color:var(--primary);cursor:pointer;'
+     'pointer-events:auto'),
+    # The build lowers `inset` to its four sides and the shadows' rgba to hex
+    # (#1418232e = rgba(20,24,35,.18), Modal's shadow colour).
+    ('.nav-btn%s:before' % W,
+     'content:"";position:absolute;top:-5px;right:-5px;bottom:-5px;left:-5px;border-radius:50%'),
+    ('.nav-btn%s svg:where(%s)' % (W, W), 'width:15px;height:15px'),
+    ('.nav-btn.next' + W, 'background:var(--primary);border-color:var(--primary);color:var(--primary-text)'),
+    ('.nav-btn%s:disabled' % W,
+     'background:var(--disabled-bg);border-color:var(--border-faint);color:var(--faint);'
+     'box-shadow:none;cursor:not-allowed'),
 ]
 
 got = sorted((' >> '.join(a), s) for s, b, a in ALL if h in s)

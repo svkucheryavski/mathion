@@ -139,8 +139,10 @@
   const nextRef = $derived<FlatRef | null>(
     flatIndex >= 0 && flatIndex < flatItems.length - 1 ? flatItems[flatIndex + 1] : null,
   );
-  // Blank whitespace-only titles fall back to a plain "Next →".
+  // Blank whitespace-only titles fall back to a plain "Next item" (D93: the
+  // round Next button's name).
   const nextTitle = $derived(nextRef && nextRef.title.trim() !== '' ? nextRef.title : '');
+  const nextName = $derived(nextTitle ? `Next: ${nextTitle}` : 'Next item');
 
   function finish(): void {
     navigate(`/courses/${courseSlug}`);
@@ -209,7 +211,6 @@
       {#each sequence.items as it (it.id)}
         <ItemIcon item={it} state={iconState(it.id)} onclick={() => selectItem(it.id)} />
       {/each}
-      <span class="counter">Item {currentIndex + 1} of {sequence.items.length}</span>
     </nav>
 
     <main class="content">
@@ -218,24 +219,35 @@
       {/if}
     </main>
 
-    <footer>
-      <Button
-        variant="secondary"
+    <!-- D93 (user, Safari pass): Previous and Next are round arrows in a bar
+         pinned to the window's bottom edge, in the page column, with the item
+         count between them, so they stay put whatever the item's length. The
+         names are in aria-label; the title gives a disabled arrow's reason. -->
+    <footer class="player-nav">
+      <button
+        type="button"
+        class="nav-btn prev"
         onclick={previous}
         disabled={flatIndex <= 0}
-        title={flatIndex < 0 ? 'Loading…' : flatIndex === 0 ? "You're on the first item" : undefined}
-      >← Previous</Button>
+        aria-label="Previous item"
+        title={flatIndex < 0 ? 'Loading…' : flatIndex === 0 ? "You're on the first item" : 'Previous item'}
+      >
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10,3.5 5.5,8 10,12.5" /></svg>
+      </button>
+      <span class="counter">Item {currentIndex + 1} of {sequence.items.length}</span>
       {#if isAtFlatEnd}
-        <Button variant="primary" onclick={finish}>Finish sequence</Button>
+        <span class="finish"><Button variant="primary" onclick={finish}>Finish sequence</Button></span>
       {:else}
-        <Button
-          variant="primary"
+        <button
+          type="button"
+          class="nav-btn next"
           onclick={next}
           disabled={flatIndex < 0}
-          title={flatIndex < 0 ? 'Loading…' : undefined}
+          aria-label={nextName}
+          title={flatIndex < 0 ? 'Loading…' : nextName}
         >
-          {#if nextTitle}<span class="next-label">Next: <span class="next-title">{nextTitle}</span> →</span>{:else}Next →{/if}
-        </Button>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6,3.5 10.5,8 6,12.5" /></svg>
+        </button>
       {/if}
     </footer>
   {/if}
@@ -243,6 +255,13 @@
 
 <style>
   .page { max-width: var(--page-max); margin: 0 auto; padding: var(--space-3); }
+  /* D93: room below the sheet for the bottom bar, so the end of an item scrolls
+     clear of it, and the same room as the root's scroll padding, so a control
+     reached by Tab scrolls clear of the bar too. 72px = the bar's 56px (36px
+     arrows, 10px above and below) + 16px. Both only while the bar is on the
+     page: the `.player-nav` inside :has() stays scoped. */
+  .page:has(.player-nav) { padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
+  :global(html):has(.player-nav) { scroll-padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
   /* Breadcrumb — scoped to .crumbs so it never reaches the sibling
      <nav class="strip"> Items row. flex-wrap is a mechanism addition
      (Constraint 5b) so a long block title wraps the row, not its own column. */
@@ -309,7 +328,20 @@
      (an earlier revision of this comment, and of spec:124) is FALSE. The two
      families never share a screen: ratios live on CourseList and CourseView,
      positions on the player. */
-  .counter { margin-left: auto; align-self: center; font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
+  /* D93: the item count, a pill between the arrows; the border and shadow
+     keep it readable over the white sheet. 12.5px mono pairs it with the quiz
+     counter. */
+  .counter {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    padding: 3px 10px;
+    box-shadow: 0 2px 8px rgba(20,24,35,.18);
+    pointer-events: auto;
+  }
   /* No max-width here — the measure lives on the components that have prose to
      measure (QuizItem, PageItem), not on the player's content slot.
      WHY THE CAP MOVED, precisely, because the first two attempts at this were
@@ -345,21 +377,48 @@
      border, shared with the current item's tab. --sheet-pad-x repeats the
      inline padding for QuizItem's edge-to-edge separator (D75); keep the two equal. */
   .content { background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius-lg); padding: 16px 20px 20px; min-height: 200px; --sheet-pad-x: 20px; }
-  footer {
+  /* D93: the bar is pinned to the window's bottom edge, in the page column
+     (the page's width and side padding), over the content. Only the arrows,
+     Finish and the count take clicks, so a slider or option beside them stays
+     usable, and a tap on the count never reaches a control hidden under it
+     (user). z-index 2 lifts it over the strip (1) as the page scrolls. */
+  .player-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 2;
+    box-sizing: border-box;
+    max-width: var(--page-max);
+    margin: 0 auto;
+    padding: 10px var(--space-3) calc(10px + env(safe-area-inset-bottom, 0px));
     display: flex;
     justify-content: space-between;
-    align-items: center; /* ref 2138 */
-    margin-top: 24px; /* ref 2138 */
+    align-items: center;
+    pointer-events: none;
   }
-  /* One flex item (no .btn gap between segments); nowrap keeps "Next:" + title
-     + "→" on one line while the title ellipsizes via its own max-width. */
-  .next-label { white-space: nowrap; min-width: 0; }
-  .next-title {
-    display: inline-block;
-    max-width: 22ch; /* Constraint 5(b) no-ref bound */
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    vertical-align: bottom;
+  .finish { pointer-events: auto; }
+  /* Round, 36px (user), with a 44px tap area from the ::before: its insets
+     count from the 34px padding box (inside the 1px border), so -5px gives 44. */
+  .nav-btn {
+    position: relative;
+    box-sizing: border-box;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 2px 8px rgba(20,24,35,.18);
+    color: var(--primary);
+    cursor: pointer;
+    pointer-events: auto;
   }
+  .nav-btn::before { content: ''; position: absolute; inset: -5px; border-radius: 50%; }
+  .nav-btn svg { width: 15px; height: 15px; }
+  .nav-btn.next { background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
+  .nav-btn:disabled { background: var(--disabled-bg); border-color: var(--border-faint); color: var(--faint); box-shadow: none; cursor: not-allowed; }
 </style>
