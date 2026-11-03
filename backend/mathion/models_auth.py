@@ -16,6 +16,8 @@ class User(Base):
     is_disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     photo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    # D22: survives logout (sessions don't); set at sign-in and on the throttled session bump.
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     sessions: Mapped[list["Session"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 

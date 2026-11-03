@@ -113,6 +113,7 @@ def verify_pin(db: DBSession, email: str, raw_pin: str, duration_days: int) -> s
 
     # Mark PIN as used
     pin.is_used = True
+    user.last_seen_at = datetime.now(timezone.utc)
 
     # Create session
     raw_token = generate_session_token()
@@ -154,6 +155,7 @@ def validate_session(db: DBSession, raw_token: str) -> User | None:
         last_active = last_active.replace(tzinfo=timezone.utc)
     if last_active is None or (now - last_active).total_seconds() > 300:
         session.last_active_at = now
+        user.last_seen_at = now
         db.commit()
 
     return user

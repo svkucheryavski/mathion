@@ -901,7 +901,8 @@ class TestTeachingRunsEndpoint:
     ):
         # Both branches of the OR match this run: it must still come back once,
         # and the student count must not be multiplied by the role rows. A
-        # second teacher and a second admin make a role join visible (2x2x2).
+        # second teacher makes a role join visible (2x2; a course has one
+        # admin since D6).
         other = User(email="other@x", full_name="Other")
         db.add(other); db.commit(); db.refresh(other)
         course, _ = seed_publishable_version()
@@ -913,7 +914,6 @@ class TestTeachingRunsEndpoint:
         db.add(RunTeacher(run_id=run["id"], user_id=teacher_user.id))
         db.add(RunTeacher(run_id=run["id"], user_id=other.id))
         db.add(CourseAdmin(user_id=teacher_user.id, course_id=course["id"]))
-        db.add(CourseAdmin(user_id=other.id, course_id=course["id"]))
         db.commit()
         assert admin_client.post(f"/api/runs/{run['id']}/publish").status_code == 200
         for email in ("s1@x", "s2@x"):
