@@ -49,3 +49,10 @@ Plan: `docs/superpowers/plans/2026-11-03-superuser-users-courses.md`.
 - `_msg` is duplicated in both panel test files; a conftest home before Task 7 adds a third (Fable r1).
 - The comment in `_assigned` says "The course is locked", which is inexact for `create_course` (a new, uncommitted course) (Fable r1).
 - The `_locked_user` comment could name SQLAlchemy's unit-of-work flush order (the parent `users` UPDATE before `login_pins`/`sessions`) as why `last_seen_at` is written first, the invariant the lock relies on; its opening "closes the sign-in race" overstates the disable case its last sentence qualifies (both lanes, r2).
+
+### Task 5 — panel shell, routes, shared pieces
+
+- The shell's `expired` never resets if the token changes within one shell instance; unreachable today (a new token means typing a URL, which reloads) (Opus r1).
+- An info `NoteStrip` inserted together with its text may not be announced by every screen reader (a status region announces changes, not its own insertion); for the VoiceOver pass at beta (Opus r1).
+- `slugFromName`: ß, ł and đ don't decompose under NFKD and become a hyphen ("Straße" → "stra-e"); D13 names only æøå and accents, and a ß → ss line is cheap if wanted (Fable r1).
+- Untested: a token spelled "users" reading as the Dashboard; `panelError`'s last fallback sentence; the expired text staying when a pill is clicked; FieldDialog's Cancel and Esc staying off while a save runs (dropping them would let Esc unmount the dialog and lose a 409's sentence) (both lanes, r1).
