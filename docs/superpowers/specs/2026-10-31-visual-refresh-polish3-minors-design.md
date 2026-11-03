@@ -40,7 +40,7 @@ Polish 1 (confirms) and Polish 2 (named items) are done. After Polish 3 comes th
 **Not in:**
 - rare races and timing edge cases (late responses after a version switch, double-clicks on controls with no in-flight guard, IME Enter in Safari);
 - gate hardening and test-gap notes, except the gate rows and tests each change needs;
-- the beta carry list: VoiceOver, forced colors / Windows High Contrast, reduced motion, iframe focus, touch devices, the 13d superuser page;
+- the beta carry list: VoiceOver, forced colors / Windows High Contrast, reduced motion, iframe focus, touch devices, the 13d superuser page (done 2026-11-03 on its own branch: restyled in the main site's look);
 - anything below 400px wide (D82);
 - the authoring and teaching screens at phone width (D88);
 - the user-visible entries listed in §Left in the backlog, each with its reason.

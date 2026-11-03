@@ -57,12 +57,19 @@
 
 <style>
   .cards { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+  /* The course page's side cards (CourseDeadlines .cdl): small white cards on
+     the grey ground. */
   .card {
+    box-sizing: border-box;
     display: flex; flex-direction: column; gap: var(--space-1);
-    padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius);
     min-width: 140px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
   }
-  .label { color: var(--muted); font-size: 0.85rem; }
-  .value { font-size: 1.5rem; font-weight: 600; }
+  /* The side cards' label. */
+  .label { font-size: 11.5px; color: var(--muted); }
+  .value { font-size: 22px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
   .panel-error { color: var(--muted); }
 </style>

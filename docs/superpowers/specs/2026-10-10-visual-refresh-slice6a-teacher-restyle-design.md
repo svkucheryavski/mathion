@@ -89,7 +89,7 @@ Rulings taken at the controller's discretion (technical; the user defers these).
 - **R15 — One page width for the whole site (Safari pass, user 2026-10-11).** Every page column — student, authoring, teaching, NotFound — is `max-width: var(--page-max)` (1140px: the teacher drawings' content, 1180 artboard minus 20px gutters), centred. 960px came from the first frontend commit, not from a design.
   - The header bar keeps its full-width background; its nav row sits in the same column, so the logo and Logout line up with the page edges.
   - The mini-project page sits in the same column, its text in a 760px column at the left. The quiz and page items keep their 652px reading measure (the reference's 68ch at its 16px base, written in px on purpose; §(g) of the gate).
-  - Outside the shared column on purpose: Login (a centred 380px card) and the superuser shell (its own header, full-width `.su-main`).
+  - Outside the shared column on purpose: Login (a centred 380px card) and the superuser shell (its own header, full-width `.su-main`). *(2026-11-03, user, Safari pass step 13d: the superuser shell now sits in the shared column, with a bar in AppHeader's look and no links, and white stat cards; only Login stays outside.)*
 - **R11 — Inline name edits on the Groups tab register no unsaved-changes guard** (none do today). An open add or rename field is dropped without asking when the tab changes. That keeps tab switching cheap, and the text is one short name.
 
 ## Scope

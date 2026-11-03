@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2490
+EXPECTED_CHECKS=2522
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -5945,6 +5945,30 @@ else
   echo "FAIL  LoadingPlaceholder still exists or is named in src (D86)"; fail=1
 fi
 none "no .loading-placeholder rule in the bundle (D86)" "\.loading-placeholder"
+
+# The superuser panel (Safari pass step 13d, user 2026-11-03): its own bar in
+# the main bar's look (a copy of AppHeader's bar, lockup and active pill), the
+# teaching list's page column, side-card-look stat cards.
+uniq1 su-header
+if [[ -n $REPLY ]]; then
+  N=SuperuserShell; H=$REPLY
+  d '\.su-header' '' 'box-sizing:border-box' 'height:44px' 'background:var\(--surface\)' 'border-bottom:1px solid var\(--border\)'
+  d '\.su-row' '' 'max-width:var\(--page-max\)' 'margin:0 auto' 'padding:0 var\(--space-3\)'
+  d '\.su-label' '' 'margin-right:auto' 'padding:4px 10px' 'border-radius:4px' 'color:var\(--gold-text\)' 'background:var\(--gold-soft\)'
+  d '\.brand-mark' '' 'transform:translateY\(-4\.35px\)'
+  d '\.wordmark' '' 'font-size:14px' 'font-weight:600'
+  d '\.name' '' 'font-size:12\.5px'
+  d '\.su-main' '' 'max-width:var\(--page-max\)' 'margin:0 auto'
+  sweep SuperuserShell $H
+fi
+uniq1 panel-error
+if [[ -n $REPLY ]]; then
+  N=SuperuserDashboard; H=$REPLY
+  d '\.card' '' 'padding:10px 14px' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius-lg\)' 'background:var\(--surface\)'
+  d '\.label' '' 'font-size:11\.5px' 'color:var\(--muted\)'
+  d '\.value' '' 'font-size:22px' 'font-variant-numeric:tabular-nums'
+  sweep SuperuserDashboard $H
+fi
 
 # The summary line is the parent process's (see the re-exec at the top).
 exit $fail
