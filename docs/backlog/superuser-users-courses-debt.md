@@ -70,3 +70,15 @@ Plan: `docs/superpowers/plans/2026-11-03-superuser-users-courses.md`.
 - Delete is gated on the impact lookup finishing, with no cue meanwhile; the failed-lookup-still-deletes path (D12a) is untested (Fable r1).
 - The disabled hint ends with a period while §5 and the plan quote it without; ruled to keep the period (sentences end with one), spec to match at the next rev (Fable r1).
 - The shell test does not check that `/superuser/T/courses` mounts the Courses page rather than the placeholder (Fable r1).
+
+### Task 7 — Users page
+
+- After a confirmed strip, focus is lost: Disable and Enable swap buttons, and a deleted row goes away; focus the heading or the row's next button (both lanes r1, as Task 6's delete).
+- A failed reload after a strip action or a save swaps the table for the error view; the Courses page keeps the table (a quiet reload) (Opus r1).
+- Opening a second row's strip while the first confirm runs: the first one's finish closes the second (Opus r1).
+- Disable warning copy: two courses read "admin of A and B and teaches 2 runs" (two "and"s), and student runs are never named; the spec's D18 example covers admin and teacher only (Opus r1).
+- "Last active" uses a `now` taken at the first render, so it drifts on a page left open; keep `now` with `shown` (Fable r1).
+- `.u-count` is not a live region, so a screen reader does not hear the new count after a search or pill; for the VoiceOver pass at beta (Fable r1).
+- Untested: typing then a pill click before the pause (one request, with the text); a page-level New account 409 reloading the list; a disabled admin's row (both lanes r1).
+- Nits: `askEls` needn't be `$state`; after a 401/404 in a strip, the reload calls `onAuth` a second time (the shell handles it once) (Fable r1).
+- EditCourseDialog (Task 6) compares the admin email with case: a case-only retype sends a PUT and gets the "already the admin" note; lowercase it as EditAccountDialog now does (Fable r2).
