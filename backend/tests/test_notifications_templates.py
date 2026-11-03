@@ -79,11 +79,25 @@ def test_render_unknown_kind_raises():
         render("not_a_real_kind", _ctx())
 
 
-def test_templates_dict_has_4_keys():
+def test_templates_dict_has_5_keys():
     assert set(TEMPLATES.keys()) == {
         "evaluation_received", "run_enrolled",
         "run_teacher_assigned", "mini_project_published",
+        "course_admin_assigned",
     }
+
+
+def test_course_admin_assigned_renders():
+    # D5: a course-scoped email; no run in the context.
+    ctx = RenderContext(
+        user=SimpleNamespace(full_name=None, email="a@x"),
+        base_url="https://m.x",
+        course=SimpleNamespace(name="Statistics 101", slug="stat"),
+    )
+    subject, body = render("course_admin_assigned", ctx)
+    assert subject == "You are now the admin of Statistics 101"
+    assert body.startswith("Hi a@x,")
+    assert "https://m.x/courses/stat/edit" in body
 
 
 def test_build_email_message_raises_on_missing_email():

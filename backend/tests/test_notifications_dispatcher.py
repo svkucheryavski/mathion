@@ -372,3 +372,77 @@ def test_session_acquire_wedge_zero_rows_returns_0_no_log(db, caplog):
     assert rc == 0
     # No wedge log when there are no rows to wedge on
     assert not any("failed to acquire" in r.getMessage() for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# D5: course_admin_assigned — course-scoped, read and checked at send time.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def admin_row(db):
+    """A course with its admin and one queued course_admin_assigned row."""
+    from mathion.models import Course, CourseAdmin
+    course = Course(slug="stat", name="Statistics 101", description="")
+    admin = User(email="anna@x", full_name="Anna Holm")
+    db.add_all([course, admin]); db.flush()
+    db.add(CourseAdmin(course_id=course.id, user_id=admin.id))
+    row = NotificationLogEntry(user_id=admin.id, kind="course_admin_assigned",
+                               payload={"course_id": course.id})
+    db.add(row); db.commit()
+    return {"course": course, "admin": admin, "row": row}
+
+
+def test_course_admin_assigned_is_sent(db, admin_row):
+    mailer = MemoryMailer()
+    assert tick(db, mailer, now=datetime.now(timezone.utc)) == 1
+    db.refresh(admin_row["row"])
+    assert admin_row["row"].sent_at is not None
+    assert [m["To"] for m in mailer.sent] == ["anna@x"]
+    assert mailer.sent[0]["Subject"] == "You are now the admin of Statistics 101"
+
+
+def _assert_skipped(db, row, reason):
+    mailer = MemoryMailer()
+    tick(db, mailer, now=datetime.now(timezone.utc))
+    db.refresh(row)
+    assert mailer.sent == []
+    assert row.error == f"skipped: {reason}"
+    assert row.sent_at is None and row.retry_count == 0
+    assert tick(db, mailer, now=datetime.now(timezone.utc)) == 0  # never picked again
+
+
+def test_skip_when_no_longer_admin(db, admin_row):
+    from mathion.models import CourseAdmin
+    other = User(email="ole@x"); db.add(other); db.flush()
+    ca = db.query(CourseAdmin).filter_by(course_id=admin_row["course"].id).one()
+    ca.user_id = other.id
+    db.commit()
+    _assert_skipped(db, admin_row["row"], "no longer admin")
+
+
+def test_skip_when_recipient_disabled(db, admin_row):
+    admin_row["admin"].is_disabled = True
+    db.commit()
+    _assert_skipped(db, admin_row["row"], "recipient disabled")
+
+
+def test_skip_when_course_gone(db, admin_row):
+    db.delete(admin_row["course"]); db.commit()
+    _assert_skipped(db, admin_row["row"], "course gone")
+
+
+def test_skip_does_not_touch_retry_or_log_warning(db, admin_row, caplog):
+    admin_row["admin"].is_disabled = True
+    db.commit()
+    with caplog.at_level(logging.WARNING, logger="mathion.notifications"):
+        tick(db, MemoryMailer(), now=datetime.now(timezone.utc))
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_course_slug_read_at_send_time(db, admin_row):
+    admin_row["course"].slug = "stat-2027"
+    db.commit()
+    mailer = MemoryMailer()
+    tick(db, mailer, now=datetime.now(timezone.utc))
+    body = mailer.sent[0].get_content()
+    assert "/courses/stat-2027/edit" in body

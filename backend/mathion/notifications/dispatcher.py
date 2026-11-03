@@ -8,11 +8,11 @@ from sqlalchemy.orm import joinedload
 
 from mathion.config import settings
 from mathion.database import SessionLocal
-from mathion.models import Run, CourseVersion, MiniProject, Submission
+from mathion.models import Course, CourseAdmin, Run, CourseVersion, MiniProject, Submission
 from mathion.models_auth import User, NotificationLogEntry
 
 from .errors import classify
-from .templates import render, _build_email_message, RenderContext
+from .templates import render, _build_email_message, RenderContext, COURSE_ADMIN_ASSIGNED
 
 
 logger = logging.getLogger("mathion.notifications")
@@ -50,8 +50,39 @@ MAX_ATTEMPTS = 5                               # inlined
 BACKOFF_SECONDS = [300, 1800, 7200, 21600]     # inlined: 5m, 30m, 2h, 6h (4 entries == MAX_ATTEMPTS - 1)
 
 
+def skip_reason(db, row: NotificationLogEntry) -> str | None:
+    """Why a queued row should not be sent any more, or None (D5).
+
+    Only the course-admin email is checked: it reads the course's current state
+    at send time, so a replaced admin, a disabled account or a deleted course
+    gets no mail."""
+    if row.kind != COURSE_ADMIN_ASSIGNED:
+        return None
+    course = db.get(Course, (row.payload or {}).get("course_id"))
+    if course is None:
+        return "course gone"
+    user = db.get(User, row.user_id)
+    if user is None or user.is_disabled:
+        return "recipient disabled"
+    is_admin = db.execute(
+        select(CourseAdmin.id).where(CourseAdmin.course_id == course.id,
+                                     CourseAdmin.user_id == row.user_id)
+    ).first()
+    if is_admin is None:
+        return "no longer admin"
+    return None
+
+
 def _build_render_context(db, row: NotificationLogEntry) -> RenderContext:
     payload = row.payload or {}
+    if row.kind == COURSE_ADMIN_ASSIGNED:
+        course = db.get(Course, payload["course_id"])
+        if course is None:
+            raise LookupError(f"referent missing: course:{payload['course_id']}")
+        user = db.get(User, row.user_id)
+        if user is None:
+            raise LookupError(f"referent missing: user:{row.user_id}")
+        return RenderContext(user=user, base_url=settings.base_url, course=course)
     if "run_id" not in payload:
         raise KeyError(f"payload missing run_id for kind={row.kind!r}")
 
@@ -137,6 +168,23 @@ def tick(db, mailer, *, now: datetime) -> int:
     try:
         for row in rows:
             processed += 1
+            # D5: a row that should no longer be sent is closed here, not via
+            # the error path (no retry count, no "flagged permanently" warning).
+            try:
+                reason = skip_reason(db, row)
+            except SQLAlchemyError:
+                logger.exception("skip check failed (will retry): id=%s", row.id)
+                db.rollback()
+                continue
+            if reason is not None:
+                row.error = f"skipped: {reason}"
+                try:
+                    db.commit()
+                    logger.info("notification id=%s skipped: %s", row.id, reason)
+                except SQLAlchemyError:
+                    logger.exception("commit failed marking skip (will retry): id=%s", row.id)
+                    db.rollback()
+                continue
             send_exc: BaseException | None = None
             try:
                 ctx = _build_render_context(db, row)
