@@ -1,6 +1,6 @@
 # Superuser panel: Users and Courses — design
 
-**Status:** rev 6, 2026-11-03.
+**Status:** rev 7, 2026-11-03.
 - Rev 2 folded in the builder check (D12a, D12b).
 - Rev 3 folded in spec review round 1, three lanes (`.superpowers/sdd/2026-11-03-superuser-users-courses/spec-r1-*.md`), and the user's answers on mockup 2.
 - Rev 4 folded in spec review round 2 (`spec-r2-*.md`) and the user's answer on confirms (D24).
@@ -194,6 +194,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
 - **Access and CSRF.** Every new endpoint is guarded the way the stats endpoint is: `require_superuser_panel` (`backend/mathion/api/superuser.py:20`) checks the token, then the session, then the superuser flag.
   - Every **mutating** endpoint also enforces the CSRF header, reusing `_require_csrf` (`api/auth.py:41`). The order is token → session → superuser → CSRF, so a request without the header still sees the route-hiding 404 first, for example through a `require_superuser_panel_write` dependency.
   - Every new endpoint lives under `/api/superuser/{token}/…`. The middleware already sets `Cache-Control: no-store` and `no-referrer` on every `/api/superuser/` response (`backend/mathion/main.py:113-122`), and the frontend routes add `/superuser/:token/users` and `/superuser/:token/courses` beside the existing `/superuser/:token` (`frontend/src/routes.ts:19`).
+- **Access log** (rev 7, final review). The Users search sends what the superuser typed, often an email, as `?q=`. The access-log filter (`mathion/superuser/log_redaction.py`) therefore redacts a panel path's whole query string to `?[redacted]`, as well as the token. This supersedes the 2026-07-14 hardening spec's "query string preserved"; other paths are unchanged.
 - **Concurrency.** The locks and orders in D6, D12c, D19 and D20. Follow the existing patterns: lock before `get_or_create_user`, SAVEPOINT recovery, Phase 9-A2.
 - **One page column, no new dependencies.** Svelte 5, no new JS, CSS or Python packages. Reuse the shared UI pieces: Button, IconButton (pencil, ×, trash, as `RunTeachersTab.svelte:121-127` does), Modal, InlineConfirm, FilterPills and Skeleton. The table copies the teaching list's look (`TeacherRunListPage.svelte:153-170`).
 - **Width.** The panel is laptop-only; the 400px rule is for student screens. Nothing may overflow at narrower widths, though.

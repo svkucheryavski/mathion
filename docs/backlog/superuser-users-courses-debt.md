@@ -82,3 +82,20 @@ Plan: `docs/superpowers/plans/2026-11-03-superuser-users-courses.md`.
 - Untested: typing then a pill click before the pause (one request, with the text); a page-level New account 409 reloading the list; a disabled admin's row (both lanes r1).
 - Nits: `askEls` needn't be `$state`; after a 401/404 in a strip, the reload calls `onAuth` a second time (the shell handles it once) (Fable r1).
 - EditCourseDialog (Task 6) compares the admin email with case: a case-only retype sends a PUT and gets the "already the admin" note; lowercase it as EditAccountDialog now does (Fable r2).
+
+### Final whole-branch review
+
+- The `last_seen_at` bump waits behind the panel's user lock (`auth.py:156-159`); a request in flight while its account is disabled, deleted or re-emailed can get one `StaleDataError` 500 instead of a 401 (Opus).
+- The address-change warning reads "…: 0 runs, 0 students." on a course with no runs; skip the clause at 0 (both lanes).
+- "<course> will have no admin." uses the saved name, not the one being edited in the same dialog (Opus).
+- Replacing an admin in Edit course shows no "<old admin> will no longer be the admin." line; only clearing says what happens (Fable).
+- The main-site `CourseUpdate.name` still accepts CR/LF and whitespace-only names; a line break makes a later admin email fail permanently; API-only, not reachable from the UI (Opus).
+- No test runs two admin assigns at once; that they serialise is checked by reading the code only (Opus).
+- Copy, user's call: "An email with a sign-in link is on its way" — the email links to the editor, and the colleague still asks for a PIN; the words are the spec's (Fable).
+- The email-off note names `mathion pin` on a dev server too, where the command is `python -m mathion.superuser pin` (Fable).
+- `_users_with_data` scans `runs.created_by`, `assets.uploaded_by` and `run_assets.uploaded_by`, none indexed, on each list and delete; fine at a university's size, index if lists slow down (Fable).
+- No thousands separator in "Showing the 20 newest of 4213 accounts." (Fable).
+- The delete-impact counts are not under the course lock; informational only (D12a), never to be treated as exact (Fable).
+- `log_redaction.py` module docstring still describes token-only redaction; add the query string (both lanes, fix re-review).
+- The test through uvicorn's real `AccessFormatter` uses a path with no query; add a `users?q=…` record (Opus, fix re-review).
+- The 2026-07-14 hardening spec (lines 46, 78) still says the query string is preserved; add a "superseded 2026-11-03, see the Users+Courses spec §4" note (both lanes, fix re-review).
