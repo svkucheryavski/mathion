@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Literal
@@ -925,3 +926,134 @@ class SuperuserStatsResponse(BaseModel):
 
 class AuthConfigResponse(BaseModel):
     send_pin_enabled: bool
+
+
+# --- The superuser panel: Courses (spec D4-D13) and Users (D14-D21) ---
+
+_PANEL_EMAIL_SHAPE = re.compile(r"^[^@\s]+@[^@\s]+$")
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+_SLUG_SHAPE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")  # CourseCreate.slug's rule
+
+
+# The panel's validators raise plain sentences, not Field() constraints: a
+# 422's `msg` is what the panel shows next to the field (Task 5).
+def _normalize_panel_email(v: str) -> str:
+    """Login's normalising, then a minimal local@domain shape (D4)."""
+    v = v.strip().lower()
+    if len(v) > 254:
+        raise ValueError("An email address is at most 254 characters")
+    v = _normalize_email(v)
+    if not _PANEL_EMAIL_SHAPE.match(v):
+        raise ValueError("Enter an email address")
+    return v
+
+
+def _panel_slug(v: str) -> str:
+    if not v:
+        raise ValueError("Enter an address")
+    if len(v) > 80:
+        raise ValueError("An address is at most 80 characters")
+    if not _SLUG_SHAPE.match(v):
+        raise ValueError("An address uses only lowercase letters, digits and single hyphens")
+    return v
+
+
+def _panel_course_name(v: str) -> str:
+    """Trimmed, 1-200 characters, no control characters (a line break would
+    make the admin email's Subject header raise)."""
+    v = v.strip()
+    if not v:
+        raise ValueError("Enter a course name")
+    if len(v) > 200:
+        raise ValueError("A course name is at most 200 characters")
+    if _CONTROL_CHARS.search(v):
+        raise ValueError("A course name can't contain line breaks or tabs")
+    return v
+
+
+class PanelAdmin(BaseModel):
+    id: int
+    email: str
+    full_name: str | None
+    is_disabled: bool
+
+
+class PanelCourse(BaseModel):
+    id: int
+    name: str
+    slug: str
+    admin: PanelAdmin | None
+    version_count: int
+    run_count: int
+    student_count: int  # distinct accounts on the rosters of the course's runs (D11)
+
+
+AdminEmail = Literal["queued", "email_off", "disabled", "unchanged"]
+
+
+class AdminAssignResult(BaseModel):
+    course: PanelCourse
+    admin: PanelAdmin
+    admin_email: AdminEmail
+    pin_minutes: int
+    sign_in_url: str
+
+
+class PanelCourseCreate(BaseModel):
+    name: str
+    slug: str
+    admin_email: str
+
+    @field_validator("name")
+    @classmethod
+    def _check_name(cls, v: str) -> str:
+        return _panel_course_name(v)
+
+    @field_validator("slug")
+    @classmethod
+    def _check_slug(cls, v: str) -> str:
+        return _panel_slug(v)
+
+    @field_validator("admin_email")
+    @classmethod
+    def _check_email(cls, v: str) -> str:
+        return _normalize_panel_email(v)
+
+
+class PanelCourseUpdate(BaseModel):
+    name: str | None = None
+    slug: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _check_name(cls, v: str | None) -> str | None:
+        return None if v is None else _panel_course_name(v)
+
+    @field_validator("slug")
+    @classmethod
+    def _check_slug(cls, v: str | None) -> str | None:
+        return None if v is None else _panel_slug(v)
+
+    @model_validator(mode="after")
+    def _one_field(self):
+        if self.name is None and self.slug is None:
+            raise ValueError("Send a name or an address")
+        return self
+
+
+class PanelEmail(BaseModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def _check_email(cls, v: str) -> str:
+        return _normalize_panel_email(v)
+
+
+class AccountLookup(BaseModel):
+    status: Literal["new", "existing", "disabled"]
+    full_name: str | None
+
+
+class CourseDeleteImpact(BaseModel):
+    progress_students: int
