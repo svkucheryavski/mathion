@@ -56,3 +56,17 @@ Plan: `docs/superpowers/plans/2026-11-03-superuser-users-courses.md`.
 - An info `NoteStrip` inserted together with its text may not be announced by every screen reader (a status region announces changes, not its own insertion); for the VoiceOver pass at beta (Opus r1).
 - `slugFromName`: ß, ł and đ don't decompose under NFKD and become a hyphen ("Straße" → "stra-e"); D13 names only æøå and accents, and a ß → ss line is cheap if wanted (Fable r1).
 - Untested: a token spelled "users" reading as the Dashboard; `panelError`'s last fallback sentence; the expired text staying when a pill is clicked; FieldDialog's Cancel and Esc staying off while a save runs (dropping them would let Esc unmount the dialog and lose a 409's sentence) (both lanes, r1).
+
+### Task 6 — Courses page
+
+- After a course delete, focus returns to the trash of a row the reload removes; focus the heading or New course instead (Opus r1).
+- Removing an admin someone else already removed: every Save gets the same 409 "This course has no admin" until Cancel; treat that answer as done, or move the baseline (Opus r1).
+- Quiet list reloads are not ordered: an older reply can overwrite a newer one; a sequence counter as in `AdminEmailField` (Opus r1).
+- The dialogs' error sentence is described on the form, not tied to its field (no `aria-invalid`); for the VoiceOver pass at beta (Opus r1).
+- Enter-to-save goes through a `hidden` submit button, untested; check Safari submits through it in the Safari pass (Opus r1).
+- A 409 from the delete-impact lookup does not reload the list (Opus r1).
+- The blocked trash's reason is only in `title`; `aria-label` "Delete <name>" names it and a keyboard user sees no tooltip; put the reason in the label when blocked (Fable r1).
+- Delete course on a course with 0 versions reads "Its 0 versions and their files go too."; skip the clause at 0 (Fable r1).
+- Delete is gated on the impact lookup finishing, with no cue meanwhile; the failed-lookup-still-deletes path (D12a) is untested (Fable r1).
+- The disabled hint ends with a period while §5 and the plan quote it without; ruled to keep the period (sentences end with one), spec to match at the next rev (Fable r1).
+- The shell test does not check that `/superuser/T/courses` mounts the Courses page rather than the placeholder (Fable r1).

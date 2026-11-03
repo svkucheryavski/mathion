@@ -1,10 +1,11 @@
 # Superuser panel: Users and Courses — design
 
-**Status:** rev 5, 2026-11-03.
+**Status:** rev 6, 2026-11-03.
 - Rev 2 folded in the builder check (D12a, D12b).
 - Rev 3 folded in spec review round 1, three lanes (`.superpowers/sdd/2026-11-03-superuser-users-courses/spec-r1-*.md`), and the user's answers on mockup 2.
 - Rev 4 folded in spec review round 2 (`spec-r2-*.md`) and the user's answer on confirms (D24).
 - Rev 5 folds in the small points from round 3 (`spec-r3-*.md`).
+- Rev 6 folds in the user's answer on the Task 6 shots ("too many pencils"): one Edit dialog per row (D24); removing the admin is clearing the email in it (D9).
 
 **Branch:** `feat/superuser-users-courses` (local).
 
@@ -90,7 +91,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - Everything happens in one transaction: insert the course, flush, then `get_or_create_user`, the admin row, the notification (D5) and the commit.
   - A taken address gives a 409, "This address is already used by another course".
   - Use a SAVEPOINT or a pre-check so a slug conflict isn't confused with the user-insert recovery.
-- D9 (user's): **Change admin / Assign admin** opens a dialog (D24) with an email field and the same hint. The old admin keeps their account and loses only this course. An **×** next to the admin removes them, after a confirm strip under the row ("<course> will have no admin"; D24), and leaves the course with none.
+- D9 (user's, rev 6): the admin is changed, assigned or removed in the course's **Edit** dialog (D24), in its admin's-email field with the same hint. The old admin keeps their account and loses only this course. **Clearing the email** removes the admin: the dialog then says "<course> will have no admin." before Save, and Save leaves the course with none.
 - D10 (user's): **Rename** a course (its name).
 - D11 (user's): **Change the address** (slug). The dialog warns that links people saved or shared with the old address will stop working, with the counts: "2 runs, 37 students". The students are the distinct accounts on the rosters (`run_students`) of the course's runs (mine). That includes links in emails Mathion already sent and links inside the course's own pages. Old addresses are not remembered or forwarded.
 - D12 (user's): **Delete** a course only when it has **no runs**. With runs, the trash button is greyed and says why ("2 runs: can't be deleted"). It uses `aria-disabled` with a `title`, as `IconButton` supports (`IconButton.svelte:37,164`), not a native `disabled`, so the reason can still be focused and read. The confirm is a dialog in which the course name must be typed (D24). The typed name is trimmed and must match exactly, case included; Delete stays off until it does. The dialog is built on `Modal`, not on the tick-box `DangerConfirm` the run screens use. Deleting also removes the course's files from disk (`<asset_path>/courses/<version_id>/` for each version, `api/assets.py:27`).
@@ -164,16 +165,13 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
 - D21 (user's): **superusers are shown but untouchable.** Their row has no Disable, Delete or email change, and the server refuses those actions for a superuser account too. The name can still be edited (mine).
 
 ### Edits are dialogs
-- D24 (user's, rev 3 and rev 4): **no new tabs, no in-cell editing.** Every edit is a pencil (or the Assign/Change admin button) that opens a small dialog with one field, Cancel/Save, and the warning or hint inside it, built on the shared `ui/Modal.svelte`. The dialogs are:
-  - Rename course;
-  - Change address;
-  - Change admin;
-  - Edit name;
-  - Change email.
+- D24 (user's, rev 3, 4 and 6): **no new tabs, no in-cell editing, one Edit dialog per row.** Cells are plain text. A row's last column holds one pencil (Edit) and the trash. The pencil opens one small dialog, built on the shared `ui/Modal.svelte`, with **all** the row's editable fields, Cancel/Save, and the warnings and hints inside it (rev 6: the user saw a pencil per field and said "too many pencils"). The dialogs are:
+  - **Edit course:** Course name, Address, Admin's email (D9-D11). The address warning (D11) shows only while the address differs from the saved one. Save is off until something changed and name and address are filled. Save sends only what changed: the name and address in one request, then the admin (set, or removed when the email is cleared). If the second request fails, the dialog stays open with the server's sentence; what already saved becomes the dialog's new starting point, so Save retries only the rest (mine). The D5a note shows only when the admin changed.
+  - **Edit account:** Name and Email (D19), on the same rules.
 
   New course and New account are dialogs too.
-  - `Modal` defaults to 920 px wide (`Modal.svelte:51-52`), so these dialogs pass a small width. One shared one-field dialog component serves the five edits (mine).
-  - **Confirms** (user's, rev 4): Disable, Enable, Remove admin and Delete account confirm in a **strip under the row**, the app's `InlineConfirm` pattern, as mock-2 drew them. Only **Delete course**, where the name is typed, is a dialog.
+  - `Modal` defaults to 920 px wide (`Modal.svelte:51-52`), so these dialogs pass a small width.
+  - **Confirms** (user's, rev 4): Disable, Enable and Delete account confirm in a **strip under the row**, the app's `InlineConfirm` pattern, as mock-2 drew them. Only **Delete course**, where the name is typed, is a dialog.
 
 ### Last active
 - D22 (mine): "Last active" needs a value that survives logout, and sessions are deleted at logout. Add a nullable `users.last_seen_at`:
