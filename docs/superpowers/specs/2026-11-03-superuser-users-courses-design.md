@@ -111,7 +111,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - Accounts enrolled at course level with no progress aren't counted.
   - The count only informs the confirm; it never blocks.
 - D12b (user's, builder check): the old main-site endpoint `DELETE /api/courses/{id}` (`courses.py:143`) is **removed**. Deleting a course happens only in the panel, behind its token.
-  - Three tests call it (`tests/test_courses.py:79-85`, `tests/test_access_control.py:110-114` and `:148-152`). They are deleted or re-pointed to the panel endpoint. After the removal that path answers 405, not 403.
+  - Three tests call it (`tests/test_courses.py:79-85`, `tests/test_access_control.py:110-114` and `:148-152`). They are deleted or re-pointed to the panel endpoint. After the removal that path answers 404 (the `/api/{rest:path}` catch-all in `main.py`; Task 3 ruling), not 403.
   - The old `POST /api/courses` (`courses.py:28`) **stays** as it is. It makes only an empty course and is used about 160 times as test setup.
 - D13 (mine; transliteration is the user's, rev 3): address rules are the existing course slug rules, `CourseCreate.slug` in `backend/mathion/schemas.py:25`: `^[a-z0-9]+(?:-[a-z0-9]+)*$`, 1-80 characters, unique (`models.py:15`).
   - Filling the address from the name first transliterates **æ→ae, ø→oe, å→aa** (and their capitals), then strips the accents from other letters (é→e, ü→u).

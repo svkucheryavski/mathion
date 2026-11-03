@@ -10,7 +10,7 @@ Plan: `docs/superpowers/plans/2026-11-03-superuser-users-courses.md`.
 
 ## Out of scope (spec §7)
 
-- **Files left on disk.** `delete_version` (`backend/mathion/api/versions.py:398-407`) and a non-force `delete_run` (`backend/mathion/api/runs.py:166-176`) leave `courses/<vid>` and `runs/<rid>` behind; the course delete can't see those. Open question that settles it: how much disk an install actually loses this way once real courses are retired.
+- **Files left on disk.** `delete_version` (`backend/mathion/api/versions.py:398-407`) and a non-force `delete_run` (`backend/mathion/api/runs.py:166-176`) leave `courses/<vid>` and `runs/<rid>` behind; the course delete can't see those. An asset upload racing a course delete can leave an orphan folder too: the upload commits its row before writing the file (T3 Opus r1). Open question that settles it: how much disk an install actually loses this way once real courses are retired.
 - **Stale emails with email off.** The other email kinds still pile up in `notification_log` while email is disabled, and all go out at once when it is set up. The admin email avoids this (D5a). Open question: whether a first-time SMTP setup should drop or send the backlog — a Settings-slice decision.
 - **Roster email checks.** The roster schemas accept any non-empty string as an email, the gap D4 closes for the panel. Open question: whether a bad roster address has ever caused trouble, or only clutter.
 
@@ -33,3 +33,10 @@ Plan: `docs/superpowers/plans/2026-11-03-superuser-users-courses.md`.
 - If the admin goes A → B → A before the queue drains, A gets the same email twice (both rows pass the send-time check). Task 3's queueing could drop an older unsent row for the same course and person (Opus r1).
 - `skip_reason` reports a missing recipient (FK cascade makes it near-unreachable) as "recipient disabled"; "recipient gone" would be more honest (Fable r1).
 - No test puts a skipped row and a sendable row in one batch (Fable r1); none covers the skip check raising `SQLAlchemyError` (rollback, continue); none shows `course_admin_assigned` in a FileMailer `.eml` name (Opus r1).
+
+### Task 3 — Courses API
+
+- `delete-impact` with no admin (the `admin_id is None` branch) is untested; so are a list row with a disabled admin, PATCH with name and address together, and PATCH re-sending the current address (Fable r1).
+- `_normalize_panel_email` strips, lowercases and length-checks, then calls `_normalize_email`, which does all three again; the inner check can't fire (Fable r2).
+- `_SLUG_SHAPE` repeats `CourseCreate.slug`'s pattern literal; `CourseCreate` could take `pattern=_SLUG_SHAPE.pattern` so the two can't drift (Fable r2).
+- The bad-email and bad-name tests accept any of their sentences for every case, so swapping two messages still passes; one expected sentence per case, as the slug test does, would pin them (Opus r2).
