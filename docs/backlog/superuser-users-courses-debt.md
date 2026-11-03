@@ -25,3 +25,11 @@ Plan: `docs/superpowers/plans/2026-11-03-superuser-users-courses.md`.
 - `test_no_bump_inside_throttle` could also assert the session's `last_active_at` stayed (Fable r1).
 - The comment above the throttled bump in `auth.py` still names only `last_active_at` (Opus r1).
 - `test_backfill_from_real_sign_in_calls` asserts only `is not None` for the signed-in account; comparing with the PIN's `created_at` would pin the source too (Fable r3).
+
+### Task 2 — panel write guard, the course-admin email
+
+- An admin invited by email alone (no name yet, D8) reads "Hi anna@x," — the shared `_name` falls back to the email for every kind. Greeting "Hi," when `full_name` is empty would read better; a copy call for the user (Fable r1).
+- A course deleted between the skip check and building the email raises `LookupError` → graded permanent, "flagged permanently" in the log. Milliseconds wide; could map to the "course gone" skip (Opus r1).
+- If the admin goes A → B → A before the queue drains, A gets the same email twice (both rows pass the send-time check). Task 3's queueing could drop an older unsent row for the same course and person (Opus r1).
+- `skip_reason` reports a missing recipient (FK cascade makes it near-unreachable) as "recipient disabled"; "recipient gone" would be more honest (Fable r1).
+- No test puts a skipped row and a sendable row in one batch (Fable r1); none covers the skip check raising `SQLAlchemyError` (rollback, continue); none shows `course_admin_assigned` in a FileMailer `.eml` name (Opus r1).
