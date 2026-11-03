@@ -179,7 +179,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
 - D22 (mine): "Last active" needs a value that survives logout, and sessions are deleted at logout. Add a nullable `users.last_seen_at`:
   - set it at sign-in, when the session is created in `verify_pin` (`auth.py:115-125`);
   - bump it together with the session's throttled `last_active_at` update (`auth.py:148`, at most every 5 minutes);
-  - in the migration, backfill it from `max(sessions.last_active_at)` per user.
+  - in the migration, backfill it from the later of `max(sessions.last_active_at)` and the user's **newest** sign-in PIN when it is used (`login_pins`). PINs are never pruned, so this dates people who signed out before the update (user, Task 1 review). Only the newest PIN counts: `request_pin` marks older unused PINs used, so an older used PIN proves no sign-in. The PIN's time is its request time, up to the PIN lifetime before the sign-in.
 
   Show it as relative text ("2 hours ago", "never").
 
