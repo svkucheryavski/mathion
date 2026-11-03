@@ -2,7 +2,8 @@ import { it, expect, vi, afterEach } from 'vitest';
 import { ApiError, OFFLINE_MESSAGE } from '../lib/api';
 import * as events from '../lib/events';
 import {
-  panelError, listUsers, assignAdmin, updateUser, deleteCourse, lookupAccount,
+  panelError, listUsers, assignAdmin, updateUser, deleteCourse, lookupAccount, adminNote,
+  type AdminAssignResult,
 } from '../lib/superuser';
 
 afterEach(() => vi.restoreAllMocks());
@@ -64,4 +65,48 @@ it('calls the panel routes with the token and never the app-wide 401 redirect', 
   f.mockImplementation(async () => new Response(null, { status: 401 }));
   await expect(deleteCourse('T', 7)).rejects.toMatchObject({ status: 401 });
   expect(unauth).not.toHaveBeenCalled();
+});
+
+// --- adminNote (D5a; Review Focus 4) ---
+
+
+function result(over: Partial<AdminAssignResult> = {}, admin: Partial<AdminAssignResult['admin']> = {}): AdminAssignResult {
+  return {
+    course: { id: 1, name: 'Statistics 101', slug: 'stat', admin: null, version_count: 1, run_count: 0, student_count: 0 },
+    admin: { id: 9, email: 'aho@uni.dk', full_name: 'Anna Holm', is_disabled: false, ...admin },
+    admin_email: 'queued',
+    pin_minutes: 10,
+    sign_in_url: 'https://m.example/courses/stat/edit',
+    ...over,
+  };
+}
+
+it('queued: the result sentence, then the email is on its way', () => {
+  expect(adminNote(result(), 'assign')).toBe(
+    'Anna Holm is now the admin of Statistics 101. An email with a sign-in link is on its way to aho@uni.dk.');
+  expect(adminNote(result(), 'create')).toBe(
+    'Statistics 101 is created; Anna Holm is its admin. An email with a sign-in link is on its way to aho@uni.dk.');
+});
+
+it('email off: tell them yourself, with the sign-in address, the pin command and the PIN lifetime', () => {
+  expect(adminNote(result({ admin_email: 'email_off' }), 'assign')).toBe(
+    "Anna Holm is now the admin of Statistics 101. Email isn't set up on this server, so tell them yourself. "
+    + 'They sign in at https://m.example/courses/stat/edit with a PIN: run mathion pin aho@uni.dk on the server '
+    + '(the PIN lasts 10 minutes).');
+  expect(adminNote(result({ admin_email: 'email_off', pin_minutes: 1 }), 'create')).toContain('(the PIN lasts 1 minute).');
+});
+
+it('disabled: no email sent, enable them on the Users page', () => {
+  expect(adminNote(result({ admin_email: 'disabled' }, { is_disabled: true }), 'create')).toBe(
+    'Statistics 101 is created; Anna Holm is its admin. No email sent: this account is disabled. '
+    + 'Enable it on the Users page so they can sign in.');
+});
+
+it('unchanged: only that nothing changed, with no result sentence', () => {
+  expect(adminNote(result({ admin_email: 'unchanged' }), 'assign')).toBe('They are already the admin; nothing changed.');
+});
+
+it('the result sentence falls back to the email for an admin with no name', () => {
+  expect(adminNote(result({}, { full_name: null }), 'assign')).toBe(
+    'aho@uni.dk is now the admin of Statistics 101. An email with a sign-in link is on its way to aho@uni.dk.');
 });

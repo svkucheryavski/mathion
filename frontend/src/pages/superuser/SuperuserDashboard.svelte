@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getSuperuserStats, panelError, type PanelOnAuth, type SuperuserStats } from '../../lib/superuser';
   import { formatFileSize } from '../../lib/format';
+  import PanelHead from '../../components/superuser/PanelHead.svelte';
 
   // The shell handles the guard's 401 and 404 for every panel page (D25).
   let { token, onAuth }: { token: string; onAuth: PanelOnAuth } = $props();
@@ -27,6 +28,7 @@
   });
 </script>
 
+<PanelHead title="Dashboard" />
 <div class="dashboard">
   {#if loading}
     <p>Loading…</p>

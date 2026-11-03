@@ -78,6 +78,34 @@ export function lookupAccount(token: string, email: string): Promise<AccountLook
   return api.post<AccountLookup>(`${base(token)}/accounts/lookup`, { email }, opts);
 }
 
+/** The `mathion pin` command the email-off note gives (D5a); the page shows it as code. */
+export const pinCommand = (email: string) => `mathion pin ${email}`;
+
+/**
+ * D5a: the note after New course (`create`) or an admin assign (`assign`). It
+ * opens with the result, naming the admin by name or, without one, by email
+ * (Review Focus 4); "unchanged" says only that nothing changed.
+ */
+export function adminNote(result: AdminAssignResult, kind: 'create' | 'assign'): string {
+  const { course, admin } = result;
+  if (result.admin_email === 'unchanged') return 'They are already the admin; nothing changed.';
+  const who = admin.full_name ?? admin.email;
+  const opening = kind === 'create'
+    ? `${course.name} is created; ${who} is its admin.`
+    : `${who} is now the admin of ${course.name}.`;
+  switch (result.admin_email) {
+    case 'queued':
+      return `${opening} An email with a sign-in link is on its way to ${admin.email}.`;
+    case 'disabled':
+      return `${opening} No email sent: this account is disabled. Enable it on the Users page so they can sign in.`;
+    case 'email_off': {
+      const minutes = `${result.pin_minutes} minute${result.pin_minutes === 1 ? '' : 's'}`;
+      return `${opening} Email isn't set up on this server, so tell them yourself. They sign in at ${result.sign_in_url} `
+        + `with a PIN: run ${pinCommand(admin.email)} on the server (the PIN lasts ${minutes}).`;
+    }
+  }
+}
+
 // --- Users (spec D14-D21) ---
 
 export type PanelUserRole = 'all' | 'admins' | 'teachers' | 'students' | 'disabled';

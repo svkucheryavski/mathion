@@ -7,7 +7,9 @@
   import type { PanelPage } from '../../lib/superuser';
   import Logo from '../../components/ui/Logo.svelte';
   import Button from '../../components/ui/Button.svelte';
+  import PanelHead from '../../components/superuser/PanelHead.svelte';
   import SuperuserDashboard from './SuperuserDashboard.svelte';
+  import SuperuserCourses from './SuperuserCourses.svelte';
 
   let { token }: { token: string } = $props();
 
@@ -82,13 +84,17 @@
     </div>
   </header>
   <main class="su-main">
-    <h1>{current.label}</h1>
+    <!-- Each page renders its own heading, so its action can sit beside it. -->
     {#if expired}
+      <PanelHead title={current.label} />
       <p class="su-expired">This panel link is not valid or has expired — re-run <code>activate</code> to mint a new one.</p>
     {:else if page === 'dashboard'}
       <SuperuserDashboard {token} {onAuth} />
+    {:else if page === 'courses'}
+      <SuperuserCourses {token} {onAuth} />
     {:else}
-      <!-- The Users and Courses pages land in Tasks 6 and 7. -->
+      <!-- The Users page lands in Task 7. -->
+      <PanelHead title={current.label} />
       <p class="su-soon">This page is not built yet.</p>
     {/if}
   </main>
@@ -137,12 +143,11 @@
   }
   .right { display: flex; align-items: center; gap: var(--space-2); }
   .name { font-size: 12.5px; color: var(--muted); }
-  /* The teaching list's page column and heading. */
+  /* The teaching list's page column. */
   .su-main {
     max-width: var(--page-max);
     margin: 0 auto;
     padding: var(--space-3) var(--space-3) var(--space-4);
   }
-  h1 { margin: 0 0 14px; font-size: 22px; font-weight: 600; color: var(--text); }
   .su-expired, .su-soon { color: var(--muted); }
 </style>
