@@ -1,9 +1,10 @@
 # Superuser panel: Users and Courses — design
 
-**Status:** rev 4, 2026-11-03.
+**Status:** rev 5, 2026-11-03.
 - Rev 2 folded in the builder check (D12a, D12b).
 - Rev 3 folded in spec review round 1, three lanes (`.superpowers/sdd/2026-11-03-superuser-users-courses/spec-r1-*.md`), and the user's answers on mockup 2.
-- Rev 4 folds in spec review round 2 (`spec-r2-*.md`) and the user's answer on confirms (D24).
+- Rev 4 folded in spec review round 2 (`spec-r2-*.md`) and the user's answer on confirms (D24).
+- Rev 5 folds in the small points from round 3 (`spec-r3-*.md`).
 
 **Branch:** `feat/superuser-users-courses` (local).
 
@@ -64,15 +65,16 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - Today it can only render run emails. `_build_render_context` requires `run_id` and loads a `Run` (`notifications/dispatcher.py:55-65`), and `RenderContext.run` is mandatory (`templates.py:11-21`). A course-level row would fail on its first tick as a permanent error and never be sent.
   - So the dispatcher gains a course-scoped context: `run` becomes optional, and a `course` is added.
   - The new kind, `course_admin_assigned`, reads the course's **current** slug at send time.
-  - At send time it **skips** the row, with no mail, if the recipient is no longer that course's admin, is disabled, or the course is gone. A skipped row is marked with `error = "skipped: <reason>"`, not `sent_at`, so the log stays honest.
+  - At send time it **skips** the row, with no mail, if the recipient is no longer that course's admin, is disabled, or the course is gone. A skipped row is marked with `error = "skipped: <reason>"`, not `sent_at`, so the log stays honest. A skip is its own branch in `tick()`, not an exception: the error path (`dispatcher.py:162-195`) adds to the retry count and logs "flagged permanently" with a traceback, which would fill the operator log with false failures.
   - A `tick()` test with `MemoryMailer` covers the kind.
 - D5a (user's, mockup 2; rev 4 detail mine): the panel always tells the superuser whether the colleague was told.
-  - "Email is set up" means **a mailer exists**: `email_mode != "disabled"`. That is the same condition that starts the email queue (`main.py:84-88`, `mailer.py:86-88`). It is **not** `send_pin_enabled`, which is also true in debug with email off (`api/auth.py:53`), when nothing would ever be sent.
-  - The create and assign answers say what happened to the email: queued, email off, not sent because the account is disabled, or not sent because nothing changed (the same admin again). The panel shows one note per case:
+  - "Email is set up" means **a mailer exists**: `email_mode != "disabled"`. That is the same condition that starts the email queue (`main.py:84-88`, `mailer.py:86-88`). It is **not** `send_pin_enabled`, which is also true in debug with email off (`api/auth.py:53`), when nothing would ever be sent. The `memory` test sink counts as set up on purpose, so the `tick()` test sees the row; don't narrow this to `in ("smtp", "file")`.
+  - The create and assign answers say what happened to the email: queued, email off, not sent because the account is disabled, or not sent because nothing changed (the same admin again). When more than one applies, the first in this order wins: unchanged, disabled, email off, queued (a disabled account can't use `mathion pin`).
+  - The panel shows one note per case. Each opens with the result: "Anna Holm is now the admin of Statistics 101." after an assign, "Statistics 101 is created; Anna Holm is its admin." after New course. Then:
     - queued: "An email with a sign-in link is on its way to <email>."
-    - email off: "Email isn't set up on this server, so tell them yourself. They sign in at <base_url>/courses/<slug>/edit with a PIN: run `mathion pin <email>` on the server (the PIN lasts 10 minutes)." (`cli/cmd/pin.go`; in dev the same is `python -m mathion.superuser pin <email>`.)
-    - disabled: "No email sent: this account is disabled."
-    - unchanged: "They are already the admin; nothing changed."
+    - email off: "Email isn't set up on this server, so tell them yourself. They sign in at <base_url>/courses/<slug>/edit with a PIN: run `mathion pin <email>` on the server (the PIN lasts <pin_expiry_minutes> minutes)." The number comes from `settings.pin_expiry_minutes` (`auth.py:70`). (`cli/cmd/pin.go`; in dev the same is `python -m mathion.superuser pin <email>`.)
+    - disabled: "No email sent: this account is disabled. Enable it on the Users page so they can sign in."
+    - unchanged: "They are already the admin; nothing changed." (With no change, there is no result sentence before it.)
   - The note is a strip that stays on the page until it is closed or the next action replaces it, not a toast that fades away, so the superuser can copy the command.
   - With email off, nothing is queued.
 - D6 (user's, rev 3): one admin per course is enforced **in the database**.
@@ -128,12 +130,12 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - an account with no role shows "—".
 - D15 (user's): **no pages.** The list shows the **20 most recently created** accounts, newest first. Typing in the search box filters on the server and shows up to 20 matches. Filter pills (All, Admins, Teachers, Students, Disabled) combine with the search.
 
-  A line under the table always says how many are shown (exact copy mine, rev 4). The noun follows the pill: "accounts", "admins", "teachers", "students", "disabled accounts".
+  A line under the table always says how many are shown (exact copy mine, rev 4). The noun follows the pill: "accounts", "admins", "teachers", "students", "disabled accounts", and is singular for one ("1 account").
   - no search, more than 20: "Showing the 20 newest of 42 accounts. Search to find others."
   - no search, 20 or fewer: "12 accounts".
   - searching, more than 20 matches: "20 of 57 match. Keep typing to narrow."
   - searching, 20 or fewer: "5 match".
-  - searching, none: "No accounts match".
+  - searching, none: "No accounts match", the noun following the pill ("No students match").
   - no search and an empty pill: "No disabled accounts" (or "No admins", and so on).
   - D15a (mine, rev 3; review lane B I4):
     - Pill counts are **totals** and don't follow the search.
@@ -185,7 +187,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
 - D23 (user's, from the mockup): the panel bar's gold "Superuser" label becomes three nav pills, **Dashboard, Users and Courses**, with the active pill in the gold look. Routes: `/superuser/{token}`, `/superuser/{token}/users`, `/superuser/{token}/courses`. The bar still has no links that leave the panel.
 - D25 (mine, rev 3; lane B I3): **the token's 404 keeps one meaning.** A 404 from the panel guard means the link has expired or is invalid (`superuser.py:25-35`).
   - Every new endpoint answers "the course or account is gone" with **409** and a message ("This course was deleted"), never 404.
-  - 409 therefore means several things: gone, has runs (D12c), address taken (D8), email taken (D17, D19). The frontend shows the server's `detail` text as it is, never a sentence picked by status. On any 409 a dialog stays open with the input kept and shows the message, and the list reloads in the background, so a row that is gone disappears once the dialog is cancelled.
+  - 409 therefore means several things: gone, has runs (D12c), address taken (D8), email taken (D17, D19). The frontend shows the server's `detail` text as it is, never a sentence picked by status. On any 409 a dialog stays open with the input kept and shows the message, and the list reloads in the background, so a row that is gone disappears once the dialog is cancelled. A confirm strip that gets a 409 (an account that gained data, an admin already removed, a row gone) closes; the server's message shows in the note strip (D5a), and the list reloads.
   - The shell handles the guard's 401 (go and sign in) and 404 (the expired-link page) once, for every panel page.
   - An expired link loses an open dialog's input. That is accepted: the inactivity window is 30 minutes, and every save resets it.
 
