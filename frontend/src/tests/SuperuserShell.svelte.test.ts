@@ -19,6 +19,10 @@ function jsonResponse(status: number, body: unknown) {
 function dispatchFetch() {
   return vi.fn(async (url: string) => {
     const s = String(url);
+    if (s.includes('/api/superuser/') && s.includes('/users')) {
+      return jsonResponse(200, { users: [], total: 0, counts: { all: 0, admins: 0, teachers: 0, students: 0, disabled: 0 } });
+    }
+    if (s.includes('/api/superuser/') && s.includes('/courses')) return jsonResponse(200, []);
     if (s.includes('/api/superuser/')) {
       return jsonResponse(200, { total_users: 0, total_courses: 0, storage_bytes: 0, active_users_24h: 0, active_users_7d: 0 });
     }
@@ -239,11 +243,14 @@ it('the heading and the page follow the route', async () => {
   router.currentRoute.path = '/superuser/T/users';
   await settle();
   expect(target.querySelector('main.su-main h1')?.textContent).toBe('Users');
+  // The page itself mounted, not a placeholder.
+  expect(target.querySelector('main.su-main .u-count')?.textContent).toBe('No accounts');
   expect(target.querySelector('.dashboard')).toBeNull();
   expect(pills()[1].getAttribute('aria-current')).toBe('page');
   router.currentRoute.path = '/superuser/T/courses';
   await settle();
   expect(target.querySelector('main.su-main h1')?.textContent).toBe('Courses');
+  expect(target.querySelector('main.su-main')?.textContent).toContain('No courses yet.');
   expect(pills()[2].getAttribute('aria-current')).toBe('page');
 });
 

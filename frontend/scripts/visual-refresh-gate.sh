@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2633
+EXPECTED_CHECKS=2711
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -5976,6 +5976,47 @@ if [[ -n $REPLY ]]; then
   sweep SuperuserDashboard $H
 fi
 
+# The panel's Users page (Task 7): the pills and search in mock-2's tools row,
+# the Courses page's table, the role chips (D14), the confirm strip row under
+# its row (D18, D20) and the count line (D15).
+own u-table SuperuserUsers.svelte
+own u-count SuperuserUsers.svelte
+uniq1 u-table
+if [[ -n $REPLY ]]; then
+  N=SuperuserUsers; H=$REPLY
+  d '\.u-tools' '' 'display:flex' 'justify-content:space-between' 'flex-wrap:wrap' 'margin:0 0 12px'
+  d '\.u-search' '' 'height:var\(--control-h-sm\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.u-table' '' 'border-collapse:separate' 'border-spacing:0'
+  chk "\.u-table\.${H} th:where\(\.${H}\)" 'padding:8px 12px' 'background:var\(--surface-2\)' 'color:var\(--text-3\)' 'font-size:12px' 'font-weight:600'
+  chk "\.u-table\.${H} td:where\(\.${H}\)" 'padding:8px 12px' 'border-top:1px solid var\(--border-soft\)' 'font-size:13px' 'color:var\(--text-2\)'
+  chk "\.u-table\.${H} td\.u-email:where\(\.${H}\)" 'font-family:var\(--font-mono\)' 'color:var\(--muted\)'
+  d '\.u-chips' '' 'display:inline-flex' 'flex-wrap:wrap' 'gap:4px'
+  d '\.chip' '' 'border-radius:var\(--radius-pill\)' 'background:var\(--surface-2\)' 'color:var\(--text-2\)' 'font-size:11\.5px'
+  d '\.chip\.su' '' 'background:var\(--gold-soft\)' 'color:var\(--gold-text\)'
+  d '\.chip\.ad' '' 'background:var\(--primary-soft\)' 'color:var\(--primary\)'
+  d '\.chip\.off' '' 'background:var\(--state-disabled-bg\)' 'color:var\(--state-disabled-fg\)'
+  d '\.row-icons' '' 'display:inline-flex' 'gap:4px'
+  chk "\.u-table\.${H} td\.u-actions:where\(\.${H}\)" 'width:1%' 'white-space:nowrap'
+  chk "\.u-confirm\.${H} td:where\(\.${H}\)" 'padding:0 12px 10px' 'border-top:0'
+  d '\.u-count' '' 'margin:8px 2px 0' 'font-size:12px' 'color:var\(--muted\)'
+  none "SuperuserUsers puts no flex on a table cell (the chips sit in .u-chips)" "\.u-roles\.${H}\{[^}]*display:"
+  sweep SuperuserUsers $H
+fi
+# D17, D19, D21: the account dialogs; a superuser's email field is locked grey.
+uniq1 ea-locked
+if [[ -n $REPLY ]]; then
+  N=EditAccountDialog; H=$REPLY
+  d '\.ea-locked' '' 'background:var\(--surface-2\)' 'color:var\(--text-2\)'
+  d '\.ea-note' '' 'margin:0' 'font-size:12\.5px' 'color:var\(--text-2\)'
+  d '\.ea-err' '' 'color:var\(--danger\)'
+fi
+uniq1 na-err
+if [[ -n $REPLY ]]; then
+  N=NewAccountDialog; H=$REPLY
+  d '\.na-err' '' 'color:var\(--danger\)'
+fi
+
 # The panel's Courses page (Users + Courses slice, Task 6): the teaching list's
 # table with plain-text cells, the disabled-admin chip in RunTeachersTab's
 # "invited" look, one Edit and the trash at the row's end (D24 rev 6).
@@ -6028,8 +6069,8 @@ if [[ -n $REPLY ]]; then
   d '\.error' '' 'background:var\(--danger-off-bg\)' 'border-color:var\(--danger-off-border\)' 'color:var\(--danger\)'
   sweep NoteStrip $H
 fi
-# D8, D12, D24: the course dialogs' fields, the item modal's field look.
-for pair in NewCourseDialog:nc-input EditCourseDialog:ec-input AdminEmailField:ae-input DeleteCourseDialog:dc-input; do
+# D8, D12, D17, D24: the panel dialogs' fields, the item modal's field look.
+for pair in NewCourseDialog:nc-input EditCourseDialog:ec-input AdminEmailField:ae-input DeleteCourseDialog:dc-input NewAccountDialog:na-input EditAccountDialog:ea-input; do
   uniq1 ${pair#*:}
   if [[ -n $REPLY ]]; then
     N=${pair%%:*}; H=$REPLY

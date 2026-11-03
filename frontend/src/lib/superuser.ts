@@ -157,6 +157,57 @@ export function deleteUser(token: string, id: number): Promise<void> {
   return api.delete(`${base(token)}/users/${id}`, opts);
 }
 
+const NOUNS: Record<PanelUserRole, [string, string]> = {
+  all: ['account', 'accounts'],
+  admins: ['admin', 'admins'],
+  teachers: ['teacher', 'teachers'],
+  students: ['student', 'students'],
+  disabled: ['disabled account', 'disabled accounts'],
+};
+const noun = (role: PanelUserRole, n: number) => NOUNS[role][n === 1 ? 0 : 1];
+const runs = (n: number) => `${n} ${n === 1 ? 'run' : 'runs'}`;
+
+/** D15: the line under the table, for the list as fetched with its pill and search. */
+export function countLine(list: PanelUserList, role: PanelUserRole, searching: boolean): string {
+  const shown = list.users.length;
+  const total = list.total;
+  if (searching) {
+    if (total === 0) return `No ${noun(role, 0)} match`;
+    return total > shown ? `${shown} of ${total} match. Keep typing to narrow.` : `${total} match`;
+  }
+  if (total === 0) return `No ${noun(role, 0)}`;
+  return total > shown
+    ? `Showing the ${shown} newest of ${total} ${noun(role, total)}. Search to find others.`
+    : `${total} ${noun(role, total)}`;
+}
+
+/** D14: the roles, worked out; one admin chip per course, or one count above two. */
+export function roleChips(u: PanelUser): string[] {
+  const chips: string[] = [];
+  if (u.is_superuser) chips.push('Superuser');
+  if (u.admin_of.length > 2) chips.push(`Admin · ${u.admin_of.length} courses`);
+  else for (const c of u.admin_of) chips.push(`Admin · ${c.name}`);
+  if (u.teacher_runs > 0) chips.push(`Teacher · ${runs(u.teacher_runs)}`);
+  if (u.student_runs > 0) chips.push(`Student · ${runs(u.student_runs)}`);
+  if (u.is_disabled) chips.push('Disabled');
+  return chips.length ? chips : ['—'];
+}
+
+/** An account as the panel names it: the name, or the email when there is none. */
+export const personName = (u: PanelUser) => u.full_name ?? u.email;
+
+/** D18: what the person loses, without she or he (Mathion stores no gender). */
+export function disableWarning(u: PanelUser): string {
+  const who = personName(u);
+  const parts: string[] = [];
+  const courses = u.admin_of.map((c) => c.name);
+  if (courses.length > 2) parts.push(`is the admin of ${courses.length} courses`);
+  else if (courses.length > 0) parts.push(`is the admin of ${courses.join(' and ')}`);
+  if (u.teacher_runs > 0) parts.push(`teaches ${runs(u.teacher_runs)}`);
+  const middle = parts.length ? `${who} ${parts.join(' and ')}. ` : '';
+  return `Disable ${who}? ${middle}They'll be signed out and can't sign in until enabled; tell them yourself.`;
+}
+
 // --- The shell (D23, D25) ---
 
 /** The panel's three pages; the shell reads it from the route. */

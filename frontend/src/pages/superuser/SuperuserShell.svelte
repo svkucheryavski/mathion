@@ -10,6 +10,7 @@
   import PanelHead from '../../components/superuser/PanelHead.svelte';
   import SuperuserDashboard from './SuperuserDashboard.svelte';
   import SuperuserCourses from './SuperuserCourses.svelte';
+  import SuperuserUsers from './SuperuserUsers.svelte';
 
   let { token }: { token: string } = $props();
 
@@ -93,9 +94,7 @@
     {:else if page === 'courses'}
       <SuperuserCourses {token} {onAuth} />
     {:else}
-      <!-- The Users page lands in Task 7. -->
-      <PanelHead title={current.label} />
-      <p class="su-soon">This page is not built yet.</p>
+      <SuperuserUsers {token} {onAuth} />
     {/if}
   </main>
 </div>
@@ -149,5 +148,5 @@
     margin: 0 auto;
     padding: var(--space-3) var(--space-3) var(--space-4);
   }
-  .su-expired, .su-soon { color: var(--muted); }
+  .su-expired { color: var(--muted); }
 </style>

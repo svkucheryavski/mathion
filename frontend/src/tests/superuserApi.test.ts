@@ -3,7 +3,8 @@ import { ApiError, OFFLINE_MESSAGE } from '../lib/api';
 import * as events from '../lib/events';
 import {
   panelError, listUsers, assignAdmin, updateUser, deleteCourse, lookupAccount, adminNote,
-  type AdminAssignResult,
+  countLine, roleChips, disableWarning,
+  type AdminAssignResult, type PanelUser, type PanelUserList, type PanelUserRole,
 } from '../lib/superuser';
 
 afterEach(() => vi.restoreAllMocks());
@@ -109,4 +110,76 @@ it('unchanged: only that nothing changed, with no result sentence', () => {
 it('the result sentence falls back to the email for an admin with no name', () => {
   expect(adminNote(result({}, { full_name: null }), 'assign')).toBe(
     'aho@uni.dk is now the admin of Statistics 101. An email with a sign-in link is on its way to aho@uni.dk.');
+});
+
+// --- Users page copy (D14, D15, D18) ---
+
+function user(over: Partial<PanelUser> = {}): PanelUser {
+  return {
+    id: 1, email: 'aho@uni.dk', full_name: 'Anna Holm', is_superuser: false, is_disabled: false,
+    created_at: '2026-11-01T10:00:00Z', last_seen_at: null, admin_of: [], teacher_runs: 0, student_runs: 0,
+    has_data: false, ...over,
+  };
+}
+function list(shown: number, total: number): PanelUserList {
+  return {
+    users: Array.from({ length: shown }, (_, i) => user({ id: i + 1 })), total,
+    counts: { all: total, admins: 0, teachers: 0, students: 0, disabled: 0 },
+  };
+}
+const line = (shown: number, total: number, role: PanelUserRole, searching: boolean) => countLine(list(shown, total), role, searching);
+
+it.each([
+  [20, 42, 'all', false, 'Showing the 20 newest of 42 accounts. Search to find others.'],
+  [20, 33, 'students', false, 'Showing the 20 newest of 33 students. Search to find others.'],
+  [12, 12, 'all', false, '12 accounts'],
+  [1, 1, 'all', false, '1 account'],
+  [1, 1, 'disabled', false, '1 disabled account'],
+  [3, 3, 'admins', false, '3 admins'],
+  [1, 1, 'teachers', false, '1 teacher'],
+  [0, 0, 'disabled', false, 'No disabled accounts'],
+  [0, 0, 'admins', false, 'No admins'],
+  [0, 0, 'all', false, 'No accounts'],
+  [20, 57, 'all', true, '20 of 57 match. Keep typing to narrow.'],
+  [5, 5, 'all', true, '5 match'],
+  [1, 1, 'teachers', true, '1 match'],
+  [0, 0, 'students', true, 'No students match'],
+  [0, 0, 'all', true, 'No accounts match'],
+  [0, 0, 'disabled', true, 'No disabled accounts match'],
+] as const)('countLine(%i shown of %i, %s, searching %s) → %s (D15)', (shown, total, role, searching, text) => {
+  expect(line(shown, total, role, searching)).toBe(text);
+});
+
+const ref = (id: number, name: string) => ({ id, name });
+it.each([
+  ['a superuser', user({ is_superuser: true }), ['Superuser']],
+  ['the admin of one course', user({ admin_of: [ref(1, 'Statistics 101')] }), ['Admin · Statistics 101']],
+  ['the admin of two courses', user({ admin_of: [ref(1, 'Algebra'), ref(2, 'Statistics 101')] }), ['Admin · Algebra', 'Admin · Statistics 101']],
+  ['the admin of three courses', user({ admin_of: [ref(1, 'A'), ref(2, 'B'), ref(3, 'C')] }), ['Admin · 3 courses']],
+  ['a teacher of one run', user({ teacher_runs: 1 }), ['Teacher · 1 run']],
+  ['a teacher of two runs', user({ teacher_runs: 2 }), ['Teacher · 2 runs']],
+  ['a student', user({ student_runs: 3 }), ['Student · 3 runs']],
+  ['disabled', user({ is_disabled: true }), ['Disabled']],
+  ['in D14 order', user({ is_disabled: true, student_runs: 1, teacher_runs: 2, admin_of: [ref(1, 'Stat')], is_superuser: true }),
+    ['Superuser', 'Admin · Stat', 'Teacher · 2 runs', 'Student · 1 run', 'Disabled']],
+  ['with no role', user(), ['—']],
+] as const)('roleChips: %s (D14)', (_label, u, chips) => {
+  expect(roleChips(u)).toEqual(chips);
+});
+
+const SIGNED_OUT = "They'll be signed out and can't sign in until enabled; tell them yourself.";
+it('disableWarning: the spec example, admin and teacher (D18)', () => {
+  expect(disableWarning(user({ admin_of: [ref(1, 'Statistics 101')], teacher_runs: 2 })))
+    .toBe(`Disable Anna Holm? Anna Holm is the admin of Statistics 101 and teaches 2 runs. ${SIGNED_OUT}`);
+});
+it('disableWarning: admin only, of two and of more than two courses', () => {
+  expect(disableWarning(user({ admin_of: [ref(1, 'A'), ref(2, 'B')] }))).toBe(`Disable Anna Holm? Anna Holm is the admin of A and B. ${SIGNED_OUT}`);
+  expect(disableWarning(user({ admin_of: [ref(1, 'A'), ref(2, 'B'), ref(3, 'C')] }))).toBe(`Disable Anna Holm? Anna Holm is the admin of 3 courses. ${SIGNED_OUT}`);
+});
+it('disableWarning: teacher only, singular for one run', () => {
+  expect(disableWarning(user({ teacher_runs: 1 }))).toBe(`Disable Anna Holm? Anna Holm teaches 1 run. ${SIGNED_OUT}`);
+});
+it('disableWarning: no role has no middle sentence, and a nameless account is named by email', () => {
+  expect(disableWarning(user({ student_runs: 4 }))).toBe(`Disable Anna Holm? ${SIGNED_OUT}`);
+  expect(disableWarning(user({ full_name: null, teacher_runs: 1 }))).toBe(`Disable aho@uni.dk? aho@uni.dk teaches 1 run. ${SIGNED_OUT}`);
 });
