@@ -1,10 +1,18 @@
 # Superuser panel: Users and Courses — design
 
-**Status:** rev 2, 2026-11-03, for the user's review (rev 2 folds in the builder check: D12a, D12b).
+**Status:** rev 3, 2026-11-03.
+- Rev 2 folded in the builder check (D12a, D12b).
+- Rev 3 folds in spec review round 1, three lanes (`.superpowers/sdd/2026-11-03-superuser-users-courses/spec-r1-*.md`), and the user's answers on mockup 2.
+
 **Branch:** `feat/superuser-users-courses` (local).
+
 **Builds on:** `docs/superpowers/specs/2026-07-11-superuser-panel-slice-1-design.md` (panel access, shell, dashboard) and the 2026-11-03 restyle (`55abe4a`).
+
 **Source of the requirement:** platform spec §8, `docs/superpowers/specs/2026-04-19-mathion-platform-design.md:548-556`.
-**Mockups:** `.superpowers/sdd/2026-11-03-superuser-users-courses/mock-1.html` (the user said "Looks good").
+
+**Mockups:** `.superpowers/sdd/2026-11-03-superuser-users-courses/`
+- `mock-1.html`: the pages ("Looks good").
+- `mock-2.html`: the row actions ("as drawn"), the no-email note ("as drawn"). Two changes since mock-2 was drawn: edits open dialogs (D24), and course names are not links (D7).
 
 ## 1. Why
 
@@ -21,15 +29,19 @@ This slice adds the panel's **Users** and **Courses** pages, so a superuser can 
 
 **Non-goals (later slices or never)**
 - Settings (SMTP, file limits, session lengths) and the first-run setup checklist: later slices (platform §8).
-- Granting or removing superuser rights in the panel. It stays the server command (`python -m mathion.superuser create-superuser`, later `mathion superuser`). The user's decision.
+- Granting or removing superuser rights in the panel. It stays the server command (`mathion superuser <email>`, `cli/cmd/superuser.go`; in dev, `python -m mathion.superuser create-superuser`). The user's decision.
 - Several admins per course. One admin per course is the user's decision.
-- Any authoring in the panel (versions, content, runs): the admin does that in the existing editor.
-- Pages or "load more" in the Users list (see §4.1).
+- Any authoring in the panel (versions, content, runs): the admin, or the superuser through Authoring on the main site, does that in the existing editor.
+- Pages or "load more" in the Users list (D15).
 
 **Anti-goals (would make it a failure even if it works)**
 - The panel can lock everyone out: it must never disable, delete or demote a superuser.
-- A delete that loses students' work: a course with runs cannot be deleted, and an account with any data cannot be deleted.
+- A delete that silently loses someone's work:
+  - a course with runs cannot be deleted;
+  - leftover student progress is counted in the course-delete confirm (D12a);
+  - an account with any data cannot be deleted.
 - A teacher or admin who is disabled keeps working in an open tab.
+- An update that fails on an existing install because of this slice's migration.
 
 ## 3. Decisions
 
@@ -37,66 +49,152 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
 
 ### Admin model
 - D1 (user's): "Admin" stays **per course** (a `course_admins` row); there is no account-level admin flag. An account is an admin because it administers a course.
-- D2 (user's): **exactly one admin per course.** Assigning replaces the current admin. A course may be left with **no admin**: the superuser can still open it, since superusers see every course (`courses.py:84`).
+- D2 (user's): **exactly one admin per course.** Assigning replaces the current admin. A course may be left with **no admin**. The superuser can still work on it through Authoring on the main site, since superusers see every course (`courses.py:84`).
 - D3 (user's): admins are given and taken **only on the Courses page**. The Users list shows "Admin · <course>" as a role and does not edit it.
-- D4 (user's): the superuser assigns an admin by **typing an email**. An existing account is used; a missing one is created on the spot (the roster's `get_or_create_user`, `backend/mathion/api/lookups.py:20`, does this already).
-- D5 (user's): the new admin gets **a short email**, "You are now the admin of <course>", with a link to the course in the editor. It goes through the existing email queue, as `run_teacher_assigned` does (`run_teachers.py:43`, a `NotificationLogEntry`; template in `backend/mathion/notifications/templates.py`). If email isn't configured on the server, it simply isn't sent, as with the other emails.
-- D6 (mine): an existing `course_admins` table may hold more than one row per course: the model allows it (`UniqueConstraint("course_id","user_id")`), and today's dev data has one per course. The builder decides how to enforce one admin per course, for example a unique index on `course_id` with a migration that refuses, or reports, existing duplicates. The rule must hold under two concurrent "assign" requests.
+- D4 (user's): the superuser assigns an admin by **typing an email**.
+  - An existing account is used; a missing one is created on the spot with `get_or_create_user` (`backend/mathion/api/lookups.py:22`).
+  - That function does no normalising, so the panel's request schemas normalise with `_normalize_email` (`schemas.py:10-21`), as `RunTeacherCreate` does (`schemas.py:491-496`).
+  - They also reject an empty value after normalising, and anything without a minimal `local@domain` shape.
+- D5 (user's): the new admin gets **a short email**, "You are now the admin of <course>", with a sign-in link to the course in the editor (`/courses/<slug>/edit`, `frontend/src/routes.ts:10`). This needs work in the email queue:
+  - Today it can only render run emails. `_build_render_context` requires `run_id` and loads a `Run` (`notifications/dispatcher.py:55-65`), and `RenderContext.run` is mandatory (`templates.py:11-21`). A course-level row would fail on its first tick as a permanent error and never be sent.
+  - So the dispatcher gains a course-scoped context: `run` becomes optional, and a `course` is added.
+  - The new kind, `course_admin_assigned`, reads the course's **current** slug at send time.
+  - At send time it **skips** the row (marks it done, no mail) if the recipient is no longer that course's admin, or is disabled.
+  - A `tick()` test with `MemoryMailer` covers the kind.
+- D5a (user's, mockup 2): **when email is not set up** (`send_pin_enabled` false), no email is queued. After the create or the assign, the panel shows a note instead: "Email isn't set up on this server, so tell them yourself. To sign in they need a PIN: run `mathion pin <email>` on the server" (`cli/cmd/pin.go`). When email is set up, the note says an email with a sign-in link is on its way. Either way the superuser knows whether the colleague was told.
+- D6 (user's, rev 3): one admin per course is enforced **in the database**.
+  - The migration **keeps the earliest admin row (lowest `id`) per course and removes the others**, printing one line per removed row. It then adds a unique constraint on `course_admins.course_id`, and drops the now-redundant `uq_course_admin` and the non-unique `ix_course_admins_course_id` (`alembic/versions/*initial_schema*.py:65-67`). The model changes to match.
+  - The migration must never fail on existing data: `mathion update` rolls back on any migration failure (`cli/cmd/update.go:456-462`).
+  - `tests/test_teaching.py:915-916` puts two admins on one course on purpose, for the "2×2×2 role join" regression. It is rewritten so the second role is a second teacher, keeping that check.
+  - Assigning takes a course-row lock (`SELECT … FOR UPDATE`) **before** `get_or_create_user`, following the lock-before-index rule (`run_roster.py:68-77`). Two concurrent assigns then serialise instead of one failing with a 500.
 
 ### Courses page
-- D7 (user's): a table: course name, address (`/courses/<slug>`), admin (name and email, or "No admin"), number of versions, number of runs, and a row action.
-- D8 (user's): **New course** dialog: name, address (filled in from the name, editable), admin's email (**required**). A hint under the email says whether an account will be created.
-- D9 (user's): **Change admin / Assign admin** turns the admin cell into an email field with ✓/×, the inline-edit pattern used elsewhere in the app. The old admin keeps their account and loses only this course. The superuser can also **remove** the admin and leave the course with none.
+- D7 (user's): a table with the course name, address, admin (name and email, "No admin", or the admin marked as disabled), number of versions and number of runs. The course name is **plain text, not a link**: nothing in the panel leads away from it.
+- D8 (user's): **New course** dialog with name, address (filled in from the name, editable) and admin's email (**required**). A hint under the email says whether an account will be created, or that the account is disabled (§5).
+  - Everything happens in one transaction: insert the course, flush, then `get_or_create_user`, the admin row, the notification (D5) and the commit.
+  - A taken address gives a 409, "This address is already used by another course".
+  - Use a SAVEPOINT or a pre-check so a slug conflict isn't confused with the user-insert recovery.
+- D9 (user's): **Change admin / Assign admin** opens a dialog (D24) with an email field and the same hint. The old admin keeps their account and loses only this course. An **×** next to the admin removes them, after a confirm ("<course> will have no admin"), and leaves the course with none.
 - D10 (user's): **Rename** a course (its name).
-- D11 (user's): **Change the address** (slug). The confirm warns that links people saved or shared with the old address will stop working. Old addresses are not remembered or forwarded.
-- D12 (user's): **Delete** a course only when it has **no runs**. With runs, Delete is disabled and says why ("2 runs: a course with runs can't be deleted"). The database already enforces this: `runs.version_id` is `ondelete="RESTRICT"` (`models.py:205`). The confirm asks for the course name to be typed. Deleting also removes the course's files from disk (`<asset_path>/courses/<version_id>/` for each version, `api/assets.py:27`).
-- D12a (user's, after the builder check): a course with no runs can still hold **students' progress**. An admin can remove students from a run and then delete it; their `user_item_states` and inactive `student_enrollments` stay tied to the course's versions and cascade away with the course. Delete stays **allowed**, and the confirm says what will be lost: "Also deletes the quiz progress of 14 students." The count is of distinct accounts with progress in the course's items, other than the course's current admin (whose own preview progress is not mentioned). Once the runs are deleted, Mathion no longer records who taught them, so a former teacher's preview progress counts like anyone else's; that is accepted. Nothing here ever blocks the delete; it only informs the confirm. The anti-goal "a delete that loses students' work" is met by the runs block plus this explicit count.
-- D12b (user's, after the builder check): the old main-site endpoint `DELETE /api/courses/{id}` (`courses.py:142`, superuser session, no runs check, no file cleanup, no screen uses it, no test uses it) is **removed**. Deleting a course happens only in the panel, behind its token. The old `POST /api/courses` (`courses.py:28`) **stays** as it is: it only makes an empty course and is used about 160 times as test setup. No screen calls it, and the panel's create has its own endpoint with the admin rule.
-- D13 (mine): address rules are the existing course slug rules, `CourseCreate.slug` in `backend/mathion/schemas.py:25`: `^[a-z0-9]+(?:-[a-z0-9]+)*$`, 1-80 characters, and unique (`models.py:15`). Filling the address in from the name lower-cases it, turns each run of other characters into one hyphen, and trims hyphens at the ends. A name that gives an empty address (all symbols) leaves the field empty for the superuser to fill. A taken address is refused with a clear message.
+- D11 (user's): **Change the address** (slug). The dialog warns that links people saved or shared with the old address will stop working, with the counts: "2 runs, 37 students". That includes links in emails Mathion already sent and links inside the course's own pages. Old addresses are not remembered or forwarded.
+- D12 (user's): **Delete** a course only when it has **no runs**. With runs, the trash button is disabled and says why ("2 runs: can't be deleted"). The confirm is a dialog in which the course name must be typed. Deleting also removes the course's files from disk (`<asset_path>/courses/<version_id>/` for each version, `api/assets.py:27`).
+  - D12c (mine, rev 3; review lane A I3): the order is fixed, so the runs check is atomic and the file list is complete:
+    1. `SELECT courses … FOR UPDATE`. This blocks new versions and new admin rows.
+    2. `SELECT course_versions WHERE course_id … FOR UPDATE`. This blocks new runs, enrollments and assets on those versions.
+    3. Count runs. If there are any, answer 409.
+    4. Collect the version ids.
+    5. Delete the course with Core SQL (`delete(Course)`), letting the database's ON DELETE CASCADE do the rest. The ORM cascade would load every row and delete bottom-up (lane A M7).
+    6. Commit.
+    7. Only then remove each `courses/<vid>` directory, best-effort, as `runs.py:200-205` does.
+
+    An `IntegrityError` that still slips through maps to 409, never 500.
+- D12a (user's, builder check): a course with no runs can still hold **students' progress**. An admin can remove students from a run and then delete the run; their `user_item_states` and inactive `student_enrollments` stay tied to the course's versions and cascade away with the course.
+  - Delete stays **allowed**, and the confirm says what will be lost: "Also deletes the progress of 14 students (pages visited, quiz answers)."
+  - The count is of distinct accounts with `user_item_states` in the course's items, **excluding the current admin and every superuser** (their own preview clicks).
+  - Once the runs are gone, Mathion no longer records who taught them, so a former teacher's preview progress counts like anyone else's; that is accepted.
+  - Accounts enrolled at course level with no progress aren't counted.
+  - The count only informs the confirm; it never blocks.
+- D12b (user's, builder check): the old main-site endpoint `DELETE /api/courses/{id}` (`courses.py:142`) is **removed**. Deleting a course happens only in the panel, behind its token.
+  - Three tests call it (`tests/test_courses.py:79-85`, `tests/test_access_control.py:110-114` and `:148-152`). They are deleted or re-pointed to the panel endpoint. After the removal that path answers 405, not 403.
+  - The old `POST /api/courses` (`courses.py:28`) **stays** as it is. It makes only an empty course and is used about 160 times as test setup.
+- D13 (mine; transliteration is the user's, rev 3): address rules are the existing course slug rules, `CourseCreate.slug` in `backend/mathion/schemas.py:25`: `^[a-z0-9]+(?:-[a-z0-9]+)*$`, 1-80 characters, unique (`models.py:15`).
+  - Filling the address from the name first transliterates **æ→ae, ø→oe, å→aa** (and their capitals), then strips the accents from other letters (é→e, ü→u).
+  - Then it lower-cases, turns each run of other characters into one hyphen, and trims hyphens at the ends. For example, "Kemometri på dansk" becomes `kemometri-paa-dansk`.
+  - A name that gives an empty address leaves the field empty for the superuser to fill.
 
 ### Users page
-- D14 (user's): a table: name, email, roles, last active, and a row action. The **roles** are worked out, not stored:
+- D14 (user's): a table with name, email, roles, last active and row actions. The **roles** are worked out, not stored:
   - "Superuser";
-  - "Admin · <course>" for each administered course;
-  - "Teacher · N runs";
-  - "Student · N runs";
+  - "Admin · <course>" for the course they administer;
+  - "Teacher · N runs" (`run_teachers`);
+  - "Student · N runs" (`run_students`);
   - "Disabled".
-- D15 (user's): **no pages.** The list shows the **20 most recently created** accounts. Typing in the search box filters on the server and shows up to 20 matches; if more match, a line says "20 of 57 shown — keep typing to narrow". Filter pills (All, Admins, Teachers, Students, Disabled), each with its total count, combine with the search.
-- D16 (mine): the search matches the email **or** the name, case-insensitive substring. The user asked for email; matching the name as well costs nothing.
-- D17 (user's): **New account:** an email and an optional name. Creating it sends no email; it isn't tied to anything yet.
-- D18 (user's): **Disable / Enable**, with a confirm that names what the person loses, e.g. "Disable Anna Holm? She is the admin of Statistics 101 and teaches 2 runs." Disabling also **deletes the person's sessions**. `validate_session` already rejects a disabled user (`auth.py:143`), so an open tab stops working at its next request either way. Disabling an admin does **not** remove them from the course (mine): enabling them again restores everything, and the Courses page shows the admin as disabled.
-- D19 (user's): **Edit the name** and **fix the email**. A changed email must not be in use by another account (refused with a message, mine). The person then signs in with the new address and keeps all their history. Any unused PINs for the old address are dropped (mine).
-- D20 (user's): **Delete** only an **unused** account. The rule (mine) is: no `course_admins`, `run_teachers` or `run_students` rows, no submissions, evaluations or item progress (`user_item_states`), and no student enrollments. A record of sign-ins doesn't survive logout (session rows are deleted), so "has never signed in" can't be checked reliably; "has no data" is the test. Anything else can only be disabled.
-- D21 (user's): **superusers are shown but untouchable.** Their row has no Disable, Delete or email edit, and the server refuses those actions for a superuser account as well. The name can still be edited (mine).
+- D15 (user's): **no pages.** The list shows the **20 most recently created** accounts, newest first. Typing in the search box filters on the server and shows up to 20 matches. A line under the table always says how many are shown:
+  - with no search: "Showing the 20 newest of 42 accounts. Search to find others.";
+  - while searching: "20 of 57 match. Keep typing to narrow.";
+  - when nothing matches: "No accounts match".
+
+  Filter pills (All, Admins, Teachers, Students, Disabled) combine with the search.
+  - D15a (mine, rev 3; review lane B I4):
+    - Pill counts are **totals** and don't follow the search.
+    - A disabled account still counts in its role pills, and in Disabled too.
+    - "Admins" means "admin of a course", "Teachers" means "teacher of at least one run", and "Students" means "in at least one run's roster".
+    - The search fires after a 250 ms pause, and a reply that arrives after a newer request is dropped.
+    - Search terms escape `%` and `_` (`ilike(…, escape='\\')`).
+- D16 (mine): the search matches the email **or** the name, as a case-insensitive substring. The user asked for email; matching the name as well costs nothing.
+- D17 (user's): **New account** takes an email and an optional name. Creating it sends no email; the account isn't tied to anything yet. An email that already has an account gets a 409, "An account with this email already exists".
+- D18 (user's): **Disable / Enable**, with a confirm that names what the person loses: "Disable Anna Holm? Anna Holm is the admin of Statistics 101 and teaches 2 runs. They'll be signed out and can't sign in until enabled; tell them yourself." Mathion stores no gender, so the text never says she or he.
+  - Disabling also **deletes the person's sessions**, in the same transaction as the flag (lane A M9: `invalidate_all_sessions` commits on its own, `auth.py:162-167`, so don't call it mid-handler).
+  - `validate_session` already rejects a disabled user (`auth.py:143`), so an open tab stops working at its next request, and unsaved editor work in that tab is lost. That is accepted.
+  - The login page keeps its usual answer ("PIN sent", no reason given); that is accepted.
+  - Disabling an admin does **not** remove them from the course (mine): enabling them again restores everything. The Courses page marks the admin as disabled, and admin emails skip disabled accounts (D5).
+- D19 (user's): **Edit the name** and **change the email**.
+  - A changed email must not belong to another account. The server checks first, and also maps an `IntegrityError` on the update to 409 inside a SAVEPOINT, because a roster import can create the same address in between.
+  - Changing the email **deletes the account's sessions and unused PINs**, in the same transaction (lane A I5, lane C). A mistyped address may belong to a stranger who has already signed in, and PINs are keyed by `user_id`, so an old-address PIN would otherwise still work.
+  - The dialog says: "They will need to sign in again with the new address." The person keeps all their history.
+- D20 (user's): **Delete** only an **unused** account. The rule (mine, rev 3) counts every reference to `users.id`:
+  - **Blocks the delete:** any `course_admins`, `run_teachers`, `run_students`, `student_enrollments` or `user_item_states` row; any `submissions.submitted_by` or `evaluations.evaluated_by`; and any `runs.created_by`, `assets.uploaded_by` or `run_assets.uploaded_by` (stricter than the bare minimum, so authorship is never lost).
+  - **Doesn't block** (deleted with the account): `sessions`, `login_pins`, `notification_log`.
+  - Sign-ins don't survive logout (session rows are deleted), so "has no data" is the test, not "has never signed in". Anything else can only be disabled.
+  - The delete locks the user row (`SELECT … FOR UPDATE`) **before** the check. A roster import or an assign that commits in between then makes the delete wait and refuse, instead of being cascaded away (lane A I2).
+- D21 (user's): **superusers are shown but untouchable.** Their row has no Disable, Delete or email change, and the server refuses those actions for a superuser account too. The name can still be edited (mine).
+
+### Edits are dialogs
+- D24 (user's, rev 3): **no new tabs, no in-cell editing.** Every edit is a pencil (or the Assign/Change admin button) that opens a small dialog with one field, Cancel/Save, and the warning or hint inside it, built on the shared `ui/Modal.svelte`. The dialogs are:
+  - Rename course;
+  - Change address;
+  - Change admin;
+  - Edit name;
+  - Change email.
+
+  New course and New account are dialogs too. The confirms for delete, disable and remove-admin are dialogs as well (mine, for consistency).
 
 ### Last active
-- D22 (mine): "Last active" needs a value that survives logout, and sessions are deleted at logout. Add a nullable `users.last_seen_at`, bumped together with the session's own throttled `last_active_at` update (`auth.py:148`, at most every 5 minutes). Show it as relative text ("2 hours ago", "never"). The builder may pick another source if it gives the same answer.
+- D22 (mine): "Last active" needs a value that survives logout, and sessions are deleted at logout. Add a nullable `users.last_seen_at`:
+  - set it at sign-in, when the session is created in `verify_pin` (`auth.py:115-125`);
+  - bump it together with the session's throttled `last_active_at` update (`auth.py:148`, at most every 5 minutes);
+  - in the migration, backfill it from `max(sessions.last_active_at)` per user.
+
+  Show it as relative text ("2 hours ago", "never").
 
 ### Panel shell
-- D23 (user's, from the mockup): the panel bar's gold "Superuser" label becomes three nav pills: **Dashboard, Users, Courses**. The active pill uses the gold look. Routes: `/superuser/{token}`, `/superuser/{token}/users`, `/superuser/{token}/courses`. The bar still has no links that leave the panel.
+- D23 (user's, from the mockup): the panel bar's gold "Superuser" label becomes three nav pills, **Dashboard, Users and Courses**, with the active pill in the gold look. Routes: `/superuser/{token}`, `/superuser/{token}/users`, `/superuser/{token}/courses`. The bar still has no links that leave the panel.
+- D25 (mine, rev 3; lane B I3): **the token's 404 keeps one meaning.** A 404 from the panel guard means the link has expired or is invalid (`superuser.py:25-35`).
+  - Every new endpoint answers "the course or account is gone" with **409** and a message ("This course was deleted"), never 404.
+  - The shell handles the guard's 401 (go and sign in) and 404 (the expired-link page) once, for every panel page.
+  - An expired link loses an open dialog's input. That is accepted: the inactivity window is 30 minutes, and every save resets it.
 
 ## 4. Constraints
 
-- **Access and CSRF.** Every new endpoint is guarded the way the stats endpoint is: `require_superuser_panel` (`backend/mathion/api/superuser.py:20`) checks the token, then the session, then the superuser flag. Every **mutating** endpoint must also enforce the `X-Requested-With: mathion` CSRF check explicitly, because `require_superuser_panel` doesn't go through `get_current_user` (slice-1 spec §3.2 and line 75; the check itself is `dependencies.py:14-16`).
-- **Concurrency.** Assigning an admin and creating an account can race: two tabs, or a roster import creating the same email. Follow the existing patterns: `get_or_create_user`'s SAVEPOINT recovery, and advisory locks where the enrollment paths use them. The Postgres concurrency work (Phase 9-A2) set those patterns.
-- **One page column, no new dependencies.** Svelte 5, no new JS, CSS or Python packages (`feedback_frontend_stack`, `feedback_backend_no_new_deps`). Reuse the shared UI pieces (Button, Modal, DangerConfirm, FilterPills, InlineName or the create-row ✓/× pattern, Skeleton) and the teaching table's look (`TeacherRunListPage.svelte:153-170`).
-- **Width.** The panel is laptop-only; the 400px phone rule applies to student screens only (`project_min_width_400`). Nothing may overflow at narrower widths, though.
-- **Gate.** The visual-refresh gate (`frontend/scripts/visual-refresh-gate.sh`) covers new components as it covers the rest: no bare hex, tokens only, and pins for the new look.
-- **Copy.** Plain words: "admin", "course", "account", "Disable", "Delete". The panel's sign-out button stays "Sign out" (user, 2026-11-03).
+- **Access and CSRF.** Every new endpoint is guarded the way the stats endpoint is: `require_superuser_panel` (`backend/mathion/api/superuser.py:20`) checks the token, then the session, then the superuser flag.
+  - Every **mutating** endpoint also enforces the CSRF header, reusing `_require_csrf` (`api/auth.py:41`). The order is token → session → superuser → CSRF, so a request without the header still sees the route-hiding 404 first, for example through a `require_superuser_panel_write` dependency.
+  - Every new endpoint lives under `/api/superuser/{token}/…`. The middleware already sets `Cache-Control: no-store` and `no-referrer` on every `/api/superuser/` response (`backend/mathion/main.py:116-121`), and the frontend routes add `/superuser/:token/users` and `/superuser/:token/courses` beside the existing `/superuser/:token` (`frontend/src/routes.ts:19`).
+- **Concurrency.** The locks and orders in D6, D12c, D19 and D20. Follow the existing patterns: lock before `get_or_create_user`, SAVEPOINT recovery, Phase 9-A2.
+- **One page column, no new dependencies.** Svelte 5, no new JS, CSS or Python packages. Reuse the shared UI pieces: Button, IconButton (pencil, ×, trash, as `RunTeachersTab.svelte:121-127` does), Modal, FilterPills and Skeleton. The table copies the teaching list's look (`TeacherRunListPage.svelte:153-170`).
+- **Width.** The panel is laptop-only; the 400px rule is for student screens. Nothing may overflow at narrower widths, though.
+- **Gate.** The visual-refresh gate (`frontend/scripts/visual-refresh-gate.sh`) covers new components as it covers the rest.
+- **Copy.** Plain words ("admin", "course", "account", "Disable", "Delete"), and no he or she. The panel's sign-out button stays "Sign out" (user, 2026-11-03).
 
 ## 5. Inputs a person will meet (for the plan's Review Focus)
 
-- An email typed with capitals or spaces: normalise it as login does (trim, lower-case).
-- An email that belongs to a disabled account, assigned as admin: say so in the hint ("This account is disabled") and decide whether to allow it. Mine: allow it, with the hint, since enabling is one click away.
-- Assigning the course's current admin again: a no-op, no email.
-- Deleting a course while someone has it open in the editor: their next save gets a clean "not found", not a crash.
-- A superuser's own row: no action may lock the acting superuser out (covered by D21).
-- A search with no results: "No accounts match".
+- **An email with capitals or spaces, or not an email at all:** normalise as login does; refuse an empty value or one without `@` (D4).
+- **A disabled account given as admin:** allowed (mine), with the hint "This account is disabled: they can't sign in until you enable it", and no email is sent (D5).
+- **The course's current admin assigned again:** a no-op, with no email.
+- **An admin replaced or removed while they have the editor open:** their next save gets the editor's usual "no access" answer, with no crash.
+- **A course deleted while someone has it in the editor:** their next save gets a clean "not found".
+- **A run created, or a version duplicated, while a course is being deleted:** handled by the D12c order. The delete either refuses with 409 or removes everything, files included.
+- **The superuser's own row:** no action can lock the acting superuser out (D21).
+- **A search with `_` or `%`:** matched literally (D15a).
 
 ## 6. What's left to the builder
 
-- API shape (paths, payloads, error codes), within the access and CSRF rules above.
-- How the role counts are computed: one query, or a small set of them.
+- API shape (paths, payloads), within the access, CSRF and status-code rules above.
+- How the role counts and pill totals are computed: one query, or a small set of them.
 - The exact empty, loading and error states, in the app's existing patterns (Skeleton, ErrorState).
-- Whether "New account" and "New course" are modals or inline rows. The mockup shows a modal for New course.
 - How to split the work into tasks.
+
+## 7. Out of scope, noted for the backlog
+
+- **Files left on disk:** `delete_version` (`versions.py:398-407`) and a non-force `delete_run` (`runs.py:166-176`) leave `courses/<vid>` and `runs/<rid>` behind. The course delete can't see those (lane A M15).
+- **Stale emails:** with email off, the other email kinds still pile up in `notification_log` and all go out once email is set up (lane A M16). D5a avoids this for the admin email only.
+- **Roster email checks:** the roster schemas have the same email-shape gap as D4 (lane A M3).
