@@ -108,8 +108,9 @@ def test_create_normalises_email(panel, db):
 
 
 def _msg(r) -> str:
-    """The plain sentence a 422 carries for the panel (Task 5 strips the prefix)."""
-    return r.json()["detail"][0]["msg"].removeprefix("Value error, ")
+    """The sentence the panel shows: a plain detail, or a 422's first msg (Task 5 strips the prefix)."""
+    d = r.json()["detail"]
+    return d if isinstance(d, str) else d[0]["msg"].removeprefix("Value error, ")
 
 
 @pytest.mark.parametrize("email", ["anna", "   ", "", "a@", "@x", "a b@x", "a@" + "x" * 260])
@@ -409,3 +410,30 @@ def test_old_course_delete_is_gone(admin_client, db):
     course, _ = _course(db)
     assert admin_client.delete(f"/api/courses/{course.id}").status_code == 404
     assert db.get(Course, course.id) is not None
+
+
+# --- an account deleted in between (T4 ruling) ------------------------------------
+
+def _ghost(monkeypatch):
+    """get_or_create_user hands back an account whose row is gone by the time
+    the admin row is written: a panel delete that won the user-row lock."""
+    import mathion.api.superuser_courses as mod
+    ghost = User(id=10**6, email="ghost@x", full_name=None, is_disabled=False)
+    monkeypatch.setattr(mod, "get_or_create_user", lambda db, email: ghost)
+
+
+def test_assign_to_account_deleted_meanwhile_409(panel, db, monkeypatch):
+    client, base = panel
+    course, _ = _course(db)
+    _ghost(monkeypatch)
+    r = client.put(f"{base}/courses/{course.id}/admin", json={"email": "ghost@x"})
+    assert (r.status_code, _msg(r)) == (409, "This account was deleted")
+    assert db.query(CourseAdmin).count() == 0 and _log_rows(db) == []
+
+
+def test_create_with_account_deleted_meanwhile_409(panel, db, monkeypatch):
+    client, base = panel
+    _ghost(monkeypatch)
+    r = client.post(f"{base}/courses", json={"name": "S", "slug": "s", "admin_email": "ghost@x"})
+    assert (r.status_code, _msg(r)) == (409, "This account was deleted")
+    assert db.query(Course).filter_by(slug="s").first() is None

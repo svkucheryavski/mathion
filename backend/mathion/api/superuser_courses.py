@@ -29,6 +29,7 @@ router = APIRouter(tags=["superuser"])
 _GONE = "This course was deleted"
 _SLUG_TAKEN = "This address is already used by another course"
 _HAS_RUNS = "This course has runs and can't be deleted"
+_ACCOUNT_GONE = "This account was deleted"
 
 
 def email_is_set_up() -> bool:
@@ -102,7 +103,13 @@ def _assigned(db: Session, course: Course, target: User, changed: bool) -> Admin
     if outcome == "queued":
         db.add(NotificationLogEntry(user_id=target.id, kind=COURSE_ADMIN_ASSIGNED,
                                     payload={"course_id": course.id}))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # The course is locked, so the only key this can break is the admin's
+        # account: a panel delete took its row lock first and committed (D20).
+        db.rollback()
+        raise HTTPException(status_code=409, detail=_ACCOUNT_GONE)
     return AdminAssignResult(
         course=_rows(db, [course])[0],
         admin=_panel_admin(target),

@@ -1057,3 +1057,93 @@ class AccountLookup(BaseModel):
 
 class CourseDeleteImpact(BaseModel):
     progress_students: int
+
+
+def _panel_person_name(v: str | None) -> str | None:
+    """Trimmed; empty means no name (D17); same limits as a course name."""
+    if v is None:
+        return None
+    v = v.strip()
+    if not v:
+        return None
+    if len(v) > 200:
+        raise ValueError("A name is at most 200 characters")
+    if _CONTROL_CHARS.search(v):
+        raise ValueError("A name can't contain line breaks or tabs")
+    return v
+
+
+PanelUserRole = Literal["all", "admins", "teachers", "students", "disabled"]
+
+
+class PanelCourseRef(BaseModel):
+    id: int
+    name: str
+
+
+class PanelUser(BaseModel):
+    id: int
+    email: str
+    full_name: str | None
+    is_superuser: bool
+    is_disabled: bool
+    created_at: datetime
+    last_seen_at: datetime | None
+    admin_of: list[PanelCourseRef]
+    teacher_runs: int
+    student_runs: int
+    has_data: bool  # D20: any reference that blocks the delete
+
+
+class PanelUserCounts(BaseModel):
+    all: int
+    admins: int
+    teachers: int
+    students: int
+    disabled: int
+
+
+class PanelUserList(BaseModel):
+    users: list[PanelUser]  # at most 20 (D15)
+    total: int  # matches for the pill and the search
+    counts: PanelUserCounts  # pill totals; never follow the search (D15a)
+
+
+class PanelUserCreate(BaseModel):
+    email: str
+    full_name: str | None = None
+
+    @field_validator("email")
+    @classmethod
+    def _check_email(cls, v: str) -> str:
+        return _normalize_panel_email(v)
+
+    @field_validator("full_name")
+    @classmethod
+    def _check_name(cls, v: str | None) -> str | None:
+        return _panel_person_name(v)
+
+
+class PanelUserUpdate(BaseModel):
+    """Only the fields sent change: `model_fields_set` tells "clear the name"
+    (full_name: null) from "not sent"."""
+    full_name: str | None = None
+    email: str | None = None
+
+    @field_validator("full_name")
+    @classmethod
+    def _check_name(cls, v: str | None) -> str | None:
+        return _panel_person_name(v)
+
+    @field_validator("email")
+    @classmethod
+    def _check_email(cls, v: str | None) -> str:
+        if v is None:
+            raise ValueError("Enter an email address")
+        return _normalize_panel_email(v)
+
+    @model_validator(mode="after")
+    def _one_field(self):
+        if not self.model_fields_set:
+            raise ValueError("Send a name or an email")
+        return self
