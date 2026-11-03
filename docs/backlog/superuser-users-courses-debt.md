@@ -40,3 +40,12 @@ Plan: `docs/superpowers/plans/2026-11-03-superuser-users-courses.md`.
 - `_normalize_panel_email` strips, lowercases and length-checks, then calls `_normalize_email`, which does all three again; the inner check can't fire (Fable r2).
 - `_SLUG_SHAPE` repeats `CourseCreate.slug`'s pattern literal; `CourseCreate` could take `pattern=_SLUG_SHAPE.pattern` so the two can't drift (Fable r2).
 - The bad-email and bad-name tests accept any of their sentences for every case, so swapping two messages still passes; one expected sentence per case, as the slug test does, would pin them (Opus r2).
+
+### Task 4 — Users API
+
+- A sign-in waiting on the user-row lock during a disable still adds a session (rejected at its next request); if nothing uses it before a later Enable, that browser comes back signed in. Deleting unused PINs on disable too would make it fail as it does for an email change (Opus r1).
+- A sign-in racing an email change gets a 500 (`StaleDataError` uncaught in `verify_pin`) instead of a clean refusal; safe, milliseconds wide (Opus r1).
+- Untested: PATCH with name and email together on the happy path; Enable on a superuser row (allowed by ruling); disable keeping `RunTeacher` rows; the `lower(name)` order of `admin_of` (both lanes, r1).
+- `_msg` is duplicated in both panel test files; a conftest home before Task 7 adds a third (Fable r1).
+- The comment in `_assigned` says "The course is locked", which is inexact for `create_course` (a new, uncommitted course) (Fable r1).
+- The `_locked_user` comment could name SQLAlchemy's unit-of-work flush order (the parent `users` UPDATE before `login_pins`/`sessions`) as why `last_seen_at` is written first, the invariant the lock relies on; its opening "closes the sign-in race" overstates the disable case its last sentence qualifies (both lanes, r2).
