@@ -63,7 +63,7 @@ First verdict, before the fix pass: both ready to merge, 0 Critical / 0 Importan
 - Only D6.12 proves the `externalLinks` attachment re-runs when the same element's content changes; the QuizItem and MarkdownEditor tests mount fresh elements (Fable m3).
 - `externalLinks` "stays in the tab" cases assert that `rel` is absent, which is true only of the hand-built anchor; in production nh3 adds `rel` (Fable m4).
 - The `validateLink` branch in `_link_tokens` cannot fail for an `http(s)://` match; comment or remove it (Fable m5).
-- Safari pass: `.prose h1` inside a `<legend>`; the run tabs' hairline and the superuser dashboard's unfilled boxes on the new ground (Fable, Opus recommendations).
+- Safari pass: `.prose h1` inside a `<legend>`; the run tabs' hairline (Fable, Opus recommendations).
 - For the beta VoiceOver pass: `aria-current` on the strip's current ItemIcon (Fable recommendation).
 
 ## Safari pass (2026-10-22/23)
