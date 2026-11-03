@@ -84,6 +84,13 @@ export const api = {
       body: JSON.stringify(body),
       headers: { 'Content-Type': 'application/json', ...(opts?.headers ?? {}) },
     }),
+  put: <T>(path: string, body: unknown, opts?: RequestOpts) =>
+    request<T>(path, {
+      ...opts,
+      method: 'PUT',
+      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json', ...(opts?.headers ?? {}) },
+    }),
   delete: (path: string, opts?: RequestOpts) =>
     request<void>(path, { ...opts, method: 'DELETE' }),
 };

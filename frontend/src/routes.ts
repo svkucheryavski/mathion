@@ -17,4 +17,6 @@ export const routes: Route[] = [
   { path: '/teaching/:courseSlug', component: 'RunListPage', auth: true },
   { path: '/teaching/:courseSlug/runs/:runId', component: 'RunDetailPage', auth: true },
   { path: '/superuser/:token', component: 'SuperuserShell', auth: false },
+  { path: '/superuser/:token/users', component: 'SuperuserShell', auth: false },
+  { path: '/superuser/:token/courses', component: 'SuperuserShell', auth: false },
 ];

@@ -1,32 +1,22 @@
 <script lang="ts">
-  import { ApiError } from '../../lib/api';
-  import { getSuperuserStats, type SuperuserStats } from '../../lib/superuser';
+  import { getSuperuserStats, panelError, type PanelOnAuth, type SuperuserStats } from '../../lib/superuser';
   import { formatFileSize } from '../../lib/format';
-  import { navigate, currentRoute } from '../../lib/router.svelte';
 
-  let { token }: { token: string } = $props();
+  // The shell handles the guard's 401 and 404 for every panel page (D25).
+  let { token, onAuth }: { token: string; onAuth: PanelOnAuth } = $props();
 
   let stats = $state<SuperuserStats | null>(null);
   let loading = $state(true);
-  let notFound = $state(false);
   let error = $state('');
 
   async function load(): Promise<void> {
     const t = token; // track the prop so this effect re-runs if the token changes
     loading = true;
     error = '';
-    notFound = false;
     try {
       stats = await getSuperuserStats(t);
     } catch (err: unknown) {
-      if (err instanceof ApiError && err.status === 404) {
-        notFound = true;
-      } else if (err instanceof ApiError && err.status === 401) {
-        sessionStorage.setItem('superuser_return_path', currentRoute.path);
-        void navigate('/login', { replace: true, force: true });
-      } else {
-        error = err instanceof ApiError ? err.displayMessage : 'Could not load stats.';
-      }
+      error = panelError(err, onAuth) ?? '';
     } finally {
       loading = false;
     }
@@ -40,8 +30,6 @@
 <div class="dashboard">
   {#if loading}
     <p>Loading…</p>
-  {:else if notFound}
-    <p class="panel-error">This panel link is not valid or has expired — re-run <code>activate</code> to mint a new one.</p>
   {:else if error}
     <p class="panel-error">{error}</p>
   {:else if stats}

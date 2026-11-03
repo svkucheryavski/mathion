@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2522
+EXPECTED_CHECKS=2529
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -5680,11 +5680,12 @@ if [[ -n $REPLY ]]; then
   N=RunProgressTab; H=$REPLY
   d '\.cell-btn' '' '--ring: var\(--heat-fg\)'
 fi
-# P116: --ring is set only on leaf controls. A tenth declaration (a card, a
-# wrapper) would silently recolour every ring inside it.
+# P116: --ring is set only on leaf controls. Another declaration (a card, a
+# wrapper) would silently recolour every ring inside it. The eleventh is the
+# superuser panel's nav pill (D23), AppHeader's nav amber.
 nring=$(grep -oE -- '--ring: ?var\(' $CSS | wc -l | tr -d ' ')
-if [[ $nring -eq 10 ]]; then echo "PASS  --ring is declared exactly ten times, all on leaf controls (D60, D61)"
-else echo "FAIL  --ring is declared exactly ten times, all on leaf controls (D60, D61) (found $nring)"; fail=1; fi
+if [[ $nring -eq 11 ]]; then echo "PASS  --ring is declared exactly eleven times, all on leaf controls (D60, D61, D23)"
+else echo "FAIL  --ring is declared exactly eleven times, all on leaf controls (D60, D61, D23) (found $nring)"; fail=1; fi
 
 # Task 2 — the page ground (D50) and the reading sheets (D56).
 # Disabled fills use --disabled-bg (the old #FBFBFC), so they stay a step above
@@ -5949,12 +5950,17 @@ none "no .loading-placeholder rule in the bundle (D86)" "\.loading-placeholder"
 # The superuser panel (Safari pass step 13d, user 2026-11-03): its own bar in
 # the main bar's look (a copy of AppHeader's bar, lockup and active pill), the
 # teaching list's page column, side-card-look stat cards.
+own su-pill SuperuserShell.svelte
 uniq1 su-header
 if [[ -n $REPLY ]]; then
   N=SuperuserShell; H=$REPLY
   d '\.su-header' '' 'box-sizing:border-box' 'height:44px' 'background:var\(--surface\)' 'border-bottom:1px solid var\(--border\)'
   d '\.su-row' '' 'max-width:var\(--page-max\)' 'margin:0 auto' 'padding:0 var\(--space-3\)'
-  d '\.su-label' '' 'margin-right:auto' 'padding:4px 10px' 'border-radius:4px' 'color:var\(--gold-text\)' 'background:var\(--gold-soft\)'
+  # D23: the gold label became three nav pills, AppHeader's .links a look.
+  d '\.su-pills' '' 'display:flex' 'flex:1'
+  d '\.su-pill' '' 'text-decoration:none' 'color:var\(--muted\)' 'padding:4px 10px' 'border-radius:4px' '--ring: var\(--gold-text\)'
+  chk "\.su-pill\[aria-current=page\]\.${H}" 'color:var\(--gold-text\)' 'background:var\(--gold-soft\)' 'font-weight:500'
+  none "SuperuserShell has no .su-label rule left (D23)" "\.su-label\."
   d '\.brand-mark' '' 'transform:translateY\(-4\.35px\)'
   d '\.wordmark' '' 'font-size:14px' 'font-weight:600'
   d '\.name' '' 'font-size:12\.5px'

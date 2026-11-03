@@ -66,7 +66,8 @@
     padding: 0 var(--space-3);
     height: 100%;
   }
-  /* SuperuserShell.svelte copies this bar, lockup and active pill; change both.
+  /* SuperuserShell.svelte copies this bar, lockup and nav pills (its Dashboard,
+     Users and Courses pills, D23); change both.
      Brand lockup — exact geometry (spec §2): mark + wordmark, centre-aligned,
      gap 7px, mark nudged up 4.35px so its stroke ends land on the wordmark
      baseline. */
