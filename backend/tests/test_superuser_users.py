@@ -171,6 +171,32 @@ def test_counts_ignore_search(panel, db):
     assert r.json()["counts"] == {"all": 5, "admins": 1, "teachers": 1, "students": 1, "disabled": 1}
 
 
+def test_runs_order_by_course_then_title(panel, db):
+    client, base = panel
+    w = _world(db, "stat", "Statistics 101")
+    alg = Course(slug="alg", name="algebra", description="")
+    db.add(alg)
+    db.flush()
+    alg_v = CourseVersion(course_id=alg.id)
+    db.add(alg_v)
+    db.flush()
+    # Titles that differ only in case tie under lower() and fall back to the id,
+    # so the order fails without lower() on any collation (en_US: a, A; C: A, B, a).
+    runs_in_order = []
+    for title in ("A", "a", "B"):
+        r = Run(version_id=alg_v.id, title=title, start_date=date(2026, 1, 1), end_date=date(2026, 6, 1))
+        db.add(r)
+        db.flush()
+        runs_in_order.append(r)
+    anna = _user(db)
+    db.add_all([RunTeacher(run_id=r.id, user_id=anna.id) for r in (w["run"], *reversed(runs_in_order))])
+    db.commit()
+    runs = _rows_by_email(client.get(f"{base}/users"))["anna@x"]["teacher_runs"]
+    assert [(r["course_name"], r["title"]) for r in runs] == [
+        ("algebra", "A"), ("algebra", "a"), ("algebra", "B"), ("Statistics 101", "R"),
+    ]
+
+
 def test_row_shape(panel, db):
     client, base = panel
     w = _world(db, "stat", "Statistics 101")
@@ -196,11 +222,17 @@ def test_row_shape(panel, db):
     a = rows["anna@x"]
     assert a["id"] == anna.id and a["full_name"] == "Anna Holm"
     assert a["admin_of"] == [{"id": other.id, "name": "algebra"}, {"id": w["course"].id, "name": "Statistics 101"}]
-    assert (a["teacher_runs"], a["student_runs"], a["has_data"]) == (2, 1, True)
+    # D14 rev 8: the runs as lists for the chip's hover, by course then run title.
+    assert a["teacher_runs"] == [
+        {"id": w["run"].id, "title": "R", "course_name": "Statistics 101"},
+        {"id": run2.id, "title": "R2", "course_name": "Statistics 101"},
+    ]
+    assert a["student_runs"] == [{"id": run2.id, "title": "R2", "course_name": "Statistics 101"}]
+    assert a["has_data"] is True
     assert datetime.fromisoformat(a["last_seen_at"]) == seen
     assert a["is_superuser"] is False and a["is_disabled"] is False and a["created_at"]
     f = rows["fresh@x"]
-    assert (f["admin_of"], f["teacher_runs"], f["student_runs"], f["has_data"], f["last_seen_at"]) == ([], 0, 0, False, None)
+    assert (f["admin_of"], f["teacher_runs"], f["student_runs"], f["has_data"], f["last_seen_at"]) == ([], [], [], False, None)
     assert rows["admin@example.com"]["is_superuser"] is True
 
 

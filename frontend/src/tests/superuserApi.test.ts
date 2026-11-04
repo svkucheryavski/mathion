@@ -117,7 +117,7 @@ it('the result sentence falls back to the email for an admin with no name', () =
 function user(over: Partial<PanelUser> = {}): PanelUser {
   return {
     id: 1, email: 'aho@uni.dk', full_name: 'Anna Holm', is_superuser: false, is_disabled: false,
-    created_at: '2026-11-01T10:00:00Z', last_seen_at: null, admin_of: [], teacher_runs: 0, student_runs: 0,
+    created_at: '2026-11-01T10:00:00Z', last_seen_at: null, admin_of: [], teacher_runs: [], student_runs: [],
     has_data: false, ...over,
   };
 }
@@ -151,25 +151,28 @@ it.each([
 });
 
 const ref = (id: number, name: string) => ({ id, name });
+const run = (id: number, title: string, course_name: string) => ({ id, title, course_name });
+const runs = (n: number) => Array.from({ length: n }, (_, i) => run(i + 1, `Run ${i + 1}`, 'Stat'));
 it.each([
-  ['a superuser', user({ is_superuser: true }), ['Superuser']],
-  ['the admin of one course', user({ admin_of: [ref(1, 'Statistics 101')] }), ['Admin · Statistics 101']],
-  ['the admin of two courses', user({ admin_of: [ref(1, 'Algebra'), ref(2, 'Statistics 101')] }), ['Admin · Algebra', 'Admin · Statistics 101']],
-  ['the admin of three courses', user({ admin_of: [ref(1, 'A'), ref(2, 'B'), ref(3, 'C')] }), ['Admin · 3 courses']],
-  ['a teacher of one run', user({ teacher_runs: 1 }), ['Teacher · 1 run']],
-  ['a teacher of two runs', user({ teacher_runs: 2 }), ['Teacher · 2 runs']],
-  ['a student', user({ student_runs: 3 }), ['Student · 3 runs']],
-  ['disabled', user({ is_disabled: true }), ['Disabled']],
-  ['in D14 order', user({ is_disabled: true, student_runs: 1, teacher_runs: 2, admin_of: [ref(1, 'Stat')], is_superuser: true }),
-    ['Superuser', 'Admin · Stat', 'Teacher · 2 runs', 'Student · 1 run', 'Disabled']],
-  ['with no role', user(), ['—']],
-] as const)('roleChips: %s (D14)', (_label, u, chips) => {
-  expect(roleChips(u)).toEqual(chips);
+  ['a superuser', user({ is_superuser: true }), [{ kind: 'su', text: 'Superuser', items: [] }]],
+  ['the admin of one course', user({ admin_of: [ref(1, 'Statistics 101')] }), [{ kind: 'ad', text: 'Admin (1)', items: ['Statistics 101'] }]],
+  ['the admin of three courses', user({ admin_of: [ref(1, 'A'), ref(2, 'B'), ref(3, 'C')] }), [{ kind: 'ad', text: 'Admin (3)', items: ['A', 'B', 'C'] }]],
+  ['a teacher of two runs', user({ teacher_runs: [run(1, 'Autumn 2026', 'Statistics 101'), run(2, 'Autumn 2026', 'Algebra')] }),
+    [{ kind: 'role', text: 'Teacher (2)', items: ['Statistics 101 · Autumn 2026', 'Algebra · Autumn 2026'] }]],
+  ['a student of one run', user({ student_runs: [run(3, 'Spring', 'Stat')] }), [{ kind: 'role', text: 'Student (1)', items: ['Stat · Spring'] }]],
+  ['disabled has no chip (D14 rev 8: the row is greyed)', user({ is_disabled: true }), []],
+  ['in D14 order', user({ is_disabled: true, student_runs: runs(1), teacher_runs: runs(2), admin_of: [ref(1, 'Stat')], is_superuser: true }),
+    ['Superuser', 'Admin (1)', 'Teacher (2)', 'Student (1)']],
+  ['with no role', user(), []],
+] as const)('roleChips: %s (D14 rev 8)', (_label, u, chips) => {
+  const got = roleChips(u);
+  if (chips.length && typeof chips[0] === 'string') expect(got.map((c) => c.text)).toEqual(chips);
+  else expect(got).toEqual(chips);
 });
 
 const SIGNED_OUT = "They'll be signed out and can't sign in until enabled; tell them yourself.";
 it('disableWarning: the spec example, admin and teacher (D18)', () => {
-  expect(disableWarning(user({ admin_of: [ref(1, 'Statistics 101')], teacher_runs: 2 })))
+  expect(disableWarning(user({ admin_of: [ref(1, 'Statistics 101')], teacher_runs: runs(2) })))
     .toBe(`Disable Anna Holm? Anna Holm is the admin of Statistics 101 and teaches 2 runs. ${SIGNED_OUT}`);
 });
 it('disableWarning: admin only, of two and of more than two courses', () => {
@@ -177,9 +180,9 @@ it('disableWarning: admin only, of two and of more than two courses', () => {
   expect(disableWarning(user({ admin_of: [ref(1, 'A'), ref(2, 'B'), ref(3, 'C')] }))).toBe(`Disable Anna Holm? Anna Holm is the admin of 3 courses. ${SIGNED_OUT}`);
 });
 it('disableWarning: teacher only, singular for one run', () => {
-  expect(disableWarning(user({ teacher_runs: 1 }))).toBe(`Disable Anna Holm? Anna Holm teaches 1 run. ${SIGNED_OUT}`);
+  expect(disableWarning(user({ teacher_runs: runs(1) }))).toBe(`Disable Anna Holm? Anna Holm teaches 1 run. ${SIGNED_OUT}`);
 });
 it('disableWarning: no role has no middle sentence, and a nameless account is named by email', () => {
-  expect(disableWarning(user({ student_runs: 4 }))).toBe(`Disable Anna Holm? ${SIGNED_OUT}`);
-  expect(disableWarning(user({ full_name: null, teacher_runs: 1 }))).toBe(`Disable aho@uni.dk? aho@uni.dk teaches 1 run. ${SIGNED_OUT}`);
+  expect(disableWarning(user({ student_runs: runs(4) }))).toBe(`Disable Anna Holm? ${SIGNED_OUT}`);
+  expect(disableWarning(user({ full_name: null, teacher_runs: runs(1) }))).toBe(`Disable aho@uni.dk? aho@uni.dk teaches 1 run. ${SIGNED_OUT}`);
 });

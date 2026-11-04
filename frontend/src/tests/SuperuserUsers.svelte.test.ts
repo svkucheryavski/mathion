@@ -13,13 +13,14 @@ const HOUR = 3_600_000;
 function u(over: Partial<PanelUser>): PanelUser {
   return {
     id: 1, email: 'x@uni.dk', full_name: null, is_superuser: false, is_disabled: false,
-    created_at: '2026-11-01T10:00:00Z', last_seen_at: null, admin_of: [], teacher_runs: 0, student_runs: 0,
+    created_at: '2026-11-01T10:00:00Z', last_seen_at: null, admin_of: [], teacher_runs: [], student_runs: [],
     has_data: true, ...over,
   };
 }
 const SU = u({ id: 1, email: 'svk@uni.dk', full_name: 'Sergey Kucheryavskiy', is_superuser: true });
-const ANNA = u({ id: 9, email: 'aho@uni.dk', full_name: 'Anna Holm', admin_of: [{ id: 1, name: 'Statistics 101' }], teacher_runs: 2 });
-const OLE = u({ id: 7, email: 'old@uni.dk', full_name: 'Ole Dahl', is_disabled: true, teacher_runs: 1 });
+const ANNA = u({ id: 9, email: 'aho@uni.dk', full_name: 'Anna Holm', admin_of: [{ id: 1, name: 'Statistics 101' }],
+  teacher_runs: [{ id: 3, title: 'Autumn 2026', course_name: 'Statistics 101' }, { id: 4, title: 'Spring 2026', course_name: 'Statistics 101' }] });
+const OLE = u({ id: 7, email: 'old@uni.dk', full_name: 'Ole Dahl', is_disabled: true, teacher_runs: [{ id: 5, title: 'Autumn 2025', course_name: 'Algebra' }] });
 const NEW = u({ id: 12, email: 'new.colleague@uni.dk', has_data: false });
 const COUNTS = { all: 42, admins: 3, teachers: 6, students: 33, disabled: 1 };
 function page(users: PanelUser[] = [SU, ANNA, OLE, NEW], total = users.length): PanelUserList {
@@ -92,21 +93,38 @@ it('rows show name, email, the role chips and last active (D14, D22)', async () 
   await render();
   const anna = row('aho@uni.dk');
   expect(anna.querySelector('.u-name')?.textContent?.trim()).toBe('Anna Holm');
-  expect([...anna.querySelectorAll('.chip')].map((c) => c.textContent?.trim())).toEqual(['Admin · Statistics 101', 'Teacher · 2 runs']);
+  // D14 rev 8: short chips; the list is the hover and, hidden, the screen reader's.
+  const chips = [...anna.querySelectorAll<HTMLElement>('.chip')];
+  expect(chips.map((c) => c.querySelector('.chip-text')?.textContent?.trim())).toEqual(['Admin (1)', 'Teacher (2)']);
+  expect(chips.map((c) => c.title)).toEqual(['Statistics 101', 'Statistics 101 · Autumn 2026\nStatistics 101 · Spring 2026']);
+  expect(chips[1].querySelector('.vh')?.textContent).toBe(': Statistics 101 · Autumn 2026, Statistics 101 · Spring 2026');
+  expect(anna.classList.contains('u-disabled')).toBe(false);
   expect(anna.querySelector('.u-last')?.textContent?.trim()).toBe('2 hours ago');
   const fresh = row('new.colleague@uni.dk');
   expect(fresh.querySelector('.u-name')?.textContent?.trim()).toBe('(no name yet)');
   expect(fresh.querySelector('.u-roles')?.textContent?.trim()).toBe('—');
   expect(fresh.querySelector('.chip')).toBeNull();
   expect(fresh.querySelector('.u-last')?.textContent?.trim()).toBe('never');
-  expect(target.querySelectorAll('thead th')).toHaveLength(5);
+  expect([...target.querySelectorAll('thead th')].map((t) => t.textContent?.trim())).toEqual(['Name', 'Email', 'Roles', 'Last active', 'Actions']);
 });
 
-it('an admin of two courses with the same name shows both chips (course names are not unique)', async () => {
+it('an admin of two courses with the same name lists both on hover (course names are not unique)', async () => {
   const twin = u({ id: 30, email: 'twin@uni.dk', full_name: 'Twin', admin_of: [{ id: 4, name: 'Algebra' }, { id: 5, name: 'Algebra' }] });
   routes['GET /users'] = () => [200, page([twin])];
   await render();
-  expect([...row('twin@uni.dk').querySelectorAll('.chip')].map((c) => c.textContent?.trim())).toEqual(['Admin · Algebra', 'Admin · Algebra']);
+  expect(row('twin@uni.dk').querySelector<HTMLElement>('.chip')?.title).toBe('Algebra\nAlgebra');
+});
+
+it('a disabled account\'s row is greyed and says Disabled to a screen reader, with no Disabled chip (D14 rev 8)', async () => {
+  await render();
+  const ole = row('old@uni.dk');
+  expect(ole.classList.contains('u-disabled')).toBe(true);
+  expect(ole.querySelector('.u-name .vh')?.textContent).toBe(' (disabled)');
+  expect(ole.querySelector('.u-name')?.textContent?.trim()).toBe('Ole Dahl (disabled)');
+  expect([...ole.querySelectorAll('.chip')].map((c) => c.querySelector('.chip-text')?.textContent?.trim())).toEqual(['Teacher (1)']);
+  expect(row('aho@uni.dk').querySelector('.u-name .vh')).toBeNull();
+  // The Superuser chip has no list.
+  expect(row('svk@uni.dk').querySelector<HTMLElement>('.chip')?.hasAttribute('title')).toBe(false);
 });
 
 it('the pills show the totals; a pill fetches at once and is pressed (D15a)', async () => {
@@ -185,6 +203,7 @@ it('Disable asks in a strip under the row with what the person loses; confirming
   act(row('aho@uni.dk'), 'disable')!.click(); await settle();
   const strip = row('aho@uni.dk').nextElementSibling as HTMLElement;
   expect(strip.classList.contains('u-confirm')).toBe(true);
+  expect(strip.querySelector('td')?.getAttribute('colspan')).toBe('5');
   expect(strip.textContent).toContain("Disable Anna Holm? Anna Holm is the admin of Statistics 101 and teaches 2 runs. They'll be signed out and can't sign in until enabled; tell them yourself.");
   expect(document.activeElement?.textContent?.trim()).toBe('Cancel');
   strip.querySelector<HTMLButtonElement>('[data-action="confirm-disable"]')!.click(); await settle();

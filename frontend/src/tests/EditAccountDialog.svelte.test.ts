@@ -15,7 +15,7 @@ afterEach(() => {
 
 const ANNA: PanelUser = {
   id: 9, email: 'aho@uni.dk', full_name: 'Anna Holm', is_superuser: false, is_disabled: false,
-  created_at: '2026-11-01T10:00:00Z', last_seen_at: null, admin_of: [], teacher_runs: 2, student_runs: 0, has_data: true,
+  created_at: '2026-11-01T10:00:00Z', last_seen_at: null, admin_of: [], teacher_runs: [{ id: 1, title: 'R1', course_name: 'Stat' }, { id: 2, title: 'R2', course_name: 'Stat' }], student_runs: [], has_data: true,
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

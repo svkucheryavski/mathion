@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2711
+EXPECTED_CHECKS=2717
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -5995,7 +5995,15 @@ if [[ -n $REPLY ]]; then
   d '\.chip' '' 'border-radius:var\(--radius-pill\)' 'background:var\(--surface-2\)' 'color:var\(--text-2\)' 'font-size:11\.5px'
   d '\.chip\.su' '' 'background:var\(--gold-soft\)' 'color:var\(--gold-text\)'
   d '\.chip\.ad' '' 'background:var\(--primary-soft\)' 'color:var\(--primary\)'
-  d '\.chip\.off' '' 'background:var\(--state-disabled-bg\)' 'color:var\(--state-disabled-fg\)'
+  # D14 rev 8: a disabled account's row is greyed (name and chips); no Disabled chip or column.
+  chk "\.u-table\.${H} tr\.u-disabled:where\(\.${H}\) td\.u-name:where\(\.${H}\)" 'color:var\(--muted\)' 'font-weight:400'
+  # Above .chip.su/.chip.ad in specificity (0,4,1 vs 0,3,0), so a disabled admin's chip greys too.
+  chk "\.u-table\.${H} tr\.u-disabled:where\(\.${H}\) \.chip:where\(\.${H}\)" 'background:var\(--state-disabled-bg\)' 'color:var\(--state-disabled-fg\)'
+  # A strip opened under a disabled row shares its tint.
+  chk "\.u-table\.${H} tr\.u-disabled:where\(\.${H}\)\+tr\.u-confirm:where\(\.${H}\) td:where\(\.${H}\)" 'background:var\(--disabled-bg\)'
+  chk "\.u-table\.${H} tr\.u-disabled:where\(\.${H}\) td:where\(\.${H}\)" 'background:var\(--disabled-bg\)'
+  none "SuperuserUsers has no Disabled chip (D14 rev 8)" "\.chip\.off\.${H}"
+  none "SuperuserUsers has no Disabled column (D14 rev 8)" "\.(u-off|u-dot)\.${H}"
   d '\.row-icons' '' 'display:inline-flex' 'gap:4px'
   chk "\.u-table\.${H} td\.u-actions:where\(\.${H}\)" 'width:1%' 'white-space:nowrap'
   chk "\.u-confirm\.${H} td:where\(\.${H}\)" 'padding:0 12px 10px' 'border-top:0'

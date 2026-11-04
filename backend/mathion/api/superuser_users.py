@@ -14,11 +14,11 @@ from sqlalchemy.orm import Session as DBSession
 from mathion.api.superuser import require_superuser_panel, require_superuser_panel_write
 from mathion.database import get_db
 from mathion.models import (
-    Asset, Course, CourseAdmin, Evaluation, Run, RunAsset, RunStudent, RunTeacher, Submission,
+    Asset, Course, CourseAdmin, CourseVersion, Evaluation, Run, RunAsset, RunStudent, RunTeacher, Submission,
 )
 from mathion.models_auth import LoginPIN, Session, StudentEnrollment, User, UserItemState
 from mathion.schemas import (
-    PanelCourseRef, PanelUser, PanelUserCounts, PanelUserCreate, PanelUserList, PanelUserRole,
+    PanelCourseRef, PanelRunRef, PanelUser, PanelUserCounts, PanelUserCreate, PanelUserList, PanelUserRole,
     PanelUserUpdate,
 )
 
@@ -63,8 +63,8 @@ def _rows(db: DBSession, users: list[User]) -> list[PanelUser]:
     """One PanelUser per account, with grouped queries (no per-row queries)."""
     ids = [u.id for u in users]
     admin_of: dict[int, list[PanelCourseRef]] = {i: [] for i in ids}
-    teacher_runs: dict[int, int] = {}
-    student_runs: dict[int, int] = {}
+    teacher_runs: dict[int, list[PanelRunRef]] = {i: [] for i in ids}
+    student_runs: dict[int, list[PanelRunRef]] = {i: [] for i in ids}
     with_data: set[int] = set()
     if ids:
         for uid, cid, name in db.execute(
@@ -72,19 +72,23 @@ def _rows(db: DBSession, users: list[User]) -> list[PanelUser]:
             .where(CourseAdmin.user_id.in_(ids)).order_by(func.lower(Course.name), Course.id)
         ).all():
             admin_of[uid].append(PanelCourseRef(id=cid, name=name))
-        teacher_runs = dict(db.execute(
-            select(RunTeacher.user_id, func.count()).where(RunTeacher.user_id.in_(ids)).group_by(RunTeacher.user_id)
-        ).all())
-        student_runs = dict(db.execute(
-            select(RunStudent.user_id, func.count()).where(RunStudent.user_id.in_(ids)).group_by(RunStudent.user_id)
-        ).all())
+        for link, into in ((RunTeacher, teacher_runs), (RunStudent, student_runs)):
+            for uid, rid, title, course_name in db.execute(
+                select(link.user_id, Run.id, Run.title, Course.name)
+                .join(Run, Run.id == link.run_id)
+                .join(CourseVersion, CourseVersion.id == Run.version_id)
+                .join(Course, Course.id == CourseVersion.course_id)
+                .where(link.user_id.in_(ids))
+                .order_by(func.lower(Course.name), func.lower(Run.title), Run.id)
+            ).all():
+                into[uid].append(PanelRunRef(id=rid, title=title, course_name=course_name))
         with_data = _users_with_data(db, ids)
     return [
         PanelUser(
             id=u.id, email=u.email, full_name=u.full_name, is_superuser=u.is_superuser,
             is_disabled=u.is_disabled, created_at=u.created_at, last_seen_at=u.last_seen_at,
-            admin_of=admin_of[u.id], teacher_runs=teacher_runs.get(u.id, 0),
-            student_runs=student_runs.get(u.id, 0), has_data=u.id in with_data,
+            admin_of=admin_of[u.id], teacher_runs=teacher_runs[u.id],
+            student_runs=student_runs[u.id], has_data=u.id in with_data,
         )
         for u in users
     ]

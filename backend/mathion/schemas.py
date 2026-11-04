@@ -1081,6 +1081,13 @@ class PanelCourseRef(BaseModel):
     name: str
 
 
+class PanelRunRef(BaseModel):
+    """A run as a Users row names it on hover: "<course> · <run title>" (D14 rev 8)."""
+    id: int
+    title: str
+    course_name: str
+
+
 class PanelUser(BaseModel):
     id: int
     email: str
@@ -1090,8 +1097,8 @@ class PanelUser(BaseModel):
     created_at: datetime
     last_seen_at: datetime | None
     admin_of: list[PanelCourseRef]
-    teacher_runs: int
-    student_runs: int
+    teacher_runs: list[PanelRunRef]
+    student_runs: list[PanelRunRef]
     has_data: bool  # D20: any reference that blocks the delete
 
 

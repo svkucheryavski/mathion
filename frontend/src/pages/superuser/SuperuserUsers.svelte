@@ -148,8 +148,6 @@
     return `Delete ${personName(u)}? This can't be undone.`;
   }
 
-  const chipKind = (chip: string) =>
-    chip === 'Superuser' ? 'su' : chip.startsWith('Admin') ? 'ad' : chip === 'Disabled' ? 'off' : '';
 </script>
 
 {#snippet newButton()}
@@ -190,17 +188,25 @@
         </thead>
         <tbody>
           {#each shown.list.users as u (u.id)}
+            {@const chips = roleChips(u)}
             {@const who = personName(u)}
-            <tr class="u-row">
-              <td class={['u-name', !u.full_name && 'u-noname']}>{u.full_name ?? '(no name yet)'}</td>
+            <!-- D14 rev 8: a disabled account's row is greyed; the icons are not. -->
+            <tr class={['u-row', u.is_disabled && 'u-disabled']}>
+              <td class={['u-name', !u.full_name && 'u-noname']}>{u.full_name ?? '(no name yet)'}{#if u.is_disabled}<span class="vh">{' (disabled)'}</span>{/if}</td>
               <td class="u-email">{u.email}</td>
               <td class="u-roles">
-                <span class="u-chips">
-                  <!-- Unkeyed: course names are not unique, so two chips can read the same. -->
-                  {#each roleChips(u) as chip}
-                    {#if chip === '—'}<span class="u-none">—</span>{:else}<span class="chip {chipKind(chip)}">{chip}</span>{/if}
-                  {/each}
-                </span>
+                {#if chips.length === 0}
+                  <span class="u-none">—</span>
+                {:else}
+                  <!-- D14 rev 8: the list is the hover (one per line) and, hidden, the screen reader's. -->
+                  <span class="u-chips">
+                    {#each chips as chip (chip.kind + chip.text)}
+                      <span class={['chip', chip.kind]} title={chip.items.length ? chip.items.join('\n') : undefined}
+                        ><span class="chip-text">{chip.text}</span
+                        >{#if chip.items.length}<span class="vh">: {chip.items.join(', ')}</span>{/if}</span>
+                    {/each}
+                  </span>
+                {/if}
               </td>
               <td class="u-last">{lastActiveText(u.last_seen_at, now)}</td>
               <td class="u-actions">
@@ -286,10 +292,17 @@
   .u-table td.u-noname { color: var(--muted); font-weight: 400; }
   .u-table td.u-email { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
   .u-table td.u-last { color: var(--muted); white-space: nowrap; }
+  /* D14 rev 8: a disabled account's row is greyed: a tinted ground, a muted name
+     and grey chips; email and last active are muted already. */
+  .u-table tr.u-disabled td { background: var(--disabled-bg); }
+  .u-table tr.u-disabled td.u-name { color: var(--muted); font-weight: 400; }
+  /* Specific enough (0,4,1) to beat .chip.ad (0,3,0), wherever it sits. */
+  .u-table tr.u-disabled .chip { background: var(--state-disabled-bg); color: var(--state-disabled-fg); }
+  .u-table tr.u-disabled + tr.u-confirm td { background: var(--disabled-bg); }
   .u-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
   .u-none { color: var(--muted); }
   /* D14's role chips: the "invited" chip's shape; the superuser in the gold
-     "you are here" family, an admin in the primary family, disabled greyed. */
+     "you are here" family, an admin in the primary family. */
   .chip {
     display: inline-block;
     padding: 0 6px;
@@ -301,7 +314,6 @@
   }
   .chip.su { background: var(--gold-soft); color: var(--gold-text); }
   .chip.ad { background: var(--primary-soft); color: var(--primary); }
-  .chip.off { background: var(--state-disabled-bg); color: var(--state-disabled-fg); }
   .row-icons { display: inline-flex; gap: 4px; }
   /* RunMiniProjectsTab's confirm row under its row. */
   .u-confirm td { padding: 0 12px 10px; border-top: 0; }

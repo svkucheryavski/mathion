@@ -111,6 +111,8 @@ export function adminNote(result: AdminAssignResult, kind: 'create' | 'assign'):
 export type PanelUserRole = 'all' | 'admins' | 'teachers' | 'students' | 'disabled';
 
 export type PanelCourseRef = { id: number; name: string };
+/** A run as a Users row lists it on hover: "<course> · <run title>" (D14 rev 8). */
+export type PanelRunRef = { id: number; title: string; course_name: string };
 
 export type PanelUser = {
   id: number;
@@ -121,8 +123,8 @@ export type PanelUser = {
   created_at: string;
   last_seen_at: string | null;
   admin_of: PanelCourseRef[];
-  teacher_runs: number;
-  student_runs: number;
+  teacher_runs: PanelRunRef[];
+  student_runs: PanelRunRef[];
   /** D20: any reference that blocks the delete. */
   has_data: boolean;
 };
@@ -181,16 +183,19 @@ export function countLine(list: PanelUserList, role: PanelUserRole, searching: b
     : `${total} ${noun(role, total)}`;
 }
 
-/** D14: the roles, worked out; one admin chip per course, or one count above two. */
-export function roleChips(u: PanelUser): string[] {
-  const chips: string[] = [];
-  if (u.is_superuser) chips.push('Superuser');
-  if (u.admin_of.length > 2) chips.push(`Admin · ${u.admin_of.length} courses`);
-  else for (const c of u.admin_of) chips.push(`Admin · ${c.name}`);
-  if (u.teacher_runs > 0) chips.push(`Teacher · ${runs(u.teacher_runs)}`);
-  if (u.student_runs > 0) chips.push(`Student · ${runs(u.student_runs)}`);
-  if (u.is_disabled) chips.push('Disabled');
-  return chips.length ? chips : ['—'];
+/** A role chip: short text, and the list shown on hover (D14 rev 8). */
+export type RoleChip = { kind: 'su' | 'ad' | 'role'; text: string; items: string[] };
+
+/** D14 rev 8: one short chip per role, the count in brackets, in D14 order;
+ *  [] for an account with no role. Disabled is not a chip: the row is greyed. */
+export function roleChips(u: PanelUser): RoleChip[] {
+  const chips: RoleChip[] = [];
+  const named = (r: PanelRunRef) => `${r.course_name} · ${r.title}`;
+  if (u.is_superuser) chips.push({ kind: 'su', text: 'Superuser', items: [] });
+  if (u.admin_of.length) chips.push({ kind: 'ad', text: `Admin (${u.admin_of.length})`, items: u.admin_of.map((c) => c.name) });
+  if (u.teacher_runs.length) chips.push({ kind: 'role', text: `Teacher (${u.teacher_runs.length})`, items: u.teacher_runs.map(named) });
+  if (u.student_runs.length) chips.push({ kind: 'role', text: `Student (${u.student_runs.length})`, items: u.student_runs.map(named) });
+  return chips;
 }
 
 /** An account as the panel names it: the name, or the email when there is none. */
@@ -203,7 +208,7 @@ export function disableWarning(u: PanelUser): string {
   const courses = u.admin_of.map((c) => c.name);
   if (courses.length > 2) parts.push(`is the admin of ${courses.length} courses`);
   else if (courses.length > 0) parts.push(`is the admin of ${courses.join(' and ')}`);
-  if (u.teacher_runs > 0) parts.push(`teaches ${runs(u.teacher_runs)}`);
+  if (u.teacher_runs.length) parts.push(`teaches ${runs(u.teacher_runs.length)}`);
   const middle = parts.length ? `${who} ${parts.join(' and ')}. ` : '';
   return `Disable ${who}? ${middle}They'll be signed out and can't sign in until enabled; tell them yourself.`;
 }
