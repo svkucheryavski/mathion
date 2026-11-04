@@ -99,3 +99,11 @@ Plan: `docs/superpowers/plans/2026-11-03-superuser-users-courses.md`.
 - `log_redaction.py` module docstring still describes token-only redaction; add the query string (both lanes, fix re-review).
 - The test through uvicorn's real `AccessFormatter` uses a path with no query; add a `users?q=…` record (Opus, fix re-review).
 - The 2026-07-14 hardening spec (lines 46, 78) still says the query string is preserved; add a "superseded 2026-11-03, see the Users+Courses spec §4" note (both lanes, fix re-review).
+
+### Safari pass — D14 rev 8 (short chips, greyed disabled rows)
+
+- The chips' hover list is in `title` only, so a sighted keyboard user can't open it; the chips are plain spans (both lanes; beta a11y pass).
+- VoiceOver may read a chip's `title` and its hidden list twice; check in the VoiceOver pass at beta (Opus).
+- A disabled account with no name and no role differs from a new one only by the near-white tint and the Enable glyph; the user approved the tint (Fable).
+- Same-named courses, or same-titled runs in one course (run titles aren't unique, `models.py:207`), give identical lines in the hover list (Fable).
+- `test_runs_order_by_course_then_title` pins `lower(Run.title)` (titles "A"/"a"/"B" fail without it on any collation) but not the `Run.id` tiebreak: Postgres happens to return the tied rows in insertion order. `lower(Course.name)` is unproven too; two courses "Algebra"/"algebra" would pin it (Opus r2).

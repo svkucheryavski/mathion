@@ -1,6 +1,6 @@
 # Superuser panel: Users and Courses — design
 
-**Status:** rev 7, 2026-11-03.
+**Status:** rev 8, 2026-11-04.
 - Rev 2 folded in the builder check (D12a, D12b).
 - Rev 3 folded in spec review round 1, three lanes (`.superpowers/sdd/2026-11-03-superuser-users-courses/spec-r1-*.md`), and the user's answers on mockup 2.
 - Rev 4 folded in spec review round 2 (`spec-r2-*.md`) and the user's answer on confirms (D24).
@@ -122,13 +122,17 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - The address follows the name only until the superuser edits the address field; after that it is left alone.
 
 ### Users page
-- D14 (user's): a table with name, email, roles, last active and row actions. The **roles** are worked out, not stored:
+- D14 (user's, rev 8 from the Safari pass): a table with name, email, roles, last active and row actions. The **roles** are worked out, not stored, and each is one short chip with no course names and no words "course" or "run":
   - "Superuser";
-  - "Admin · <course>", one for each course they administer (one admin per course does not mean one course per admin). With more than two, a single "Admin · 3 courses" (mine);
-  - "Teacher · N runs" (`run_teachers`);
-  - "Student · N runs" (`run_students`);
-  - "Disabled";
+  - "Admin (N)": N courses they administer (one admin per course does not mean one course per admin);
+  - "Teacher (N)": N runs (`run_teachers`);
+  - "Student (N)": N runs (`run_students`);
+  - the number shows even at 1: "Admin (1)";
   - an account with no role shows "—".
+
+  **Hovering a chip shows its list** in the browser's own tooltip (`title`), one item per line: Admin lists the course names; Teacher and Student list their runs as "<course> · <run title>". Superuser has none. The same list is in visually hidden text inside the chip, so a screen reader reads it (mine). The users list therefore sends the teacher and student runs as lists of `{id, title, course_name}`, not counts.
+
+  A **disabled account's row is greyed** (user's; a Disabled column with a disc was tried in the Safari pass and dropped): the row's cells take the `--disabled-bg` fill (#FBFBFC, the theme's disabled-control fill; user asked for "#fafafa or similar", and #F5F6F9 was too dark), the name turns the muted grey and loses its weight, and the role chips take the disabled-state grey; email and last active are muted already. The icons stay as they are, since Enable and Edit are what a superuser needs there. A screen reader hears "Disabled" after the name (visually hidden). There is no "Disabled" chip and no Disabled column. The Disable warning (D18) still names the courses and says "teaches N runs".
 - D15 (user's): **no pages.** The list shows the **20 most recently created** accounts, newest first. Typing in the search box filters on the server and shows up to 20 matches. Filter pills (All, Admins, Teachers, Students, Disabled) combine with the search.
 
   A line under the table always says how many are shown (exact copy mine, rev 4). The noun follows the pill: "accounts", "admins", "teachers", "students", "disabled accounts", and is singular for one ("1 account").
