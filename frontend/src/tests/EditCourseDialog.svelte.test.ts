@@ -83,6 +83,13 @@ it('the address warning shows only while the address differs, singular for one (
   expect(panel().textContent).toContain('Links people saved or shared with the old address will stop working: 1 run, 1 student.');
 });
 
+it('a course with no runs and no students warns without counts (D11 rev 10: not "0 runs, 0 students")', async () => {
+  render({ course: { ...ONE, run_count: 0, student_count: 0 } }); await settle();
+  type(field('Address'), 'alg-2');
+  expect(panel().textContent).toContain('Links people saved or shared with the old address will stop working.');
+  expect(panel().textContent).not.toContain('0 runs');
+});
+
 it('Save sends only the changed fields, trimmed, in one request, then is done', async () => {
   const p = render(); await settle();
   type(field('Course name'), ' Statistics 102 ');

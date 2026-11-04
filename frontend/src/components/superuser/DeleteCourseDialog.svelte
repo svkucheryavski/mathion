@@ -29,7 +29,12 @@
   let busy = $state(false);
 
   const ready = $derived(impactDone && typed.trim() === course.name);
-  const versions = $derived(course.version_count === 1 ? 'Its 1 version and its files go too.' : `Its ${course.version_count} versions and their files go too.`);
+  // D12 rev 10: a course with no versions (one just created) says nothing of them.
+  const versions = $derived(
+    course.version_count === 0 ? ''
+      : course.version_count === 1 ? 'Its 1 version and its files go too. '
+        : `Its ${course.version_count} versions and their files go too. `,
+  );
 
   onMount(async () => {
     try {
@@ -67,7 +72,7 @@
 
 <Modal labelledby={titleId} width={480} maxHeight={480} onRequestClose={onClose} closeDisabled={busy} header={head} footer={foot}>
   <form class="dc-form" novalidate onsubmit={(e) => { e.preventDefault(); void remove(); }}>
-    <p class="dc-text">Delete <strong>{course.name}</strong>? {versions} This can't be undone.</p>
+    <p class="dc-text">Delete <strong>{course.name}</strong>? {versions}This can't be undone.</p>
     {#if progress !== null && progress > 0}
       <p class="dc-text">Also deletes the progress of {progress} {progress === 1 ? 'student' : 'students'} (pages visited, quiz answers).</p>
     {/if}

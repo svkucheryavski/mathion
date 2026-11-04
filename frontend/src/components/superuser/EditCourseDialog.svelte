@@ -41,8 +41,11 @@
   const removing = $derived(saved.email !== '' && email.trim() === '');
 
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  // D11 rev 10: a course with no runs and no students (one just created) gives no counts.
   const warning = $derived(
-    `Links people saved or shared with the old address will stop working: ${plural(course.run_count, 'run', 'runs')}, ${plural(course.student_count, 'student', 'students')}.`,
+    course.run_count === 0 && course.student_count === 0
+      ? 'Links people saved or shared with the old address will stop working.'
+      : `Links people saved or shared with the old address will stop working: ${plural(course.run_count, 'run', 'runs')}, ${plural(course.student_count, 'student', 'students')}.`,
   );
 
   async function save() {

@@ -40,6 +40,11 @@ it('asks for the impact and names what goes', async () => {
   expect(document.activeElement).toBe(input());
 });
 
+it('a course with no versions says nothing of versions (D12 rev 10: not "Its 0 versions")', async () => {
+  render(0, { course: { ...COURSE, version_count: 0 } }); await settle();
+  expect(panel().querySelector('.dc-text')?.textContent).toBe("Delete Chemometrics? This can't be undone.");
+});
+
 it('says nothing of progress when nobody has any; singular forms for one', async () => {
   render(0, { course: { ...COURSE, version_count: 1 } }); await settle();
   expect(panel().textContent).not.toContain('Also deletes the progress');
