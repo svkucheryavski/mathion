@@ -4,21 +4,28 @@ from typing import Optional, Callable
 from email.message import EmailMessage
 
 from mathion.config import settings
-from mathion.models import Run, MiniProject, Submission
+from mathion.models import Course, Run, MiniProject, Submission
 from mathion.models_auth import User
+
+
+# D5: the one course-scoped kind (payload {"course_id": …}); every other kind is run-scoped.
+COURSE_ADMIN_ASSIGNED = "course_admin_assigned"
 
 
 @dataclass
 class RenderContext:
     user: User
-    run: Run
     base_url: str
+    run: Optional[Run] = None
+    course: Optional[Course] = None  # set instead of `run` for a course-scoped kind
     mp: Optional[MiniProject] = None
     sub: Optional[Submission] = None
 
     @property
     def course_slug(self) -> str:
-        return self.run.version.course.slug
+        if self.run is not None:
+            return self.run.version.course.slug
+        return self.course.slug
 
 
 def _name(u) -> str:
@@ -78,11 +85,23 @@ def _mini_project_published(ctx):
     return subject, body
 
 
+def _course_admin_assigned(ctx):
+    subject = f"You are now the admin of {ctx.course.name}"
+    body = (
+        f"Hi {_name(ctx.user)},\n\n"
+        f'You are now the admin of "{ctx.course.name}" on Mathion. '
+        "You can work on it in the course editor.\n\n"
+        f"Open it: {ctx.base_url}/courses/{ctx.course_slug}/edit\n\n"
+        "— Mathion\n")
+    return subject, body
+
+
 TEMPLATES: dict[str, Callable[[RenderContext], tuple[str, str]]] = {
     "evaluation_received":     _evaluation_received,
     "run_enrolled":            _run_enrolled,
     "run_teacher_assigned":    _run_teacher_assigned,
     "mini_project_published":  _mini_project_published,
+    COURSE_ADMIN_ASSIGNED:     _course_admin_assigned,
 }
 
 

@@ -29,6 +29,8 @@ from mathion.api.runs import router as runs_router
 from mathion.api.student_mini_projects import router as student_mini_projects_router
 from mathion.api.submissions import router as submissions_router
 from mathion.api.superuser import router as superuser_router
+from mathion.api.superuser_courses import router as superuser_courses_router
+from mathion.api.superuser_users import router as superuser_users_router
 from mathion.api.teaching import router as teaching_router
 from mathion.api.versions import router as versions_router
 from mathion.config import settings, Settings
@@ -146,6 +148,8 @@ app.include_router(evaluations_router)
 app.include_router(dashboard_router)
 app.include_router(teaching_router)
 app.include_router(superuser_router)
+app.include_router(superuser_courses_router)
+app.include_router(superuser_users_router)
 
 
 @app.get("/health")

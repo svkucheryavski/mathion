@@ -23,11 +23,12 @@ class Course(Base):
 class CourseAdmin(Base):
     __tablename__ = "course_admins"
     __table_args__ = (
-        UniqueConstraint("course_id", "user_id", name="uq_course_admin"),
+        # D6: exactly one admin per course; the unique index also serves lookups by course.
+        UniqueConstraint("course_id", name="uq_course_admins_course_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 
     course: Mapped["Course"] = relationship(back_populates="admins")

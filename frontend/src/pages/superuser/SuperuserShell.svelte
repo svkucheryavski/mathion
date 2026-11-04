@@ -1,15 +1,45 @@
 <script lang="ts">
   import { logout } from '../../lib/auth.svelte';
-  import { navigate } from '../../lib/router.svelte';
+  import { navigate, currentRoute } from '../../lib/router.svelte';
+  import { routeClick } from '../../lib/routeClick';
   import { session } from '../../stores/session.svelte';
   import { PRODUCT_NAME } from '../../lib/branding';
+  import type { PanelPage } from '../../lib/superuser';
   import Logo from '../../components/ui/Logo.svelte';
   import Button from '../../components/ui/Button.svelte';
+  import PanelHead from '../../components/superuser/PanelHead.svelte';
   import SuperuserDashboard from './SuperuserDashboard.svelte';
+  import SuperuserCourses from './SuperuserCourses.svelte';
+  import SuperuserUsers from './SuperuserUsers.svelte';
 
   let { token }: { token: string } = $props();
 
   const displayName = $derived(session.user?.full_name ?? session.user?.email ?? '');
+
+  // D23: /superuser/{token}, /superuser/{token}/users, /superuser/{token}/courses.
+  const PAGES: { page: PanelPage; label: string; suffix: string }[] = [
+    { page: 'dashboard', label: 'Dashboard', suffix: '' },
+    { page: 'users', label: 'Users', suffix: '/users' },
+    { page: 'courses', label: 'Courses', suffix: '/courses' },
+  ];
+  // The segment after the token, so a token spelled "users" still reads as the Dashboard.
+  const page = $derived.by((): PanelPage => {
+    const seg = currentRoute.path.split('/').filter(Boolean)[2];
+    return seg === 'users' || seg === 'courses' ? seg : 'dashboard';
+  });
+  const current = $derived(PAGES.find((p) => p.page === page)!);
+
+  // D25: the guard's answers, handled once for every page. 404 means only that
+  // the link expired; a 401 goes to sign in and comes back here after.
+  let expired = $state(false);
+  function onAuth(kind: 'signin' | 'expired'): void {
+    if (kind === 'expired') {
+      expired = true;
+      return;
+    }
+    sessionStorage.setItem('superuser_return_path', currentRoute.path);
+    void navigate('/login', { replace: true, force: true });
+  }
 
   async function onSignOut(): Promise<void> {
     try {
@@ -26,18 +56,25 @@
 </script>
 
 <div class="superuser">
-  <!-- The main site's bar (AppHeader), with no links: the panel is reached only
-       by its token URL, so nothing here leads away from it. -->
+  <!-- The main site's bar (AppHeader). Its only links are the panel's own
+       pages: the panel is reached only by its token URL, so nothing here leads
+       away from it. -->
   <header class="su-header">
     <div class="su-row">
       <span class="brand">
         <span class="brand-mark"><Logo /></span>
         <span class="wordmark">{PRODUCT_NAME}</span>
       </span>
-      <span class="su-label">Superuser</span>
+      <nav class="su-pills" aria-label="Superuser panel">
+        {#each PAGES as p (p.page)}
+          {@const href = `/superuser/${token}${p.suffix}`}
+          <a class="su-pill" {href} aria-current={p.page === page ? 'page' : undefined}
+             onclick={(e) => routeClick(e, href)}>{p.label}</a>
+        {/each}
+      </nav>
       <!-- Only someone signed in can sign out: an expired link reaches the
            panel without a session (the token is checked first). If loading the
-           session fails (network, 5xx) the stats can still show without Sign
+           session fails (network, 5xx) the page can still show without Sign
            out; a reload brings it back. -->
       {#if session.user}
         <div class="right">
@@ -48,8 +85,17 @@
     </div>
   </header>
   <main class="su-main">
-    <h1>Dashboard</h1>
-    <SuperuserDashboard {token} />
+    <!-- Each page renders its own heading, so its action can sit beside it. -->
+    {#if expired}
+      <PanelHead title={current.label} />
+      <p class="su-expired">This panel link is not valid or has expired — re-run <code>activate</code> to mint a new one.</p>
+    {:else if page === 'dashboard'}
+      <SuperuserDashboard {token} {onAuth} />
+    {:else if page === 'courses'}
+      <SuperuserCourses {token} {onAuth} />
+    {:else}
+      <SuperuserUsers {token} {onAuth} />
+    {/if}
   </main>
 </div>
 
@@ -79,23 +125,28 @@
     letter-spacing: -0.01em;
     color: var(--text);
   }
-  /* AppHeader's active nav pill (gold), as a plain label; it takes the free
-     space so the name and Sign out sit right. */
-  .su-label {
-    margin-right: auto;
+  /* AppHeader's nav pills (D23); the row takes the free space so the name and
+     Sign out sit right. */
+  .su-pills { display: flex; gap: var(--space-2); flex: 1; }
+  .su-pill {
+    text-decoration: none;
+    color: var(--muted);
     padding: 4px 10px;
     border-radius: 4px;
+    --ring: var(--gold-text);
+  }
+  .su-pill[aria-current="page"] {
     color: var(--gold-text);
     background: var(--gold-soft);
     font-weight: 500;
   }
   .right { display: flex; align-items: center; gap: var(--space-2); }
   .name { font-size: 12.5px; color: var(--muted); }
-  /* The teaching list's page column and heading. */
+  /* The teaching list's page column. */
   .su-main {
     max-width: var(--page-max);
     margin: 0 auto;
     padding: var(--space-3) var(--space-3) var(--space-4);
   }
-  h1 { margin: 0 0 14px; font-size: 22px; font-weight: 600; color: var(--text); }
+  .su-expired { color: var(--muted); }
 </style>

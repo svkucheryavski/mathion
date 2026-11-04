@@ -33,7 +33,7 @@ it('fetches and renders five stat cards with formatted storage', async () => {
   vi.stubGlobal('fetch', mockFetch(200, {
     total_users: 3, total_courses: 2, storage_bytes: 1500, active_users_24h: 1, active_users_7d: 2,
   }));
-  component = mount(SuperuserDashboard, { target, props: { token: 'tok' } });
+  component = mount(SuperuserDashboard, { target, props: { token: 'tok', onAuth: vi.fn() } });
   await settle();
   const text = target.textContent ?? '';
   expect(text).toContain('3');
@@ -44,26 +44,35 @@ it('fetches and renders five stat cards with formatted storage', async () => {
 it('threads the token into the stats URL and skips the global auth redirect', async () => {
   const f = mockFetch(200, ZEROS);
   vi.stubGlobal('fetch', f);
-  component = mount(SuperuserDashboard, { target, props: { token: 'abc' } });
+  component = mount(SuperuserDashboard, { target, props: { token: 'abc', onAuth: vi.fn() } });
   await settle();
   expect(String(f.mock.calls[0][0])).toBe('/api/superuser/abc/stats');
 });
 
-it('renders a panel-specific expired state on 404 (not generic NotFound)', async () => {
+it('hands a 404 to onAuth("expired") and shows nothing of its own', async () => {
+  const onAuth = vi.fn();
   vi.stubGlobal('fetch', mockFetch(404, { detail: 'Not Found' }));
-  component = mount(SuperuserDashboard, { target, props: { token: 'bad' } });
+  component = mount(SuperuserDashboard, { target, props: { token: 'bad', onAuth } });
   await settle();
-  expect(target.textContent ?? '').toMatch(/not valid or has expired/i);
+  expect(onAuth).toHaveBeenCalledWith('expired');
+  expect(target.querySelector('.panel-error')).toBeNull();
+  expect(target.querySelector('.cards')).toBeNull();
 });
 
-it('on 401 stashes the panel path in sessionStorage and navigates to /login', async () => {
+it('hands a 401 to onAuth("signin") and does not navigate itself', async () => {
   const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
-  router.currentRoute.path = '/superuser/tok401';
+  const onAuth = vi.fn();
   vi.stubGlobal('fetch', mockFetch(401, { detail: 'Not authenticated' }));
-  component = mount(SuperuserDashboard, { target, props: { token: 'tok401' } });
+  component = mount(SuperuserDashboard, { target, props: { token: 'tok401', onAuth } });
   await settle();
-  expect(sessionStorage.getItem('superuser_return_path')).toBe('/superuser/tok401');
-  expect(navSpy).toHaveBeenCalledWith('/login', { replace: true, force: true });
-  // token never placed in the navigation URL
-  expect(String(navSpy.mock.calls[0][0])).toBe('/login');
+  expect(onAuth).toHaveBeenCalledWith('signin');
+  expect(navSpy).not.toHaveBeenCalled();
+  expect(sessionStorage.getItem('superuser_return_path')).toBeNull();
+});
+
+it("shows another error's message", async () => {
+  vi.stubGlobal('fetch', mockFetch(500, { detail: 'Internal Server Error' }));
+  component = mount(SuperuserDashboard, { target, props: { token: 'tok', onAuth: vi.fn() } });
+  await settle();
+  expect(target.querySelector('.panel-error')?.textContent).toBe('Internal Server Error');
 });

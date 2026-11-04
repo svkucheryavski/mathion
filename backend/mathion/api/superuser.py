@@ -1,9 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from mathion.api.auth import _require_csrf
 from mathion.auth import validate_session
 from mathion.database import get_db
 from mathion.models import Asset, Course, RunAsset, Submission
@@ -33,6 +34,16 @@ def require_superuser_panel(
     # 3. role -> 404 (deliberately NOT 403, so normal users cannot tell the route exists).
     if not user.is_superuser:
         raise HTTPException(status_code=404, detail="Not Found")
+    return user
+
+
+def require_superuser_panel_write(
+    request: Request,
+    user: User = Depends(require_superuser_panel),
+) -> User:
+    # §4: CSRF after the guard (token → session → superuser → CSRF), so a
+    # request without the header still meets the route-hiding 404 first.
+    _require_csrf(request)
     return user
 
 

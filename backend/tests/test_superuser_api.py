@@ -163,3 +163,44 @@ def test_error_responses_also_carry_no_store_headers(admin_client, auth_client, 
     ):
         assert resp.headers["Cache-Control"] == "no-store"
         assert resp.headers["Referrer-Policy"] == "no-referrer"
+
+
+def test_write_guard_order(db, superuser, test_user):
+    """§4: token → session → superuser → CSRF, so a request without the CSRF
+    header still sees the route-hiding 404 first."""
+    from fastapi import APIRouter, Depends, FastAPI
+    from fastapi.testclient import TestClient
+
+    from mathion.api.superuser import require_superuser_panel_write
+    from mathion.auth import request_pin, verify_pin
+    from mathion.database import get_db
+
+    probe = APIRouter()
+
+    @probe.post("/api/superuser/{token}/_probe")
+    def _probe(_user=Depends(require_superuser_panel_write)):
+        return {"ok": True}
+
+    app = FastAPI()
+    app.include_router(probe)
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    def signed_in(user) -> TestClient:
+        c = TestClient(app)
+        c.cookies.set("session_token", verify_pin(db, user.email, request_pin(db, user.email), duration_days=7))
+        return c
+
+    token = panel_service.mint(db)
+    csrf = {"X-Requested-With": "mathion"}
+    su, plain, anon = signed_in(superuser), signed_in(test_user), TestClient(app)
+
+    assert su.post("/api/superuser/bogus/_probe").status_code == 404
+    assert anon.post(f"/api/superuser/{token}/_probe").status_code == 401
+    assert plain.post(f"/api/superuser/{token}/_probe").status_code == 404
+    r = su.post(f"/api/superuser/{token}/_probe")
+    assert r.status_code == 403 and r.json()["detail"] == "Missing CSRF header"
+    assert su.post(f"/api/superuser/{token}/_probe", headers=csrf).json() == {"ok": True}

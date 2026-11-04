@@ -19,6 +19,10 @@ function jsonResponse(status: number, body: unknown) {
 function dispatchFetch() {
   return vi.fn(async (url: string) => {
     const s = String(url);
+    if (s.includes('/api/superuser/') && s.includes('/users')) {
+      return jsonResponse(200, { users: [], total: 0, counts: { all: 0, admins: 0, teachers: 0, students: 0, disabled: 0 } });
+    }
+    if (s.includes('/api/superuser/') && s.includes('/courses')) return jsonResponse(200, []);
     if (s.includes('/api/superuser/')) {
       return jsonResponse(200, { total_users: 0, total_courses: 0, storage_bytes: 0, active_users_24h: 0, active_users_7d: 0 });
     }
@@ -32,6 +36,13 @@ async function settle() {
 function buttonByText(t: HTMLElement, text: string): HTMLButtonElement | null {
   return (Array.from(t.querySelectorAll('button')) as HTMLButtonElement[])
     .find((b) => (b.textContent ?? '').trim() === text) ?? null;
+}
+
+function pills(): HTMLAnchorElement[] {
+  return [...target.querySelectorAll<HTMLAnchorElement>('header.su-header nav a')];
+}
+function pillTexts(): string[] {
+  return pills().map((a) => (a.textContent ?? '').trim());
 }
 
 function signIn() {
@@ -76,8 +87,9 @@ it('with no session (an expired link is checked before the session) the bar has 
   expect(target.textContent ?? '').toMatch(/not valid or has expired/i);
   expect(target.querySelector('header.su-header .name')).toBeNull();
   expect(buttonByText(target, 'Sign out')).toBeNull();
-  // The brand and the label still show.
-  expect(target.querySelector('header.su-header .su-label')?.textContent?.trim()).toBe('Superuser');
+  // The brand and the pills still show; the page itself does not.
+  expect(pillTexts()).toEqual(['Dashboard', 'Users', 'Courses']);
+  expect(target.querySelector('.dashboard')).toBeNull();
 });
 
 it('sign-out logs out then navigates to /login (not the panel path)', async () => {
@@ -134,7 +146,7 @@ it('suppresses AppHeader on /superuser paths but shows it on /courses', async ()
   expect(target.querySelector('header.su-header')).toBeNull();
 });
 
-it('the bar is the main site look: logo + wordmark, a Superuser label, the name, a ghost Sign out', async () => {
+it('the bar is the main site look: logo + wordmark, the three pills, the name, a ghost Sign out', async () => {
   vi.stubGlobal('fetch', dispatchFetch());
   session.user = {
     id: 1, email: 'su@x.com', full_name: 'Sue Perr', is_superuser: true,
@@ -146,7 +158,7 @@ it('the bar is the main site look: logo + wordmark, a Superuser label, the name,
   expect(header).not.toBeNull();
   expect(header.querySelector('.brand svg')).not.toBeNull();
   expect(header.querySelector('.brand .wordmark')?.textContent).toBe('Mathion');
-  expect(header.querySelector('.su-label')?.textContent?.trim()).toBe('Superuser');
+  expect(pillTexts()).toEqual(['Dashboard', 'Users', 'Courses']);
   expect(header.querySelector('.name')?.textContent).toBe('Sue Perr');
   const signOut = buttonByText(target, 'Sign out')!;
   expect(signOut.dataset.variant).toBe('ghost');
@@ -164,13 +176,15 @@ it('the bar shows the email when the superuser has no full name', async () => {
   expect(target.querySelector('header.su-header .name')?.textContent).toBe('su@x.com');
 });
 
-it('the bar has no links, so nothing leads away from the panel', async () => {
+it('the bar has no links outside the panel, so nothing leads away from it', async () => {
   vi.stubGlobal('fetch', dispatchFetch());
   signIn(); // so the name and Sign out render and are covered too
   component = mount(SuperuserShell, { target, props: { token: 'tok' } });
   await settle();
   expect(target.querySelector('header.su-header .name')).not.toBeNull();
-  expect(target.querySelectorAll('header.su-header a')).toHaveLength(0);
+  const hrefs = [...target.querySelectorAll('header.su-header a')].map((a) => a.getAttribute('href'));
+  expect(hrefs).toHaveLength(3);
+  for (const h of hrefs) expect(h === '/superuser/tok' || h!.startsWith('/superuser/tok/')).toBe(true);
 });
 
 it('the page has a Dashboard heading above the cards, in the page column', async () => {
@@ -183,4 +197,83 @@ it('the page has a Dashboard heading above the cards, in the page column', async
   const h1 = main.querySelector('h1')!;
   const cards = main.querySelector('.cards')!;
   expect(h1.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+it('the pills are same-tab links to the three pages; the current one is marked (D23)', async () => {
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T/users';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  const nav = target.querySelector('header.su-header nav')!;
+  expect(nav.getAttribute('aria-label')).toBe('Superuser panel');
+  expect(pills().map((a) => a.getAttribute('href'))).toEqual(['/superuser/T', '/superuser/T/users', '/superuser/T/courses']);
+  expect(pills().map((a) => a.getAttribute('aria-current'))).toEqual([null, 'page', null]);
+  for (const a of pills()) expect(a.hasAttribute('target')).toBe(false);
+});
+
+it('a plain click on a pill navigates in the app; a modifier click is left to the browser', async () => {
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  const courses = pills()[2];
+  const plain = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+  courses.dispatchEvent(plain);
+  expect(plain.defaultPrevented).toBe(true);
+  expect(navSpy).toHaveBeenCalledWith('/superuser/T/courses');
+  navSpy.mockClear();
+  let prevented: boolean | null = null;
+  // Runs after the app's delegated handler; it records, then blocks jsdom's own navigation.
+  const probe = (e: Event) => { prevented = e.defaultPrevented; e.preventDefault(); };
+  window.addEventListener('click', probe);
+  courses.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, metaKey: true }));
+  window.removeEventListener('click', probe);
+  expect(prevented).toBe(false);
+  expect(navSpy).not.toHaveBeenCalled();
+});
+
+it('the heading and the page follow the route', async () => {
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  expect(target.querySelector('main.su-main h1')?.textContent).toBe('Dashboard');
+  expect(target.querySelector('.dashboard')).not.toBeNull();
+  router.currentRoute.path = '/superuser/T/users';
+  await settle();
+  expect(target.querySelector('main.su-main h1')?.textContent).toBe('Users');
+  // The page itself mounted, not a placeholder.
+  expect(target.querySelector('main.su-main .u-count')?.textContent).toBe('No accounts');
+  expect(target.querySelector('.dashboard')).toBeNull();
+  expect(pills()[1].getAttribute('aria-current')).toBe('page');
+  router.currentRoute.path = '/superuser/T/courses';
+  await settle();
+  expect(target.querySelector('main.su-main h1')?.textContent).toBe('Courses');
+  expect(target.querySelector('main.su-main')?.textContent).toContain('No courses yet.');
+  expect(pills()[2].getAttribute('aria-current')).toBe('page');
+});
+
+it("a 404 from a page's load shows the expired-link text instead of the page", async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(404, { detail: 'Not Found' })));
+  signIn();
+  router.currentRoute.path = '/superuser/T';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  const expired = target.querySelector('main.su-main .su-expired');
+  expect(expired?.textContent ?? '').toMatch(/This panel link is not valid or has expired/);
+  expect(expired?.textContent ?? '').toContain('activate');
+  expect(target.querySelector('.dashboard')).toBeNull();
+});
+
+it('a 401 keeps the panel path for after sign-in and goes to /login', async () => {
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  sessionStorage.clear();
+  router.currentRoute.path = '/superuser/T401';
+  vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(401, { detail: 'Not authenticated' })));
+  component = mount(SuperuserShell, { target, props: { token: 'T401' } });
+  await settle();
+  expect(sessionStorage.getItem('superuser_return_path')).toBe('/superuser/T401');
+  expect(navSpy).toHaveBeenCalledWith('/login', { replace: true, force: true });
+  expect(String(navSpy.mock.calls[0][0])).toBe('/login');
 });

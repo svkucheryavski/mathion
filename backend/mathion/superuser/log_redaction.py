@@ -12,18 +12,23 @@ import re
 
 # Matches /superuser/<token> and /api/superuser/<token>..., capturing the route
 # prefix in group 1 and consuming the token segment (stops at the next / or ?),
-# so a trailing path (e.g. /stats) and any query string are preserved. Bare
-# /superuser, /superuserfoo, and /superuser/ (empty token) do NOT match.
+# so a trailing path (e.g. /stats) is preserved. Bare /superuser,
+# /superuserfoo, and /superuser/ (empty token) do NOT match.
 _PANEL_TOKEN_RE = re.compile(r"^(/(?:api/)?superuser/)[^/?]+")
 
 
 def redact_panel_path(path: str) -> str:
     """Return `path` with the panel token replaced by `[redacted]`.
 
-    Pure function, unit-testable in isolation. Non-panel paths, bare
-    `/superuser`, and empty-token `/superuser/` are returned unchanged.
+    A panel path's query string is redacted too: the Users search sends what
+    the superuser typed (often an email) as `?q=`. Pure function,
+    unit-testable in isolation. Non-panel paths, bare `/superuser`, and
+    empty-token `/superuser/` are returned unchanged.
     """
-    return _PANEL_TOKEN_RE.sub(r"\1[redacted]", path)
+    redacted, n = _PANEL_TOKEN_RE.subn(r"\1[redacted]", path)
+    if n and "?" in redacted:
+        redacted = redacted.split("?", 1)[0] + "?[redacted]"
+    return redacted
 
 
 class PanelAccessLogFilter(logging.Filter):

@@ -138,9 +138,3 @@ def update_course(course_id: int, data: CourseUpdate, db: Session = Depends(get_
     out.is_admin = _is_admin_for(db, user, course.id)
     return out
 
-
-@router.delete("/api/courses/{course_id}", status_code=204)
-def delete_course(course_id: int, db: Session = Depends(get_db), user: User = Depends(require_superuser)):
-    course = get_or_404(db, Course, course_id)
-    db.delete(course)
-    db.commit()

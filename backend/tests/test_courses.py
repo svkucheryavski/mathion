@@ -76,15 +76,6 @@ def test_api_update_course(admin_client):
     assert response.json()["slug"] == "stats"  # unchanged
 
 
-def test_api_delete_course(admin_client):
-    create_resp = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""})
-    course_id = create_resp.json()["id"]
-    response = admin_client.delete(f"/api/courses/{course_id}")
-    assert response.status_code == 204
-    response = admin_client.get(f"/api/courses/{course_id}")
-    assert response.status_code == 404
-
-
 def test_api_create_course_missing_slug(admin_client):
     response = admin_client.post("/api/courses", json={"name": "Stats", "description": ""})
     assert response.status_code == 422

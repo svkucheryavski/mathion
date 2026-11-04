@@ -108,10 +108,11 @@ def test_regular_user_cannot_create_course(auth_client):
 
 
 def test_regular_user_cannot_delete_course(auth_client, db):
-    """Regular user gets 403 when trying to delete a course."""
+    """No main-site course delete exists (D12b); it lives behind the panel token."""
     course, _ = _make_published_course(db)
     response = auth_client.delete(f"/api/courses/{course.id}")
-    assert response.status_code == 403
+    assert response.status_code == 404
+    assert db.get(type(course), course.id) is not None
 
 
 def test_regular_user_cannot_update_course(auth_client, db):
@@ -145,11 +146,13 @@ def test_superuser_can_create_course(admin_client):
     assert response.status_code == 201
 
 
-def test_superuser_can_delete_course(admin_client, db):
-    """Superuser can delete a course."""
+def test_superuser_cannot_delete_course_outside_the_panel(admin_client, db):
+    """D12b: even a superuser deletes a course only in the panel
+    (tests/test_superuser_courses.py)."""
     course, _ = _make_published_course(db)
     response = admin_client.delete(f"/api/courses/{course.id}")
-    assert response.status_code == 204
+    assert response.status_code == 404
+    assert db.get(type(course), course.id) is not None
 
 
 def test_superuser_can_access_content(admin_client, db):

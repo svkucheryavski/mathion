@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2522
+EXPECTED_CHECKS=2717
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -5680,11 +5680,12 @@ if [[ -n $REPLY ]]; then
   N=RunProgressTab; H=$REPLY
   d '\.cell-btn' '' '--ring: var\(--heat-fg\)'
 fi
-# P116: --ring is set only on leaf controls. A tenth declaration (a card, a
-# wrapper) would silently recolour every ring inside it.
+# P116: --ring is set only on leaf controls. Another declaration (a card, a
+# wrapper) would silently recolour every ring inside it. The eleventh is the
+# superuser panel's nav pill (D23), AppHeader's nav amber.
 nring=$(grep -oE -- '--ring: ?var\(' $CSS | wc -l | tr -d ' ')
-if [[ $nring -eq 10 ]]; then echo "PASS  --ring is declared exactly ten times, all on leaf controls (D60, D61)"
-else echo "FAIL  --ring is declared exactly ten times, all on leaf controls (D60, D61) (found $nring)"; fail=1; fi
+if [[ $nring -eq 11 ]]; then echo "PASS  --ring is declared exactly eleven times, all on leaf controls (D60, D61, D23)"
+else echo "FAIL  --ring is declared exactly eleven times, all on leaf controls (D60, D61, D23) (found $nring)"; fail=1; fi
 
 # Task 2 — the page ground (D50) and the reading sheets (D56).
 # Disabled fills use --disabled-bg (the old #FBFBFC), so they stay a step above
@@ -5949,12 +5950,17 @@ none "no .loading-placeholder rule in the bundle (D86)" "\.loading-placeholder"
 # The superuser panel (Safari pass step 13d, user 2026-11-03): its own bar in
 # the main bar's look (a copy of AppHeader's bar, lockup and active pill), the
 # teaching list's page column, side-card-look stat cards.
+own su-pill SuperuserShell.svelte
 uniq1 su-header
 if [[ -n $REPLY ]]; then
   N=SuperuserShell; H=$REPLY
   d '\.su-header' '' 'box-sizing:border-box' 'height:44px' 'background:var\(--surface\)' 'border-bottom:1px solid var\(--border\)'
   d '\.su-row' '' 'max-width:var\(--page-max\)' 'margin:0 auto' 'padding:0 var\(--space-3\)'
-  d '\.su-label' '' 'margin-right:auto' 'padding:4px 10px' 'border-radius:4px' 'color:var\(--gold-text\)' 'background:var\(--gold-soft\)'
+  # D23: the gold label became three nav pills, AppHeader's .links a look.
+  d '\.su-pills' '' 'display:flex' 'flex:1'
+  d '\.su-pill' '' 'text-decoration:none' 'color:var\(--muted\)' 'padding:4px 10px' 'border-radius:4px' '--ring: var\(--gold-text\)'
+  chk "\.su-pill\[aria-current=page\]\.${H}" 'color:var\(--gold-text\)' 'background:var\(--gold-soft\)' 'font-weight:500'
+  none "SuperuserShell has no .su-label rule left (D23)" "\.su-label\."
   d '\.brand-mark' '' 'transform:translateY\(-4\.35px\)'
   d '\.wordmark' '' 'font-size:14px' 'font-weight:600'
   d '\.name' '' 'font-size:12\.5px'
@@ -5968,6 +5974,129 @@ if [[ -n $REPLY ]]; then
   d '\.label' '' 'font-size:11\.5px' 'color:var\(--muted\)'
   d '\.value' '' 'font-size:22px' 'font-variant-numeric:tabular-nums'
   sweep SuperuserDashboard $H
+fi
+
+# The panel's Users page (Task 7): the pills and search in mock-2's tools row,
+# the Courses page's table, the role chips (D14), the confirm strip row under
+# its row (D18, D20) and the count line (D15).
+own u-table SuperuserUsers.svelte
+own u-count SuperuserUsers.svelte
+uniq1 u-table
+if [[ -n $REPLY ]]; then
+  N=SuperuserUsers; H=$REPLY
+  d '\.u-tools' '' 'display:flex' 'justify-content:space-between' 'flex-wrap:wrap' 'margin:0 0 12px'
+  d '\.u-search' '' 'height:var\(--control-h-sm\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.u-table' '' 'border-collapse:separate' 'border-spacing:0'
+  chk "\.u-table\.${H} th:where\(\.${H}\)" 'padding:8px 12px' 'background:var\(--surface-2\)' 'color:var\(--text-3\)' 'font-size:12px' 'font-weight:600'
+  chk "\.u-table\.${H} td:where\(\.${H}\)" 'padding:8px 12px' 'border-top:1px solid var\(--border-soft\)' 'font-size:13px' 'color:var\(--text-2\)'
+  chk "\.u-table\.${H} td\.u-email:where\(\.${H}\)" 'font-family:var\(--font-mono\)' 'color:var\(--muted\)'
+  d '\.u-chips' '' 'display:inline-flex' 'flex-wrap:wrap' 'gap:4px'
+  d '\.chip' '' 'border-radius:var\(--radius-pill\)' 'background:var\(--surface-2\)' 'color:var\(--text-2\)' 'font-size:11\.5px'
+  d '\.chip\.su' '' 'background:var\(--gold-soft\)' 'color:var\(--gold-text\)'
+  d '\.chip\.ad' '' 'background:var\(--primary-soft\)' 'color:var\(--primary\)'
+  # D14 rev 8: a disabled account's row is greyed (name and chips); no Disabled chip or column.
+  chk "\.u-table\.${H} tr\.u-disabled:where\(\.${H}\) td\.u-name:where\(\.${H}\)" 'color:var\(--muted\)' 'font-weight:400'
+  # Above .chip.su/.chip.ad in specificity (0,4,1 vs 0,3,0), so a disabled admin's chip greys too.
+  chk "\.u-table\.${H} tr\.u-disabled:where\(\.${H}\) \.chip:where\(\.${H}\)" 'background:var\(--state-disabled-bg\)' 'color:var\(--state-disabled-fg\)'
+  # A strip opened under a disabled row shares its tint.
+  chk "\.u-table\.${H} tr\.u-disabled:where\(\.${H}\)\+tr\.u-confirm:where\(\.${H}\) td:where\(\.${H}\)" 'background:var\(--disabled-bg\)'
+  chk "\.u-table\.${H} tr\.u-disabled:where\(\.${H}\) td:where\(\.${H}\)" 'background:var\(--disabled-bg\)'
+  none "SuperuserUsers has no Disabled chip (D14 rev 8)" "\.chip\.off\.${H}"
+  none "SuperuserUsers has no Disabled column (D14 rev 8)" "\.(u-off|u-dot)\.${H}"
+  d '\.row-icons' '' 'display:inline-flex' 'gap:4px'
+  chk "\.u-table\.${H} td\.u-actions:where\(\.${H}\)" 'width:1%' 'white-space:nowrap'
+  chk "\.u-confirm\.${H} td:where\(\.${H}\)" 'padding:0 12px 10px' 'border-top:0'
+  d '\.u-count' '' 'margin:8px 2px 0' 'font-size:12px' 'color:var\(--muted\)'
+  none "SuperuserUsers puts no flex on a table cell (the chips sit in .u-chips)" "\.u-roles\.${H}\{[^}]*display:"
+  sweep SuperuserUsers $H
+fi
+# D17, D19, D21: the account dialogs; a superuser's email field is locked grey.
+uniq1 ea-locked
+if [[ -n $REPLY ]]; then
+  N=EditAccountDialog; H=$REPLY
+  d '\.ea-locked' '' 'background:var\(--surface-2\)' 'color:var\(--text-2\)'
+  d '\.ea-note' '' 'margin:0' 'font-size:12\.5px' 'color:var\(--text-2\)'
+  d '\.ea-err' '' 'color:var\(--danger\)'
+fi
+uniq1 na-err
+if [[ -n $REPLY ]]; then
+  N=NewAccountDialog; H=$REPLY
+  d '\.na-err' '' 'color:var\(--danger\)'
+fi
+
+# The panel's Courses page (Users + Courses slice, Task 6): the teaching list's
+# table with plain-text cells, the disabled-admin chip in RunTeachersTab's
+# "invited" look, one Edit and the trash at the row's end (D24 rev 6).
+own c-table SuperuserCourses.svelte
+uniq1 c-table
+if [[ -n $REPLY ]]; then
+  N=SuperuserCourses; H=$REPLY
+  d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.c-table' '' 'border-collapse:separate' 'border-spacing:0'
+  chk "\.c-table\.${H} th:where\(\.${H}\)" 'padding:8px 12px' 'background:var\(--surface-2\)' 'color:var\(--text-3\)' 'font-size:12px' 'font-weight:600'
+  chk "\.c-table\.${H} td:where\(\.${H}\)" 'padding:8px 12px' 'border-top:1px solid var\(--border-soft\)' 'font-size:13px' 'color:var\(--text-2\)'
+  d '\.num' '' 'font-family:var\(--font-mono\)' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.chip-disabled' '' 'border-radius:var\(--radius-pill\)' 'background:var\(--state-disabled-bg\)' 'color:var\(--state-disabled-fg\)' 'font-family:var\(--font-mono\)' 'font-size:10\.5px'
+  chk "\.c-table\.${H} td\.c-name:where\(\.${H}\)" 'color:var\(--text\)' 'font-weight:500'
+  d '\.row-icons' '' 'display:inline-flex' 'gap:4px'
+  none "SuperuserCourses has no confirm row or per-cell action rules (D24 rev 6)" "\.(c-confirm|cell)\.${H}"
+  none "SuperuserCourses has no link look: course names are plain text (D7)" "\.c-table\.${H} td:where\(\.${H}\) a"
+  sweep SuperuserCourses $H
+fi
+# Each panel page's heading, with its action at the row's end.
+uniq1 panel-head
+if [[ -n $REPLY ]]; then
+  N=PanelHead; H=$REPLY
+  d '\.panel-head' '' 'display:flex' 'align-items:center' 'justify-content:space-between' 'margin:0 0 14px'
+  chk "h1\.${H}" 'margin:0' 'font-size:22px' 'font-weight:600' 'color:var\(--text\)'
+  sweep PanelHead $H
+fi
+# The admin email's account hint (D8, D9): muted small text, gone when empty.
+uniq1 account-hint
+if [[ -n $REPLY ]]; then
+  N=AdminEmailField; H=$REPLY
+  d '\.account-hint' '' 'margin:0' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.account-hint' ':empty' 'display:none'
+fi
+# D24 rev 6: one Edit dialog per row; the one-field dialog is gone.
+none "no .fd-input rule left (FieldDialog removed, D24 rev 6)" "\.fd-input\."
+uniq1 ec-note
+if [[ -n $REPLY ]]; then
+  N=EditCourseDialog; H=$REPLY
+  d '\.ec-note' '' 'margin:0' 'font-size:12\.5px' 'color:var\(--text-2\)'
+  d '\.ec-err' '' 'color:var\(--danger\)'
+  d '\.ec-mono' '' 'font-family:var\(--font-mono\)'
+fi
+# D5a, D25: the note under the heading, info in gold, an error in the danger look.
+uniq1 note-strip
+if [[ -n $REPLY ]]; then
+  N=NoteStrip; H=$REPLY
+  d '\.note-strip' '' 'display:flex' 'border-radius:var\(--radius\)' 'font-size:12\.5px'
+  d '\.info' '' 'background:var\(--gold-soft\)' 'color:var\(--gold-text\)'
+  d '\.error' '' 'background:var\(--danger-off-bg\)' 'border-color:var\(--danger-off-border\)' 'color:var\(--danger\)'
+  sweep NoteStrip $H
+fi
+# D8, D12, D17, D24: the panel dialogs' fields, the item modal's field look.
+for pair in NewCourseDialog:nc-input EditCourseDialog:ec-input AdminEmailField:ae-input DeleteCourseDialog:dc-input NewAccountDialog:na-input EditAccountDialog:ea-input; do
+  uniq1 ${pair#*:}
+  if [[ -n $REPLY ]]; then
+    N=${pair%%:*}; H=$REPLY
+    d "\.${pair#*:}" '' 'height:var\(--control-h\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)'
+    d "\.${pair#*:}" ':focus-visible' 'outline:none' 'border:1\.5px solid var\(--primary\)'
+    sweep $N $H
+  fi
+done
+uniq1 dc-err
+if [[ -n $REPLY ]]; then
+  N=DeleteCourseDialog; H=$REPLY
+  d '\.dc-err' '' 'color:var\(--danger\)'
+fi
+uniq1 nc-err
+if [[ -n $REPLY ]]; then
+  N=NewCourseDialog; H=$REPLY
+  d '\.nc-err' '' 'color:var\(--danger\)'
+  d '\.nc-mono' '' 'font-family:var\(--font-mono\)'
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

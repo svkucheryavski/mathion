@@ -28,8 +28,12 @@ def _make_access_record(args):
         ("/superuser/tok-EN_abc", "/superuser/[redacted]"),          # url-safe token (- and _)
         ("/superuser/SECRET/", "/superuser/[redacted]/"),            # trailing slash preserved
         ("/api/superuser/SECRET/stats", "/api/superuser/[redacted]/stats"),
-        ("/api/superuser/SECRET/stats?x=1", "/api/superuser/[redacted]/stats?x=1"),  # query preserved
-        ("/superuser/SECRET?x=1", "/superuser/[redacted]?x=1"),      # token directly before ? -> [^/?]+ stops at ?
+        # A panel query can carry an email (the Users search, ?q=), so it is
+        # redacted too; only the fact that there was one is kept.
+        ("/api/superuser/SECRET/stats?x=1", "/api/superuser/[redacted]/stats?[redacted]"),
+        ("/api/superuser/SECRET/users?q=anna%40uni.dk&role=all", "/api/superuser/[redacted]/users?[redacted]"),
+        ("/superuser/SECRET?x=1", "/superuser/[redacted]?[redacted]"),  # token directly before ? -> [^/?]+ stops at ?
+        ("/api/courses/abc-123?q=anna%40uni.dk", "/api/courses/abc-123?q=anna%40uni.dk"),  # non-panel query -> unchanged
         ("/superuser/", "/superuser/"),                              # empty token -> unchanged
         ("/superuserfoo", "/superuserfoo"),                          # no trailing / -> unchanged
         ("/api/courses/abc-123", "/api/courses/abc-123"),            # non-panel -> unchanged
@@ -40,6 +44,7 @@ def test_redact_panel_path(path, expected):
     assert out == expected
     if "SECRET" in path or path.startswith("/superuser/tok"):
         assert "SECRET" not in out and "tok-EN_abc" not in out
+        assert "anna" not in out
 
 
 # ---- Unit: filter robustness (fail-open, method-agnostic) ----------------
