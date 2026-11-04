@@ -1,6 +1,6 @@
 # Superuser panel: Users and Courses — design
 
-**Status:** rev 9, 2026-11-04.
+**Status:** rev 10, 2026-11-04.
 - Rev 2 folded in the builder check (D12a, D12b).
 - Rev 3 folded in spec review round 1, three lanes (`.superpowers/sdd/2026-11-03-superuser-users-courses/spec-r1-*.md`), and the user's answers on mockup 2.
 - Rev 4 folded in spec review round 2 (`spec-r2-*.md`) and the user's answer on confirms (D24).
@@ -9,6 +9,7 @@
 - Rev 7 redacts a panel path's query string in the access log (§4, final review).
 - Rev 8 gives D14 short role chips with hover lists and greyed disabled rows (Safari pass).
 - Rev 9 caps the D14 hover list (Safari pass, user's: "looks very busy").
+- Rev 10 words the course-delete confirm for a course with no versions (D12) and the address warning for one with no runs or students (D11), both from the Safari pass.
 
 **Branch:** `feat/superuser-users-courses` (local).
 
@@ -96,8 +97,8 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - Use a SAVEPOINT or a pre-check so a slug conflict isn't confused with the user-insert recovery.
 - D9 (user's, rev 6): the admin is changed, assigned or removed in the course's **Edit** dialog (D24), in its admin's-email field with the same hint. The old admin keeps their account and loses only this course. **Clearing the email** removes the admin: the dialog then says "<course> will have no admin." before Save, and Save leaves the course with none.
 - D10 (user's): **Rename** a course (its name).
-- D11 (user's): **Change the address** (slug). The dialog warns that links people saved or shared with the old address will stop working, with the counts: "2 runs, 37 students". The students are the distinct accounts on the rosters (`run_students`) of the course's runs (mine). That includes links in emails Mathion already sent and links inside the course's own pages. Old addresses are not remembered or forwarded.
-- D12 (user's): **Delete** a course only when it has **no runs**. With runs, the trash button is greyed and says why ("2 runs: can't be deleted"). It uses `aria-disabled` with a `title`, as `IconButton` supports (`IconButton.svelte:37,164`), not a native `disabled`, so the reason can still be focused and read. The confirm is a dialog in which the course name must be typed (D24). The typed name is trimmed and must match exactly, case included; Delete stays off until it does. The dialog is built on `Modal`, not on the tick-box `DangerConfirm` the run screens use. Deleting also removes the course's files from disk (`<asset_path>/courses/<version_id>/` for each version, `api/assets.py:27`).
+- D11 (user's): **Change the address** (slug). The dialog warns that links people saved or shared with the old address will stop working, with the counts: "2 runs, 37 students". A course with no runs and no students, such as one just created, gives no counts: "Links people saved or shared with the old address will stop working." (rev 10, user's; the Safari pass would have shown "0 runs, 0 students"). The students are the distinct accounts on the rosters (`run_students`) of the course's runs (mine). That includes links in emails Mathion already sent and links inside the course's own pages. Old addresses are not remembered or forwarded.
+- D12 (user's): **Delete** a course only when it has **no runs**. With runs, the trash button is greyed and says why ("2 runs: can't be deleted"). It uses `aria-disabled` with a `title`, as `IconButton` supports (`IconButton.svelte:37,164`), not a native `disabled`, so the reason can still be focused and read. The confirm is a dialog in which the course name must be typed (D24). The typed name is trimmed and must match exactly, case included; Delete stays off until it does. The dialog is built on `Modal`, not on the tick-box `DangerConfirm` the run screens use. Deleting also removes the course's files from disk (`<asset_path>/courses/<version_id>/` for each version, `api/assets.py:27`). The confirm reads "Delete <name>? Its N versions and their files go too. This can't be undone.", singular for one ("Its 1 version and its files go too."). A course with no versions, such as one just created, leaves that sentence out: "Delete <name>? This can't be undone." (rev 10, mine; the Safari pass showed "Its 0 versions").
   - D12c (mine, rev 3; review lane A I3): the order is fixed, so the runs check is atomic and the file list is complete:
     1. `SELECT courses … FOR UPDATE`. This blocks new versions and new admin rows.
     2. `SELECT course_versions WHERE course_id … FOR UPDATE`. This blocks new runs, enrollments and assets on those versions.

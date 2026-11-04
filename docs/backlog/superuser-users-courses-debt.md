@@ -114,3 +114,7 @@ Plan: `docs/superpowers/plans/2026-11-03-superuser-users-courses.md`.
 - `cut()` counts code points, so it never splits a surrogate pair, but it can still split a visible character made of several code points (a ZWJ emoji, a flag, a letter plus a combining accent). Tooltip only, cosmetic; the comment and test name say "never splitting one in two", which overstates it (Opus).
 - The template comment above the chips (`SuperuserUsers.svelte`) still says the list is the hover, one per line; since rev 9 the hover is capped and bulleted and the full list is only in the hidden text (Opus).
 - Fable concurs on code points vs visible characters: a cut between a letter and a combining accent drops the accent. `Intl.Segmenter` would cut by grapheme if it is ever wanted (Fable).
+
+### Safari pass — D12 rev 10 (no "Its 0 versions")
+
+- The 1-version case is pinned with `toContain('Its 1 version and its files go too.')` only, so a dropped trailing space in that literal ("go too.This can't") would still pass; the full sentence, as in the 2-version test, would pin it (Fable, Opus).
