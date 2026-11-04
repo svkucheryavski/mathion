@@ -107,3 +107,10 @@ Plan: `docs/superpowers/plans/2026-11-03-superuser-users-courses.md`.
 - A disabled account with no name and no role differs from a new one only by the near-white tint and the Enable glyph; the user approved the tint (Fable).
 - Same-named courses, or same-titled runs in one course (run titles aren't unique, `models.py:207`), give identical lines in the hover list (Fable).
 - `test_runs_order_by_course_then_title` pins `lower(Run.title)` (titles "A"/"a"/"B" fail without it on any collation) but not the `Run.id` tiebreak: Postgres happens to return the tied rows in insertion order. `lower(Course.name)` is unproven too; two courses "Algebra"/"algebra" would pin it (Opus r2).
+
+### Safari pass — D14 rev 9 (capped hover lists)
+
+- The tooltip's "more" edge is unpinned: `> 11` instead of `> 10` would still pass the ten-run and twelve-run tests, so an 11-run list would silently drop its last run with no "more" line. An 11-run case ("… and 1 more") would pin it. The cut limits are all pinned: the 31×"𝔸" test catches a wrong comparison in `cut()`, which serves all three limits, and the exact long outputs pin 24 and 20 at the call sites (Opus r3, correcting its r1 and Fable's r2).
+- `cut()` counts code points, so it never splits a surrogate pair, but it can still split a visible character made of several code points (a ZWJ emoji, a flag, a letter plus a combining accent). Tooltip only, cosmetic; the comment and test name say "never splitting one in two", which overstates it (Opus).
+- The template comment above the chips (`SuperuserUsers.svelte`) still says the list is the hover, one per line; since rev 9 the hover is capped and bulleted and the full list is only in the hidden text (Opus).
+- Fable concurs on code points vs visible characters: a cut between a letter and a combining accent drops the accent. `Intl.Segmenter` would cut by grapheme if it is ever wanted (Fable).

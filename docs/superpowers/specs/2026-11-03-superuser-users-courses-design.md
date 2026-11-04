@@ -1,11 +1,14 @@
 # Superuser panel: Users and Courses — design
 
-**Status:** rev 8, 2026-11-04.
+**Status:** rev 9, 2026-11-04.
 - Rev 2 folded in the builder check (D12a, D12b).
 - Rev 3 folded in spec review round 1, three lanes (`.superpowers/sdd/2026-11-03-superuser-users-courses/spec-r1-*.md`), and the user's answers on mockup 2.
 - Rev 4 folded in spec review round 2 (`spec-r2-*.md`) and the user's answer on confirms (D24).
 - Rev 5 folds in the small points from round 3 (`spec-r3-*.md`).
 - Rev 6 folds in the user's answer on the Task 6 shots ("too many pencils"): one Edit dialog per row (D24); removing the admin is clearing the email in it (D9).
+- Rev 7 redacts a panel path's query string in the access log (§4, final review).
+- Rev 8 gives D14 short role chips with hover lists and greyed disabled rows (Safari pass).
+- Rev 9 caps the D14 hover list (Safari pass, user's: "looks very busy").
 
 **Branch:** `feat/superuser-users-courses` (local).
 
@@ -130,7 +133,14 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - the number shows even at 1: "Admin (1)";
   - an account with no role shows "—".
 
-  **Hovering a chip shows its list** in the browser's own tooltip (`title`), one item per line: Admin lists the course names; Teacher and Student list their runs as "<course> · <run title>". Superuser has none. The same list is in visually hidden text inside the chip, so a screen reader reads it (mine). The users list therefore sends the teacher and student runs as lists of `{id, title, course_name}`, not counts.
+  **Hovering a chip shows its list** in the browser's own tooltip (`title`), one item per line: Admin lists the course names; Teacher and Student list their runs as "<course> · <run title>". Superuser has none.
+
+  The **tooltip is capped** (user's, rev 9; a 40-run list "looks very busy"):
+  - each line starts with "- ";
+  - at most ten items; a longer list shows the first ten, then one more line "… and N more", with no bullet;
+  - a course name is cut to at most 24 characters and a run title to at most 20, the "…" included (so a cut name keeps up to 23 or 19 characters, a trailing space dropped, then "…"); Admin's course names are cut the same way to 30 (the numbers are mine; the user asked for 20-30). Cutting the two parts apart keeps the run title, which tells two runs of one course apart, in view.
+
+  The same list, complete and uncut, is in visually hidden text inside the chip, so a screen reader reads it (mine). The users list therefore sends the teacher and student runs as lists of `{id, title, course_name}`, not counts.
 
   A **disabled account's row is greyed** (user's; a Disabled column with a disc was tried in the Safari pass and dropped): the row's cells take the `--disabled-bg` fill (#FBFBFC, the theme's disabled-control fill; user asked for "#fafafa or similar", and #F5F6F9 was too dark), the name turns the muted grey and loses its weight, and the role chips take the disabled-state grey; email and last active are muted already. The icons stay as they are, since Enable and Edit are what a superuser needs there. A screen reader hears "Disabled" after the name (visually hidden). There is no "Disabled" chip and no Disabled column. The Disable warning (D18) still names the courses and says "teaches N runs".
 - D15 (user's): **no pages.** The list shows the **20 most recently created** accounts, newest first. Typing in the search box filters on the server and shows up to 20 matches. Filter pills (All, Admins, Teachers, Students, Disabled) combine with the search.
