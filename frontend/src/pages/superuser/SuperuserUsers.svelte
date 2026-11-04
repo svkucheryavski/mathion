@@ -201,7 +201,7 @@
                   <!-- D14 rev 8: the list is the hover (one per line) and, hidden, the screen reader's. -->
                   <span class="u-chips">
                     {#each chips as chip (chip.kind + chip.text)}
-                      <span class={['chip', chip.kind]} title={chip.items.length ? chip.items.join('\n') : undefined}
+                      <span class={['chip', chip.kind]} title={chip.tip || undefined}
                         ><span class="chip-text">{chip.text}</span
                         >{#if chip.items.length}<span class="vh">: {chip.items.join(', ')}</span>{/if}</span>
                     {/each}

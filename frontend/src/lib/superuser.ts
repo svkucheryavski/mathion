@@ -183,18 +183,41 @@ export function countLine(list: PanelUserList, role: PanelUserRole, searching: b
     : `${total} ${noun(role, total)}`;
 }
 
-/** A role chip: short text, and the list shown on hover (D14 rev 8). */
-export type RoleChip = { kind: 'su' | 'ad' | 'role'; text: string; items: string[] };
+/** A role chip: short text, the full list for a screen reader (D14 rev 8),
+ *  and the capped hover text, '' for none (D14 rev 9). */
+export type RoleChip = { kind: 'su' | 'ad' | 'role'; text: string; items: string[]; tip: string };
+
+const TIP_LINES = 10;
+
+// Cut by characters, not UTF-16 units, so a cut never splits one in two.
+function cut(s: string, max: number): string {
+  const chars = Array.from(s);
+  return chars.length <= max ? s : chars.slice(0, max - 1).join('').trimEnd() + '…';
+}
+
+// D14 rev 9: "- " lines, at most ten, then "… and N more" with no bullet.
+function tip(lines: string[]): string {
+  const shown = lines.slice(0, TIP_LINES).map((l) => `- ${l}`);
+  if (lines.length > TIP_LINES) shown.push(`… and ${lines.length - TIP_LINES} more`);
+  return shown.join('\n');
+}
 
 /** D14 rev 8: one short chip per role, the count in brackets, in D14 order;
  *  [] for an account with no role. Disabled is not a chip: the row is greyed. */
 export function roleChips(u: PanelUser): RoleChip[] {
   const chips: RoleChip[] = [];
   const named = (r: PanelRunRef) => `${r.course_name} · ${r.title}`;
-  if (u.is_superuser) chips.push({ kind: 'su', text: 'Superuser', items: [] });
-  if (u.admin_of.length) chips.push({ kind: 'ad', text: `Admin (${u.admin_of.length})`, items: u.admin_of.map((c) => c.name) });
-  if (u.teacher_runs.length) chips.push({ kind: 'role', text: `Teacher (${u.teacher_runs.length})`, items: u.teacher_runs.map(named) });
-  if (u.student_runs.length) chips.push({ kind: 'role', text: `Student (${u.student_runs.length})`, items: u.student_runs.map(named) });
+  // Course and run are cut apart, so a long course never hides the run title.
+  const short = (r: PanelRunRef) => `${cut(r.course_name, 24)} · ${cut(r.title, 20)}`;
+  const runChip = (role: string, runs: PanelRunRef[]): RoleChip =>
+    ({ kind: 'role', text: `${role} (${runs.length})`, items: runs.map(named), tip: tip(runs.map(short)) });
+  if (u.is_superuser) chips.push({ kind: 'su', text: 'Superuser', items: [], tip: '' });
+  if (u.admin_of.length) {
+    const names = u.admin_of.map((c) => c.name);
+    chips.push({ kind: 'ad', text: `Admin (${names.length})`, items: names, tip: tip(names.map((n) => cut(n, 30))) });
+  }
+  if (u.teacher_runs.length) chips.push(runChip('Teacher', u.teacher_runs));
+  if (u.student_runs.length) chips.push(runChip('Student', u.student_runs));
   return chips;
 }
 

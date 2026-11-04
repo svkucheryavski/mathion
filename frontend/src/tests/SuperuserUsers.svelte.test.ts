@@ -96,7 +96,7 @@ it('rows show name, email, the role chips and last active (D14, D22)', async () 
   // D14 rev 8: short chips; the list is the hover and, hidden, the screen reader's.
   const chips = [...anna.querySelectorAll<HTMLElement>('.chip')];
   expect(chips.map((c) => c.querySelector('.chip-text')?.textContent?.trim())).toEqual(['Admin (1)', 'Teacher (2)']);
-  expect(chips.map((c) => c.title)).toEqual(['Statistics 101', 'Statistics 101 · Autumn 2026\nStatistics 101 · Spring 2026']);
+  expect(chips.map((c) => c.title)).toEqual(['- Statistics 101', '- Statistics 101 · Autumn 2026\n- Statistics 101 · Spring 2026']);
   expect(chips[1].querySelector('.vh')?.textContent).toBe(': Statistics 101 · Autumn 2026, Statistics 101 · Spring 2026');
   expect(anna.classList.contains('u-disabled')).toBe(false);
   expect(anna.querySelector('.u-last')?.textContent?.trim()).toBe('2 hours ago');
@@ -112,7 +112,7 @@ it('an admin of two courses with the same name lists both on hover (course names
   const twin = u({ id: 30, email: 'twin@uni.dk', full_name: 'Twin', admin_of: [{ id: 4, name: 'Algebra' }, { id: 5, name: 'Algebra' }] });
   routes['GET /users'] = () => [200, page([twin])];
   await render();
-  expect(row('twin@uni.dk').querySelector<HTMLElement>('.chip')?.title).toBe('Algebra\nAlgebra');
+  expect(row('twin@uni.dk').querySelector<HTMLElement>('.chip')?.title).toBe('- Algebra\n- Algebra');
 });
 
 it('a disabled account\'s row is greyed and says Disabled to a screen reader, with no Disabled chip (D14 rev 8)', async () => {

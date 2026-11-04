@@ -154,20 +154,54 @@ const ref = (id: number, name: string) => ({ id, name });
 const run = (id: number, title: string, course_name: string) => ({ id, title, course_name });
 const runs = (n: number) => Array.from({ length: n }, (_, i) => run(i + 1, `Run ${i + 1}`, 'Stat'));
 it.each([
-  ['a superuser', user({ is_superuser: true }), [{ kind: 'su', text: 'Superuser', items: [] }]],
-  ['the admin of one course', user({ admin_of: [ref(1, 'Statistics 101')] }), [{ kind: 'ad', text: 'Admin (1)', items: ['Statistics 101'] }]],
-  ['the admin of three courses', user({ admin_of: [ref(1, 'A'), ref(2, 'B'), ref(3, 'C')] }), [{ kind: 'ad', text: 'Admin (3)', items: ['A', 'B', 'C'] }]],
+  ['a superuser', user({ is_superuser: true }), [{ kind: 'su', text: 'Superuser', items: [], tip: '' }]],
+  ['the admin of one course', user({ admin_of: [ref(1, 'Statistics 101')] }), [{ kind: 'ad', text: 'Admin (1)', items: ['Statistics 101'], tip: '- Statistics 101' }]],
+  ['the admin of three courses', user({ admin_of: [ref(1, 'A'), ref(2, 'B'), ref(3, 'C')] }), [{ kind: 'ad', text: 'Admin (3)', items: ['A', 'B', 'C'], tip: '- A\n- B\n- C' }]],
   ['a teacher of two runs', user({ teacher_runs: [run(1, 'Autumn 2026', 'Statistics 101'), run(2, 'Autumn 2026', 'Algebra')] }),
-    [{ kind: 'role', text: 'Teacher (2)', items: ['Statistics 101 · Autumn 2026', 'Algebra · Autumn 2026'] }]],
-  ['a student of one run', user({ student_runs: [run(3, 'Spring', 'Stat')] }), [{ kind: 'role', text: 'Student (1)', items: ['Stat · Spring'] }]],
+    [{ kind: 'role', text: 'Teacher (2)', items: ['Statistics 101 · Autumn 2026', 'Algebra · Autumn 2026'],
+      tip: '- Statistics 101 · Autumn 2026\n- Algebra · Autumn 2026' }]],
+  ['a student of one run', user({ student_runs: [run(3, 'Spring', 'Stat')] }), [{ kind: 'role', text: 'Student (1)', items: ['Stat · Spring'], tip: '- Stat · Spring' }]],
   ['disabled has no chip (D14 rev 8: the row is greyed)', user({ is_disabled: true }), []],
   ['in D14 order', user({ is_disabled: true, student_runs: runs(1), teacher_runs: runs(2), admin_of: [ref(1, 'Stat')], is_superuser: true }),
     ['Superuser', 'Admin (1)', 'Teacher (2)', 'Student (1)']],
   ['with no role', user(), []],
-] as const)('roleChips: %s (D14 rev 8)', (_label, u, chips) => {
+] as const)('roleChips: %s (D14 rev 8, tip rev 9)', (_label, u, chips) => {
   const got = roleChips(u);
   if (chips.length && typeof chips[0] === 'string') expect(got.map((c) => c.text)).toEqual(chips);
   else expect(got).toEqual(chips);
+});
+
+// D14 rev 9: the tooltip is capped; the hidden list (items) is not.
+const tipLines = (u: PanelUser) => roleChips(u)[0].tip.split('\n');
+it('roleChips tip: ten runs are all listed, with no "more" line (D14 rev 9)', () => {
+  const lines = tipLines(user({ teacher_runs: runs(10) }));
+  expect(lines).toHaveLength(10);
+  expect(lines[9]).toBe('- Stat · Run 10');
+});
+it('roleChips tip: past ten, the last line says how many more, with no bullet (D14 rev 9)', () => {
+  const u = user({ student_runs: runs(12) });
+  const lines = tipLines(u);
+  expect(lines).toHaveLength(11);
+  expect(lines[0]).toBe('- Stat · Run 1');
+  expect(lines[9]).toBe('- Stat · Run 10');
+  expect(lines[10]).toBe('… and 2 more');
+  expect(roleChips(u)[0].items).toHaveLength(12);
+});
+it('roleChips tip: a course name is cut at 24 and a run title at 20, apart (D14 rev 9)', () => {
+  const u = user({ teacher_runs: [
+    run(1, 'Summer school 2026 (evening group)', 'Introduction to Probability and Mathematical Statistics'),
+    run(2, 'abcdefghijklmnopqrst', 'abcdefghijklmnopqrstuvwx'),
+  ] });
+  expect(tipLines(u)).toEqual(['- Introduction to Probabi… · Summer school 2026…', '- abcdefghijklmnopqrstuvwx · abcdefghijklmnopqrst']);
+  expect(roleChips(u)[0].items[0]).toBe('Introduction to Probability and Mathematical Statistics · Summer school 2026 (evening group)');
+});
+it("roleChips tip: an admin's course name is cut at 30 (D14 rev 9)", () => {
+  const u = user({ admin_of: [ref(1, 'Introduction to Probability and Mathematical Statistics'), ref(2, 'abcdefghijklmnopqrstuvwxyz1234')] });
+  expect(tipLines(u)).toEqual(['- Introduction to Probability a…', '- abcdefghijklmnopqrstuvwxyz1234']);
+});
+it('roleChips tip: cutting counts characters, never splitting one in two (D14 rev 9)', () => {
+  const tip = tipLines(user({ admin_of: [ref(1, '𝔸'.repeat(31))] }))[0];
+  expect(tip).toBe(`- ${'𝔸'.repeat(29)}…`);
 });
 
 const SIGNED_OUT = "They'll be signed out and can't sign in until enabled; tell them yourself.";
