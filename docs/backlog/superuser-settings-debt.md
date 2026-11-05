@@ -110,3 +110,65 @@ Minor findings from the per-task review lanes of the Settings slice
     transaction; the name over-claims;
   - the PIN off test doesn't assert that `build_mailer` gave None for
     `mode="smtp"`.
+
+## Task 4 (the Settings API)
+
+- After the 20 s answer, a retry can get "A test is already running." for as
+  long as smtplib's per-step timeouts take: 20 s per step and per address of
+  the host. A hostile server can drip bytes for longer. The sentence could say
+  the last test is still finishing.
+- If the endpoint's own `_record_test` fails on the timeout path (a database
+  error), the answer is a 500 instead of the sentence.
+- A thread that dies before settling would be reported as the 20 s timeout.
+  Today every exit path settles.
+- Host and username aren't checked for spaces or control characters. The
+  dialog's single-line inputs can't send a newline, but the API accepts one,
+  and it would reach log lines and sentences.
+- A display name with an unquoted comma (`Mathion, AAU <m@uni.dk>`) is refused
+  with the format sentence, which doesn't say why. Suggest: "Put a name with a
+  comma in quotes."
+- A display name with a colon (`Aalborg Universitet: Institut <m@aau.dk>`) is
+  accepted, but goes out as group syntax (`…<m@aau.dk>;`), which RFC 5322
+  doesn't allow in From. How strict receivers treat it is unverified. Fix:
+  refuse when `back["From"].groups[0].display_name` is set, and add "or
+  colon" to the comma sentence above.
+- A pasted zero-width space (U+200B) at the end of the From isn't stripped,
+  so the field looks right but gets the format sentence.
+- An underscore domain (`my_school.dk`) is refused (correct under RFC 5321)
+  with a sentence that doesn't say why.
+- `_from_problem`: the mailbox-count and `addr_spec` lines have no test of
+  their own (other parts catch the same values). An NBSP in the local part
+  would pin the `addr_spec` line.
+- `parseaddr` accepts some odd Froms ("(comment) a@b.dk", a trailing comma).
+  A From over 320 characters gets the format sentence, not a length one.
+- A spaces-only password is accepted. The password has no length cap.
+- Saving with email off still type-checks the whole body, so Task 5 should
+  send `{"on": false}` alone. The API accepts email saves in the `file` and
+  `memory` modes; the UI can't reach that.
+- The encryption names are repeated (`ENCRYPTIONS`, `SmtpEncryption`), and the
+  sentence styles vary.
+- Test gaps:
+  - no test that smtplib gets `timeout=20` (the fake ignores it);
+  - the bad-token 404 is checked only on GET;
+  - the off-save test sends no password;
+  - nothing tests that no row lock is held during a test, or that the lock is
+    released after a recording failure;
+  - D10a's interval edges (`created_at == off_at`, a second toggle).
+- D10a: a notification created during the turn-on's own milliseconds (its
+  transaction started after the save's `now()`) is neither marked nor left out,
+  so it's sent. A later off/on doesn't mark it either. Fix: at turn-off, mark
+  the closing interval's unsent rows too.
+- A non-ASCII username passes, and the test then says "Sending failed
+  (UnicodeEncodeError).", which nobody can act on. Give the username the
+  printable-ASCII check.
+- If the thread is mid-record when the 20 s join ends, the dialog's answer
+  arrives a few milliseconds before the commit. The card shows it on the next
+  load.
+- A From copied by the migration (D2) isn't checked: a non-ASCII address on a
+  relay without SMTPUTF8 fails every message, one by one, as "secure
+  connection failed". Add `SMTPNotSupportedError` to `_STOP_MID_SEND`, so it
+  becomes D9c's batch stop with the card's red line, and give it its own
+  sentence (see Task 3's describe() line). Saving from the dialog fixes it.
+- `_send_login_pin` and the dispatcher still use `logger.exception` for
+  non-SMTP failures. The test endpoint now logs those by class only; do the
+  same there (see Task 3's line on this).
