@@ -250,6 +250,10 @@ def _build_schema():
         conn.execute(text("CREATE SCHEMA public"))
     alembic_cfg = Config(str(Path(__file__).resolve().parent.parent / "alembic.ini"))
     command.upgrade(alembic_cfg, "head")
+    # The site_settings migration copies the shell's .env into its row; every
+    # test starts without one (the defaults with email off).
+    with engine.begin() as conn:
+        conn.execute(text("TRUNCATE site_settings"))
     yield
 
 
