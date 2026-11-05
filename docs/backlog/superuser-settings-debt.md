@@ -172,3 +172,43 @@ Minor findings from the per-task review lanes of the Settings slice
 - `_send_login_pin` and the dispatcher still use `logger.exception` for
   non-SMTP failures. The test endpoint now logs those by class only; do the
   same there (see Task 3's line on this).
+
+## Task 5: the Settings page and its dialogs
+
+Minors from the review lanes, Task 5 (Opus + Fable, round 1).
+
+- **Edit email: the saved password's hint can mislead.** The placeholder
+  "Saved: type a new one to replace it" stays when the mail server or username
+  changes or the certificate box is newly ticked, though D8a then asks for the
+  password again; the server's sentence says so on Save or test. Clearing the
+  username drops the saved password with no hint, and a password typed with no
+  username is ignored. Fix: derive the placeholder from D8a's rule, and add a
+  note when the username is cleared.
+- **Edit email while busy:**
+  - Send test email stays usable while Save runs, so it can start a needless
+    20 s server-side test.
+  - While saving, the segmented choices and the checkbox go `disabled` (they
+    flash grey and drop focus), while the text fields only go read-only.
+  - A save error stays on screen next to a test result that says the same.
+- **Edit email focus:** opened with email off, focus lands on × instead of
+  the switch (Mail server is disabled).
+- **Edit email layout:** on a short laptop screen the test answer can sit
+  below the fold of the scrolling body. Scroll it into view when it appears.
+- **Edit email a11y:**
+  - The answer's `role="status"` region is created already filled, so a
+    screen reader may not announce it. Keep an empty live region mounted.
+  - The visible "Encryption" and "Longest sign-in" captions aren't tied to
+    their radiogroups (`{uid}-enc` is unused); use `aria-labelledby`.
+- **Cancel mid-test** reloads the page before the test records, so in the
+  failing-server case the card shows the test only on the next load (D9a
+  accepts this).
+- **Greyed fields:** `.ee-input:disabled` keeps the strong border. Match the
+  project's disabled-field look (`--border-faint`) and pin it in the gate.
+- **Gate gaps:** Segmented's forced-colors outlines and its greyed selected
+  state aren't pinned.
+- **Test gaps:**
+  - Cancel and Esc waiting while Save runs (each dialog);
+  - a page-level email save reaching the card (the page test's title
+    overclaims);
+  - the switch toggled off and back on, then blocked again;
+  - the `saveLimits` / `saveSignIn` bodies in superuserApi.test.ts.

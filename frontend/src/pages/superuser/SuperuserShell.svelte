@@ -11,21 +11,23 @@
   import SuperuserDashboard from './SuperuserDashboard.svelte';
   import SuperuserCourses from './SuperuserCourses.svelte';
   import SuperuserUsers from './SuperuserUsers.svelte';
+  import SuperuserSettings from './SuperuserSettings.svelte';
 
   let { token }: { token: string } = $props();
 
   const displayName = $derived(session.user?.full_name ?? session.user?.email ?? '');
 
-  // D23: /superuser/{token}, /superuser/{token}/users, /superuser/{token}/courses.
+  // D23: /superuser/{token}, then /users, /courses and /settings (Settings D4).
   const PAGES: { page: PanelPage; label: string; suffix: string }[] = [
     { page: 'dashboard', label: 'Dashboard', suffix: '' },
     { page: 'users', label: 'Users', suffix: '/users' },
     { page: 'courses', label: 'Courses', suffix: '/courses' },
+    { page: 'settings', label: 'Settings', suffix: '/settings' },
   ];
   // The segment after the token, so a token spelled "users" still reads as the Dashboard.
   const page = $derived.by((): PanelPage => {
     const seg = currentRoute.path.split('/').filter(Boolean)[2];
-    return seg === 'users' || seg === 'courses' ? seg : 'dashboard';
+    return seg === 'users' || seg === 'courses' || seg === 'settings' ? seg : 'dashboard';
   });
   const current = $derived(PAGES.find((p) => p.page === page)!);
 
@@ -93,6 +95,8 @@
       <SuperuserDashboard {token} {onAuth} />
     {:else if page === 'courses'}
       <SuperuserCourses {token} {onAuth} />
+    {:else if page === 'settings'}
+      <SuperuserSettings {token} {onAuth} />
     {:else}
       <SuperuserUsers {token} {onAuth} />
     {/if}

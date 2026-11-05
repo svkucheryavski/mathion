@@ -23,12 +23,22 @@ function dispatchFetch() {
       return jsonResponse(200, { users: [], total: 0, counts: { all: 0, admins: 0, teachers: 0, students: 0, disabled: 0 } });
     }
     if (s.includes('/api/superuser/') && s.includes('/courses')) return jsonResponse(200, []);
+    if (s.includes('/api/superuser/') && s.includes('/settings')) return jsonResponse(200, SETTINGS);
     if (s.includes('/api/superuser/')) {
       return jsonResponse(200, { total_users: 0, total_courses: 0, storage_bytes: 0, active_users_24h: 0, active_users_7d: 0 });
     }
     return jsonResponse(200, []);
   });
 }
+const SETTINGS = {
+  email: {
+    on: false, host: '', port: 587, encryption: 'starttls', skip_cert_check: false, username: '',
+    password_saved: false, password_unreadable: false, from_address: '', dev_mode: null, card_test: null, failing: null,
+  },
+  limits: { max_file_mb: 20, max_total_mb: 500 },
+  sign_in: { pin_minutes: 10, pin_requests_per_hour: 3, pin_failures_per_hour: 5, longest_sign_in_days: 30 },
+  site: { base_url: 'https://learn.uni.dk' },
+};
 async function settle() {
   for (let i = 0; i < 8; i++) await Promise.resolve();
   flushSync();
@@ -88,7 +98,7 @@ it('with no session (an expired link is checked before the session) the bar has 
   expect(target.querySelector('header.su-header .name')).toBeNull();
   expect(buttonByText(target, 'Sign out')).toBeNull();
   // The brand and the pills still show; the page itself does not.
-  expect(pillTexts()).toEqual(['Dashboard', 'Users', 'Courses']);
+  expect(pillTexts()).toEqual(['Dashboard', 'Users', 'Courses', 'Settings']);
   expect(target.querySelector('.dashboard')).toBeNull();
 });
 
@@ -146,7 +156,7 @@ it('suppresses AppHeader on /superuser paths but shows it on /courses', async ()
   expect(target.querySelector('header.su-header')).toBeNull();
 });
 
-it('the bar is the main site look: logo + wordmark, the three pills, the name, a ghost Sign out', async () => {
+it('the bar is the main site look: logo + wordmark, the four pills, the name, a ghost Sign out', async () => {
   vi.stubGlobal('fetch', dispatchFetch());
   session.user = {
     id: 1, email: 'su@x.com', full_name: 'Sue Perr', is_superuser: true,
@@ -158,7 +168,7 @@ it('the bar is the main site look: logo + wordmark, the three pills, the name, a
   expect(header).not.toBeNull();
   expect(header.querySelector('.brand svg')).not.toBeNull();
   expect(header.querySelector('.brand .wordmark')?.textContent).toBe('Mathion');
-  expect(pillTexts()).toEqual(['Dashboard', 'Users', 'Courses']);
+  expect(pillTexts()).toEqual(['Dashboard', 'Users', 'Courses', 'Settings']);
   expect(header.querySelector('.name')?.textContent).toBe('Sue Perr');
   const signOut = buttonByText(target, 'Sign out')!;
   expect(signOut.dataset.variant).toBe('ghost');
@@ -183,7 +193,7 @@ it('the bar has no links outside the panel, so nothing leads away from it', asyn
   await settle();
   expect(target.querySelector('header.su-header .name')).not.toBeNull();
   const hrefs = [...target.querySelectorAll('header.su-header a')].map((a) => a.getAttribute('href'));
-  expect(hrefs).toHaveLength(3);
+  expect(hrefs).toHaveLength(4);
   for (const h of hrefs) expect(h === '/superuser/tok' || h!.startsWith('/superuser/tok/')).toBe(true);
 });
 
@@ -199,15 +209,15 @@ it('the page has a Dashboard heading above the cards, in the page column', async
   expect(h1.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
-it('the pills are same-tab links to the three pages; the current one is marked (D23)', async () => {
+it('the pills are same-tab links to the four pages; the current one is marked (D23)', async () => {
   vi.stubGlobal('fetch', dispatchFetch());
   router.currentRoute.path = '/superuser/T/users';
   component = mount(SuperuserShell, { target, props: { token: 'T' } });
   await settle();
   const nav = target.querySelector('header.su-header nav')!;
   expect(nav.getAttribute('aria-label')).toBe('Superuser panel');
-  expect(pills().map((a) => a.getAttribute('href'))).toEqual(['/superuser/T', '/superuser/T/users', '/superuser/T/courses']);
-  expect(pills().map((a) => a.getAttribute('aria-current'))).toEqual([null, 'page', null]);
+  expect(pills().map((a) => a.getAttribute('href'))).toEqual(['/superuser/T', '/superuser/T/users', '/superuser/T/courses', '/superuser/T/settings']);
+  expect(pills().map((a) => a.getAttribute('aria-current'))).toEqual([null, 'page', null, null]);
   for (const a of pills()) expect(a.hasAttribute('target')).toBe(false);
 });
 
@@ -252,6 +262,13 @@ it('the heading and the page follow the route', async () => {
   expect(target.querySelector('main.su-main h1')?.textContent).toBe('Courses');
   expect(target.querySelector('main.su-main')?.textContent).toContain('No courses yet.');
   expect(pills()[2].getAttribute('aria-current')).toBe('page');
+  router.currentRoute.path = '/superuser/T/settings';
+  await settle();
+  expect(target.querySelector('main.su-main h1')?.textContent).toBe('Settings');
+  // The Settings page itself mounted: its four cards.
+  expect([...target.querySelectorAll('main.su-main section.s-card h2')].map((h) => h.textContent))
+    .toEqual(['Email', 'File limits', 'Sign-in', 'Site']);
+  expect(pills()[3].getAttribute('aria-current')).toBe('page');
 });
 
 it("a 404 from a page's load shows the expired-link text instead of the page", async () => {

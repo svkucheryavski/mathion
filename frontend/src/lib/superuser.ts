@@ -236,10 +236,88 @@ export function disableWarning(u: PanelUser): string {
   return `Disable ${who}? ${middle}They'll be signed out and can't sign in until enabled; tell them yourself.`;
 }
 
+// --- Settings (Settings spec D4-D12), mirroring backend/mathion/schemas.py ---
+
+export type Encryption = 'starttls' | 'ssl' | 'none';
+
+export type PanelEmailTest = { at: string; ok: boolean; message: string };
+export type PanelSendFailure = { since: string; message: string };
+
+export type PanelEmailSettings = {
+  on: boolean;
+  host: string;
+  port: number;
+  encryption: Encryption;
+  skip_cert_check: boolean;
+  username: string;
+  /** D8: the password itself never reaches the browser. */
+  password_saved: boolean;
+  password_unreadable: boolean;
+  from_address: string;
+  /** D2c: a developer mode set in .env wins over the panel. */
+  dev_mode: 'file' | 'memory' | null;
+  /** D9a: the last test of the settings now saved. */
+  card_test: PanelEmailTest | null;
+  /** D9d: the queue is stuck on a server-side failure. */
+  failing: PanelSendFailure | null;
+};
+
+export type PanelLimits = { max_file_mb: number; max_total_mb: number };
+
+export type PanelSignIn = {
+  pin_minutes: number;
+  pin_requests_per_hour: number;
+  pin_failures_per_hour: number;
+  longest_sign_in_days: number;
+};
+
+export type PanelSettings = {
+  email: PanelEmailSettings;
+  limits: PanelLimits;
+  sign_in: PanelSignIn;
+  site: { base_url: string };
+};
+
+/** What a test sends: the form as it is now; no password means the saved one (D8a). */
+export type EmailTestBody = {
+  host: string;
+  port: number;
+  encryption: Encryption;
+  skip_cert_check: boolean;
+  username: string;
+  password?: string;
+  from_address: string;
+};
+
+/** D7c: an off save sends the switch alone, so nothing else is written. */
+export type EmailSaveBody = { on: false } | ({ on: true } & EmailTestBody);
+
+export type EmailTestResult = { ok: boolean; message: string };
+
+export function getSettings(token: string): Promise<PanelSettings> {
+  return api.get<PanelSettings>(`${base(token)}/settings`, opts);
+}
+
+export function saveEmail(token: string, body: EmailSaveBody): Promise<PanelSettings> {
+  return api.patch<PanelSettings>(`${base(token)}/settings/email`, body, opts);
+}
+
+export function saveLimits(token: string, body: PanelLimits): Promise<PanelSettings> {
+  return api.patch<PanelSettings>(`${base(token)}/settings/limits`, body, opts);
+}
+
+export function saveSignIn(token: string, body: PanelSignIn): Promise<PanelSettings> {
+  return api.patch<PanelSettings>(`${base(token)}/settings/sign-in`, body, opts);
+}
+
+export function testEmail(token: string, body: EmailTestBody): Promise<EmailTestResult> {
+  return api.post<EmailTestResult>(`${base(token)}/settings/email/test`, body, opts);
+}
+
 // --- The shell (D23, D25) ---
 
-/** The panel's three pages; the shell reads it from the route. */
-export type PanelPage = 'dashboard' | 'users' | 'courses';
+/** The panel's four pages; the shell reads it from the route. */
+export type PanelPage = 'dashboard' | 'users' | 'courses' | 'settings';
 
 // --- Errors (D25) ---
 

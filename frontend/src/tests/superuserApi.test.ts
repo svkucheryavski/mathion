@@ -3,7 +3,7 @@ import { ApiError, OFFLINE_MESSAGE } from '../lib/api';
 import * as events from '../lib/events';
 import {
   panelError, listUsers, assignAdmin, updateUser, deleteCourse, lookupAccount, adminNote,
-  countLine, roleChips, disableWarning,
+  countLine, roleChips, disableWarning, getSettings, saveEmail, saveLimits, saveSignIn, testEmail,
   type AdminAssignResult, type PanelUser, type PanelUserList, type PanelUserRole,
 } from '../lib/superuser';
 
@@ -219,4 +219,38 @@ it('disableWarning: teacher only, singular for one run', () => {
 it('disableWarning: no role has no middle sentence, and a nameless account is named by email', () => {
   expect(disableWarning(user({ student_runs: runs(4) }))).toBe(`Disable Anna Holm? ${SIGNED_OUT}`);
   expect(disableWarning(user({ full_name: null, teacher_runs: runs(1) }))).toBe(`Disable aho@uni.dk? aho@uni.dk teaches 1 run. ${SIGNED_OUT}`);
+});
+
+it('the Settings calls: one GET, a PATCH per card, a POST for the test, all on the token', async () => {
+  const unauth = vi.spyOn(events, 'emitUnauthorized');
+  const f = vi.fn(async (..._a: Parameters<typeof fetch>) => jsonResponse(200, {}));
+  vi.stubGlobal('fetch', f);
+  await getSettings('T');
+  expect(String(f.mock.calls[0][0])).toBe('/api/superuser/T/settings');
+  expect(f.mock.calls[0][1]?.method ?? 'GET').toBe('GET');
+
+  // D7c: an off save sends the switch alone.
+  await saveEmail('T', { on: false });
+  expect(String(f.mock.calls[1][0])).toBe('/api/superuser/T/settings/email');
+  expect(f.mock.calls[1][1]?.method).toBe('PATCH');
+  expect(f.mock.calls[1][1]?.body).toBe(JSON.stringify({ on: false }));
+
+  await saveLimits('T', { max_file_mb: 50, max_total_mb: 500 });
+  expect(String(f.mock.calls[2][0])).toBe('/api/superuser/T/settings/limits');
+  expect(f.mock.calls[2][1]?.method).toBe('PATCH');
+
+  await saveSignIn('T', { pin_minutes: 10, pin_requests_per_hour: 3, pin_failures_per_hour: 5, longest_sign_in_days: 7 });
+  expect(String(f.mock.calls[3][0])).toBe('/api/superuser/T/settings/sign-in');
+  expect(f.mock.calls[3][1]?.method).toBe('PATCH');
+
+  f.mockImplementation(async () => jsonResponse(200, { ok: true, message: 'Sent to su@x.dk: check your inbox.' }));
+  const body = { host: 'smtp.x.dk', port: 587, encryption: 'starttls' as const, skip_cert_check: false, username: '', from_address: 'a@x.dk' };
+  expect(await testEmail('T', body)).toEqual({ ok: true, message: 'Sent to su@x.dk: check your inbox.' });
+  expect(String(f.mock.calls[4][0])).toBe('/api/superuser/T/settings/email/test');
+  expect(f.mock.calls[4][1]?.method).toBe('POST');
+  expect(f.mock.calls[4][1]?.body).toBe(JSON.stringify(body));
+
+  f.mockImplementation(async () => jsonResponse(401, { detail: 'Not authenticated' }));
+  await expect(getSettings('T')).rejects.toBeInstanceOf(ApiError);
+  expect(unauth).not.toHaveBeenCalled();
 });
