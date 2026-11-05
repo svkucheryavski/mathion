@@ -171,7 +171,7 @@ func TestEmbeddedComposeTLSTopology(t *testing.T) {
 		"SSL_ACME_LOCATION": "/srv/acme",
 		"STATIC_ENABLED":    "true",
 		"STATIC_RULES":      "${MATHION_TLS_DOMAIN},/,http://app:8000/",
-		"MAX_SIZE":          "25M",
+		"MAX_SIZE":          "60M", // Settings D11c: the 50 MB ceiling plus the form's overhead
 	} {
 		if proxy.Environment[k] != want {
 			t.Errorf("proxy env %s = %q, want %q", k, proxy.Environment[k], want)

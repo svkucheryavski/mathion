@@ -16,14 +16,27 @@ func TestEnvFixedValues(t *testing.T) {
 	fixed := map[string]string{
 		"POSTGRES_USER": "mathion", "POSTGRES_DB": "mathion",
 		"MATHION_COOKIE_SECURE": "1", "MATHION_DEBUG": "0",
-		"MATHION_EMAIL_MODE":    "disabled",
-		"MATHION_ASSET_PATH":    "/data/mathion/assets",
-		"MATHION_MAX_FILE_SIZE": "20971520", "MATHION_MAX_COURSE_SIZE": "524288000",
+		"MATHION_EMAIL_MODE": "disabled",
+		"MATHION_ASSET_PATH": "/data/mathion/assets",
 	}
 	for k, v := range fixed {
 		if m[k] != v {
 			t.Errorf("%s = %q, want %q", k, m[k], v)
 		}
+	}
+}
+
+// Settings D2b: the size limits live in the panel's Settings now, so a new .env
+// no longer carries them; the email mode stays ("disabled" = the panel decides).
+func TestGenerateEnvDropsMovedKeys(t *testing.T) {
+	m := ParseEnv(RenderEnv(gen()))
+	for _, k := range []string{"MATHION_MAX_FILE_SIZE", "MATHION_MAX_COURSE_SIZE"} {
+		if _, ok := m[k]; ok {
+			t.Errorf("generated .env still has %s", k)
+		}
+	}
+	if m["MATHION_EMAIL_MODE"] != "disabled" {
+		t.Errorf("MATHION_EMAIL_MODE = %q, want disabled", m["MATHION_EMAIL_MODE"])
 	}
 }
 

@@ -28,8 +28,6 @@ func GenerateEnv(baseURL, version, secretKey, pgPassword string) Env {
 		{"MATHION_DEBUG", "0"},
 		{"MATHION_EMAIL_MODE", "disabled"},
 		{"MATHION_ASSET_PATH", "/data/mathion/assets"},
-		{"MATHION_MAX_FILE_SIZE", "20971520"},
-		{"MATHION_MAX_COURSE_SIZE", "524288000"},
 		{"MATHION_VERSION", version},
 		{"MATHION_TLS_DOMAIN", ""},
 		{"MATHION_TLS_EMAIL", ""},

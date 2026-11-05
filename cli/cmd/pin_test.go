@@ -22,7 +22,7 @@ func TestPinGatesOnComposeError(t *testing.T) {
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("pin must surface a compose/infra error, not swallow it")
 	}
-	if strings.Contains(out.String(), "PIN expires") {
+	if strings.Contains(out.String(), "Log in at") {
 		t.Fatalf("pin must not print the advisory when the exec failed, got %q", out.String())
 	}
 	// `--` ends option parsing so a leading-dash email is never read as a flag.
@@ -33,8 +33,8 @@ func TestPinGatesOnComposeError(t *testing.T) {
 }
 
 func TestPinSuccessPrintsAdvisory(t *testing.T) {
-	// The subcommand exits 0 (including on rate-limit), so a clean exec prints
-	// the advisory and returns no error.
+	// The subcommand exits 0, so a clean exec prints the advisory and returns
+	// no error.
 	f := &compose.FakeRunner{}
 	app := newTestApp(f)
 	var out bytes.Buffer
@@ -44,7 +44,32 @@ func TestPinSuccessPrintsAdvisory(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("pin on a clean exec must not error, got %v", err)
 	}
-	if !strings.Contains(out.String(), "PIN expires in 10 min") {
+	if !strings.Contains(out.String(), "Log in at your HTTPS domain") {
 		t.Fatalf("expected the advisory after a clean exec, got %q", out.String())
+	}
+}
+
+func TestPinTextQuotesNoFixedNumbers(t *testing.T) {
+	// Settings D14: the panel's Settings set how long a PIN lasts and the
+	// request limit, and `mathion pin` skips that limit; the backend prints the
+	// real minutes. So neither the help nor the advisory quotes a number.
+	f := &compose.FakeRunner{}
+	app := newTestApp(f)
+	var out bytes.Buffer
+	app.Out = &out
+	cmd := newPinCmd(app)
+	cmd.SetArgs([]string{"you@example.edu"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("pin on a clean exec must not error, got %v", err)
+	}
+	for _, text := range []string{cmd.Short, cmd.Long, out.String()} {
+		for _, old := range []string{"10 min", "3/hour"} {
+			if strings.Contains(text, old) {
+				t.Errorf("pin text quotes %q: %q", old, text)
+			}
+		}
+	}
+	if !strings.Contains(cmd.Short, "Settings") {
+		t.Errorf("pin help should point to the panel's Settings, got %q", cmd.Short)
 	}
 }

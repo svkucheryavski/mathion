@@ -239,4 +239,31 @@ Minors from the review lanes, Task 5 (Opus + Fable, round 1).
   instead of sending its 413 (HTTP/1.1, nginx). Then the student sees the
   network copy with Retry, not the limit sentence. Note which one appears in
   the spec's manual check (a 40 MB upload through an old proxy) and adjust
-  the README's D11c paragraph if needed.
+  the README's D11c paragraph and the release note
+  (`docs/release-notes/settings-release-order.md`, which quotes the sentence)
+  if needed.
+
+## Task 7: CLI, deploy files and docs
+
+- **The README's way back in is CLI-only.** Operations names
+  `sudo mathion pin <email>`; an operator on the manual docker-compose path has
+  no `mathion` binary. Add the `docker compose … exec app python -m
+  mathion.superuser pin <email>` form.
+- **The man page calls `pin` "pin the image"** (`deploy/man/mathion.1:36-37`,
+  pre-existing). It issues a sign-in PIN.
+- **`mathion pin` prints its "Log in at…" advisory after "unknown email" or
+  "user is disabled"** (pre-existing; the backend command always exits 0).
+- **An old CLI's `mathion pin` still prints "10 min"** under the server's real
+  minutes, until the operator upgrades the CLI.
+- **The release note (`docs/release-notes/settings-release-order.md`) could
+  say more** (review r3):
+  - pull `main` and check its last commit is the Settings merge before tagging;
+  - what to do if a release run fails: fix on `main` and use the next tag,
+    never move a pushed tag;
+  - make the CLI tag annotated (`git tag -a cli-v0.9.0 -m …`), like
+    `cli-v0.4.0` to `cli-v0.8.0`;
+  - operators could check `sudo mathion version` before `mathion update` too;
+  - say where startup names the leftover `.env` keys (one INFO line in
+    `sudo mathion logs app`);
+  - a line for operators on the manual docker-compose path, who have no
+    `mathion self-update`.
