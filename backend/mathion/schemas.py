@@ -926,6 +926,8 @@ class SuperuserStatsResponse(BaseModel):
 
 class AuthConfigResponse(BaseModel):
     send_pin_enabled: bool
+    longest_sign_in_days: int  # superuser Settings D12
+    max_file_mb: int           # superuser Settings D11b
 
 
 # --- The superuser panel: Courses (spec D4-D13) and Users (D14-D21) ---

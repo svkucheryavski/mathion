@@ -39,3 +39,25 @@ Minor findings from the per-task review lanes of the Settings slice
     or the two D10a times;
   - no migration test with a password over 32 bytes (a multi-block seal);
   - no test that flips a nonce byte.
+
+## Task 2 (limits and sign-in rules)
+
+- The minutes in the PIN email and in `mathion pin`'s output come from a
+  second `load(db)` right after the PIN is committed. A save in between makes
+  the text disagree with the PIN's real expiry. Fix: return the minutes from
+  `request_pin`. The bootstrap command also clears wrong tries in its own
+  commit; it could do that before `request_pin`, in one commit.
+- `/verify-pin` loads the settings row twice (`api_verify_pin`, then
+  `verify_pin`).
+- Test gaps:
+  - `test_login_pin_delivery` checks `task.args[2] == 10`, the default; no
+    test checks the email's "It expires in N minutes." against a saved value;
+  - only course files test "exactly the limit is accepted"; run files (POST,
+    PUT), submissions and evaluations don't;
+  - no test pins the wrong-try limit on an operator PIN;
+  - `"Max-Age=86400" in set-cookie` is a substring check (864000 would match);
+  - `test_config_without_a_row_reports_the_defaults` depends on the shell's
+    MATHION_DEBUG (it should pin `settings.debug`);
+  - `test_course_asset_read_is_bounded` proves MB+1 was read, not that
+    nothing larger was.
+- `test_auth.py` imports mid-file with underscore aliases (E402).

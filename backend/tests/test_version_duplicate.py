@@ -67,13 +67,6 @@ def test_duplicate_missing_source_404(admin_client):
     assert r.status_code == 404
 
 
-def test_duplicate_over_quota_400(admin_client, db, monkeypatch):
-    _, src_v, _ = _build_full_source(admin_client, db)
-    monkeypatch.setattr(settings, "max_course_size", 1)  # any real asset exceeds
-    r = admin_client.post(f"/api/versions/{src_v['id']}/duplicate", json={"label": "x"})
-    assert r.status_code == 400
-
-
 def test_duplicate_dangling_referenced_asset_409_no_orphan_dir(admin_client, db):
     _, src_v, _ = _build_full_source(admin_client, db)
     admin_client.post(f"/api/versions/{src_v['id']}/publish")

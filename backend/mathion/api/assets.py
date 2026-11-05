@@ -16,6 +16,7 @@ from mathion.dependencies import get_current_user
 from mathion.models import Asset, AssetReference, CourseAdmin, CourseVersion
 from mathion.models_auth import StudentEnrollment, User
 from mathion.schemas import AssetResponse
+from mathion.site_settings import file_over_limit, load as load_site, total_over_limit
 
 router = APIRouter(tags=["assets"])
 
@@ -46,12 +47,10 @@ def upload_asset(
     if ext is None:
         raise HTTPException(status_code=400, detail=f"File extension not allowed: {file.filename}")
 
-    content = file.file.read()
-    if len(content) > settings.max_file_size:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File size {len(content)} exceeds max {settings.max_file_size}",
-        )
+    site = load_site(db)
+    content = file.file.read(site.max_file_bytes + 1)  # bounded, like the other upload paths (D11)
+    if len(content) > site.max_file_bytes:
+        raise HTTPException(status_code=400, detail=file_over_limit(site))
     if not content.strip():
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
@@ -59,11 +58,8 @@ def upload_asset(
     current_total = db.scalar(
         select(func.coalesce(func.sum(Asset.file_size), 0)).where(Asset.version_id == version_id)
     )
-    if current_total + len(content) > settings.max_course_size:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Total version asset size would exceed limit ({settings.max_course_size} bytes)",
-        )
+    if current_total + len(content) > site.max_total_bytes:
+        raise HTTPException(status_code=400, detail=total_over_limit(site, "version"))
 
     filename = sanitize_filename(file.filename)
     mime_type = get_mime_type(ext)

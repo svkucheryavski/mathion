@@ -13,6 +13,7 @@ from mathion.models_auth import User
 from mathion.notifications.mailer import build_mailer_from_settings
 from mathion.notifications.templates import build_login_pin_message
 from mathion.schemas import AuthConfigResponse, PinRequestSchema, PinVerifySchema, UserResponse, UserUpdate
+from mathion.site_settings import load as load_site
 from mathion.superuser import service as panel_service
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -45,16 +46,20 @@ def _require_csrf(request: Request):
 
 
 @router.get("/config", response_model=AuthConfigResponse)
-def api_auth_config() -> AuthConfigResponse:
+def api_auth_config(db: Session = Depends(get_db)) -> AuthConfigResponse:
     # True whenever "Send PIN" yields a retrievable PIN: debug (console print) or
     # a delivering mailer (smtp inbox / file .eml outbox). Excludes the one-shot
-    # `memory` sink and `disabled`. Public, no auth, no CSRF (GET).
+    # `memory` sink and `disabled`. Public, no auth, no CSRF (GET), so it carries
+    # nothing beyond what the login page and the upload checks need (D10b).
+    site = load_site(db)
     return AuthConfigResponse(
-        send_pin_enabled=settings.debug or settings.email_mode in ("smtp", "file")
+        send_pin_enabled=settings.debug or settings.email_mode in ("smtp", "file"),
+        longest_sign_in_days=site.longest_sign_in_days,
+        max_file_mb=site.max_file_mb,
     )
 
 
-def _send_login_pin(email: str, raw_pin: str) -> None:
+def _send_login_pin(email: str, raw_pin: str, minutes: int) -> None:
     """Build a one-shot mailer and send the login PIN. Best-effort: any
     build/send failure is caught and logged with a static message (never the
     raw PIN). This is the SOLE error boundary for the send after it moved
@@ -62,7 +67,7 @@ def _send_login_pin(email: str, raw_pin: str) -> None:
     try:
         mailer = build_mailer_from_settings(settings)  # one-shot; NOT app.state.mailer
         if mailer is not None:
-            msg = build_login_pin_message(email, raw_pin)
+            msg = build_login_pin_message(email, raw_pin, minutes=minutes)
             with mailer.session():
                 mailer.send(msg)
     except Exception:
@@ -84,14 +89,18 @@ def api_request_pin(
     if raw_pin is not None and not settings.debug:
         # data.email is already stripped+lowercased by PinRequestSchema.normalize_email;
         # the .strip().lower() here is belt-and-suspenders (a no-op post-schema).
-        background_tasks.add_task(_send_login_pin, data.email.strip().lower(), raw_pin)
+        background_tasks.add_task(_send_login_pin, data.email.strip().lower(), raw_pin,
+                                  load_site(db).pin_minutes)
     return {"message": "PIN sent"}
 
 
 @router.post("/verify-pin")
 def api_verify_pin(request: Request, data: PinVerifySchema, response: Response, db: Session = Depends(get_db)):
     _require_csrf(request)
-    token = verify_pin(db, data.email, data.pin, data.duration_days)
+    # D12: a longer request (a login page left open across a change) is
+    # shortened to the longest, before and apart from the PIN check.
+    days = min(data.duration_days, load_site(db).longest_sign_in_days)
+    token = verify_pin(db, data.email, data.pin, days)
     if not token:
         raise HTTPException(status_code=401, detail="Invalid or expired PIN")
 
@@ -101,7 +110,7 @@ def api_verify_pin(request: Request, data: PinVerifySchema, response: Response, 
         httponly=True,
         samesite="lax",
         secure=settings.cookie_secure,
-        max_age=data.duration_days * 86400,
+        max_age=days * 86400,
     )
 
     email = data.email.strip().lower()

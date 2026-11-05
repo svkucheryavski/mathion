@@ -27,6 +27,27 @@ RANGES = {
 SIGN_IN_DAYS = (1, 7, 30)
 ENCRYPTIONS = ("starttls", "ssl", "none")
 
+# D2: the .env keys the migration copied; once copied they're ignored, and
+# startup names any that .env still sets.
+MOVED_ENV_KEYS = (
+    "MATHION_MAX_FILE_SIZE", "MATHION_MAX_COURSE_SIZE", "MATHION_PIN_EXPIRY_MINUTES",
+    "MATHION_MAX_PIN_REQUESTS_PER_HOUR", "MATHION_MAX_PIN_FAILURES_PER_HOUR",
+)
+
+
+# D11a: upload errors say the limit in whole MB (a path that reads only the
+# limit plus one byte never knows the real size).
+def file_over_limit(view: "SiteSettingsView") -> str:
+    return f"This file is over the {view.max_file_mb} MB limit."
+
+
+def total_over_limit(view: "SiteSettingsView", kind: str) -> str:
+    return f"This would take the files of this {kind} past its {view.max_total_mb} MB limit."
+
+
+def copy_over_limit(view: "SiteSettingsView") -> str:
+    return f"This version's files are over the {view.max_total_mb} MB limit, so it can't be copied."
+
 
 @dataclass(frozen=True)
 class SiteSettingsView:

@@ -15,12 +15,12 @@ from mathion.api.authz import require_course_admin_for_run, require_run_admin_or
 from mathion.api.asset_render import render_with_run_assets
 from mathion.api.submission_files import run_asset_storage_dir
 from mathion.assets import get_mime_type, sanitize_filename, validate_extension
-from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import CourseAdmin, CourseVersion, Run, RunAsset, RunAssetReference, RunStudent, RunTeacher
 from mathion.models_auth import User
 from mathion.schemas import RunAssetResponse
+from mathion.site_settings import file_over_limit, load as load_site, total_over_limit
 
 router = APIRouter(tags=["run-assets"])
 
@@ -41,21 +41,16 @@ def upload_run_asset(
     if ext is None:
         raise HTTPException(status_code=400, detail=f"File extension not allowed: {file.filename}")
 
-    content = file.file.read(settings.max_file_size + 1)
-    if len(content) > settings.max_file_size:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File size {len(content)} exceeds max {settings.max_file_size}",
-        )
+    site = load_site(db)
+    content = file.file.read(site.max_file_bytes + 1)
+    if len(content) > site.max_file_bytes:
+        raise HTTPException(status_code=413, detail=file_over_limit(site))
 
     current_total = db.scalar(
         select(func.coalesce(func.sum(RunAsset.file_size), 0)).where(RunAsset.run_id == run_id)
     )
-    if current_total + len(content) > settings.max_course_size:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Total run asset size would exceed limit ({settings.max_course_size} bytes)",
-        )
+    if current_total + len(content) > site.max_total_bytes:
+        raise HTTPException(status_code=413, detail=total_over_limit(site, "run"))
 
     filename = sanitize_filename(file.filename)
     asset = RunAsset(
@@ -145,12 +140,10 @@ def replace_run_asset(
             detail=f"Extension must match the existing asset's extension ({existing_ext}).",
         )
 
-    content = file.file.read(settings.max_file_size + 1)
-    if len(content) > settings.max_file_size:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File size {len(content)} exceeds max {settings.max_file_size}",
-        )
+    site = load_site(db)
+    content = file.file.read(site.max_file_bytes + 1)
+    if len(content) > site.max_file_bytes:
+        raise HTTPException(status_code=413, detail=file_over_limit(site))
 
     size_delta = len(content) - asset.file_size
     if size_delta > 0:
@@ -159,14 +152,8 @@ def replace_run_asset(
                 RunAsset.run_id == run_id
             )
         )
-        if (current_total or 0) + size_delta > settings.max_course_size:
-            raise HTTPException(
-                status_code=413,
-                detail=(
-                    "Total run asset size would exceed limit "
-                    f"({settings.max_course_size} bytes)"
-                ),
-            )
+        if (current_total or 0) + size_delta > site.max_total_bytes:
+            raise HTTPException(status_code=413, detail=total_over_limit(site, "run"))
 
     dirpath = run_asset_storage_dir(run_id)
     filepath = os.path.join(dirpath, asset.filename)

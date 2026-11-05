@@ -185,7 +185,7 @@ def test_validate_session_expired(db):
 
 
 def test_request_pin_rate_limited(db):
-    """After max_pin_requests_per_hour PINs, further requests return None."""
+    """After pin_requests_per_hour (panel Settings) PINs, further requests return None."""
     user = User(email="alice@example.com")
     db.add(user)
     db.commit()
@@ -199,7 +199,7 @@ def test_request_pin_rate_limited(db):
 
 
 def test_verify_pin_rate_limited_after_failures(db):
-    """After max_pin_failures_per_hour failed verifications, further attempts return None."""
+    """After pin_failures_per_hour (panel Settings) failed verifications, further attempts return None."""
     from mathion.models_auth import RateLimitEntry
     user = User(email="alice@example.com")
     db.add(user)
@@ -207,7 +207,7 @@ def test_verify_pin_rate_limited_after_failures(db):
     # Create a valid PIN first
     raw_pin = request_pin(db, "alice@example.com")
     assert raw_pin is not None
-    # Simulate max_pin_failures_per_hour failures by inserting rate limit entries directly
+    # Simulate pin_failures_per_hour failures by inserting rate limit entries directly
     for _ in range(5):
         db.add(RateLimitEntry(key="pin_failure:alice@example.com"))
     db.commit()

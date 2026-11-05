@@ -7,9 +7,10 @@ from starlette.requests import Request as StarletteRequest
 import mathion.api.auth as auth_api
 from mathion.auth import verify_pin
 from mathion.config import settings
-from mathion.models_auth import NotificationLogEntry, User
+from mathion.models_auth import NotificationLogEntry, RateLimitEntry, User
 from mathion.notifications.mailer import MemoryMailer
 from mathion.schemas import PinRequestSchema
+from tests.conftest import set_site
 
 
 def _make_user(db, email="real@example.com"):
@@ -140,6 +141,7 @@ def test_eligible_user_schedules_send_off_path(db, monkeypatch):
     # validate the scheduled PIN non-circularly (same pattern as
     # test_sends_exactly_one_login_pin), not by reading task.args[1] back.
     assert verify_pin(db, "real@example.com", task.args[1], 1) is not None
+    assert task.args[2] == 10  # the PIN's minutes, for the email (D10b)
 
 
 def test_unknown_user_schedules_nothing(db, monkeypatch):
@@ -169,7 +171,10 @@ def test_disabled_user_schedules_nothing(db, monkeypatch):
 def test_rate_limited_user_schedules_nothing(db, monkeypatch):
     _make_user(db)
     monkeypatch.setattr(settings, "debug", False)
-    monkeypatch.setattr(settings, "max_pin_requests_per_hour", 0)  # any count >= 0 -> limited
+    set_site(db, pin_requests_per_hour=3)
+    for _ in range(3):
+        db.add(RateLimitEntry(key="pin_request:real@example.com"))
+    db.commit()
     bg = BackgroundTasks()
     auth_api.api_request_pin(
         _csrf_request(), PinRequestSchema(email="real@example.com"), bg, db=db

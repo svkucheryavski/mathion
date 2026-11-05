@@ -9,12 +9,9 @@ class Settings(BaseSettings):
     version: str = "unknown"          # reads MATHION_VERSION via env_prefix="MATHION_"
     database_url: str = "postgresql+psycopg://mathion:mathion@localhost:5432/mathion"
     asset_path: str = "/data/mathion/assets"
-    max_file_size: int = 20 * 1024 * 1024  # 20MB
-    max_course_size: int = 500 * 1024 * 1024  # 500MB
     secret_key: str = "dev-secret-key-change-in-production"
-    pin_expiry_minutes: int = 10
-    max_pin_requests_per_hour: int = 3
-    max_pin_failures_per_hour: int = 5
+    # File limits and sign-in rules live in the panel's Settings
+    # (mathion.site_settings, superuser Settings spec D1, D2).
     cookie_secure: bool = False  # Set True in production (HTTPS)
     # Dev-only: when MATHION_DEBUG=1, generated login PINs are printed to
     # stdout (visible in the uvicorn terminal). MUST be off in production.

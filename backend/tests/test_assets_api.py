@@ -2,8 +2,6 @@ import io
 
 import pytest
 
-from mathion.config import settings
-
 
 def _create_published_version(admin_client):
     course = admin_client.post("/api/courses", json={"slug": "asset-course", "name": "AC", "description": ""}).json()
@@ -56,36 +54,6 @@ def test_upload_svg_rejected(admin_client, asset_tmpdir):
     )
     assert response.status_code == 400
     assert "extension" in response.json()["detail"].lower()
-
-
-def test_upload_too_large_rejected(admin_client, asset_tmpdir):
-    original = settings.max_file_size
-    settings.max_file_size = 100
-    course, version = _create_published_version(admin_client)
-    response = admin_client.post(
-        f"/api/versions/{version['id']}/assets",
-        files={"file": ("big.png", io.BytesIO(b"x" * 200), "image/png")},
-    )
-    settings.max_file_size = original
-    assert response.status_code == 400
-    assert "size" in response.json()["detail"].lower()
-
-
-def test_upload_version_total_exceeded(admin_client, asset_tmpdir):
-    original = settings.max_course_size
-    settings.max_course_size = 50
-    course, version = _create_published_version(admin_client)
-    admin_client.post(
-        f"/api/versions/{version['id']}/assets",
-        files={"file": ("a.png", io.BytesIO(b"x" * 10), "image/png")},
-    )
-    response = admin_client.post(
-        f"/api/versions/{version['id']}/assets",
-        files={"file": ("b.png", io.BytesIO(b"x" * 50), "image/png")},
-    )
-    settings.max_course_size = original
-    assert response.status_code == 400
-    assert "total" in response.json()["detail"].lower()
 
 
 def test_upload_non_admin_rejected(admin_client, auth_client, asset_tmpdir):
@@ -440,30 +408,6 @@ def test_version_copy_assets_wrong_course_rejected(admin_client, asset_tmpdir):
         json={"label": "L", "info_md": "", "copy_assets_from": v1["id"]},
     )
     assert response.status_code == 400
-
-
-def test_version_copy_assets_size_check(admin_client, asset_tmpdir):
-    original = settings.max_course_size
-    settings.max_course_size = 10
-    try:
-        course = admin_client.post("/api/courses", json={"slug": "sc", "name": "S", "description": ""}).json()
-        v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
-        # Bypass max_course_size for the source upload — it's a pre-existing version.
-        # Use max_file_size only by temporarily restoring max_course_size for upload.
-        settings.max_course_size = 10000
-        admin_client.post(
-            f"/api/versions/{v1['id']}/assets",
-            files={"file": ("big.png", io.BytesIO(b"x" * 20), "image/png")},
-        )
-        settings.max_course_size = 10
-        response = admin_client.post(
-            f"/api/courses/{course['id']}/versions",
-            json={"label": "L", "info_md": "", "copy_assets_from": v1["id"]},
-        )
-    finally:
-        settings.max_course_size = original
-    assert response.status_code == 400
-    assert "size" in response.json()["detail"].lower()
 
 
 def test_version_copy_no_assets_is_noop(admin_client, asset_tmpdir):

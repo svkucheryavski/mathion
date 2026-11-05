@@ -11,6 +11,7 @@ from mathion.models import (
 )
 from mathion.models_auth import NotificationLogEntry, StudentEnrollment, User, UserItemState
 from mathion.superuser import service as panel_service
+from tests.conftest import set_site
 
 
 @pytest.fixture
@@ -198,8 +199,9 @@ def test_disabled_wins_over_email_off(panel, db, monkeypatch):
 def test_result_carries_pin_minutes_and_sign_in_url(panel, db):
     client, base = panel
     course, _ = _course(db, "stat")
+    set_site(db, pin_minutes=25)  # superuser Settings D10b: the saved minutes
     body = client.put(f"{base}/courses/{course.id}/admin", json={"email": "anna@x"}).json()
-    assert body["pin_minutes"] == settings.pin_expiry_minutes
+    assert body["pin_minutes"] == 25
     assert body["sign_in_url"] == f"{settings.base_url}/courses/stat/edit"
 
 

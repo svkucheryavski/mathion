@@ -23,6 +23,7 @@ from mathion.schemas import (
     AccountLookup, AdminAssignResult, CourseDeleteImpact, PanelAdmin, PanelCourse,
     PanelCourseCreate, PanelCourseUpdate, PanelEmail,
 )
+from mathion.site_settings import load as load_site
 
 router = APIRouter(tags=["superuser"])
 
@@ -114,7 +115,7 @@ def _assigned(db: Session, course: Course, target: User, changed: bool) -> Admin
         course=_rows(db, [course])[0],
         admin=_panel_admin(target),
         admin_email=outcome,
-        pin_minutes=settings.pin_expiry_minutes,
+        pin_minutes=load_site(db).pin_minutes,
         sign_in_url=f"{settings.base_url}/courses/{course.slug}/edit",
     )
 

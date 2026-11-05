@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session as DBSession
 
 from mathion.auth import hash_token, request_pin
 from mathion.config import settings
-from mathion.models_auth import SuperuserPanelToken, User
+from mathion.models_auth import RateLimitEntry, SuperuserPanelToken, User
+from mathion.site_settings import load as load_site
 
 PANEL_INACTIVITY_SECONDS = 30 * 60  # 1800 — sliding inactivity window
 PANEL_BUMP_THROTTLE_SECONDS = 5 * 60  # 300 — at most one last_active_at write per interval
@@ -66,6 +67,7 @@ def validate(db: DBSession, token: str) -> SuperuserPanelToken:
 @dataclass
 class PinIssued:
     pin: str
+    minutes: int  # how long it lasts, from the panel's Settings (D14)
 
 
 @dataclass
@@ -75,11 +77,6 @@ class UnknownUser:
 
 @dataclass
 class DisabledUser:
-    pass
-
-
-@dataclass
-class RateLimited:
     pass
 
 
@@ -108,18 +105,19 @@ def create_or_promote_superuser(db: DBSession, email: str) -> User:
     return user
 
 
-def issue_bootstrap_pin(db: DBSession, email: str) -> "PinIssued | UnknownUser | DisabledUser | RateLimited":
+def issue_bootstrap_pin(db: DBSession, email: str) -> "PinIssued | UnknownUser | DisabledUser":
+    # D12: the operator's command skips the request limit and clears this
+    # email's wrong tries, so with email off it's always a way back in. The
+    # wrong-try limit still applies to the PIN it makes.
     normalized = email.strip().lower()
-    raw = request_pin(db, normalized)
+    raw = request_pin(db, normalized, operator=True)
     if raw is not None:
-        return PinIssued(pin=raw)
-    # Disambiguate request_pin's None: unknown / disabled / rate-limited.
+        db.execute(delete(RateLimitEntry).where(RateLimitEntry.key == f"pin_failure:{normalized}"))
+        db.commit()
+        return PinIssued(pin=raw, minutes=load_site(db).pin_minutes)
+    # With operator=True, None means an unknown or a disabled account.
     user = db.execute(select(User).where(User.email == normalized)).scalar_one_or_none()
-    if user is None:
-        return UnknownUser()
-    if user.is_disabled:
-        return DisabledUser()
-    return RateLimited()
+    return UnknownUser() if user is None else DisabledUser()
 
 
 def activate_panel(db: DBSession) -> ActivateResult:

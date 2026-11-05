@@ -126,7 +126,7 @@ def _build_email_message(subject, body, ctx, *, kind: str) -> EmailMessage:
 LOGIN_PIN_KIND = "login_pin"
 
 
-def build_login_pin_message(email: str, pin: str) -> EmailMessage:
+def build_login_pin_message(email: str, pin: str, *, minutes: int) -> EmailMessage:
     """Standalone login-PIN email. Not a TEMPLATES entry (those are
     RenderContext -> (subject, body) callables). The raw PIN lives only in this
     in-memory message — never persisted or logged."""
@@ -139,7 +139,7 @@ def build_login_pin_message(email: str, pin: str) -> EmailMessage:
     msg["X-Mathion-Kind"] = LOGIN_PIN_KIND
     msg.set_content(
         f"Your Mathion sign-in PIN is {pin}. "
-        f"It expires in {settings.pin_expiry_minutes} minutes.",
+        f"It expires in {minutes} minutes.",
         charset="utf-8",
     )
     return msg

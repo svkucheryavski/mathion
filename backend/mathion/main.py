@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -40,6 +41,7 @@ from mathion.notifications import (
     SHUTDOWN_TIMEOUT_SECONDS,
     build_mailer_from_settings,
 )
+from mathion.site_settings import MOVED_ENV_KEYS
 from mathion.superuser.log_redaction import install as install_log_redaction
 
 # Redact the panel token from uvicorn access logs. Installed at IMPORT TIME
@@ -82,6 +84,12 @@ async def lifespan(app):
     _db = make_url(settings.database_url)
     logger.info("Database target: %s@%s:%s/%s",
                 _db.username, _db.host, _db.port or 5432, _db.database)
+    # D2: the panel's Settings now set these; say once which ones .env still
+    # sets, without asking anyone to delete them.
+    ignored = sorted(k for k in MOVED_ENV_KEYS if k in os.environ)
+    if ignored:
+        logger.info("These .env keys are ignored since this version; the panel's "
+                    "Settings page sets them: %s.", ", ".join(ignored))
     app.state.shutdown = asyncio.Event()
     app.state.mailer = build_mailer_from_settings(settings)
     app.state.lock_fd = None

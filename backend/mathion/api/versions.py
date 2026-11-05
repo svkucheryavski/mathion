@@ -17,6 +17,7 @@ from mathion.dependencies import get_current_user
 from mathion.models import AnswerOption, Asset, Block, Course, CourseAdmin, CourseVersion, Item, Question, Run, RunTeacher, Sequence
 from mathion.models_auth import StudentEnrollment, User
 from mathion.schemas import VersionCreate, VersionDuplicateRequest, VersionRenderRequest, VersionRenderResponse, VersionResponse, VersionUpdate
+from mathion.site_settings import copy_over_limit, load as load_site
 
 router = APIRouter(tags=["versions"])
 
@@ -35,11 +36,9 @@ def create_version(course_id: int, data: VersionCreate, db: Session = Depends(ge
                 Asset.version_id == data.copy_assets_from
             )
         )
-        if total_size > settings.max_course_size:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Source assets total size ({total_size}) exceeds limit ({settings.max_course_size})",
-            )
+        site = load_site(db)
+        if total_size > site.max_total_bytes:
+            raise HTTPException(status_code=400, detail=copy_over_limit(site))
 
     version = CourseVersion(
         course_id=course_id,
@@ -83,11 +82,9 @@ def duplicate_version(
     total_size = db.scalar(
         select(func.coalesce(func.sum(Asset.file_size), 0)).where(Asset.version_id == source.id)
     )
-    if total_size > settings.max_course_size:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Source assets total size ({total_size}) exceeds limit ({settings.max_course_size})",
-        )
+    site = load_site(db)
+    if total_size > site.max_total_bytes:
+        raise HTTPException(status_code=400, detail=copy_over_limit(site))
 
     # 2. Asset preflight — every referenced filename must have a backing Asset,
     #    BEFORE any disk write, so render_with_assets can't 422 mid-clone.

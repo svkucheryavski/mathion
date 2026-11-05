@@ -14,12 +14,12 @@ from mathion.api.lookups import get_or_404
 from mathion.api.authz import is_run_admin_or_teacher
 from mathion.api.submission_files import build_submission_filename, get_submitter_group, mini_project_visible_to_student, submission_storage_dir
 from mathion.assets import looks_like_pdf, validate_extension
-from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Block, Evaluation, MiniProject, Run, RunStudent, Submission
 from mathion.models_auth import NotificationLogEntry, User
 from mathion.schemas import SubmissionResponse
+from mathion.site_settings import file_over_limit, load as load_site
 
 router = APIRouter(tags=["submissions"])
 
@@ -70,11 +70,12 @@ def create_submission(
         raise HTTPException(status_code=400, detail="File extension not allowed")
     if ext != "pdf":
         raise HTTPException(status_code=400, detail="Submission must be a PDF")
-    content = file.file.read(settings.max_file_size + 1)
+    site = load_site(db)
+    content = file.file.read(site.max_file_bytes + 1)
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="Empty file")
-    if len(content) > settings.max_file_size:
-        raise HTTPException(status_code=400, detail=f"File size {len(content)} exceeds max {settings.max_file_size}")
+    if len(content) > site.max_file_bytes:
+        raise HTTPException(status_code=400, detail=file_over_limit(site))
     if not looks_like_pdf(content):
         raise HTTPException(status_code=400, detail="Submission is not a valid PDF (missing %PDF- header)")
 
