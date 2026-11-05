@@ -68,6 +68,14 @@ Minor findings from the per-task review lanes of the Settings slice
   loop and lock now start at every boot, so a second dev server on the same
   host (or a probe beside the user's own) refuses to start. D10 says the plan
   handles this; give each script its own lock path before the Safari pass.
+  **Ruled 2026-11-05 (cleanup): the scripts stay as they are.** All four use
+  the same dev database and port 8000, so two of them can't run together
+  anyway, and separate lock paths on one database would let two loops send
+  the same messages twice, which is what the lock exists to stop. A probe on
+  its own database sets its own absolute `MATHION_DISPATCHER_LOCK_PATH`. One
+  that shares the dev database must share the lock (the default
+  `/tmp/mathion.dispatcher.lock`), or run only while the other server is
+  stopped, as the Settings Safari pass did.
 - `off_interval_for`: with email on, `email_off_at` set and `email_on_at`
   NULL, the filter has no upper bound, so nothing is ever sent, and nothing
   says so. Only a turn-on that forgets to stamp `email_on_at` reaches it.
@@ -310,3 +318,24 @@ Minors from the review lanes, Task 5 (Opus + Fable, round 1).
   copy ("…or that it accepts Mathion's messages").
 - **The refusal test does not assert the password stays out of the logs**
   (`hunter2` not in `caplog`).
+
+## Cleanup (spec rev 6 review)
+
+- **Spec D7c says an "off" save writes only the switch**; it also stamps
+  `email_off_at` and clears the card's red line and the queue's wait (D9d).
+  Reword D7c.
+- **An old CLI's proxy also lacks the new timeouts**: through `mathion tls`,
+  a slow email test gets a 502 at 5 s, and a large upload or download is cut
+  at 30 s. One sentence in spec D11c and in
+  `docs/release-notes/settings-release-order.md`.
+- **Stale code references in the spec** (D9b, D9c, D10): `dispatcher.py`,
+  `errors.py` and `auth.py` line numbers are pre-slice, and D10's loop calls
+  `_run(…, view=…)` through `_tick_once`, not `tick()`. Update or mark them
+  pre-slice.
+- **Spec D7b's wording**: the name is optional; "control character" means
+  ASCII C0 and DEL; an empty local part or domain is refused too. The build's
+  other checks (host ≤ 253, username ≤ 254, "Type the password for this
+  username.", the saved non-ASCII password sentence) could be listed.
+- **Spec D9 has no example for a refusal after the body**: Send test says
+  "The mail server refused the message." there, not D9d's "may send as" hint
+  (see the whole-branch minor on reusing the hint in the test).

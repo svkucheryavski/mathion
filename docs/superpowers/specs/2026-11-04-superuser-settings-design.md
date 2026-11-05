@@ -1,6 +1,6 @@
 # Superuser panel: Settings — design
 
-**Status:** rev 5, 2026-11-04.
+**Status:** rev 6, 2026-11-05.
 - Rev 2 folded in the builder check: D2a, D7a, D8a, D11b, the lower file ceiling in D11, and the user's D10a.
 - Rev 3 folds in spec review round 1, three lanes (`.superpowers/sdd/2026-11-04-superuser-settings/spec-r1-*.md`), and the user's answer on the upload ceiling (D11c). New or changed:
   - **D10b:** every email reader is listed;
@@ -28,6 +28,13 @@
   - **D11c:** image first, then the CLI;
   - **D7c:** an "off" save writes only the switch;
   - **D12:** `mathion pin` clears the wrong-try count.
+- Rev 6 records what the build, its reviews and the user's rulings settled (plan `docs/superpowers/plans/2026-11-04-superuser-settings.md`, ledger `.superpowers/sdd/2026-11-04-superuser-settings/progress.md`). New or changed:
+  - **D7b:** the final From check (an ASCII address, any line break refused, a message built and read back);
+  - **D9a:** a passing test of the saved settings clears the card's red line and the queue's wait;
+  - **D9c:** a refusal after the message body is retried per message, never failed at once (the user's ruling);
+  - **D9d:** the card's line for refusals after the body, and the PIN email reaches the card;
+  - **D11a:** a proxy's 413 shows its sentence on every upload screen;
+  - **D11c:** the bundled proxy's two timeouts, and what a proxy refusal shows (Safari pass).
 
 **Builds on:** `docs/superpowers/specs/2026-11-03-superuser-users-courses-design.md` (panel pages, dialogs, D25 errors) and `docs/superpowers/specs/2026-07-11-superuser-panel-slice-1-design.md` (panel access and shell).
 
@@ -156,7 +163,12 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - **Certificates are checked.** STARTTLS and SSL/TLS check the server's certificate with `ssl.create_default_context()`. Today's `starttls()` checks nothing.
   - **An opt-out for campus relays.** For a relay with a self-signed or internal certificate, the dialog has one checkbox under Encryption: "Don't check the server's certificate".
   - **Copied settings keep today's behaviour.** D2's copy ticks the box only when the copied mode is `smtp`, because a server that sends today must still send after the update. On every other install, and for new settings, it starts unticked.
-- **D7b. The From address is checked** (mine, from review). On save and on test, the server refuses a From address with a line break, or one that `email.utils.parseaddr` can't read as a name and an address with an @: "The From address must look like Name <address@example.edu> or address@example.edu."
+- **D7b. The From address is checked** (mine, from review; rev 6 gives the final check). On save and on test, the server refuses a From address that would fail every message later. The sentence is "The From address must look like Name <address@example.edu> or address@example.edu." when:
+  - it has a line break of any kind (a Unicode one included, which a paste can carry) or a control character, is longer than 320 characters, or has unbalanced `<` `>`;
+  - `email.utils.parseaddr` can't read a name and an address with an @ and no spaces;
+  - a message built with it as From, flattened as smtplib sends it and read back, doesn't give exactly that one address, with a domain of letters, digits and hyphens between single dots.
+
+  The address part must be plain ASCII, because most mail servers refuse any other (no SMTPUTF8): "The address in From can only use plain letters, digits and symbols: write an accented domain in its xn-- form." The display name may use any letters.
 - **D7c. Turning email off** (mine, from review). The switch off keeps the saved server, login, password and From. Saving "off" writes only the switch, so a changed server can't be stored next to the old password without D8a's check. It checks nothing and needs no password, even one that can't be read. With the switch off, the dialog greys the other fields and hides Send test email.
 - **D8. The password** (mine; the user agreed). It's never sent to the browser.
   - **The field:** it's always empty. When a password is saved, the placeholder says "Saved: type a new one to replace it". When none is saved, it's blank with no placeholder. Leaving it empty keeps the saved one. Clearing the username drops it (mine).
@@ -196,6 +208,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
     - On save, if the latest test's fingerprint equals the new saved settings, it becomes the card's test. Otherwise the card's test is cleared.
     - A save made while a test runs is handled by the first of these when the test records.
   - The card shows the card's test. So the usual flow works: type, test, Save. Testing other values and pressing Cancel leaves the card's test alone.
+  - **A passing test of the saved settings clears D9d's red line and the queue's wait** (rev 6, from the whole-branch review). It proves the saved settings work, so the superuser who fixed the server side needn't wait up to an hour. A failing test, or a test of other values, leaves both alone.
 - **D9b. Nothing the mail server says reaches a log or the browser** (mine, from review). Some servers echo the credentials in their replies.
   - Every place that talks to the mail server goes through one helper that turns an SMTP failure into the error's class name, the SMTP code and D9's sentence, and logs only that. Those places are the queue (`dispatcher.py:163, 223-235`), the PIN email (`api/auth.py:63-69`) and the test.
   - The queue's stored `error` column gets the same text.
@@ -207,12 +220,17 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - a refused login (`SMTPAuthenticationError`);
   - a certificate or TLS failure;
   - an unreadable password (D8);
+  - a refused greeting (`SMTPHeloError`);
   - a refused sender (`SMTPSenderRefused`).
 
-  Everything else stays per-message with today's `classify()` (`notifications/errors.py`): a refused recipient, a missing referent or recipient email, a 5xx data error. A disconnect mid-batch counts against the message being sent and stops the batch, so the messages after it aren't charged a retry (today they are). This way one bad message can't freeze the queue.
+  Everything else stays per-message with `classify()` (`notifications/errors.py`): a refused recipient, a missing referent or recipient email. A disconnect mid-batch counts against the message being sent and stops the batch, so the messages after it aren't charged a retry (today they are). This way one bad message can't freeze the queue.
 
-  **The queue backs off after a D9c failure** (mine, from review). The next try waits 5 minutes, then doubles each time up to 1 hour, instead of every 30 s. A login refused every 30 s could trip a provider's lockout (Office 365, Google). A save of the email settings, or a successful send, resets the wait.
-- **D9d. The card shows a stuck queue** (mine, from review). When a D9c failure stops a batch, the queue stores its sentence and time with the settings. The Email card then shows a red line under Last test: "Sending is failing since <time>: <sentence>". A successful send clears it, and so does a save of the email settings. It's logged once per change of sentence, not every tick.
+  **A refusal after the message body is retried** (user's ruling, rev 6, 2026-11-05). Some servers accept the sender and only refuse once the body is sent, for example Microsoft 365's `554 5.2.252 SendAsDenied` when the login may not send as the From. Every `SMTPDataError` (4xx or 5xx) is transient: the message is tried again after 5 minutes, 30 minutes, 2 hours and 6 hours, and fails for good on its fifth try. It never holds up other messages, and it doesn't stop the batch or start the queue's wait. So a From refused this way (unlike a refused sender above) uses up each message after its five tries, about 8.5 hours, while the card says why (D9d). A recipient refused with a 5xx still fails at once, because it's usually that address's own problem; a 4xx one (greylisting) is retried.
+
+  **The queue backs off after a D9c failure** (mine, from review). The next try waits 5 minutes, then doubles each time up to 1 hour, instead of every 30 s. A login refused every 30 s could trip a provider's lockout (Office 365, Google). A save of the email settings, a successful send, or a passing test of the saved settings (D9a) resets the wait.
+- **D9d. The card shows a stuck queue** (mine, from review). When a D9c failure stops a batch, the queue stores its sentence and time with the settings. The Email card then shows a red line under Last test: "Sending is failing since <time>: <sentence>". A successful send clears it, and so do a save of the email settings and a passing test of the saved settings (D9a). It's logged once per change of sentence, not every tick.
+  - **Refusals after the body** (user's ruling, rev 6). When a tick has at least one 5xx refusal after the body, no D9c failure, and nothing in it got through, the card shows the same red line with "The mail server refused a message: check that the login may send as <From>." (the saved From, never the server's text, D9b). Other per-message failures in the tick don't hide it. It starts no wait. The next message that gets through clears it, as do an email save and a passing test of the saved settings. A D9c failure in the same tick wins, with its own sentence and the wait.
+  - **The PIN email reaches the card** (rev 6). A PIN email that fails on the server's side (D9c) or is refused after the body shows its sentence there too, and a PIN email that gets through clears the line. A refused recipient doesn't reach the card. A failing PIN email starts no wait (only the queue's own tick backs off), and one that gets through also resets the queue's wait. The PIN email still doesn't wait for the queue's back-off.
 - **D10. When a change takes effect** (mine). At once:
   - the PIN email and the notification queue use the saved email settings from their next send;
   - a file limit applies from the next upload;
@@ -251,7 +269,8 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - **A file over the limit:** "This file is over the <m> MB limit." Three upload paths read only the limit plus one byte, so they never know the real size, and a rounded size could read "20 MB; the largest allowed is 20 MB".
   - **A total over the limit:** "This would take the files of this <version|run> past its <m> MB limit." For a version copy: "This version's files are over the <m> MB limit, so it can't be copied."
   - The statuses stay as they are today.
-  - The run files tab (`RunAssetsTab.svelte:229, 506`) shows the server's sentence instead of mapping every 413 to "storage quota". It keeps its own sentence for a 413 without one, from a proxy: "This file is over the server's upload limit."
+  - The run files tab (`RunAssetsTab.svelte:229, 506`) shows the server's sentence instead of mapping every 413 to "storage quota".
+  - **A 413 without a sentence** comes from a proxy. Every upload screen (rev 6; the build shares `tooLargeSentence` in `lib/uploadLimit.svelte.ts` across all five upload paths) shows: "This file is over the server's upload limit."
 - **D11b. The browser follows the saved limit** (mine, from the builder check and review). Today the frontend hard-codes 20 MB:
   - in its checks: `lib/runAssets.ts:9`, `lib/evaluations.ts:8`, `lib/studentMiniProjects.ts:24`;
   - in its messages and help text: `AssetSidebar.svelte:200`, `DashboardSidePanel.svelte:602, 856`, `MiniProjectDetailPage.svelte:353-354` (a student screen), `RunAssetsTab.svelte:195, 287`.
@@ -269,6 +288,8 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - Only `mathion update --version` run from an old CLI gets the new image with a 25 MB proxy. D11a's proxy sentence covers that case.
   - The README's upload-limit paragraph (`README.md:259-261`) changes to match: the panel sets the limit, and the bundled proxy allows up to the ceiling.
   - The File limits dialog says under Largest file: "Uploads also pass the server's proxy. With `mathion tls`, an up-to-date `mathion` allows 50 MB; another proxy must allow at least this."
+  - **The proxy's timeouts** (rev 6, from the whole-branch review). The bundled proxy (reproxy) waits 5 s for a response header and gives a request 30 s by default, which cuts off the 20 s email test (D9) and a 50 MB upload or download on a slow link. Both compose copies set `TIMEOUT_RESP_HEADER: "30s"` and `TIMEOUT_WRITE: "15m"` (50 MB at about 0.45 Mbit/s), and `embed_test.go` pins them. The README's line for running reproxy yourself adds `--timeout.resp-header=30s --timeout.write=15m`.
+  - **What a proxy refusal shows** (Safari pass, 2026-11-05). The pinned reproxy answers a body over `MAX_SIZE` with a clean 413, and Safari shows D11a's "This file is over the server's upload limit.", not the network error.
 - **D12. Sign-in rules** (user's; ranges mine). The Edit sign-in dialog has four fields:
   - **A PIN lasts:** 5 to 60 minutes;
   - **PIN requests per hour:** 3 to 20. The floor is 3, so a person who clicks twice still gets a PIN;
@@ -319,7 +340,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - a campus relay with a self-signed certificate (D7a), on a fresh setting and on a copied one;
   - a test that hangs: a firewall dropping packets to port 25 rather than refusing (D9's 20 s);
   - a campus relay with no login on port 25, and a 465 server that refuses STARTTLS;
-  - a From address the mail server refuses, saved without a test: the queue keeps its messages (D9c).
+  - a From address the mail server refuses, saved without a test: refused as the sender, the queue keeps its messages (D9c); refused after the body (Microsoft 365's SendAsDenied), each message is retried and fails after five tries, with the card saying why (D9c, D9d).
 - **File limits:**
   - the total limit set below the largest file;
   - a lowered limit with courses already over it;
@@ -329,7 +350,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
 - **Sign-in:** a longest sign-in lowered to 1 day while a login page is open showing 30 days. The person still signs in, for 1 day (D12).
 - **Email turned on** with a queue full of messages from while it was off (D10a): none of them goes out.
 - **Email turned off and on again** within 30 seconds: nothing from the off time goes out, and messages from before it still do.
-- **A bad From or login saved without a test:** the queue stops, keeps every message, and the card says why (D9c, D9d).
+- **A bad From or login saved without a test:** the queue stops, keeps every message, and the card says why (D9c, D9d). A From refused only after the body is the exception: each message is retried and fails after five tries, and the card names the From (D9c, D9d).
 - **The developer `file` mode:** the outbox gets every message (D10c).
 - **Two browser tabs** with the Settings page open, each saving a different card: one card's save never overwrites another card's values.
 
