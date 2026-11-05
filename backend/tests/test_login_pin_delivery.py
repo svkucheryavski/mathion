@@ -244,3 +244,74 @@ def test_pin_send_failure_logs_no_server_reply(client, db, monkeypatch, caplog):
     assert client.post("/api/auth/request-pin", json={"email": "real@example.com"}).status_code == 200
     assert "S3ntinel" not in caplog.text
     assert "The mail server refused to send to real@example.com." in caplog.text
+
+
+# --- the Email card hears about a failing PIN email (whole-branch review, Opus I2) -----------
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+import smtplib  # noqa: E402
+from contextlib import contextmanager  # noqa: E402
+
+from mathion.site_settings import load  # noqa: E402
+
+
+def _smtp_on(monkeypatch, mailer):
+    monkeypatch.setattr(settings, "debug", False)
+    monkeypatch.setattr(settings, "email_mode", "smtp")
+    monkeypatch.setattr(auth_api, "build_mailer", lambda *a: mailer)
+
+
+def _card(db):
+    db.expire_all()
+    v = load(db)
+    return v.send_failure_message, v.send_retry_at, v.send_backoff_step
+
+
+def test_refused_login_on_a_pin_email_reaches_the_card(client, db, monkeypatch):
+    class LoginRefused(MemoryMailer):
+        @contextmanager
+        def session(self):
+            raise smtplib.SMTPAuthenticationError(535, b"bad password hunter2")
+            yield
+
+    _make_user(db)
+    _smtp_on(monkeypatch, LoginRefused())
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    # The card shows it; the queue's back-off is left alone.
+    assert _card(db) == ("The mail server refused the login.", None, 0)
+
+
+def test_refused_recipient_on_a_pin_email_leaves_the_card(client, db, monkeypatch):
+    class RecipientRefused(MemoryMailer):
+        def send(self, msg):
+            raise smtplib.SMTPRecipientsRefused({"real@example.com": (550, b"no such user")})
+
+    _make_user(db)
+    _smtp_on(monkeypatch, RecipientRefused())
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db) == (None, None, 0)
+
+
+def test_sent_pin_email_clears_the_card(client, db, monkeypatch):
+    later = datetime.now(timezone.utc) + timedelta(minutes=30)
+    set_site(db, send_failure_message="The mail server refused the login.",
+             send_failure_at=datetime.now(timezone.utc), send_retry_at=later, send_backoff_step=3)
+    _make_user(db)
+    mailer = MemoryMailer()
+    _smtp_on(monkeypatch, mailer)
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert len(mailer.sent) == 1
+    assert _card(db) == (None, None, 0)
+
+
+def test_pin_email_refused_after_body_reaches_the_card(client, db, monkeypatch):
+    class Refused(MemoryMailer):
+        def send(self, msg):
+            raise smtplib.SMTPDataError(554, b"5.2.252 SendAsDenied")
+
+    set_site(db, email_from="Mathion <noreply@uni.dk>")
+    _make_user(db)
+    _smtp_on(monkeypatch, Refused())
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db) == ("The mail server refused a message: check that the login may send as "
+                         "Mathion <noreply@uni.dk>.", None, 0)

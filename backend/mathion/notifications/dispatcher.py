@@ -131,6 +131,7 @@ class TickResult:
     processed: int = 0
     sent: int = 0
     failure: SmtpFailure | None = None  # D9c: a failure on the server's side stopped the batch
+    refused: SmtpFailure | None = None  # D9c, extended: a message was refused after the body
 
 
 def off_interval_for(view) -> tuple[datetime, datetime | None] | None:
@@ -150,6 +151,53 @@ def _where(mailer, view=None) -> dict:
     return dict(host=getattr(mailer, "host", ""), port=getattr(mailer, "port", 0),
                 sender=getattr(mailer, "sender", ""), encryption=getattr(mailer, "encryption", ""),
                 timeout=getattr(mailer, "timeout", 20))
+
+
+def _charge(db, row_id: int, send_exc: BaseException, failure: SmtpFailure | None,
+            now: datetime) -> None:
+    """Charge one failed message: a retry with its back-off, or a permanent
+    error. A mail-server failure is stored and logged only as its class, code
+    and sentence (D9b: servers can echo credentials); Mathion's own errors (a
+    missing referent) keep their text."""
+    db.rollback()                       # clear any partial in-memory state
+    row_db = db.get(NotificationLogEntry, row_id)
+    if row_db is None:
+        return                          # row was deleted; skip
+    row_db.retry_count = (row_db.retry_count or 0) + 1
+
+    kind = classify(send_exc)
+    exhausted = row_db.retry_count >= MAX_ATTEMPTS
+    if kind == 'permanent' or exhausted:
+        error_msg = failure.text() if failure is not None else str(send_exc)[:500]
+        if exhausted and kind != 'permanent':
+            row_db.error = f"max attempts: {error_msg[:480]}"
+        else:
+            row_db.error = error_msg
+        row_db.next_attempt_at = None
+        logger.warning("notification id=%s flagged permanently: %s",
+                       row_db.id, row_db.error)
+        if failure is None:
+            # Full exception for operator (logs only, never DB).
+            logger.exception("notification id=%s permanent-error detail", row_db.id, exc_info=send_exc)
+    else:
+        idx = min(row_db.retry_count - 1, len(BACKOFF_SECONDS) - 1)
+        row_db.next_attempt_at = now + timedelta(seconds=BACKOFF_SECONDS[idx])
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        logger.exception("commit failed updating retry state: id=%s", row_db.id)
+        db.rollback()
+
+
+def refusal_on_card(send_exc: BaseException, failure: SmtpFailure | None, sender: str) -> SmtpFailure | None:
+    """D9c, extended (user 2026-11-05): a 5xx refusal after the message body,
+    as the Email card says it. Microsoft 365 refuses a From the login may not
+    send as only here; each such message is retried on its own (`classify`)."""
+    if (failure is None or not isinstance(send_exc, smtplib.SMTPDataError)
+            or failure.code is None or not 500 <= failure.code <= 599):
+        return None
+    return SmtpFailure(failure.cls, failure.code,
+                       f"The mail server refused a message: check that the login may send as {sender}.", False)
 
 
 def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = True,
@@ -275,37 +323,9 @@ def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = T
                     logger.warning("notifications: sending stopped (%s): %s", row.id, failure.text())
                 break
 
-            # Error branch — failure path. Increment counters separately.
-            db.rollback()                       # clear any partial in-memory state
-            row_db = db.get(NotificationLogEntry, row.id)
-            if row_db is None: continue          # row was deleted; skip
-            row_db.retry_count = (row_db.retry_count or 0) + 1
-
-            kind = classify(send_exc)
-            exhausted = row_db.retry_count >= MAX_ATTEMPTS
-            if kind == 'permanent' or exhausted:
-                # D9b: a mail-server failure is stored and logged only as its
-                # class, code and sentence (servers can echo credentials);
-                # Mathion's own errors (a missing referent) keep their text.
-                error_msg = failure.text() if failure is not None else str(send_exc)[:500]
-                if exhausted and kind != 'permanent':
-                    row_db.error = f"max attempts: {error_msg[:480]}"
-                else:
-                    row_db.error = error_msg
-                row_db.next_attempt_at = None
-                logger.warning("notification id=%s flagged permanently: %s",
-                               row_db.id, row_db.error)
-                if failure is None:
-                    # Full exception for operator (logs only, never DB).
-                    logger.exception("notification id=%s permanent-error detail", row_db.id, exc_info=send_exc)
-            else:
-                idx = min(row_db.retry_count - 1, len(BACKOFF_SECONDS) - 1)
-                row_db.next_attempt_at = now + timedelta(seconds=BACKOFF_SECONDS[idx])
-            try:
-                db.commit()
-            except SQLAlchemyError:
-                logger.exception("commit failed updating retry state: id=%s", row_db.id)
-                db.rollback()
+            # Error branch — failure path.
+            result.refused = refusal_on_card(send_exc, failure, _where(mailer, view)["sender"]) or result.refused
+            _charge(db, row.id, send_exc, failure, now)
             if isinstance(send_exc, smtplib.SMTPServerDisconnected):
                 # D9c: a disconnect mid-batch is charged to the message being
                 # sent and ends the batch, so the ones after it aren't charged.
@@ -365,14 +385,41 @@ def _record(db, view, result: TickResult, now: datetime) -> None:
         row.send_retry_at = now + timedelta(minutes=wait)
         row.send_backoff_step = min(step + 1, 6)
         db.commit()
-    elif result.sent and (view.send_failure_message is not None or view.send_retry_at is not None
-                          or view.send_backoff_step):
-        row = _fresh_row(db, view)
-        if row is None:
-            return
-        row.send_failure_message = row.send_failure_at = row.send_retry_at = None
-        row.send_backoff_step = 0
-        db.commit()
+    elif result.sent:
+        _clear_failure(db, view)
+    elif result.refused is not None:
+        # Refusals and nothing through: the card says so, the queue goes on.
+        record_send_outcome(db, view, result.refused, now)
+
+
+def _clear_failure(db, view) -> None:
+    """A message went out, so the server works: drop the stored failure and
+    the back-off."""
+    if view.send_failure_message is None and view.send_retry_at is None and not view.send_backoff_step:
+        return
+    row = _fresh_row(db, view)
+    if row is None:
+        return
+    row.send_failure_message = row.send_failure_at = row.send_retry_at = None
+    row.send_backoff_step = 0
+    db.commit()
+
+
+def record_send_outcome(db, view, failure: SmtpFailure | None, now: datetime) -> None:
+    """A send outside the queue (the login PIN, whole-branch review): a
+    failure on the server's side shows on the Email card, without starting
+    the queue's back-off; a sent message clears a stored failure."""
+    if failure is None:
+        _clear_failure(db, view)
+        return
+    row = _fresh_row(db, view)
+    if row is None:
+        return
+    if row.send_failure_message != failure.sentence:
+        logger.warning("notifications: sending is failing: %s", failure.text())
+        row.send_failure_at = now
+    row.send_failure_message = failure.sentence
+    db.commit()
 
 
 def _tick_once(app_state, now: datetime) -> int:

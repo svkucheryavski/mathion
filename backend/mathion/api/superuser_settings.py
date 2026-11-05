@@ -334,6 +334,10 @@ def _record_test(fp: str, ok: bool, message: str) -> None:
         row.test_fp, row.test_at, row.test_ok, row.test_message = fp, at, ok, message
         if fp == _saved_fingerprint(row, secret):
             row.card_test_at, row.card_test_ok, row.card_test_message = at, ok, message
+            if ok:
+                # The saved settings work now (a fix on the server's side):
+                # the queue may try again at once (whole-branch review).
+                _clear_send_failure(row)
         db.commit()
 
 

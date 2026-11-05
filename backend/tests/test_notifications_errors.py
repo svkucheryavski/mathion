@@ -50,3 +50,9 @@ def test_sender_refused_is_never_permanent(code):
     # Superuser Settings D9c: a refused sender is the server's side (a bad From),
     # so it must not mark messages failed for good; the queue stops the batch.
     assert classify(smtplib.SMTPSenderRefused(code, b"...", "from@x")) == 'transient'
+
+
+def test_refusal_after_body_is_retried():
+    # Superuser Settings D9c, extended (user 2026-11-05): Microsoft 365 refuses a
+    # From the login may not send as only after DATA, so it isn't the message's.
+    assert classify(smtplib.SMTPDataError(554, b"5.2.252 SendAsDenied")) == 'transient'

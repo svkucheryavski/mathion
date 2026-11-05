@@ -359,6 +359,28 @@ def test_test_of_saved_values_reaches_card(panel, db, smtp):
     assert (card["ok"], card["message"]) == (True, "Sent to admin@example.com: check your inbox.")
 
 
+def test_passing_test_of_saved_values_clears_the_failure(panel, db, smtp):
+    # Whole-branch review: after a fix on the server's side, a passing test of
+    # the saved settings lets the queue try again now.
+    assert _email(panel).status_code == 200
+    set_site(db, send_failure_message="The mail server refused the login.",
+             send_failure_at=datetime.now(timezone.utc),
+             send_retry_at=datetime.now(timezone.utc) + timedelta(minutes=30), send_backoff_step=3)
+    assert _test(panel).json()["ok"] is True
+    v = _view(db)
+    assert (v.send_failure_message, v.send_failure_at, v.send_retry_at, v.send_backoff_step) == (None, None, None, 0)
+
+
+def test_failing_or_other_test_keeps_the_failure(panel, db, smtp):
+    assert _email(panel).status_code == 200
+    set_site(db, send_failure_message="x", send_failure_at=datetime.now(timezone.utc), send_backoff_step=2)
+    assert _test(panel, host="mail2.uni.dk").json()["ok"] is True       # not the saved values
+    smtp.fail_send = smtplib.SMTPSenderRefused(553, b"no", "x")
+    assert _test(panel).json()["ok"] is False                           # failed
+    v = _view(db)
+    assert (v.send_failure_message, v.send_backoff_step) == ("x", 2)
+
+
 def test_test_of_saved_login_uses_saved_password(panel, db, smtp):
     _saved_login(db)
     r = _test(panel, username="u@uni.dk")

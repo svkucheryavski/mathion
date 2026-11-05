@@ -274,14 +274,17 @@ Primary — **reproxy** (host-run; pin a specific release and verify the flags):
 
 ```bash
 reproxy --listen=:443 --ssl.type=auto --ssl.fqdn=<domain> --ssl.http-port=80 \
-        --max=60M --static.enabled --static.rule='*,/,http://127.0.0.1:8000'
+        --max=60M --timeout.resp-header=30s --timeout.write=15m \
+        --static.enabled --static.rule='*,/,http://127.0.0.1:8000'
 ```
 
 Host mode defaults to `127.0.0.1:443`, so `--listen=:443` is required; ACME http-01
 needs port 80; `--static.enabled` is required alongside `--static.rule`; and
 reproxy's default `--max` is **64K** — raise it above the largest file set in the
-panel's Settings (up to 50 MB) or uploads are rejected at the proxy. Binding 80/443 needs root or
-`CAP_NET_BIND_SERVICE`.
+panel's Settings (up to 50 MB) or uploads are rejected at the proxy. Its default
+5 s wait for an answer is shorter than the panel's 20 s email test, and its 30 s
+limit per request is too short for a big upload or download on a slow link: raise
+both, as above. Binding 80/443 needs root or `CAP_NET_BIND_SERVICE`.
 
 Alternative — **Caddy** (no low default body limit; auto-manages 80/443 + ACME):
 

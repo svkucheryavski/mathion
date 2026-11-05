@@ -13,6 +13,11 @@ def classify(exc: BaseException) -> str:
     each message (`smtp_errors.stops_the_batch`)."""
     if isinstance(exc, smtplib.SMTPSenderRefused):
         return 'transient'
+    if isinstance(exc, smtplib.SMTPDataError):
+        # D9c, extended (user 2026-11-05): a refusal after the body may be the
+        # server's (Microsoft 365 refuses a From the login may not send as only
+        # here), so it is retried and fails only when its tries run out.
+        return 'transient'
     if isinstance(exc, smtplib.SMTPRecipientsRefused):
         if not exc.recipients:
             return 'permanent'

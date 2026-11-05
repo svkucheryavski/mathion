@@ -284,3 +284,56 @@ def test_failure_text_in_db_has_no_server_reply(db, seeded_run, mailer, caplog):
     db.expire_all()
     assert load(db).send_failure_message == SENDER_SENTENCE
     assert "S3ntinel" not in caplog.text
+
+
+
+# --- D9c, extended (user 2026-11-05): a refusal after the body --------------------------
+# Microsoft 365 refuses a From the login may not send as only after DATA. Each
+# refused message is retried on its own (5 min, 30 min, 2 h, 6 h, then failed
+# for good) and never holds up the others; while refusals come and nothing gets
+# through, the Email card says so (no queue back-off).
+
+REFUSED_SENTENCE = ("The mail server refused a message: check that the login may send as "
+                    "Mathion <noreply@uni.dk>.")
+
+
+def _fresh_view(db):
+    db.expire_all()
+    return load(db)
+
+
+def test_refusal_after_body_is_retried_and_shown(db, seeded_run, mailer):
+    mailer["m"] = _Mailer(fail=smtplib.SMTPDataError(554, b"5.2.252 SendAsDenied; pw=hunter2"))
+    set_site(db, **ON, email_off_at=None)
+    rows = [_row(db, seeded_run, T0 + timedelta(seconds=i)) for i in range(3)]
+    now = T0 + H
+    _tick_once(_state(), now)
+    assert mailer["m"].calls == 3                       # nothing stops the batch
+    for r in rows:
+        db.refresh(r)
+        assert (r.retry_count, r.error, r.next_attempt_at, r.sent_at) == (1, None, now + timedelta(minutes=5), None)
+    view = _fresh_view(db)
+    assert view.send_failure_message == REFUSED_SENTENCE
+    assert view.send_failure_at == now
+    assert (view.send_retry_at, view.send_backoff_step) == (None, 0)   # the queue isn't held back
+
+
+def test_refusal_after_body_fails_after_five_tries(db, seeded_run, mailer):
+    mailer["m"] = _Mailer(fail=smtplib.SMTPDataError(554, b"rejected"))
+    set_site(db, **ON, email_off_at=None)
+    r = _row(db, seeded_run, T0, retry_count=4)
+    _tick_once(_state(), T0 + H)
+    db.refresh(r)
+    assert r.error == "max attempts: SMTPDataError 554: The mail server refused the message."
+    assert (r.retry_count, r.next_attempt_at, r.sent_at) == (5, None, None)
+
+
+def test_refusal_beside_a_sent_message_leaves_the_card(db, seeded_run, mailer):
+    mailer["m"] = _Mailer(fail=smtplib.SMTPDataError(554, b"rejected"), on_calls=[1])
+    set_site(db, **ON, email_off_at=None)
+    r1, r2 = (_row(db, seeded_run, T0 + timedelta(seconds=i)) for i in range(2))
+    _tick_once(_state(), T0 + H)
+    db.refresh(r1)
+    assert (r1.retry_count, r1.error) == (1, None)
+    assert _sent(db, r2) == [True]
+    assert _fresh_view(db).send_failure_message is None

@@ -267,3 +267,46 @@ Minors from the review lanes, Task 5 (Opus + Fable, round 1).
     `sudo mathion logs app`);
   - a line for operators on the manual docker-compose path, who have no
     `mathion self-update`.
+
+## Whole-branch review
+
+- **Restoring a pre-update backup with the old image** needs the old email
+  keys still in `.env`: with `MATHION_EMAIL_MODE=smtp` and the keys removed,
+  the old image refuses to boot. One sentence in the release note.
+- **A quiet reload can overwrite a save in flight.** Closing the email dialog
+  reloads the page behind it; a limits or sign-in save finishing during that
+  request can be shown with the old values until the next load.
+- **The red "saved password can't be read" hint stays visible with the switch
+  off** in the Edit email dialog (D7c needs no password then).
+- **The README's install steps never say email is turned on in the panel's
+  Settings.**
+- **The Email-off card names only `mathion pin`**; the manual docker-compose
+  path has no `mathion` binary.
+- **The PIN email ignores the queue's back-off**, so each "Send PIN" tries a
+  refused login again.
+- **Test failures log at INFO, PIN email failures at WARNING.**
+- **A relay that refuses every recipient (`554 Relay access denied`) still
+  fails each message for good, with no card line.** Refusals after the body
+  are retried and shown on the card; a refused recipient still fails at once,
+  because it is usually that address's own problem.
+- **No test pins `refusal_on_card`'s two checks.** Removing the 5xx check or
+  the `SMTPDataError` check leaves the suite green; then a `451` after the
+  body, or one refused student address in a quiet tick, would turn the card
+  red with the "may send as" advice. One dispatcher test: a tick of
+  `SMTPDataError(451)` and a tick of `SMTPRecipientsRefused(550)`, card empty
+  after each.
+- **A relay with no username still reads "check that the login may send as
+  <From>"**; there is no login. Pick a no-login sentence when the saved
+  username is empty.
+- **Send test answers only "The mail server refused the message."** for the
+  same refusal the card explains; reuse `refusal_on_card`'s hint in the test.
+- **A refusal after the body leaves an old queue back-off in place.** It
+  proves the login works, but a PIN refused after the body during a "refused
+  the login" back-off relabels the card while the queue still waits up to
+  60 min, and `send_backoff_step` keeps its old value. Clear the retry time
+  and step when the failure is not server-side.
+- **One template refused by a content filter on a busy install** toggles the
+  red line on and off for ~8.5 h with a fresh "since" each time; hedge the
+  copy ("…or that it accepts Mathion's messages").
+- **The refusal test does not assert the password stays out of the logs**
+  (`hunter2` not in `caplog`).

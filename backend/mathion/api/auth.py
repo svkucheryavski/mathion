@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
@@ -10,8 +11,9 @@ from mathion.database import SessionLocal, get_db
 from mathion.dependencies import get_current_user
 from mathion.models import CourseAdmin, RunTeacher
 from mathion.models_auth import User
+from mathion.notifications.dispatcher import record_send_outcome, refusal_on_card
 from mathion.notifications.mailer import DEV_MODES, build_mailer
-from mathion.notifications.smtp_errors import SMTP_FAILURES, describe
+from mathion.notifications.smtp_errors import SMTP_FAILURES, describe, stops_the_batch
 from mathion.notifications.templates import build_login_pin_message
 from mathion.schemas import AuthConfigResponse, PinRequestSchema, PinVerifySchema, UserResponse, UserUpdate
 from mathion.site_settings import load as load_site, password_is_readable
@@ -70,7 +72,8 @@ def _send_login_pin(email: str, raw_pin: str, minutes: int) -> None:
     sentence (servers can echo credentials). This is the SOLE error boundary
     for the send after it moved off the response path. It runs as a background
     task, so it opens its own database session (D10b)."""
-    mailer = None
+    mailer = site = None
+    sending = False
     try:
         with SessionLocal() as db:
             site = load_site(db)
@@ -78,15 +81,34 @@ def _send_login_pin(email: str, raw_pin: str, minutes: int) -> None:
         if mailer is not None:
             msg = build_login_pin_message(email, raw_pin, minutes=minutes, sender=mailer.sender)
             with mailer.session():
+                sending = True
                 mailer.send(msg)
+            _record_on_card(site, None)
     except SMTP_FAILURES as exc:
         failure = describe(exc, host=getattr(mailer, "host", ""), port=getattr(mailer, "port", 0),
                            sender=getattr(mailer, "sender", ""), recipient=email,
                            encryption=getattr(mailer, "encryption", ""),
                            timeout=getattr(mailer, "timeout", 20))
         logger.warning("login PIN email send failed: %s", failure.text())
+        # The Email card hears about the server's side (login, TLS, the
+        # sender, no answer) and a refusal after the body, not about one
+        # refused recipient.
+        if site is not None:
+            card = (failure if not sending or stops_the_batch(exc)
+                    else refusal_on_card(exc, failure, site.email_from))
+            if card is not None:
+                _record_on_card(site, card)
     except Exception:
         logger.exception("login PIN email send failed")  # static message; never the raw PIN
+
+
+def _record_on_card(site, failure) -> None:
+    """Best-effort: a failure to record never reaches the caller."""
+    try:
+        with SessionLocal() as db:
+            record_send_outcome(db, site, failure, datetime.now(timezone.utc))
+    except Exception:
+        logger.exception("login PIN email: recording the outcome on the Email card failed")
 
 
 @router.post("/request-pin")
