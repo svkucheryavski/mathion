@@ -3,6 +3,7 @@ import App from './App.svelte';
 import { onUnauthorized } from './lib/events';
 import { startRouter, navigate, safeNext } from './lib/router.svelte';
 import { bootstrapSession } from './lib/auth.svelte';
+import { loadUploadLimit } from './lib/uploadLimit.svelte';
 import { clearSession } from './stores/session.svelte';
 import { clearCourse } from './stores/currentCourse.svelte';
 import { clearToasts } from './stores/toasts.svelte';
@@ -25,5 +26,8 @@ const app = mount(App, { target: document.getElementById('app')! });
 // Step 4: bootstrap session — populates session.user from /api/auth/me, then App
 // re-renders the right route.
 void bootstrapSession();
+
+// Step 5: the saved upload limit (Settings D11b), read once per page load.
+void loadUploadLimit();
 
 export default app;

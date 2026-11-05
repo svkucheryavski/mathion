@@ -18,11 +18,13 @@ from mathion.config import settings
 from mathion.database import get_db
 from mathion.models import Block, Course, CourseAdmin, CourseVersion, Item, Run, RunStudent, Sequence
 from mathion.models_auth import NotificationLogEntry, User, UserItemState
+from mathion.notifications.mailer import DEV_MODES
 from mathion.notifications.templates import COURSE_ADMIN_ASSIGNED
 from mathion.schemas import (
     AccountLookup, AdminAssignResult, CourseDeleteImpact, PanelAdmin, PanelCourse,
     PanelCourseCreate, PanelCourseUpdate, PanelEmail,
 )
+from mathion.site_settings import load as load_site
 
 router = APIRouter(tags=["superuser"])
 
@@ -32,20 +34,21 @@ _HAS_RUNS = "This course has runs and can't be deleted"
 _ACCOUNT_GONE = "This account was deleted"
 
 
-def email_is_set_up() -> bool:
-    # D5a: "set up" means a mailer exists, the condition that starts the email
-    # queue (main.py). The `memory` test sink counts on purpose. Not
-    # send_pin_enabled: that is also true in debug with email off.
-    return settings.email_mode != "disabled"
+def email_is_set_up(db: Session) -> bool:
+    # D5a: "set up" means the queue has a mailer: a developer outbox (D2c; the
+    # `memory` test sink counts on purpose) or the panel's email switch on
+    # (superuser Settings D10b). Not send_pin_enabled: that is also true in
+    # debug with email off.
+    return settings.email_mode in DEV_MODES or load_site(db).email_on
 
 
-def _admin_email_outcome(target: User, changed: bool) -> str:
+def _admin_email_outcome(db: Session, target: User, changed: bool) -> str:
     # D5a: the first that applies wins.
     if not changed:
         return "unchanged"
     if target.is_disabled:
         return "disabled"
-    if not email_is_set_up():
+    if not email_is_set_up(db):
         return "email_off"
     return "queued"
 
@@ -99,11 +102,13 @@ def _rows(db: Session, courses: list[Course]) -> list[PanelCourse]:
 
 def _assigned(db: Session, course: Course, target: User, changed: bool) -> AdminAssignResult:
     """Queue the admin email when it should go, commit, and say what happened (D5, D5a)."""
-    outcome = _admin_email_outcome(target, changed)
-    if outcome == "queued":
-        db.add(NotificationLogEntry(user_id=target.id, kind=COURSE_ADMIN_ASSIGNED,
-                                    payload={"course_id": course.id}))
     try:
+        # Reading the saved switch opens a savepoint, which flushes the admin
+        # row first, so the outcome sits inside the try too.
+        outcome = _admin_email_outcome(db, target, changed)
+        if outcome == "queued":
+            db.add(NotificationLogEntry(user_id=target.id, kind=COURSE_ADMIN_ASSIGNED,
+                                        payload={"course_id": course.id}))
         db.commit()
     except IntegrityError:
         # The course is locked, so the only key this can break is the admin's
@@ -114,7 +119,7 @@ def _assigned(db: Session, course: Course, target: User, changed: bool) -> Admin
         course=_rows(db, [course])[0],
         admin=_panel_admin(target),
         admin_email=outcome,
-        pin_minutes=settings.pin_expiry_minutes,
+        pin_minutes=load_site(db).pin_minutes,
         sign_in_url=f"{settings.base_url}/courses/{course.slug}/edit",
     )
 

@@ -75,8 +75,8 @@ async def test_lifespan_shutdown_with_inflight_tick(db, seeded_run, tmp_path, mo
 
     # Patch the mailer factory to return a slow MemoryMailer
     monkeypatch.setattr(
-        "mathion.main.build_mailer_from_settings",
-        lambda s: _SlowMailer())
+        "mathion.main.build_mailer",
+        lambda view, secret, mode: _SlowMailer())
 
     import mathion.main
     live_app = mathion.main.app

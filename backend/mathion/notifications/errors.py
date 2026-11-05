@@ -6,7 +6,18 @@ TRANSIENT_EXCS = (
 )
 
 def classify(exc: BaseException) -> str:
-    """RFC 5321: 4xx = transient (retry), 5xx = permanent (don't retry)."""
+    """RFC 5321: 4xx = transient (retry), 5xx = permanent (don't retry).
+
+    A refused sender is never permanent: it is the server's side (a bad From,
+    superuser Settings D9c), so the queue stops the batch instead of failing
+    each message (`smtp_errors.stops_the_batch`)."""
+    if isinstance(exc, smtplib.SMTPSenderRefused):
+        return 'transient'
+    if isinstance(exc, smtplib.SMTPDataError):
+        # D9c, extended (user 2026-11-05): a refusal after the body may be the
+        # server's (Microsoft 365 refuses a From the login may not send as only
+        # here), so it is retried and fails only when its tries run out.
+        return 'transient'
     if isinstance(exc, smtplib.SMTPRecipientsRefused):
         if not exc.recipients:
             return 'permanent'

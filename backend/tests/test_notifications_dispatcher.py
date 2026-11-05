@@ -255,8 +255,10 @@ def test_permanent_failure_smtp_550(db, seeded_run):
     db.refresh(entry)
     assert entry.retry_count == 1
     assert entry.next_attempt_at is None
-    assert entry.error and "no mailbox" in entry.error
-    assert not entry.error.startswith("max attempts:")
+    # Superuser Settings D9b: the stored error is the class, code and sentence,
+    # never the server's own reply.
+    assert entry.error == "SMTPResponseException 550: The mail server refused the message."
+    assert "no mailbox" not in entry.error
 
 
 def test_permanent_failure_smtp_recipients_refused(db, seeded_run):
@@ -274,23 +276,22 @@ def test_permanent_failure_smtp_recipients_refused(db, seeded_run):
     assert not entry.error.startswith("max attempts:")
 
 
-def test_smtp_auth_error_redacted(db, seeded_run, caplog):
+def test_smtp_auth_error_stops_the_batch_and_never_logs_the_reply(db, seeded_run, caplog):
+    # Superuser Settings D9b, D9c: a refused login is the server's side: no
+    # message is charged, and nothing the server said reaches a log or the row.
     entry = NotificationLogEntry(
         user_id=seeded_run["student_user"].id, kind="run_enrolled",
         payload={"run_id": seeded_run["run"].id})
     db.add(entry); db.commit()
     sensitive = smtplib.SMTPAuthenticationError(
         535, b"535 5.7.8 Authentication credentials invalid for user@example.com")
-    caplog.set_level(logging.WARNING, logger="mathion.notifications")
+    caplog.set_level(logging.DEBUG, logger="mathion.notifications")
     tick(db, _RaisingMailer(sensitive), now=datetime.now(timezone.utc))
     db.refresh(entry)
-    assert entry.error == "SMTP authentication failed (see operator logs)"
-    assert "user@example.com" not in (entry.error or "")
-    # Full exception is in the logs for the operator
-    has_full_exc = any(
-        r.exc_info and r.exc_info[1] is sensitive for r in caplog.records
-    )
-    assert has_full_exc
+    assert (entry.retry_count, entry.error, entry.sent_at, entry.next_attempt_at) == (0, None, None, None)
+    assert "user@example.com" not in caplog.text
+    assert not any(r.exc_info and r.exc_info[1] is sensitive for r in caplog.records)
+    assert any("The mail server refused the login." in r.getMessage() for r in caplog.records)
 
 
 def test_per_row_containment(db, seeded_run):

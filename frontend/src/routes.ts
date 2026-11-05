@@ -19,4 +19,5 @@ export const routes: Route[] = [
   { path: '/superuser/:token', component: 'SuperuserShell', auth: false },
   { path: '/superuser/:token/users', component: 'SuperuserShell', auth: false },
   { path: '/superuser/:token/courses', component: 'SuperuserShell', auth: false },
+  { path: '/superuser/:token/settings', component: 'SuperuserShell', auth: false },
 ];

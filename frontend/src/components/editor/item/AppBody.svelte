@@ -13,6 +13,7 @@
   import { fetchAssetSource, uploadAsset, deleteAsset, type AssetResponse } from '../../../lib/assets';
   import { scanAppSource } from '../../../lib/appSourceScan';
   import { api, ApiError } from '../../../lib/api';
+  import { tooLargeSentence } from '../../../lib/uploadLimit.svelte';
   import { patchItem, reportSaveFailure, type SaveOutcome } from '../../../lib/itemBody';
   import { loadAdminTree } from '../../../stores/currentEditorVersion.svelte';
   import { pushToast } from '../../../stores/toasts.svelte';
@@ -138,6 +139,8 @@
       if (!alive) return;
       if (err instanceof ApiError && err.status === 409) {
         uploadError = 'A file with that name already exists. Rename it or remove the old one first.';
+      } else if (err instanceof ApiError && err.status === 413) {
+        uploadError = tooLargeSentence(err); // Settings D11a
       } else {
         uploadError = err instanceof ApiError ? err.displayMessage : 'Upload failed.';
       }

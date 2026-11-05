@@ -4,8 +4,8 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import func, select
 
-from mathion.auth import hash_token
-from mathion.models_auth import SuperuserPanelToken
+from mathion.auth import hash_token, verify_pin
+from mathion.models_auth import RateLimitEntry, SuperuserPanelToken, User
 from mathion.superuser import service as panel_service
 
 
@@ -73,3 +73,21 @@ def test_destroy_active_removes_token(db):
     panel_service.mint(db)
     panel_service.destroy_active(db)
     assert _token_count(db) == 0
+
+
+def test_bootstrap_pin_skips_request_limit_and_clears_failures(db):
+    # D12: with email off, `mathion pin` is always a way back in.
+    db.add(User(email="su@example.com", is_superuser=True))
+    for _ in range(5):
+        db.add(RateLimitEntry(key="pin_request:su@example.com"))
+        db.add(RateLimitEntry(key="pin_failure:su@example.com"))
+    db.add(RateLimitEntry(key="pin_failure:other@example.com"))
+    db.commit()
+    result = panel_service.issue_bootstrap_pin(db, "su@example.com")
+    assert isinstance(result, panel_service.PinIssued)
+    assert result.minutes == 10
+    keys = db.scalars(select(RateLimitEntry.key)).all()
+    assert "pin_failure:su@example.com" not in keys
+    assert keys.count("pin_request:su@example.com") == 5  # the operator's PIN isn't counted
+    assert "pin_failure:other@example.com" in keys       # only this email's tries
+    assert verify_pin(db, "su@example.com", result.pin, 1) is not None

@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2717
+EXPECTED_CHECKS=2822
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -6078,7 +6078,7 @@ if [[ -n $REPLY ]]; then
   sweep NoteStrip $H
 fi
 # D8, D12, D17, D24: the panel dialogs' fields, the item modal's field look.
-for pair in NewCourseDialog:nc-input EditCourseDialog:ec-input AdminEmailField:ae-input DeleteCourseDialog:dc-input NewAccountDialog:na-input EditAccountDialog:ea-input; do
+for pair in NewCourseDialog:nc-input EditCourseDialog:ec-input AdminEmailField:ae-input DeleteCourseDialog:dc-input NewAccountDialog:na-input EditAccountDialog:ea-input EditEmailDialog:ee-input EditLimitsDialog:el-input EditSignInDialog:es-input; do
   uniq1 ${pair#*:}
   if [[ -n $REPLY ]]; then
     N=${pair%%:*}; H=$REPLY
@@ -6097,6 +6097,70 @@ if [[ -n $REPLY ]]; then
   N=NewCourseDialog; H=$REPLY
   d '\.nc-err' '' 'color:var\(--danger\)'
   d '\.nc-mono' '' 'font-family:var\(--font-mono\)'
+fi
+
+# The segmented choice (Login's duration, Settings D7/D12): one component owns
+# it, Login's look unchanged; `fit` hugs the text; greyed by colour (D7c).
+own segmented Segmented.svelte
+own segment Segmented.svelte
+uniq1 segmented
+if [[ -n $REPLY ]]; then
+  N=Segmented; H=$REPLY
+  d '\.segmented' '' 'display:flex' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'overflow:hidden'
+  d '\.segment' '' 'flex:1' 'font-size:13px' 'color:var\(--muted\)' 'padding:var\(--btn-pad-segment\)' 'background:var\(--surface\)'
+  d '\.segment\.selected' '' 'background:var\(--primary-soft\)' 'color:var\(--text\)' 'font-weight:500'
+  d '\.segmented\.fit' '' 'display:inline-flex' 'align-self:flex-start'
+  chk "\.fit\.${H} \.segment:where\(\.${H}\)" 'flex:none' 'padding:5px 12px'
+  chk "\.disabled\.${H} \.segment:where\(\.${H}\)" 'cursor:default' 'background:var\(--surface-2\)' 'color:var\(--muted\)'
+  chk "\.segment\.${H}:has\(input:where\(\.${H}\):focus-visible\)" 'box-shadow:inset 0 0 0 2px var\(--primary\)'
+  sweep Segmented $H
+fi
+
+# The panel's Settings page (Settings D4-D6, D9d): the mockup's cards, a
+# badge for the switch, label/value rows, the red line for a stuck queue.
+own s-card SuperuserSettings.svelte
+uniq1 s-card
+if [[ -n $REPLY ]]; then
+  N=SuperuserSettings; H=$REPLY
+  d '\.s-page' '' 'max-width:760px'
+  d '\.s-card' '' 'background:var\(--surface\)' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius-lg\)' 'margin:0 0 14px'
+  d '\.s-card-head' '' 'display:flex' 'gap:10px' 'padding:10px 12px 10px 16px' 'border-bottom:1px solid var\(--border\)'
+  chk "\.s-card-head\.${H} h2:where\(\.${H}\)" 'flex:1' 'font-size:15px' 'font-weight:600' 'color:var\(--text\)'
+  d '\.s-badge' '' 'font-size:11\.5px' 'font-weight:500'
+  d '\.s-badge\.on' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
+  d '\.s-badge\.off' '' 'background:var\(--surface-2\)' 'color:var\(--muted\)'
+  chk "dl\.${H}" 'display:grid' 'grid-template-columns:210px 1fr' 'padding:6px 16px 10px'
+  chk "dt\.${H}" 'padding:5px 0' 'color:var\(--muted\)'
+  chk "dd\.${H}" 'padding:5px 0' 'color:var\(--text\)'
+  d '\.mono' '' 'font-family:var\(--font-mono\)' 'font-size:12\.5px'
+  d '\.s-foot' '' 'font-size:12\.5px' 'color:var\(--muted\)'
+  d '\.ok' '' 'color:var\(--success\)'
+  d '\.err' '' 'color:var\(--danger\)'
+  sweep SuperuserSettings $H
+fi
+# D7, D9: the Edit email dialog: server and port on one row, greyed fields
+# when off, the test's answer in the accepted / danger-panel looks.
+uniq1 ee-result
+if [[ -n $REPLY ]]; then
+  N=EditEmailDialog; H=$REPLY
+  d '\.ee-pair' '' 'display:grid' 'grid-template-columns:1fr 90px'
+  d '\.ee-input' ':disabled' 'background:var\(--surface-2\)' 'color:var\(--muted\)'
+  d '\.ee-hint' '' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.ee-result' '' 'padding:7px 10px' 'font-size:12\.5px'
+  d '\.ee-result\.ok' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
+  d '\.ee-result\.err' '' 'background:var\(--danger-panel-bg\)' 'color:var\(--danger-panel-fg\)'
+  d '\.ee-err' '' 'color:var\(--danger\)'
+fi
+uniq1 el-hint
+if [[ -n $REPLY ]]; then
+  N=EditLimitsDialog; H=$REPLY
+  d '\.el-hint' '' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.el-err' '' 'color:var\(--danger\)'
+fi
+uniq1 es-err
+if [[ -n $REPLY ]]; then
+  N=EditSignInDialog; H=$REPLY
+  d '\.es-err' '' 'color:var\(--danger\)'
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

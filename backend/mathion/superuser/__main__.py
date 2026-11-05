@@ -2,7 +2,7 @@ import argparse
 
 from mathion.database import SessionLocal
 from mathion.superuser.service import (
-    DisabledUser, PinIssued, RateLimited, UnknownUser,
+    DisabledUser, PinIssued, UnknownUser,
     activate_panel, create_or_promote_superuser, issue_bootstrap_pin,
 )
 
@@ -32,16 +32,11 @@ def main(argv: list[str] | None = None) -> int:
             result = issue_bootstrap_pin(db, args.email)
             if isinstance(result, PinIssued):
                 print(f"PIN: {result.pin}")
+                print(f"It expires in {result.minutes} minutes.")
             elif isinstance(result, UnknownUser):
                 print("unknown email")
             elif isinstance(result, DisabledUser):
                 print("user is disabled")
-            elif isinstance(result, RateLimited):
-                print(
-                    "rate-limited: try again later — bootstrap can trip the 3/hr cap "
-                    "(PINs expire in 10 min); wait an hour, raise "
-                    "MATHION_MAX_PIN_REQUESTS_PER_HOUR, or clear rate_limit_entries"
-                )
             return 0
 
         if args.command == "activate":

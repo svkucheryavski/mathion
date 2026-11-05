@@ -9,12 +9,9 @@ class Settings(BaseSettings):
     version: str = "unknown"          # reads MATHION_VERSION via env_prefix="MATHION_"
     database_url: str = "postgresql+psycopg://mathion:mathion@localhost:5432/mathion"
     asset_path: str = "/data/mathion/assets"
-    max_file_size: int = 20 * 1024 * 1024  # 20MB
-    max_course_size: int = 500 * 1024 * 1024  # 500MB
     secret_key: str = "dev-secret-key-change-in-production"
-    pin_expiry_minutes: int = 10
-    max_pin_requests_per_hour: int = 3
-    max_pin_failures_per_hour: int = 5
+    # File limits and sign-in rules live in the panel's Settings
+    # (mathion.site_settings, superuser Settings spec D1, D2).
     cookie_secure: bool = False  # Set True in production (HTTPS)
     # Dev-only: when MATHION_DEBUG=1, generated login PINs are printed to
     # stdout (visible in the uvicorn terminal). MUST be off in production.
@@ -27,12 +24,10 @@ class Settings(BaseSettings):
     )
 
     # --- Notification / email settings ---
+    # `file` and `memory` are developer outboxes that win over the panel;
+    # `smtp` and `disabled` mean "the panel's Settings decide" (superuser
+    # Settings D2c). The mail server, login and From live in the panel.
     email_mode: str = "disabled"           # smtp | file | memory | disabled
-    smtp_host: str = ""
-    smtp_port: int = 587
-    smtp_username: str = ""
-    smtp_password: str = ""
-    email_from: str = "Mathion <noreply@mathion.test>"
     email_outbox: str = "./outbox/"
     base_url: str = "http://localhost:8000"
     dispatcher_lock_path: str = "/tmp/mathion.dispatcher.lock"

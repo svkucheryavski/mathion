@@ -2,11 +2,7 @@ import { api, ApiError } from './api';
 import { emitUnauthorized } from './events';
 import type { RunAssetResponse } from './types';
 
-// MUST stay in sync with backend Settings.max_file_size (config.py:9), default 20 MB.
-// Backend value is env-overridable via MATHION_MAX_FILE_SIZE; a deploy bumping the
-// backend constant must hand-update this. Accepted drift for slice A; a
-// /api/config/limits endpoint is the principled fix (Phase 9).
-export const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
+// The size limit and a 413's sentence are the panel's (lib/uploadLimit.svelte.ts, Settings D11a/b).
 
 // MUST stay in sync with backend ALLOWED_EXTENSIONS (backend/mathion/assets.py:4-9).
 // Backend stores extensions WITHOUT leading dot; mirrored verbatim:

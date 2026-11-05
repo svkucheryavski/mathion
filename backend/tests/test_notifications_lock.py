@@ -85,7 +85,9 @@ def test_lifespan_refuses_when_lock_held(tmp_path, monkeypatch):
         fd.close()
 
 
-def test_lifespan_disabled_mode_no_lock(tmp_path, monkeypatch):
+def test_lifespan_disabled_mode_takes_lock(tmp_path, monkeypatch):
+    # Superuser Settings D10: the panel can turn email on at any time, so the
+    # queue's loop and the single-sender lock start at every boot.
     import mathion.config
     import mathion.main
     live_settings = mathion.config.settings
@@ -93,7 +95,9 @@ def test_lifespan_disabled_mode_no_lock(tmp_path, monkeypatch):
     monkeypatch.setattr(live_settings, "dispatcher_lock_path", str(tmp_path / "dispatcher.lock"))
     monkeypatch.setattr(live_settings, "email_mode", "disabled")
     with TestClient(live_app):
-        pass
-    assert not (tmp_path / "dispatcher.lock").exists()
+        assert (tmp_path / "dispatcher.lock").exists()
+        assert live_app.state.lock_fd is not None
+        with pytest.raises(RuntimeError, match="Another Mathion dispatcher"):
+            acquire_singleton_lock(live_settings)
+        assert live_app.state.mailer is None  # no developer outbox; the panel decides
     assert live_app.state.lock_fd is None
-    assert live_app.state.mailer is None

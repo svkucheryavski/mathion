@@ -171,16 +171,20 @@ func TestEmbeddedComposeTLSTopology(t *testing.T) {
 		"SSL_ACME_LOCATION": "/srv/acme",
 		"STATIC_ENABLED":    "true",
 		"STATIC_RULES":      "${MATHION_TLS_DOMAIN},/,http://app:8000/",
-		"MAX_SIZE":          "25M",
+		"MAX_SIZE":          "60M", // Settings D11c: the 50 MB ceiling plus the form's overhead
+		// The panel's email test answers within 20 s (reproxy's default is 5 s);
+		// a 50 MB upload or download on a slow link needs minutes (the default is 30 s).
+		"TIMEOUT_RESP_HEADER": "30s",
+		"TIMEOUT_WRITE":       "15m",
 	} {
 		if proxy.Environment[k] != want {
 			t.Errorf("proxy env %s = %q, want %q", k, proxy.Environment[k], want)
 		}
 	}
-	// Exactly these 7 keys — an injected extra (e.g. another SSL_* var) could alter
+	// Exactly these 9 keys — an injected extra (e.g. another SSL_* var) could alter
 	// proxy behavior and must trip the wire.
-	if len(proxy.Environment) != 7 {
-		t.Errorf("proxy has %d env keys, want exactly 7; extra keys are a red flag: %v", len(proxy.Environment), proxy.Environment)
+	if len(proxy.Environment) != 9 {
+		t.Errorf("proxy has %d env keys, want exactly 9; extra keys are a red flag: %v", len(proxy.Environment), proxy.Environment)
 	}
 
 	// --- HSTS: reproxy has no env binding for --header, so it is passed as a command

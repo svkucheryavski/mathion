@@ -334,3 +334,72 @@ class TestVerifyPinFlags:
         assert body["user"]["has_course_admin"] is False
         for key in ("id", "email", "full_name", "is_superuser", "is_disabled", "photo_url"):
             assert key in body["user"]
+
+
+# --- superuser Settings D12: the sign-in rules come from the panel ---
+
+from sqlalchemy import func as _func, select as _select
+
+from mathion.auth import verify_pin as _verify_pin
+from mathion.models_auth import RateLimitEntry
+from tests.conftest import set_site
+
+
+def test_pin_limits_follow_site_settings(db):
+    db.add(User(email="lim@example.com"))
+    db.commit()
+    set_site(db, pin_requests_per_hour=4, pin_minutes=5)
+    pins = [request_pin(db, "lim@example.com") for _ in range(5)]
+    assert all(p is not None for p in pins[:4]) and pins[4] is None
+    pin = db.execute(_select(LoginPIN).order_by(LoginPIN.id.desc())).scalars().first()
+    left = pin.expires_at - datetime.now(timezone.utc)
+    assert timedelta(minutes=4, seconds=50) < left <= timedelta(minutes=5)
+
+
+def test_wrong_tries_follow_site_settings(db):
+    db.add(User(email="wt@example.com"))
+    db.commit()
+    set_site(db, pin_failures_per_hour=3)
+    raw = request_pin(db, "wt@example.com")
+    for _ in range(3):
+        assert _verify_pin(db, "wt@example.com", "000000", 1) is None
+    assert _verify_pin(db, "wt@example.com", raw, 1) is None  # the 4th try is refused
+
+
+def test_longer_duration_is_shortened_not_refused(client, db):
+    # D12: a login page left open across a change still signs the person in.
+    db.add(User(email="short@example.com"))
+    db.commit()
+    set_site(db, longest_sign_in_days=1)
+    raw = request_pin(db, "short@example.com")
+    resp = client.post("/api/auth/verify-pin", json={
+        "email": "short@example.com", "pin": raw, "duration_days": 30,
+    }, headers={"X-Requested-With": "mathion"})
+    assert resp.status_code == 200
+    assert "Max-Age=86400" in resp.headers["set-cookie"]
+    session = db.execute(_select(Session)).scalar_one()
+    left = session.expires_at - datetime.now(timezone.utc)
+    assert timedelta(hours=23, minutes=59) < left <= timedelta(days=1)
+    assert db.scalar(_select(_func.count()).select_from(RateLimitEntry).where(
+        RateLimitEntry.key == "pin_failure:short@example.com")) == 0
+
+
+def test_shorter_duration_is_kept(client, db):
+    db.add(User(email="keep@example.com"))
+    db.commit()
+    set_site(db, longest_sign_in_days=7)
+    raw = request_pin(db, "keep@example.com")
+    resp = client.post("/api/auth/verify-pin", json={
+        "email": "keep@example.com", "pin": raw, "duration_days": 1,
+    }, headers={"X-Requested-With": "mathion"})
+    assert resp.status_code == 200
+    assert "Max-Age=86400" in resp.headers["set-cookie"]
+
+
+def test_typo_in_ignored_key_does_not_stop_startup(monkeypatch):
+    # D2: the moved keys are out of Settings, so a bad value can't stop the app.
+    from mathion.config import Settings
+    monkeypatch.setenv("MATHION_MAX_FILE_SIZE", "abc")
+    monkeypatch.setenv("MATHION_PIN_EXPIRY_MINUTES", "ten")
+    s = Settings()
+    assert not hasattr(s, "max_file_size") and not hasattr(s, "pin_expiry_minutes")

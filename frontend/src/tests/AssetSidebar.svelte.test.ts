@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import AssetSidebar from '../components/editor/AssetSidebar.svelte';
+import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
 import type { AssetResponse } from '../lib/assets';
 import type { AssetContext, AssetItem } from '../lib/assetContext';
 
@@ -865,5 +866,40 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
     props.uploading = true;
     flushSync();
     expect(zone.getAttribute('title')).toBe('Wait for the upload to finish');
+  });
+});
+
+describe('AssetSidebar — the saved upload limit (Settings D11b)', () => {
+  afterEach(() => resetUploadLimit());
+  async function drop(target: HTMLElement, file: File) {
+    const dropZone = target.querySelector<HTMLElement>('[data-testid="drop-zone"]')!;
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
+    dropZone.dispatchEvent(ev);
+    for (let i = 0; i < 3; i++) { await Promise.resolve(); flushSync(); }
+  }
+  const sized = (mb: number) => {
+    const f = new File(['x'], 'big.png', { type: 'image/png' });
+    Object.defineProperty(f, 'size', { value: mb * 1024 * 1024 });
+    return f;
+  };
+
+  it('a file over the saved limit is refused with that number', async () => {
+    uploadLimit.mb = 50;
+    const onUploadFile = vi.fn().mockResolvedValue(mkAsset({ filename: 'big.png' }));
+    const { target } = mountSidebar({ onUploadFile });
+    await Promise.resolve(); flushSync();
+    await drop(target, sized(51));
+    expect(onUploadFile).not.toHaveBeenCalled();
+    expect(target.textContent).toContain('Cannot upload: big.png (file exceeds 50 MB)');
+  });
+
+  it('while the limit is unknown nothing is checked; the server decides', async () => {
+    uploadLimit.mb = null;
+    const onUploadFile = vi.fn().mockResolvedValue(mkAsset({ filename: 'big.png' }));
+    const { target } = mountSidebar({ onUploadFile });
+    await Promise.resolve(); flushSync();
+    await drop(target, sized(60));
+    expect(onUploadFile).toHaveBeenCalled();
   });
 });

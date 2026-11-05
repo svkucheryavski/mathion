@@ -168,7 +168,8 @@ Then finish setup:
    [TLS / reverse proxy (external)](#tls--reverse-proxy-external) below. Confirm
    `https://<domain>` loads with a valid cert before continuing (ACME + DNS can
    take minutes).
-2. Issue the first-login PIN (it expires in 10 minutes):
+2. Issue the first-login PIN (it prints how long the PIN lasts; the superuser
+   panel's Settings page sets that):
 
    ```bash
    sudo mathion pin you@school.edu
@@ -198,7 +199,7 @@ or read root-owned config):
 | `mathion logs [app\|db]` | Show stack logs (optionally for a single service). |
 | `mathion version` | Print CLI + pinned image version. |
 | `mathion superuser <email>` | Create or promote a superuser account (idempotent). |
-| `mathion pin <email>` | Issue a first-login PIN (expires in 10 min; rate-limited 3/hour). |
+| `mathion pin <email>` | Issue a sign-in PIN (the panel's Settings page sets how long a PIN lasts). |
 | `mathion uninstall` | Stop and remove containers (keeps data + config). |
 | `mathion uninstall --purge` | Also remove volumes and config — **destructive**; requires typing the project name to confirm. |
 
@@ -227,7 +228,7 @@ docker compose -f docker-compose.prod.yml exec app python -m mathion.superuser c
 # 5. Start your reverse proxy → 127.0.0.1:8000 (below) and confirm https://<domain>
 #    loads with a valid cert FIRST (ACME + DNS can take minutes).
 
-# 6. Issue the first-login PIN LAST (it expires in 10 minutes)
+# 6. Issue the first-login PIN LAST (it prints how long the PIN lasts)
 docker compose -f docker-compose.prod.yml exec app python -m mathion.superuser pin you@school.edu
 #    Then browse to https://<domain> (test via HTTPS, not http://127.0.0.1:8000 —
 #    the Secure session cookie won't persist over plain HTTP) and log in with
@@ -256,9 +257,10 @@ allow inbound TCP 80 (ACME HTTP-01 challenge + redirect) and 443 (HTTPS).
 **not** downgrade to plain HTTP — the app keeps `Secure` cookies and its
 `https://…` base URL, so put your own TLS proxy in front (or re-enable) to reach it.
 
-**Upload limit:** the bundled proxy allows request bodies up to 25 MiB (covers the
-default 20 MiB upload cap). If you raise `MATHION_MAX_FILE_SIZE` above ~24 MiB, raise
-the proxy's `MAX_SIZE` in the compose file to match.
+**Upload limit:** the superuser panel's Settings page sets the largest file, up to
+50 MB. The bundled proxy allows request bodies up to 60 MiB, enough for that
+ceiling. The compose file an older `mathion` CLI wrote allows only 25 MiB: upgrade
+the CLI (`mathion self-update`, or apt) and run `mathion update`.
 
 **Downgrade caveat:** running an **older** `mathion` CLI's `tls enable` against a
 **newer** install rewrites the on-disk compose with the older embedded copy. That
@@ -272,14 +274,17 @@ Primary — **reproxy** (host-run; pin a specific release and verify the flags):
 
 ```bash
 reproxy --listen=:443 --ssl.type=auto --ssl.fqdn=<domain> --ssl.http-port=80 \
-        --max=25M --static.enabled --static.rule='*,/,http://127.0.0.1:8000'
+        --max=60M --timeout.resp-header=30s --timeout.write=15m \
+        --static.enabled --static.rule='*,/,http://127.0.0.1:8000'
 ```
 
 Host mode defaults to `127.0.0.1:443`, so `--listen=:443` is required; ACME http-01
 needs port 80; `--static.enabled` is required alongside `--static.rule`; and
-reproxy's default `--max` is **64K** — raise it above `MATHION_MAX_FILE_SIZE`
-(20 MiB) or uploads are rejected at the proxy. Binding 80/443 needs root or
-`CAP_NET_BIND_SERVICE`.
+reproxy's default `--max` is **64K** — raise it above the largest file set in the
+panel's Settings (up to 50 MB) or uploads are rejected at the proxy. Its default
+5 s wait for an answer is shorter than the panel's 20 s email test, and its 30 s
+limit per request is too short for a big upload or download on a slow link: raise
+both, as above. Binding 80/443 needs root or `CAP_NET_BIND_SERVICE`.
 
 Alternative — **Caddy** (no low default body limit; auto-manages 80/443 + ACME):
 
@@ -294,8 +299,10 @@ join the compose network and target `http://app:8000`, or use host networking.
 
 ### Operations
 
-- **Rate limits:** PIN issuance 3/hour, verify failures 5/hour (both per email). If
-  locked out during setup, wait an hour or clear the `rate_limit_entries` table.
+- **Rate limits:** PIN requests and wrong PIN tries are limited per email per hour;
+  the superuser panel's Settings page sets both. If someone is locked out,
+  `sudo mathion pin <email>` makes a new PIN: it skips the request limit and clears
+  that email's wrong tries.
 - **Data safety:** `mathion_pgdata` + `mathion_assets` hold all state (project-prefixed as
   `mathion_prod_mathion_pgdata` / `mathion_prod_mathion_assets` in `docker volume ls`).
   **`docker compose -f docker-compose.prod.yml down -v` permanently deletes them** — use

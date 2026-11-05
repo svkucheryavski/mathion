@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest';
+import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
 import { mount, unmount, flushSync, tick } from 'svelte';
 
 import DashboardSidePanel from '../components/runs/DashboardSidePanel.svelte';
@@ -173,11 +174,13 @@ beforeEach(() => {
   vi.restoreAllMocks();
   vi.mocked(pushToast).mockClear();
   vi.stubGlobal('fetch', routedFetch()); // default: empty thread; tests needing a body/eval override this
+  uploadLimit.mb = 20; // the saved limit (Settings D11b); tests of other values set their own
 });
 
 afterEach(() => {
   if (component) { unmount(component); component = null; }
   if (host?.parentNode) host.parentNode.removeChild(host);
+  resetUploadLimit();
 });
 
 // --- Fixtures ---
@@ -2107,6 +2110,52 @@ describe('DashboardSidePanel — the Evaluate form (6c T6, R37, R44)', () => {
     const click = vi.spyOn(input, 'click').mockImplementation(() => {});
     attach.click();
     expect(click).toHaveBeenCalledTimes(1);
+  });
+
+  it('the help and the size check follow the saved limit (Settings D11b)', async () => {
+    uploadLimit.mb = 50;
+    await mountCreate();
+    expect(host.querySelector('[id$="-file-help"]')?.textContent).toBe('PDF only, max 50 MB.');
+    const input = host.querySelector('input#evaluation-file') as HTMLInputElement;
+    const big = new File(['x'], 'big.pdf', { type: 'application/pdf' });
+    Object.defineProperty(big, 'size', { value: 50 * 1024 * 1024 + 1 });
+    Object.defineProperty(input, 'files', { value: [big], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).toContain('File exceeds 50 MB limit.');
+  });
+
+  it('while the limit is unknown, the help has no number and nothing is checked (Settings D11b)', async () => {
+    uploadLimit.mb = null;
+    await mountCreate();
+    expect(host.querySelector('[id$="-file-help"]')?.textContent).toBe('PDF only.');
+    const input = host.querySelector('input#evaluation-file') as HTMLInputElement;
+    const big = new File(['x'], 'big.pdf', { type: 'application/pdf' });
+    Object.defineProperty(big, 'size', { value: 60 * 1024 * 1024 });
+    Object.defineProperty(input, 'files', { value: [big], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(host.textContent).not.toContain('File exceeds');
+  });
+
+  it("a proxy's 413 (an HTML page) says the server's upload limit (Settings D11a)", async () => {
+    const thread = routedFetch();
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => ((init?.method ?? 'GET').toUpperCase() === 'GET'
+      ? thread(url, init)
+      : Promise.resolve(new Response('<html><body><h1>413 Request Entity Too Large</h1></body></html>', { status: 413, headers: { 'Content-Type': 'text/html' } })))));
+    await mountCreate();
+    pickResult('accepted');
+    const input = host.querySelector('input#evaluation-file') as HTMLInputElement;
+    const pdf = new File([new Uint8Array(2048)], 'notes.pdf', { type: 'application/pdf' });
+    Object.defineProperty(input, 'files', { value: [pdf], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const banner = host.querySelector('[role="alert"].form-error')?.textContent ?? '';
+    expect(banner).toContain("This file is over the server's upload limit.");
+    expect(banner).not.toContain('Upload failed');
   });
 
   it('a chosen file shows "{name} · {size}" with its remove × focused; remove clears the input and focuses "attach PDF"', async () => {

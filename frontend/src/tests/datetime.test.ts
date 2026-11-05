@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { localInputToISO, isoToLocalInput, formatLocalWithTz, localTzLabel, formatShortDeadline, formatShortDate, formatLocalShortDate, deadlinesHeader } from '../lib/datetime';
+import { localInputToISO, isoToLocalInput, formatLocalWithTz, localTzLabel, formatShortDeadline, formatShortDate, formatLocalShortDate, deadlinesHeader, formatDayTime } from '../lib/datetime';
 
 // TZ pinned to Europe/Copenhagen via package.json scripts (TZ=Europe/Copenhagen
 // prepended to vitest). Node caches the host TZ at process start, so a
@@ -129,5 +129,12 @@ describe('formatLocalShortDate (6c §Dates)', () => {
   });
   it('and across the year in winter (CET)', () => {
     expect(formatLocalShortDate('2026-12-31T23:30:00Z')).toBe('01 Jan 2027');
+  });
+});
+
+describe('formatDayTime', () => {
+  it('reads a local instant as "4 Nov 2026 at 14:02": day unpadded, English month, padded time', () => {
+    expect(formatDayTime(new Date(2026, 10, 4, 14, 2).toISOString())).toBe('4 Nov 2026 at 14:02');
+    expect(formatDayTime(new Date(2026, 0, 15, 9, 5).toISOString())).toBe('15 Jan 2026 at 09:05');
   });
 });

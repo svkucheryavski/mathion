@@ -115,6 +115,12 @@ describe('lib/assets', () => {
       }
     });
 
+    it('a non-JSON error with no status text (HTTP/2) still has a detail, never a blank one', async () => {
+      fetchSpy.mockResolvedValueOnce(new Response('<html>Bad gateway</html>', { status: 502, statusText: '' }));
+      const err = await uploadAsset(42, new File(['x'], 'a.png', { type: 'image/png' })).catch((e) => e);
+      expect(err).toMatchObject({ status: 502, detail: 'Upload failed' });
+    });
+
     it('wraps network failure in ApiError with status 0', async () => {
       fetchSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'));
       const file = new File(['x'], 'foo.png', { type: 'image/png' });

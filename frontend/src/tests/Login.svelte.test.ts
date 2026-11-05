@@ -58,7 +58,7 @@ it('send_pin_enabled=false: direct email+PIN entry submits to verify-pin, never 
   vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
   const f = vi.fn((url: string) => {
     const s = String(url);
-    if (s.includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: false }));
+    if (s.includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: false, longest_sign_in_days: 30, max_file_mb: 20 }));
     if (s.includes('/verify-pin')) return Promise.resolve(jsonResponse(200, { user: FAKE_USER }));
     return Promise.resolve(jsonResponse(200, {}));
   });
@@ -78,7 +78,7 @@ it('send_pin_enabled=false: direct email+PIN entry submits to verify-pin, never 
 it('send_pin_enabled=true: two-step flow shows delivery-neutral copy', async () => {
   const f = vi.fn((url: string) => {
     const s = String(url);
-    if (s.includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: true }));
+    if (s.includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: true, longest_sign_in_days: 30, max_file_mb: 20 }));
     if (s.includes('/request-pin')) return Promise.resolve(jsonResponse(200, { message: 'PIN sent' }));
     return Promise.resolve(jsonResponse(200, {}));
   });
@@ -115,7 +115,7 @@ it('captures + clears superuser_return_path on mount and navigates there after v
   const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
   const f = vi.fn((url: string) => {
     const s = String(url);
-    if (s.includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: false }));
+    if (s.includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: false, longest_sign_in_days: 30, max_file_mb: 20 }));
     if (s.includes('/verify-pin')) return Promise.resolve(jsonResponse(200, { user: FAKE_USER }));
     return Promise.resolve(jsonResponse(200, {}));
   });
@@ -134,7 +134,7 @@ it('captures + clears superuser_return_path on mount and navigates there after v
 it('a stale return path from a prior mount does not survive to a later login', async () => {
   sessionStorage.setItem('superuser_return_path', '/superuser/stale');
   const f = vi.fn((url: string) => {
-    if (String(url).includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: true }));
+    if (String(url).includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: true, longest_sign_in_days: 30, max_file_mb: 20 }));
     return Promise.resolve(jsonResponse(200, {}));
   });
   vi.stubGlobal('fetch', f);
@@ -151,7 +151,7 @@ it('§2a: segmented duration in a card+logo; selecting 30 submits numeric durati
   const calls: Array<[string, RequestInit]> = [];
   const f = vi.fn((url: string, init?: RequestInit) => {
     calls.push([String(url), init ?? {}]);
-    if (String(url).includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: false }));
+    if (String(url).includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: false, longest_sign_in_days: 30, max_file_mb: 20 }));
     if (String(url).includes('/api/auth/verify-pin')) return Promise.resolve(jsonResponse(200, { user: FAKE_USER }));
     return Promise.resolve(jsonResponse(200, {}));
   });
@@ -189,7 +189,7 @@ it('§2a: the two-step pin step carries the full-width primary (ref 2010) and a 
   // button (:101), so without this test `full`'s only production call site is unguarded.
   const f = vi.fn((url: string) => {
     const s = String(url);
-    if (s.includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: true }));
+    if (s.includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: true, longest_sign_in_days: 30, max_file_mb: 20 }));
     if (s.includes('/request-pin')) return Promise.resolve(jsonResponse(200, { message: 'PIN sent' }));
     return Promise.resolve(jsonResponse(200, {}));
   });
@@ -205,4 +205,44 @@ it('§2a: the two-step pin step carries the full-width primary (ref 2010) and a 
   expect(submit).not.toBeNull();
   expect(submit!.classList.contains('full')).toBe(true);
   expect(target.querySelector('[role="radiogroup"]')?.getAttribute('aria-label')).toBe('Stay signed in for');
+});
+
+// Settings D12: the login page offers only the lengths up to the longest the
+// panel allows, and preselects 7 days, or the longest when that's shorter.
+async function mountWithConfig(config: Record<string, unknown>) {
+  vi.stubGlobal('fetch', vi.fn((url: string) => {
+    if (String(url).includes('/api/auth/config')) {
+      return Promise.resolve(jsonResponse(200, { send_pin_enabled: false, longest_sign_in_days: 30, max_file_mb: 20, ...config }));
+    }
+    return Promise.resolve(jsonResponse(200, {}));
+  }));
+  component = mount(Login, { target });
+  await settle();
+}
+const segmentTexts = () => [...target.querySelectorAll('.segment')].map((s) => s.textContent!.trim());
+const selectedText = () => target.querySelector('.segment.selected')?.textContent!.trim();
+
+it('D12: longest 7 days offers 1 and 7, with 7 selected', async () => {
+  await mountWithConfig({ longest_sign_in_days: 7 });
+  expect(segmentTexts()).toEqual(['1 day', '7 days']);
+  expect(selectedText()).toBe('7 days');
+});
+
+it('D12: longest 1 day offers only 1 day, selected', async () => {
+  await mountWithConfig({ longest_sign_in_days: 1 });
+  expect(segmentTexts()).toEqual(['1 day']);
+  expect(selectedText()).toBe('1 day');
+});
+
+it('D12: longest 30 days offers 1, 7 and 30, with 7 selected', async () => {
+  await mountWithConfig({ longest_sign_in_days: 30 });
+  expect(segmentTexts()).toEqual(['1 day', '7 days', '30 days']);
+  expect(selectedText()).toBe('7 days');
+});
+
+it("D10b: with email off, the page says to ask the person who runs this Mathion for a PIN", async () => {
+  await mountWithConfig({ send_pin_enabled: false });
+  expect(target.querySelector('.subtitle')?.textContent).toBe(
+    "Email isn't set up on this server, so PINs aren't emailed. Ask the person who runs this Mathion for one.");
+  expect(target.textContent).not.toContain('server terminal');
 });

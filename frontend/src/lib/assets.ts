@@ -69,7 +69,8 @@ export async function uploadAsset(
       // Non-JSON response (HTML error page, truncated payload) — body stays
       // undefined. Mirrors lib/api.ts non-2xx handling.
     }
-    const detail = (parsedBody as { detail?: string } | undefined)?.detail ?? res.statusText;
+    // statusText is empty over HTTP/2, so it can't be the only fallback.
+    const detail = (parsedBody as { detail?: string } | undefined)?.detail ?? (res.statusText || 'Upload failed');
     const errorCode = (parsedBody as { error_code?: string } | undefined)?.error_code;
     throw new ApiError(res.status, detail, errorCode, parsedBody);
   }

@@ -926,6 +926,8 @@ class SuperuserStatsResponse(BaseModel):
 
 class AuthConfigResponse(BaseModel):
     send_pin_enabled: bool
+    longest_sign_in_days: int  # superuser Settings D12
+    max_file_mb: int           # superuser Settings D11b
 
 
 # --- The superuser panel: Courses (spec D4-D13) and Users (D14-D21) ---
@@ -1154,3 +1156,98 @@ class PanelUserUpdate(BaseModel):
         if not self.model_fields_set:
             raise ValueError("Send a name or an email")
         return self
+
+
+# --- the superuser panel's Settings (superuser Settings spec D5-D12) -------------
+# Types only: the rules (D7-D8a, D11, D12) are checked in the endpoints, which
+# know the saved row and answer one sentence.
+
+SmtpEncryption = Literal["starttls", "ssl", "none"]
+
+
+class PanelEmailTest(BaseModel):
+    at: datetime
+    ok: bool
+    message: str
+
+
+class PanelSendFailure(BaseModel):
+    since: datetime
+    message: str
+
+
+class PanelEmailSettings(BaseModel):
+    on: bool
+    host: str
+    port: int
+    encryption: str
+    skip_cert_check: bool
+    username: str
+    password_saved: bool
+    password_unreadable: bool
+    from_address: str
+    dev_mode: Literal["file", "memory"] | None
+    card_test: PanelEmailTest | None
+    failing: PanelSendFailure | None
+
+
+class PanelLimits(BaseModel):
+    max_file_mb: int
+    max_total_mb: int
+
+
+class PanelSignIn(BaseModel):
+    pin_minutes: int
+    pin_requests_per_hour: int
+    pin_failures_per_hour: int
+    longest_sign_in_days: int
+
+
+class PanelSite(BaseModel):
+    base_url: str
+
+
+class PanelSettings(BaseModel):
+    email: PanelEmailSettings
+    limits: PanelLimits
+    sign_in: PanelSignIn
+    site: PanelSite
+
+
+class EmailTestIn(BaseModel):
+    """What a test email tests: the form as it is now. An empty password means
+    the saved one (D8a decides whether that's allowed)."""
+    host: str = ""
+    port: int = 587
+    encryption: SmtpEncryption = "starttls"
+    skip_cert_check: bool = False
+    username: str = ""
+    password: str | None = None
+    from_address: str = ""
+
+    @field_validator("host", "username", "from_address")
+    @classmethod
+    def _trim(cls, v: str) -> str:
+        return v.strip()
+
+
+class EmailSettingsIn(EmailTestIn):
+    """D7c: with `on` false only the switch is written, so `{"on": false}` alone is enough."""
+    on: bool
+
+
+class LimitsIn(BaseModel):
+    max_file_mb: int
+    max_total_mb: int
+
+
+class SignInIn(BaseModel):
+    pin_minutes: int
+    pin_requests_per_hour: int
+    pin_failures_per_hour: int
+    longest_sign_in_days: int
+
+
+class EmailTestResult(BaseModel):
+    ok: bool
+    message: str

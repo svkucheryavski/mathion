@@ -11,6 +11,7 @@ from mathion.models import (
 )
 from mathion.models_auth import NotificationLogEntry, StudentEnrollment, User, UserItemState
 from mathion.superuser import service as panel_service
+from tests.conftest import set_site
 
 
 @pytest.fixture
@@ -195,11 +196,25 @@ def test_disabled_wins_over_email_off(panel, db, monkeypatch):
     assert client.put(f"{base}/courses/{course.id}/admin", json={"email": "off@x"}).json()["admin_email"] == "disabled"
 
 
+def test_admin_note_follows_saved_switch(panel, db, monkeypatch):
+    # Superuser Settings D10b: "set up" is the panel's switch, unless a dev mode wins.
+    client, base = panel
+    monkeypatch.setattr(settings, "email_mode", "disabled")
+    _user(db)
+    course, _ = _course(db, "sw")
+    set_site(db, email_on=True, smtp_host="mail.uni.dk", email_from="a@uni.dk")
+    assert client.put(f"{base}/courses/{course.id}/admin", json={"email": "anna@x"}).json()["admin_email"] == "queued"
+    client.delete(f"{base}/courses/{course.id}/admin")
+    set_site(db, email_on=False)
+    assert client.put(f"{base}/courses/{course.id}/admin", json={"email": "anna@x"}).json()["admin_email"] == "email_off"
+
+
 def test_result_carries_pin_minutes_and_sign_in_url(panel, db):
     client, base = panel
     course, _ = _course(db, "stat")
+    set_site(db, pin_minutes=25)  # superuser Settings D10b: the saved minutes
     body = client.put(f"{base}/courses/{course.id}/admin", json={"email": "anna@x"}).json()
-    assert body["pin_minutes"] == settings.pin_expiry_minutes
+    assert body["pin_minutes"] == 25
     assert body["sign_in_url"] == f"{settings.base_url}/courses/stat/edit"
 
 
@@ -422,7 +437,10 @@ def _ghost(monkeypatch):
     monkeypatch.setattr(mod, "get_or_create_user", lambda db, email: ghost)
 
 
-def test_assign_to_account_deleted_meanwhile_409(panel, db, monkeypatch):
+@pytest.mark.parametrize("email_mode", ["memory", "disabled"])
+def test_assign_to_account_deleted_meanwhile_409(panel, db, monkeypatch, email_mode):
+    # `disabled` reads the saved switch, whose savepoint flushes the admin row.
+    monkeypatch.setattr(settings, "email_mode", email_mode)
     client, base = panel
     course, _ = _course(db)
     _ghost(monkeypatch)
@@ -431,7 +449,9 @@ def test_assign_to_account_deleted_meanwhile_409(panel, db, monkeypatch):
     assert db.query(CourseAdmin).count() == 0 and _log_rows(db) == []
 
 
-def test_create_with_account_deleted_meanwhile_409(panel, db, monkeypatch):
+@pytest.mark.parametrize("email_mode", ["memory", "disabled"])
+def test_create_with_account_deleted_meanwhile_409(panel, db, monkeypatch, email_mode):
+    monkeypatch.setattr(settings, "email_mode", email_mode)
     client, base = panel
     _ghost(monkeypatch)
     r = client.post(f"{base}/courses", json={"name": "S", "slug": "s", "admin_email": "ghost@x"})

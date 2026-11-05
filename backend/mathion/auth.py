@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from mathion.config import settings
 from mathion.models_auth import LoginPIN, RateLimitEntry, Session, User
+from mathion.site_settings import load as load_site
 
 
 def hash_token(value: str) -> str:
@@ -30,25 +31,30 @@ def generate_session_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def request_pin(db: DBSession, email: str) -> str | None:
-    """Create a login PIN for the given email. Returns raw PIN or None if user not found or rate limited."""
+def request_pin(db: DBSession, email: str, *, operator: bool = False) -> str | None:
+    """Create a login PIN for the given email. Returns raw PIN or None if user not found or rate limited.
+
+    `operator=True` is the server operator's `mathion pin` (superuser Settings
+    D12): it skips the per-email request count and isn't counted itself."""
     email = email.strip().lower()
+    site = load_site(db)
     user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
     if not user or user.is_disabled:
         return None
 
-    # Rate limit: count PIN requests in last hour.
-    # NOTE: Rate limiting is approximate under concurrent requests.
-    # For strict enforcement on PostgreSQL, use SELECT ... FOR UPDATE on a per-email lock row.
-    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
-    request_count = db.scalar(
-        select(func.count()).where(
-            RateLimitEntry.key == f"pin_request:{email}",
-            RateLimitEntry.created_at > one_hour_ago,
+    if not operator:
+        # Rate limit: count PIN requests in last hour.
+        # NOTE: Rate limiting is approximate under concurrent requests.
+        # For strict enforcement on PostgreSQL, use SELECT ... FOR UPDATE on a per-email lock row.
+        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+        request_count = db.scalar(
+            select(func.count()).where(
+                RateLimitEntry.key == f"pin_request:{email}",
+                RateLimitEntry.created_at > one_hour_ago,
+            )
         )
-    )
-    if request_count >= settings.max_pin_requests_per_hour:
-        return None
+        if request_count >= site.pin_requests_per_hour:
+            return None
 
     # Invalidate any existing unused PINs for this user
     existing_pins = db.execute(
@@ -61,13 +67,14 @@ def request_pin(db: DBSession, email: str) -> str | None:
         p.is_used = True
 
     # Record this request for rate limiting
-    db.add(RateLimitEntry(key=f"pin_request:{email}"))
+    if not operator:
+        db.add(RateLimitEntry(key=f"pin_request:{email}"))
 
     raw_pin = generate_pin()
     pin = LoginPIN(
         user_id=user.id,
         pin_hash=hash_token(raw_pin),
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.pin_expiry_minutes),
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=site.pin_minutes),
     )
     db.add(pin)
     db.commit()
@@ -79,6 +86,7 @@ def request_pin(db: DBSession, email: str) -> str | None:
 def verify_pin(db: DBSession, email: str, raw_pin: str, duration_days: int) -> str | None:
     """Verify a PIN and create a session. Returns session token or None."""
     email = email.strip().lower()
+    site = load_site(db)
     user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
     if not user or user.is_disabled:
         return None
@@ -91,7 +99,7 @@ def verify_pin(db: DBSession, email: str, raw_pin: str, duration_days: int) -> s
             RateLimitEntry.created_at > one_hour_ago,
         )
     )
-    if failure_count >= settings.max_pin_failures_per_hour:
+    if failure_count >= site.pin_failures_per_hour:
         return None
 
     # Find valid, unused PIN — use .first() as safety net against MultipleResultsFound

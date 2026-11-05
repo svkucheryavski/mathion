@@ -250,6 +250,10 @@ def _build_schema():
         conn.execute(text("CREATE SCHEMA public"))
     alembic_cfg = Config(str(Path(__file__).resolve().parent.parent / "alembic.ini"))
     command.upgrade(alembic_cfg, "head")
+    # The site_settings migration copies the shell's .env into its row; every
+    # test starts without one (the defaults with email off).
+    with engine.begin() as conn:
+        conn.execute(text("TRUNCATE site_settings"))
     yield
 
 
@@ -840,3 +844,13 @@ def record_lock_calls(monkeypatch):
 
     monkeypatch.setattr(advisory, "advisory_xact_lock", spy)
     return events
+
+
+def set_site(db, **fields):
+    """Write the panel's Settings row (superuser Settings D1) for a test."""
+    from mathion.site_settings import get_row
+    row = get_row(db)
+    for name, value in fields.items():
+        setattr(row, name, value)
+    db.commit()
+    return row

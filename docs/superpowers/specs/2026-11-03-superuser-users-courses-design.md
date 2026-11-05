@@ -240,5 +240,5 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
 ## 7. Out of scope, noted for the backlog
 
 - **Files left on disk:** `delete_version` (`versions.py:398-407`) and a non-force `delete_run` (`runs.py:166-176`) leave `courses/<vid>` and `runs/<rid>` behind. The course delete can't see those (lane A M15).
-- **Stale emails:** with email off, the other email kinds still pile up in `notification_log` and all go out once email is set up (lane A M16). D5a avoids this for the admin email only.
+- **Stale emails:** with email off, the other email kinds still pile up in `notification_log` and all go out once email is set up (lane A M16). D5a avoids this for the admin email only. *Settled by D10a of the Settings spec (`2026-11-04-superuser-settings-design.md`): what is queued while email is off is never emailed.*
 - **Roster email checks:** the roster schemas have the same email-shape gap as D4 (lane A M3).

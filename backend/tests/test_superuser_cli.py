@@ -4,7 +4,7 @@ from mathion.auth import verify_pin
 from mathion.models_auth import User
 from mathion.superuser import service as panel_service
 from mathion.superuser.service import (
-    ActivateResult, DisabledUser, PinIssued, RateLimited, UnknownUser,
+    ActivateResult, DisabledUser, PinIssued, UnknownUser,
     activate_panel, create_or_promote_superuser, issue_bootstrap_pin,
 )
 
@@ -60,11 +60,23 @@ def test_issue_pin_disabled_user(db):
     assert isinstance(issue_bootstrap_pin(db, "off@example.com"), DisabledUser)
 
 
-def test_issue_pin_rate_limited(db):
+def test_issue_pin_is_not_request_limited(db):
+    # D12: the operator's command skips the per-email request count.
     create_or_promote_superuser(db, "rl@example.com")
-    for _ in range(3):   # settings.max_pin_requests_per_hour default is 3
-        issue_bootstrap_pin(db, "rl@example.com")
-    assert isinstance(issue_bootstrap_pin(db, "rl@example.com"), RateLimited)
+    for _ in range(5):
+        assert isinstance(issue_bootstrap_pin(db, "rl@example.com"), PinIssued)
+
+
+def test_pin_command_prints_the_saved_minutes(db, capsys, monkeypatch):
+    # D14: what `mathion pin` shows says the real minutes.
+    from mathion.superuser import __main__ as cli
+    from tests.conftest import set_site
+    create_or_promote_superuser(db, "m@example.com")
+    set_site(db, pin_minutes=25)
+    monkeypatch.setattr(cli, "SessionLocal", lambda: db)
+    assert cli.main(["pin", "m@example.com"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("PIN: ") and "It expires in 25 minutes." in out
 
 
 def test_activate_no_superuser_warns(db):

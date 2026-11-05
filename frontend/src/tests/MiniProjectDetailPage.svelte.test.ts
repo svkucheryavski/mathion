@@ -37,6 +37,7 @@ vi.mock('../lib/events', () => {
 });
 
 import { ApiError } from '../lib/api';
+import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
 import { fetchDetail, submit, REASON_LABELS } from '../lib/studentMiniProjects';
 import { emitUnauthorized } from '../lib/events';
 import { currentCourse, __test__setSlots } from '../stores/currentCourse.svelte';
@@ -67,6 +68,7 @@ beforeEach(() => {
   vi.mocked(submit).mockReset();
   vi.mocked(emitUnauthorized).mockReset();
   __test__setSlots(null);
+  uploadLimit.mb = 20; // the saved limit (Settings D11b); tests of other values set their own
   target = document.createElement('div');
   document.body.appendChild(target);
   // F19 — jsdom default visibilityState seam; reset to 'visible' each test
@@ -78,6 +80,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetUploadLimit();
   if (component) { unmount(component); component = null; }
   if (target.parentNode) target.parentNode.removeChild(target);
   __test__setSlots(null);
@@ -554,7 +557,56 @@ describe('MiniProjectDetailPage (D6 — submit flow)', () => {
     expect(vi.mocked(submit)).not.toHaveBeenCalled();
     const banner = target.querySelector('[data-testid="mp-submit-error"]');
     if (!banner) throw new Error('expected client-size banner');
-    expect(banner.textContent).toContain('File too large');
+    expect(banner.textContent).toContain('File too large — 20 MB maximum.');
+  });
+
+  it('the size check says the saved limit (Settings D11b)', async () => {
+    uploadLimit.mb = 50;
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ latest_status: 'not_submitted', can_submit: true }));
+    await mountPage();
+    const big = new File([new Uint8Array(1)], 'big.pdf', { type: 'application/pdf' });
+    Object.defineProperty(big, 'size', { configurable: true, value: 51 * 1024 * 1024 });
+    await pickFile(big);
+    clickSubmit();
+    await settle();
+    expect(vi.mocked(submit)).not.toHaveBeenCalled();
+    expect(target.querySelector('[data-testid="mp-submit-error"]')?.textContent).toContain('File too large — 50 MB maximum.');
+  });
+
+  it('while the limit is unknown the browser skips its size check; the server decides (Settings D11b)', async () => {
+    uploadLimit.mb = null;
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ latest_status: 'not_submitted', can_submit: true }));
+    vi.mocked(submit).mockReturnValue(new Promise(() => {}));
+    await mountPage();
+    const big = new File([new Uint8Array(1)], 'big.pdf', { type: 'application/pdf' });
+    Object.defineProperty(big, 'size', { configurable: true, value: 60 * 1024 * 1024 });
+    await pickFile(big);
+    clickSubmit();
+    await settle();
+    expect(vi.mocked(submit)).toHaveBeenCalled();
+  });
+
+  it("a proxy's 413 (no sentence) says the server's upload limit (Settings D11a)", async () => {
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ latest_status: 'not_submitted', can_submit: true }));
+    vi.mocked(submit).mockRejectedValue(new ApiError(413, 'Submission failed'));
+    await mountPage();
+    await pickFile(makePdf());
+    clickSubmit();
+    await settle();
+    const banner = target.querySelector('[data-testid="mp-submit-error"]')?.textContent ?? '';
+    expect(banner).toContain("This file is over the server's upload limit.");
+    expect(banner).not.toContain('Submission failed');
+  });
+
+  it("the server's 413 shows its own sentence (Settings D11a)", async () => {
+    const sentence = 'This file is over the 20 MB limit.';
+    vi.mocked(fetchDetail).mockResolvedValue(makeDetail({ latest_status: 'not_submitted', can_submit: true }));
+    vi.mocked(submit).mockRejectedValue(new ApiError(413, sentence, undefined, { detail: sentence }));
+    await mountPage();
+    await pickFile(makePdf());
+    clickSubmit();
+    await settle();
+    expect(target.querySelector('[data-testid="mp-submit-error"]')?.textContent).toContain(sentence);
   });
 });
 

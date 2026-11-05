@@ -1,12 +1,6 @@
 import { api, ApiError } from './api';
 import { emitUnauthorized } from './events';
 
-// MUST stay in sync with backend Settings.max_file_size (config.py:9), default 20 MB.
-// Backend value is env-overridable via MATHION_MAX_FILE_SIZE; a deploy bumping the
-// backend constant must hand-update this. Accepted drift for the write-surface
-// slice; a /api/config/limits endpoint is the principled fix (Phase 9).
-export const MAX_FEEDBACK_FILE_SIZE_BYTES = 20 * 1024 * 1024;
-
 export type EvaluationResult = 'rejected' | 'major_revision' | 'minor_revision' | 'accepted';
 
 export interface Evaluation {

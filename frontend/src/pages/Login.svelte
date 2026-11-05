@@ -8,6 +8,7 @@
   import FormRow from '../components/ui/FormRow.svelte';
   import Spinner from '../components/ui/Spinner.svelte';
   import Logo from '../components/ui/Logo.svelte';
+  import Segmented from '../components/ui/Segmented.svelte';
   import { PRODUCT_NAME } from '../lib/branding';
 
   // Capture + clear the superuser return path SYNCHRONOUSLY at init, before any
@@ -30,11 +31,22 @@
   // undefined until GET /api/auth/config resolves — render-gate.
   let sendPinEnabled = $state<boolean | undefined>(undefined);
   const DURATIONS = [1, 7, 30] as const;   // `as const` keeps `d: 1|7|30` (bare [1,7,30] widens to number[])
+  // Settings D12: only the lengths up to the longest the panel allows (all
+  // three until the config arrives, or if it fails).
+  let longest = $state(30);
+  const durationOptions = $derived(DURATIONS.filter((d) => d <= longest)
+    .map((d) => ({ value: d, label: `${d} ${d === 1 ? 'day' : 'days'}` })));
 
   $effect(() => { void loadConfig(); });
 
   async function loadConfig(): Promise<void> {
-    try { sendPinEnabled = (await getAuthConfig()).send_pin_enabled; }
+    try {
+      const config = await getAuthConfig();
+      longest = config.longest_sign_in_days;
+      // 7 days, or the longest when that's shorter (1, 7 and 30 are the only lengths).
+      duration = longest < 7 ? 1 : 7;
+      sendPinEnabled = config.send_pin_enabled;
+    }
     catch {
       // Network/5xx — resolve into the standard two-step flow (no infinite
       // spinner; submit re-enables). Production-normal path.
@@ -70,14 +82,7 @@
 
 {#snippet durationField()}
   <FormRow label="Stay signed in for">
-    <div class="segmented" role="radiogroup" aria-label="Stay signed in for">
-      {#each DURATIONS as d (d)}
-        <label class="segment" class:selected={duration === d}>
-          <input type="radio" name="duration" value={d} bind:group={duration} />
-          {d} {d === 1 ? 'day' : 'days'}
-        </label>
-      {/each}
-    </div>
+    <Segmented options={durationOptions} bind:value={duration} name="duration" label="Stay signed in for" />
   </FormRow>
 {/snippet}
 
@@ -89,7 +94,7 @@
     {#if sendPinEnabled === undefined}
       <div class="loading"><Spinner /></div>
     {:else if sendPinEnabled === false}
-      <p class="subtitle">Email delivery isn't configured — enter your email and the PIN shown in the server terminal.</p>
+      <p class="subtitle">Email isn't set up on this server, so PINs aren't emailed. Ask the person who runs this Mathion for one.</p>
       <form onsubmit={onSubmitPin}>
         <FormRow label="Email">
           <Input type="email" bind:value={email} autocomplete="email" autofocus name="email" />
@@ -130,21 +135,6 @@
   .brand { display: flex; align-items: center; gap: var(--space-2); margin-bottom: 20px; /* ref 1988 */ }
   .wordmark { font-size: 15px; /* ref 1990 */ font-weight: 600; letter-spacing: -.01em; color: var(--text); }
   .subtitle { font-size: 13px; /* ref 1993 */ line-height: 1.5; color: var(--muted); margin: 0 0 20px; }
-  .segmented { display: flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-  .segment { position: relative; flex: 1; text-align: center; font-size: 13px; /* ref 2004 */ color: var(--muted); padding: var(--btn-pad-segment); background: var(--surface); cursor: pointer; }
-  .segment:not(:first-child) { border-left: 1px solid var(--border); }
-  .segment.selected { background: var(--primary-soft); color: var(--text); font-weight: 500; }
-  .segment input { position: absolute; width: 1px; height: 1px; opacity: 0; margin: -1px; }        /* visually-hidden radio (sr-only, not a disabled treatment) */
-  .segment input:focus-visible { box-shadow: none; }                                                /* a no-op since Polish 2 (the field rule skips this input); kept for Polish 3 */
-  .segment:has(input:focus-visible) { box-shadow: inset 0 0 0 2px var(--primary); }                 /* --primary: visible on both --surface and the selected --primary-soft */
-  /* Forced-colors (Windows High Contrast) drops background-color AND box-shadow, so
-     both the selected fill (.segment.selected) and the focus ring above vanish —
-     the native <select> this replaced had system-drawn cues. Restore both with
-     outlines (forced-colors keeps outlines): neutral for selection, Highlight for focus. */
-  @media (forced-colors: active) {
-    .segment.selected { outline: 2px solid; outline-offset: -2px; }
-    .segment:has(input:focus-visible) { outline: 2px solid Highlight; outline-offset: -2px; }
-  }
   .actions { display: flex; align-items: center; gap: 10px; /* ref 2009 */ }
   .loading { display: flex; justify-content: center; padding: var(--space-4); }
 </style>

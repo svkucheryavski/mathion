@@ -61,6 +61,12 @@ export function formatLocalShortDate(iso: string): string {
   return `${pad2(d.getDate())} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+// A UTC ISO instant in the viewer's local time, for a record: "4 Nov 2026 at 14:02".
+export function formatDayTime(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()} at ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
 // The Deadlines column header: the zone when every shown deadline shares one
 // offset, "(local time)" when daylight saving splits them, bare otherwise.
 export function deadlinesHeader(isos: string[]): string {

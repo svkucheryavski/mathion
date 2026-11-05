@@ -1,11 +1,14 @@
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.engine import make_url
 
 from mathion.api.auth import router as auth_router
@@ -30,6 +33,7 @@ from mathion.api.student_mini_projects import router as student_mini_projects_ro
 from mathion.api.submissions import router as submissions_router
 from mathion.api.superuser import router as superuser_router
 from mathion.api.superuser_courses import router as superuser_courses_router
+from mathion.api.superuser_settings import router as superuser_settings_router
 from mathion.api.superuser_users import router as superuser_users_router
 from mathion.api.teaching import router as teaching_router
 from mathion.api.versions import router as versions_router
@@ -38,8 +42,9 @@ from mathion.notifications import (
     run_forever,
     acquire_singleton_lock,
     SHUTDOWN_TIMEOUT_SECONDS,
-    build_mailer_from_settings,
+    build_mailer,
 )
+from mathion.site_settings import MOVED_ENV_KEYS
 from mathion.superuser.log_redaction import install as install_log_redaction
 
 # Redact the panel token from uvicorn access logs. Installed at IMPORT TIME
@@ -82,14 +87,22 @@ async def lifespan(app):
     _db = make_url(settings.database_url)
     logger.info("Database target: %s@%s:%s/%s",
                 _db.username, _db.host, _db.port or 5432, _db.database)
+    # D2: the panel's Settings now set these; say once which ones .env still
+    # sets, without asking anyone to delete them.
+    ignored = sorted(k for k in MOVED_ENV_KEYS if k in os.environ)
+    if ignored:
+        logger.info("These .env keys are ignored since this version; the panel's "
+                    "Settings page sets them: %s.", ", ".join(ignored))
     app.state.shutdown = asyncio.Event()
-    app.state.mailer = build_mailer_from_settings(settings)
+    # A developer outbox (`file`/`memory`, D2c) is built once here; otherwise
+    # the loop builds the mailer from the panel's saved settings every tick.
+    # An unknown MATHION_EMAIL_MODE fails the boot here, as before.
+    app.state.mailer = build_mailer(None, settings.secret_key, settings.email_mode)
+    # Superuser Settings D10: the panel can turn email on at any time, so the
+    # loop and the single-sender lock start at every boot.
     app.state.lock_fd = None
-    if app.state.mailer is not None:
-        app.state.lock_fd = acquire_singleton_lock(settings)
-        task = asyncio.create_task(run_forever(app))
-    else:
-        task = None
+    app.state.lock_fd = acquire_singleton_lock(settings)
+    task = asyncio.create_task(run_forever(app))
 
     try:
         yield
@@ -125,6 +138,17 @@ async def _superuser_no_store(request: Request, call_next):
     return response
 
 
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError):
+    """Superuser Settings D9b: a panel 422 never echoes its input, which may hold
+    a typed SMTP password. Elsewhere, FastAPI's default answer."""
+    if request.url.path.startswith("/api/superuser/"):
+        return JSONResponse(status_code=422, content={
+            "detail": [{"loc": list(e.get("loc", ())), "msg": e.get("msg", "")} for e in exc.errors()],
+        })
+    return await request_validation_exception_handler(request, exc)
+
+
 app.include_router(auth_router)
 app.include_router(courses_router)
 app.include_router(versions_router)
@@ -150,6 +174,7 @@ app.include_router(teaching_router)
 app.include_router(superuser_router)
 app.include_router(superuser_courses_router)
 app.include_router(superuser_users_router)
+app.include_router(superuser_settings_router)
 
 
 @app.get("/health")

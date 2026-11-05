@@ -4,7 +4,6 @@ import {
   uploadRunAsset,
   replaceRunAsset,
   deleteRunAsset,
-  MAX_FILE_SIZE_BYTES,
   ALLOWED_EXTENSIONS,
 } from '../lib/runAssets';
 import * as events from '../lib/events';
@@ -232,10 +231,6 @@ describe('runAssets wrappers', () => {
 });
 
 describe('pre-validation constants', () => {
-  it('MAX_FILE_SIZE_BYTES is 20 MB (matches backend config.py default)', () => {
-    expect(MAX_FILE_SIZE_BYTES).toBe(20 * 1024 * 1024);
-  });
-
   it('ALLOWED_EXTENSIONS mirrors backend assets.py exactly (no leading dots)', () => {
     expect(ALLOWED_EXTENSIONS).toEqual(
       new Set([
