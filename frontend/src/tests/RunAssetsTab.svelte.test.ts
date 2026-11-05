@@ -13,6 +13,8 @@ vi.mock('../lib/runAssets', async () => {
 
 import RunAssetsTab from '../components/runs/RunAssetsTab.svelte';
 import { uploadRunAsset, replaceRunAsset, deleteRunAsset } from '../lib/runAssets';
+import { ApiError } from '../lib/api';
+import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
 import type { BlockResponse, Course, MiniProjectResponse, RunAssetResponse } from '../lib/types';
 
 // jsdom doesn't ship DataTransfer/DragEvent constructors with a writable
@@ -108,12 +110,14 @@ beforeEach(() => {
   target = document.createElement('div');
   document.body.appendChild(target);
   component = null;
+  uploadLimit.mb = 20; // the saved limit (Settings D11b); tests of other values set their own
 });
 
 afterEach(() => {
   if (component) unmount(component);
   document.body.removeChild(target);
   vi.restoreAllMocks();
+  resetUploadLimit();
 });
 
 describe('RunAssetsTab — skeleton', () => {
@@ -677,10 +681,9 @@ describe('RunAssetsTab — upload via file picker', () => {
     expect(target.textContent).toMatch(/Failed to write asset file/i);
   });
 
-  it('upload 413 quota error shows dedicated storage-quota banner', async () => {
-    (uploadRunAsset as any).mockRejectedValue(
-      Object.assign(new Error('Quota exceeded'), { status: 413 }),
-    );
+  it("upload 413 shows the server's sentence, never \"storage quota\" for a too-big file (D11a)", async () => {
+    const sentence = 'This file is over the 20 MB limit.';
+    (uploadRunAsset as any).mockRejectedValue(new ApiError(413, sentence, undefined, { detail: sentence }));
     component = mount(RunAssetsTab, { target, props: baseProps() });
     flushSync();
 
@@ -690,7 +693,44 @@ describe('RunAssetsTab — upload via file picker', () => {
     hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
 
-    expect(target.textContent).toMatch(/big\.pdf.*exceed.*storage quota/i);
+    expect(target.textContent).toContain("Couldn't upload 'big.pdf': This file is over the 20 MB limit.");
+    expect(target.textContent).not.toMatch(/storage quota/i);
+  });
+
+  it("upload 413 with no sentence (the proxy's) says the server's upload limit (D11a)", async () => {
+    (uploadRunAsset as any).mockRejectedValue(new ApiError(413, 'Upload failed'));
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+    const hiddenInput = target.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['data'], 'big.pdf', { type: 'application/pdf' });
+    Object.defineProperty(hiddenInput, 'files', { value: [file], configurable: true });
+    hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(target.textContent).toContain("Couldn't upload 'big.pdf': This file is over the server's upload limit.");
+    expect(target.textContent).not.toMatch(/storage quota/i);
+  });
+
+  it('the size check says the saved limit, and is skipped while it is unknown (D11b)', async () => {
+    uploadLimit.mb = 50;
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+    const hiddenInput = target.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['x'], 'huge.pdf', { type: 'application/pdf' });
+    Object.defineProperty(file, 'size', { value: 50 * 1024 * 1024 + 1 });
+    Object.defineProperty(hiddenInput, 'files', { value: [file], configurable: true });
+    hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(target.textContent).toContain('huge.pdf: file too large (the limit is 50 MB).');
+    expect(uploadRunAsset).not.toHaveBeenCalled();
+
+    uploadLimit.mb = null;
+    (uploadRunAsset as any).mockResolvedValue({});
+    const ok = new File(['x'], 'huge.pdf', { type: 'application/pdf' });
+    Object.defineProperty(ok, 'size', { value: 60 * 1024 * 1024 });
+    Object.defineProperty(hiddenInput, 'files', { value: [ok], configurable: true });
+    hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(uploadRunAsset).toHaveBeenCalled();
   });
 
   it('multi-file partial success then failure refetches so the persisted file appears', async () => {
@@ -1069,7 +1109,7 @@ describe('RunAssetsTab — replace flow', () => {
     expect(target.textContent).toMatch(/same extension/i);
   });
 
-  it('PUT 413 → "exceed.*quota" banner', async () => {
+  it("PUT 413 with no sentence (the proxy's) says the server's upload limit (D11a)", async () => {
     (replaceRunAsset as any).mockRejectedValue(
       Object.assign(new Error('too large'), { status: 413 }),
     );
@@ -1087,7 +1127,8 @@ describe('RunAssetsTab — replace flow', () => {
     findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
 
-    expect(target.textContent).toMatch(/exceed.*quota/i);
+    expect(target.textContent).toContain("This file is over the server's upload limit.");
+    expect(target.textContent).not.toMatch(/quota/i);
   });
 
   it('versionIsDisabled blocks [↻ Replace] button (disabled attribute)', () => {

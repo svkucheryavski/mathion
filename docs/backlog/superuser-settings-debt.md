@@ -212,3 +212,31 @@ Minors from the review lanes, Task 5 (Opus + Fable, round 1).
     overclaims);
   - the switch toggled off and back on, then blocked again;
   - the `saveLimits` / `saveSignIn` bodies in superuserApi.test.ts.
+
+## Task 6: the login page and the upload screens
+
+- **A saved limit reaches other screens only on reload.** The upload limit is
+  read once per page load. A superuser who changes it in the panel and goes on
+  to the course editor in the same tab still meets the old number until a
+  reload. A failed read also stays failed until the next reload. Fix: after
+  the limits save, set `uploadLimit.mb` to the saved value.
+- **The interactive-app upload (AppBody) has no browser-side size check.** It
+  never had one; the server's 400 sentence covers it.
+- **"Over the limit" is worded five ways** across the four screens, plus the
+  server's own sentence. One shared sentence would read better.
+- **File sizes use 1000-based units, the limit 1024-based.** `formatFileSize`
+  shows a 20.5 MiB file as "21.0 MB" beside "max 20 MB", and the file is
+  accepted. Pre-existing.
+- **The login page reads `/api/auth/config` twice** (main.ts and Login).
+- **Test gaps:**
+  - nothing pins the `loadUploadLimit()` call in main.ts;
+  - the replace path: the saved number in its message, and the server's
+    sentence on a replace 413.
+  - the student page's "the server's 413 shows its own sentence" passes
+    without the fix and tests a reply the server never sends (submissions
+    answer 400); test the 400-plus-sentence case instead.
+- **Check by hand in the Safari pass:** a proxy can drop the connection
+  instead of sending its 413 (HTTP/1.1, nginx). Then the student sees the
+  network copy with Retry, not the limit sentence. Note which one appears in
+  the spec's manual check (a 40 MB upload through an old proxy) and adjust
+  the README's D11c paragraph if needed.

@@ -6,7 +6,8 @@
   import { ApiError } from '../../lib/api';
   import { formatRef } from '../../lib/assets';
   import type { AssetContext, AssetItem } from '../../lib/assetContext';
-  import { MAX_FILE_SIZE_BYTES, ALLOWED_EXTENSIONS } from '../../lib/runAssets';
+  import { ALLOWED_EXTENSIONS } from '../../lib/runAssets';
+  import { uploadLimit, overUploadLimit } from '../../lib/uploadLimit.svelte';
   import { formatFileSize } from '../../lib/format';
   import { repairFocus } from '../../lib/askInPlace.svelte';
 
@@ -197,7 +198,7 @@
   function pickFile() { if (disabled || uploading) return; fileInputEl?.click(); }
 
   function validateFile(file: File): string | null {
-    if (file.size > MAX_FILE_SIZE_BYTES) return `${file.name} (file exceeds 20MB)`;
+    if (overUploadLimit(file.size)) return `${file.name} (file exceeds ${uploadLimit.mb} MB)`;
     const dot = file.name.lastIndexOf('.');
     const ext = dot >= 0 ? file.name.slice(dot + 1).toLowerCase() : '';
     if (!ALLOWED_EXTENSIONS.has(ext)) return `${file.name} (extension not allowed)`;

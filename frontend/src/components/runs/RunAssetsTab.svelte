@@ -11,11 +11,11 @@
   import { extractAssetRefs } from '../../lib/extractAssetRefs';
   import {
     ALLOWED_EXTENSIONS,
-    MAX_FILE_SIZE_BYTES,
     uploadRunAsset,
     replaceRunAsset,
     deleteRunAsset,
   } from '../../lib/runAssets';
+  import { uploadLimit, overUploadLimit, tooLargeSentence } from '../../lib/uploadLimit.svelte';
   import { blockPositions } from '../../lib/blockNumbers';
   import { focusFirst } from '../../lib/focusFirst';
   import { repairFocus } from '../../lib/askInPlace.svelte';
@@ -192,7 +192,7 @@
   }
 
   function validateFile(f: File): string | null {
-    if (f.size > MAX_FILE_SIZE_BYTES) return `${f.name}: file too large.`;
+    if (overUploadLimit(f.size)) return `${f.name}: file too large (the limit is ${uploadLimit.mb} MB).`;
     if (!isExtensionAllowed(f.name)) return `${f.name}: extension not allowed.`;
     return null;
   }
@@ -227,7 +227,9 @@
           if (err?.status === 409) {
             banner = `An asset named '${files[i]!.name}' already exists. Use Replace on the existing row, or rename your file.`;
           } else if (err?.status === 413) {
-            banner = `Uploading '${files[i]!.name}' would exceed this run's storage quota.`;
+            // D11a: the server's sentence (a file or the run's total over the
+            // saved limit), or the proxy sentence for a 413 without one.
+            banner = `Couldn't upload '${files[i]!.name}': ${tooLargeSentence(e)}`;
           } else {
             banner = err?.message ?? `Failed to upload '${files[i]!.name}'.`;
           }
@@ -284,8 +286,8 @@
       banner = `New file must have the same extension as the original (.${fileExt(asset.filename)}).`;
       return;
     }
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      banner = `${file.name}: file too large.`;
+    if (overUploadLimit(file.size)) {
+      banner = `${file.name}: file too large (the limit is ${uploadLimit.mb} MB).`;
       return;
     }
     // One panel under a row (R14): the replace confirm closes "used by".
@@ -504,7 +506,7 @@
       } else if (err?.status === 422) {
         banner = 'New file must have the same extension as the original.';
       } else if (err?.status === 413) {
-        banner = "Replacing would exceed this run's storage quota.";
+        banner = tooLargeSentence(e);
       } else {
         banner = err?.message ?? 'Replace failed.';
       }

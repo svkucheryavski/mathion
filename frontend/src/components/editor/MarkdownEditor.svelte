@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
   import { ApiError } from '../../lib/api';
   import { formatRef } from '../../lib/assets';
+  import { tooLargeSentence } from '../../lib/uploadLimit.svelte';
   import type { AssetContext, AssetItem } from '../../lib/assetContext';
   import AssetSidebar from './AssetSidebar.svelte';
   import { externalLinks } from '../../lib/externalLinks';
@@ -155,7 +156,9 @@
       // walks the .detail → .message → String(e) chain so plain objects
       // like { detail: '...' } or { message: '...' } are surfaced too.
       let baseDetail: string;
-      if (e instanceof ApiError) {
+      if (e instanceof ApiError && e.status === 413) {
+        baseDetail = tooLargeSentence(e); // Settings D11a
+      } else if (e instanceof ApiError) {
         baseDetail = e.displayMessage;
       } else {
         const eo = e as { detail?: unknown; message?: unknown } | null | undefined;

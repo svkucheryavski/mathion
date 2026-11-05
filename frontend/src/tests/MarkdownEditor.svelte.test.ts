@@ -439,6 +439,21 @@ describe('MarkdownEditor — 409 duplicate upload rename hint', () => {
     expect(err?.textContent).toContain('Extension not allowed');
     expect(err?.textContent).not.toContain('Rename the file on disk and re-upload.');
   });
+
+  it("a proxy's 413 (no sentence) says the server's upload limit, never a blank banner (Settings D11a)", async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (stubCtx.upload as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new ApiError(413, ''));
+    const { target } = mountEditor({ value: 'abc' });
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
+    const file = new File(['x'], 'big.png', { type: 'image/png' });
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
+    ev.preventDefault = vi.fn(); ev.stopPropagation = vi.fn();
+    ta.dispatchEvent(ev);
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    expect(target.querySelector('[data-testid="upload-error"]')?.textContent).toContain("This file is over the server's upload limit.");
+  });
 });
 
 describe('MarkdownEditor — sidebar drop suppression', () => {

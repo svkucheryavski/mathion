@@ -31,12 +31,22 @@
   // undefined until GET /api/auth/config resolves — render-gate.
   let sendPinEnabled = $state<boolean | undefined>(undefined);
   const DURATIONS = [1, 7, 30] as const;   // `as const` keeps `d: 1|7|30` (bare [1,7,30] widens to number[])
-  const DURATION_OPTIONS = DURATIONS.map((d) => ({ value: d, label: `${d} ${d === 1 ? 'day' : 'days'}` }));
+  // Settings D12: only the lengths up to the longest the panel allows (all
+  // three until the config arrives, or if it fails).
+  let longest = $state(30);
+  const durationOptions = $derived(DURATIONS.filter((d) => d <= longest)
+    .map((d) => ({ value: d, label: `${d} ${d === 1 ? 'day' : 'days'}` })));
 
   $effect(() => { void loadConfig(); });
 
   async function loadConfig(): Promise<void> {
-    try { sendPinEnabled = (await getAuthConfig()).send_pin_enabled; }
+    try {
+      const config = await getAuthConfig();
+      longest = config.longest_sign_in_days;
+      // 7 days, or the longest when that's shorter (1, 7 and 30 are the only lengths).
+      duration = longest < 7 ? 1 : 7;
+      sendPinEnabled = config.send_pin_enabled;
+    }
     catch {
       // Network/5xx — resolve into the standard two-step flow (no infinite
       // spinner; submit re-enables). Production-normal path.
@@ -72,7 +82,7 @@
 
 {#snippet durationField()}
   <FormRow label="Stay signed in for">
-    <Segmented options={DURATION_OPTIONS} bind:value={duration} name="duration" label="Stay signed in for" />
+    <Segmented options={durationOptions} bind:value={duration} name="duration" label="Stay signed in for" />
   </FormRow>
 {/snippet}
 
@@ -84,7 +94,7 @@
     {#if sendPinEnabled === undefined}
       <div class="loading"><Spinner /></div>
     {:else if sendPinEnabled === false}
-      <p class="subtitle">Email delivery isn't configured — enter your email and the PIN shown in the server terminal.</p>
+      <p class="subtitle">Email isn't set up on this server, so PINs aren't emailed. Ask the person who runs this Mathion for one.</p>
       <form onsubmit={onSubmitPin}>
         <FormRow label="Email">
           <Input type="email" bind:value={email} autocomplete="email" autofocus name="email" />

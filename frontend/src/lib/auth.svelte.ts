@@ -44,9 +44,12 @@ export async function verifyPin(
   return user;
 }
 
-export async function getAuthConfig(): Promise<{ send_pin_enabled: boolean }> {
+/** The public sign-in config (Settings D10b): nothing else is public. */
+export type AuthConfig = { send_pin_enabled: boolean; longest_sign_in_days: number; max_file_mb: number };
+
+export async function getAuthConfig(): Promise<AuthConfig> {
   // Public endpoint; never 401s, so no skipAuthRedirect needed.
-  return api.get<{ send_pin_enabled: boolean }>('/api/auth/config');
+  return api.get<AuthConfig>('/api/auth/config');
 }
 
 export async function logout(): Promise<void> {

@@ -883,6 +883,16 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     expect(panel().querySelector('.field-err')!.textContent).toContain('already exists');
   });
 
+  it("a proxy's 413 (an HTML page) says the server's upload limit (Settings D11a)", async () => {
+    serveUpload((u, init) => (/\/api\/versions\/1\/assets$/.test(u) && init?.method === 'POST'
+      ? Promise.resolve(new Response('<html><body>413 Request Entity Too Large</body></html>', { status: 413, headers: { 'content-type': 'text/html' } }))
+      : undefined));
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    chooseFile(jsFile("getElementById('app-root')", 'big.js'));
+    await waitUntil(() => !!panel().querySelector('.field-err'));
+    expect(panel().querySelector('.field-err')!.textContent).toContain("This file is over the server's upload limit.");
+  });
+
   it('a failed link deletes the orphaned asset and does not reload', async () => {
     serveUpload((u, init) => (/\/api\/items\/7$/.test(u) && init?.method === 'PATCH' ? jres({ detail: 'boom' }, 500) : undefined));
     await render({ item: { type: 'interactive_app', script_url: null } });

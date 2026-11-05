@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createEvaluation, patchEvaluation, MAX_FEEDBACK_FILE_SIZE_BYTES } from '../lib/evaluations';
+import { createEvaluation, patchEvaluation } from '../lib/evaluations';
 import * as events from '../lib/events';
 
 function jsonResp(status: number, body: unknown, statusText = ''): Response {
@@ -143,8 +143,3 @@ describe('patchEvaluation (JSON PATCH)', () => {
   });
 });
 
-describe('Constants', () => {
-  it('WC1: MAX_FEEDBACK_FILE_SIZE_BYTES matches backend default (20 MB)', () => {
-    expect(MAX_FEEDBACK_FILE_SIZE_BYTES).toBe(20 * 1024 * 1024);
-  });
-});

@@ -37,7 +37,8 @@
   import StatusBadge from '../ui/StatusBadge.svelte';
   import { formatFileSize } from '../../lib/format';
   import { focusFirst } from '../../lib/focusFirst';
-  import { MAX_FEEDBACK_FILE_SIZE_BYTES, type EvaluationResult, createEvaluation, patchEvaluation, type Evaluation } from '../../lib/evaluations';
+  import { type EvaluationResult, createEvaluation, patchEvaluation, type Evaluation } from '../../lib/evaluations';
+  import { uploadLimit, overUploadLimit, tooLargeSentence } from '../../lib/uploadLimit.svelte';
   import { ApiError } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
   import { tick, untrack } from 'svelte';
@@ -502,6 +503,8 @@
         const reason = (submitController?.signal as AbortSignal & { reason?: unknown })?.reason;
         // A user cancel reverts silently; a timeout says so.
         if (reason === 'timeout') serverError = 'Upload timed out. Try again.';
+      } else if (e instanceof ApiError && e.status === 413) {
+        serverError = tooLargeSentence(e); // Settings D11a
       } else if (e instanceof ApiError) {
         serverError = e.displayMessage;
       } else {
@@ -598,8 +601,8 @@
       fileError = 'File appears empty.';
       formFeedbackFile = null; return;
     }
-    if (file.size > MAX_FEEDBACK_FILE_SIZE_BYTES) {
-      fileError = 'File exceeds 20 MB limit.';
+    if (overUploadLimit(file.size)) {
+      fileError = `File exceeds ${uploadLimit.mb} MB limit.`;
       formFeedbackFile = null; return;
     }
     formFeedbackFile = file;
@@ -853,7 +856,7 @@
               hidden
               onchange={handleFileChange}
             />
-            <span class="sp-help" id="{uid}-file-help">PDF only, max 20 MB.</span>
+            <span class="sp-help" id="{uid}-file-help">{uploadLimit.mb === null ? 'PDF only.' : `PDF only, max ${uploadLimit.mb} MB.`}</span>
             {#if errors.feedbackFile}<p class="sp-field-err" role="alert">{errors.feedbackFile}</p>{/if}
           {:else if existingHasFeedbackFile}
             <p class="sp-muted">The feedback file cannot be replaced.</p>

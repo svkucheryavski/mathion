@@ -10,7 +10,7 @@
   // every D5 block to artboard 9c.
   //
   // D6 owns: submit / resubmit section, the 4-state submit machine (C15),
-  // client-side guard rails (.pdf + MAX_FILE_SIZE), error mapping per status
+  // client-side guard rails (.pdf + the saved size limit), error mapping per status
   // (400 / 401 / 403 / 409 / 503 / network), visibilitychange refetch with
   // single-flight gate (spec §6 step 6), write-back into
   // currentCourse.miniProjectsByBlockId guarded by the slug snapshot (F6),
@@ -25,8 +25,8 @@
     submit,
     LATEST_STATUS_META,
     REASON_LABELS,
-    MAX_FILE_SIZE,
   } from '../lib/studentMiniProjects';
+  import { uploadLimit, overUploadLimit, tooLargeSentence } from '../lib/uploadLimit.svelte';
   import { externalLinks } from '../lib/externalLinks';
   import type { StudentMiniProjectDetail } from '../lib/types';
   import StatusPill from '../components/course/StatusPill.svelte';
@@ -350,8 +350,8 @@
       submitState = 'error';
       return;
     }
-    if (file.size > MAX_FILE_SIZE) {
-      submitErrorMessage = 'File too large — 20 MB maximum.';
+    if (overUploadLimit(file.size)) {
+      submitErrorMessage = `File too large — ${uploadLimit.mb} MB maximum.`;
       submitErrorIsNetwork = false;
       submitState = 'error';
       return;
@@ -403,6 +403,13 @@
         if (e.status === 503) {
           submitErrorMessage = "The upload didn't go through. Nothing has been lost — retrying sends the same file.";
           submitErrorIsNetwork = true;
+          submitState = 'error';
+          return;
+        }
+        if (e.status === 413) {
+          // Settings D11a: the server's sentence, or the proxy's limit.
+          submitErrorMessage = tooLargeSentence(e);
+          submitErrorIsNetwork = false;
           submitState = 'error';
           return;
         }
