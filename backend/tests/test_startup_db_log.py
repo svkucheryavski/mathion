@@ -8,9 +8,19 @@ redaction (spec §50).
 """
 import logging
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from mathion.main import app
+
+
+@pytest.fixture(autouse=True)
+def _own_lock_path(tmp_path, monkeypatch):
+    # Superuser Settings D10: every boot takes the single-sender lock, so a
+    # dev server holding the default path can't make these boots fail.
+    import mathion.config
+    monkeypatch.setattr(mathion.config.settings, "dispatcher_lock_path", str(tmp_path / "dispatcher.lock"))
 
 
 def test_startup_logs_redacted_db_target_via_uvicorn_logger():
@@ -41,7 +51,9 @@ def test_startup_logs_redacted_db_target_via_uvicorn_logger():
 
 
 MOVED = ("MATHION_MAX_FILE_SIZE", "MATHION_MAX_COURSE_SIZE", "MATHION_PIN_EXPIRY_MINUTES",
-         "MATHION_MAX_PIN_REQUESTS_PER_HOUR", "MATHION_MAX_PIN_FAILURES_PER_HOUR")
+         "MATHION_MAX_PIN_REQUESTS_PER_HOUR", "MATHION_MAX_PIN_FAILURES_PER_HOUR",
+         "MATHION_SMTP_HOST", "MATHION_SMTP_PORT", "MATHION_SMTP_USERNAME", "MATHION_SMTP_PASSWORD",
+         "MATHION_EMAIL_FROM")
 
 
 def _boot_lines() -> list[str]:
@@ -92,3 +104,16 @@ def test_no_ignored_line_without_moved_keys(monkeypatch):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("MATHION_EMAIL_MODE", "disabled")  # D2c: the mode is never ignored
     assert _boot_lines() == []
+
+
+def test_ignored_email_keys_are_named(monkeypatch):
+    for key in MOVED:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("MATHION_SMTP_HOST", "mail.uni.dk")
+    monkeypatch.setenv("MATHION_SMTP_PASSWORD", "S3ntinel")
+    lines = _boot_lines()
+    assert lines == [
+        "These .env keys are ignored since this version; the panel's Settings page "
+        "sets them: MATHION_SMTP_HOST, MATHION_SMTP_PASSWORD."
+    ]
+    assert "S3ntinel" not in lines[0]  # names only, never values

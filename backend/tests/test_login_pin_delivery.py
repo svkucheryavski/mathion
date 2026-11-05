@@ -25,7 +25,7 @@ def test_debug_console_no_email(client, db, monkeypatch):
     monkeypatch.setattr(settings, "debug", True)
     monkeypatch.setattr(settings, "email_mode", "smtp")
     mailer = MemoryMailer()
-    monkeypatch.setattr(auth_api, "build_mailer_from_settings", lambda s: mailer)
+    monkeypatch.setattr(auth_api, "build_mailer", lambda *a: mailer)
     resp = client.post("/api/auth/request-pin", json={"email": "real@example.com"})
     assert resp.status_code == 200
     assert mailer.sent == []
@@ -36,7 +36,7 @@ def test_sends_exactly_one_login_pin(client, db, monkeypatch):
     monkeypatch.setattr(settings, "debug", False)
     monkeypatch.setattr(settings, "email_mode", "smtp")
     mailer = MemoryMailer()
-    monkeypatch.setattr(auth_api, "build_mailer_from_settings", lambda s: mailer)
+    monkeypatch.setattr(auth_api, "build_mailer", lambda *a: mailer)
 
     resp = client.post("/api/auth/request-pin", json={"email": "real@example.com"})
     assert resp.status_code == 200
@@ -57,7 +57,7 @@ def test_no_mailer_sends_nothing(client, db, monkeypatch):
     _make_user(db)
     monkeypatch.setattr(settings, "debug", False)
     monkeypatch.setattr(settings, "email_mode", "disabled")
-    monkeypatch.setattr(auth_api, "build_mailer_from_settings", lambda s: None)
+    monkeypatch.setattr(auth_api, "build_mailer", lambda *a: None)
     resp = client.post("/api/auth/request-pin", json={"email": "real@example.com"})
     assert resp.status_code == 200
 
@@ -66,7 +66,7 @@ def test_unknown_email_sends_nothing(client, db, monkeypatch):
     monkeypatch.setattr(settings, "debug", False)
     monkeypatch.setattr(settings, "email_mode", "smtp")
     mailer = MemoryMailer()
-    monkeypatch.setattr(auth_api, "build_mailer_from_settings", lambda s: mailer)
+    monkeypatch.setattr(auth_api, "build_mailer", lambda *a: mailer)
     resp = client.post("/api/auth/request-pin", json={"email": "nobody@example.com"})
     assert resp.status_code == 200
     assert mailer.sent == []
@@ -81,7 +81,7 @@ def test_send_failure_stays_uniform(client, db, monkeypatch):
         def send(self, msg):
             raise RuntimeError("SMTP down")
 
-    monkeypatch.setattr(auth_api, "build_mailer_from_settings", lambda s: BoomMailer())
+    monkeypatch.setattr(auth_api, "build_mailer", lambda *a: BoomMailer())
     fail_resp = client.post("/api/auth/request-pin", json={"email": "real@example.com"})
     unknown_resp = client.post("/api/auth/request-pin", json={"email": "nobody@example.com"})
     assert fail_resp.status_code == 200
@@ -100,10 +100,10 @@ def test_mailer_build_failure_stays_uniform(client, db, monkeypatch):
     monkeypatch.setattr(settings, "debug", False)
     monkeypatch.setattr(settings, "email_mode", "smtp")
 
-    def boom(s):
+    def boom(*a):
         raise RuntimeError("bad mailer config")
 
-    monkeypatch.setattr(auth_api, "build_mailer_from_settings", boom)
+    monkeypatch.setattr(auth_api, "build_mailer", boom)
     fail_resp = client.post("/api/auth/request-pin", json={"email": "real@example.com"})
     unknown_resp = client.post("/api/auth/request-pin", json={"email": "nobody@example.com"})
     assert fail_resp.status_code == 200
@@ -122,7 +122,7 @@ def test_eligible_user_schedules_send_off_path(db, monkeypatch):
     _make_user(db)
     monkeypatch.setattr(settings, "debug", False)
     mailer = MemoryMailer()
-    monkeypatch.setattr(auth_api, "build_mailer_from_settings", lambda s: mailer)
+    monkeypatch.setattr(auth_api, "build_mailer", lambda *a: mailer)
 
     bg = BackgroundTasks()
     result = auth_api.api_request_pin(
@@ -147,7 +147,7 @@ def test_eligible_user_schedules_send_off_path(db, monkeypatch):
 def test_unknown_user_schedules_nothing(db, monkeypatch):
     monkeypatch.setattr(settings, "debug", False)
     mailer = MemoryMailer()
-    monkeypatch.setattr(auth_api, "build_mailer_from_settings", lambda s: mailer)
+    monkeypatch.setattr(auth_api, "build_mailer", lambda *a: mailer)
     bg = BackgroundTasks()
     auth_api.api_request_pin(
         _csrf_request(), PinRequestSchema(email="nobody@example.com"), bg, db=db
@@ -190,3 +190,57 @@ def test_debug_mode_schedules_nothing(db, monkeypatch):
         _csrf_request(), PinRequestSchema(email="real@example.com"), bg, db=db
     )
     assert bg.tasks == []
+
+
+# --- superuser Settings D9b, D10b: the PIN email follows the panel ---
+
+def test_pin_email_uses_the_saved_from_and_minutes(client, db, monkeypatch):
+    import smtplib
+    from mathion.notifications import mailer as mailer_mod
+    _make_user(db)
+    monkeypatch.setattr(settings, "debug", False)
+    monkeypatch.setattr(settings, "email_mode", "disabled")
+    set_site(db, email_on=True, smtp_host="mail.uni.dk", email_from="Mathion <noreply@uni.dk>", pin_minutes=25)
+    sent = []
+
+    class _FakeSMTP:
+        def __init__(self, *a, **k): pass
+        def ehlo_or_helo_if_needed(self): pass
+        def starttls(self, **k): pass
+        def send_message(self, msg): sent.append(msg)
+        def quit(self): pass
+
+    monkeypatch.setattr(mailer_mod.smtplib, "SMTP", _FakeSMTP)
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert len(sent) == 1
+    assert sent[0]["From"] == "Mathion <noreply@uni.dk>"
+    assert "It expires in 25 minutes." in sent[0].get_content()
+
+
+def test_pin_email_off_in_the_panel_sends_nothing(client, db, monkeypatch):
+    from mathion.notifications import mailer as mailer_mod
+    _make_user(db)
+    monkeypatch.setattr(settings, "debug", False)
+    monkeypatch.setattr(settings, "email_mode", "smtp")  # D2c: smtp now means "the panel decides"
+    set_site(db, email_on=False, smtp_host="mail.uni.dk", email_from="a@uni.dk")
+    connects = []
+    monkeypatch.setattr(mailer_mod.smtplib, "SMTP", lambda *a, **k: connects.append(a))
+    assert client.post("/api/auth/request-pin", json={"email": "real@example.com"}).status_code == 200
+    assert connects == []
+
+
+def test_pin_send_failure_logs_no_server_reply(client, db, monkeypatch, caplog):
+    import logging
+    import smtplib
+    _make_user(db)
+    monkeypatch.setattr(settings, "debug", False)
+
+    class _Refusing(MemoryMailer):
+        def send(self, msg):
+            raise smtplib.SMTPRecipientsRefused({"real@example.com": (550, b"S3ntinel no such user")})
+
+    monkeypatch.setattr(auth_api, "build_mailer", lambda *a: _Refusing())
+    caplog.set_level(logging.DEBUG)
+    assert client.post("/api/auth/request-pin", json={"email": "real@example.com"}).status_code == 200
+    assert "S3ntinel" not in caplog.text
+    assert "The mail server refused to send to real@example.com." in caplog.text

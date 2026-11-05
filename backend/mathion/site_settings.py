@@ -13,6 +13,7 @@ from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from mathion.models_auth import OFF_SINCE_EPOCH, SiteSettings
+from mathion.secret_box import SealError, unseal
 
 MB = 1_048_576
 
@@ -32,6 +33,8 @@ ENCRYPTIONS = ("starttls", "ssl", "none")
 MOVED_ENV_KEYS = (
     "MATHION_MAX_FILE_SIZE", "MATHION_MAX_COURSE_SIZE", "MATHION_PIN_EXPIRY_MINUTES",
     "MATHION_MAX_PIN_REQUESTS_PER_HOUR", "MATHION_MAX_PIN_FAILURES_PER_HOUR",
+    "MATHION_SMTP_HOST", "MATHION_SMTP_PORT", "MATHION_SMTP_USERNAME", "MATHION_SMTP_PASSWORD",
+    "MATHION_EMAIL_FROM",
 )
 
 
@@ -116,3 +119,17 @@ def get_row(db: Session) -> SiteSettings:
         db.execute(insert(SiteSettings).values(id=1).on_conflict_do_nothing(index_elements=["id"]))
         row = db.get(SiteSettings, 1)
     return row
+
+
+def password_is_readable(view: SiteSettingsView, secret: str) -> bool:
+    """D8: a login's saved password opens with this server's key. No login
+    needs no password; a login without a saved one can't send."""
+    if not view.smtp_username:
+        return True
+    if not view.smtp_password_sealed:
+        return False
+    try:
+        unseal(view.smtp_password_sealed, secret)
+    except SealError:
+        return False
+    return True

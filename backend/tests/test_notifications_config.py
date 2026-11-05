@@ -48,3 +48,13 @@ def test_dispatcher_lock_path_rejects_relative(bad_path):
 def test_dispatcher_lock_path_accepts_absolute(good_path):
     s = Settings(dispatcher_lock_path=good_path)
     assert s.dispatcher_lock_path == good_path
+
+
+def test_smtp_port_typo_does_not_stop_startup(monkeypatch):
+    # Superuser Settings D2: the email keys left Settings, so a bad value in an
+    # old .env can't stop the app.
+    monkeypatch.setenv("MATHION_SMTP_PORT", "abc")
+    monkeypatch.setenv("MATHION_SMTP_HOST", "x")
+    s = Settings()
+    assert not hasattr(s, "smtp_port") and not hasattr(s, "email_from")
+    assert s.email_mode and s.email_outbox  # the dev modes stay (D2c)

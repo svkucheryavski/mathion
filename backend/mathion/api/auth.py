@@ -6,14 +6,15 @@ from sqlalchemy import exists, select
 
 from mathion.auth import destroy_session, request_pin, validate_session, verify_pin
 from mathion.config import settings
-from mathion.database import get_db
+from mathion.database import SessionLocal, get_db
 from mathion.dependencies import get_current_user
 from mathion.models import CourseAdmin, RunTeacher
 from mathion.models_auth import User
-from mathion.notifications.mailer import build_mailer_from_settings
+from mathion.notifications.mailer import DEV_MODES, build_mailer
+from mathion.notifications.smtp_errors import SMTP_FAILURES, describe
 from mathion.notifications.templates import build_login_pin_message
 from mathion.schemas import AuthConfigResponse, PinRequestSchema, PinVerifySchema, UserResponse, UserUpdate
-from mathion.site_settings import load as load_site
+from mathion.site_settings import load as load_site, password_is_readable
 from mathion.superuser import service as panel_service
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -47,29 +48,43 @@ def _require_csrf(request: Request):
 
 @router.get("/config", response_model=AuthConfigResponse)
 def api_auth_config(db: Session = Depends(get_db)) -> AuthConfigResponse:
-    # True whenever "Send PIN" yields a retrievable PIN: debug (console print) or
-    # a delivering mailer (smtp inbox / file .eml outbox). Excludes the one-shot
-    # `memory` sink and `disabled`. Public, no auth, no CSRF (GET), so it carries
-    # nothing beyond what the login page and the upload checks need (D10b).
+    # True whenever "Send PIN" yields a retrievable PIN: debug (console print),
+    # the `file` outbox, or the panel's email switch on with a password this
+    # server can read (or no login). Excludes the one-shot `memory` sink.
+    # Public, no auth, no CSRF (GET), so it carries nothing beyond what the
+    # login page and the upload checks need (superuser Settings D10b).
     site = load_site(db)
+    panel_sends = (settings.email_mode not in DEV_MODES and site.email_on
+                   and password_is_readable(site, settings.secret_key))
     return AuthConfigResponse(
-        send_pin_enabled=settings.debug or settings.email_mode in ("smtp", "file"),
+        send_pin_enabled=settings.debug or settings.email_mode == "file" or panel_sends,
         longest_sign_in_days=site.longest_sign_in_days,
         max_file_mb=site.max_file_mb,
     )
 
 
 def _send_login_pin(email: str, raw_pin: str, minutes: int) -> None:
-    """Build a one-shot mailer and send the login PIN. Best-effort: any
-    build/send failure is caught and logged with a static message (never the
-    raw PIN). This is the SOLE error boundary for the send after it moved
-    off the response path."""
+    """Build a one-shot mailer from the panel's saved settings and send the
+    login PIN. Best-effort: any build/send failure is caught and logged without
+    the raw PIN, and a mail-server failure only as D9b's class, code and
+    sentence (servers can echo credentials). This is the SOLE error boundary
+    for the send after it moved off the response path. It runs as a background
+    task, so it opens its own database session (D10b)."""
+    mailer = None
     try:
-        mailer = build_mailer_from_settings(settings)  # one-shot; NOT app.state.mailer
+        with SessionLocal() as db:
+            site = load_site(db)
+        mailer = build_mailer(site, settings.secret_key, settings.email_mode)  # one-shot
         if mailer is not None:
-            msg = build_login_pin_message(email, raw_pin, minutes=minutes)
+            msg = build_login_pin_message(email, raw_pin, minutes=minutes, sender=mailer.sender)
             with mailer.session():
                 mailer.send(msg)
+    except SMTP_FAILURES as exc:
+        failure = describe(exc, host=getattr(mailer, "host", ""), port=getattr(mailer, "port", 0),
+                           sender=getattr(mailer, "sender", ""), recipient=email,
+                           encryption=getattr(mailer, "encryption", ""),
+                           timeout=getattr(mailer, "timeout", 20))
+        logger.warning("login PIN email send failed: %s", failure.text())
     except Exception:
         logger.exception("login PIN email send failed")  # static message; never the raw PIN
 

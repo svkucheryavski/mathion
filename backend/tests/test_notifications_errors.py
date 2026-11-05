@@ -33,7 +33,6 @@ def test_classify_transient(exc):
     smtplib.SMTPResponseException(553, "mailbox name not allowed"),
     smtplib.SMTPHeloError(500, "..."),
     smtplib.SMTPConnectError(550, "..."),
-    smtplib.SMTPSenderRefused(550, b"...", "from@x"),
     smtplib.SMTPRecipientsRefused({"a@x": (550, b"no such user")}),
     smtplib.SMTPRecipientsRefused({"a@x": (450, b"greylist"), "b@x": (550, b"no such user")}),
     smtplib.SMTPRecipientsRefused({}),  # empty dict → permanent (defensive)
@@ -44,3 +43,10 @@ def test_classify_transient(exc):
 ])
 def test_classify_permanent(exc):
     assert classify(exc) == 'permanent'
+
+
+@pytest.mark.parametrize("code", [450, 550, 553])
+def test_sender_refused_is_never_permanent(code):
+    # Superuser Settings D9c: a refused sender is the server's side (a bad From),
+    # so it must not mark messages failed for good; the queue stops the batch.
+    assert classify(smtplib.SMTPSenderRefused(code, b"...", "from@x")) == 'transient'

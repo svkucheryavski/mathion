@@ -3,9 +3,10 @@ from typing import Optional, Callable
 
 from email.message import EmailMessage
 
-from mathion.config import settings
 from mathion.models import Course, Run, MiniProject, Submission
 from mathion.models_auth import User
+
+from .mailer import DEFAULT_FROM
 
 
 # D5: the one course-scoped kind (payload {"course_id": …}); every other kind is run-scoped.
@@ -111,11 +112,11 @@ def render(kind, ctx):
     return TEMPLATES[kind](ctx)
 
 
-def _build_email_message(subject, body, ctx, *, kind: str) -> EmailMessage:
+def _build_email_message(subject, body, ctx, *, kind: str, sender: str = DEFAULT_FROM) -> EmailMessage:
     if not ctx.user.email:
         raise ValueError("recipient has no email")  # → permanent
     msg = EmailMessage()
-    msg["From"] = settings.email_from
+    msg["From"] = sender  # the panel's From, through the mailer (superuser Settings D10b)
     msg["To"] = ctx.user.email
     msg["Subject"] = subject  # EmailMessage default policy raises ValueError on CR/LF → permanent
     msg["X-Mathion-Kind"] = kind  # FileMailer reads this to name the .eml file
@@ -126,14 +127,14 @@ def _build_email_message(subject, body, ctx, *, kind: str) -> EmailMessage:
 LOGIN_PIN_KIND = "login_pin"
 
 
-def build_login_pin_message(email: str, pin: str, *, minutes: int) -> EmailMessage:
+def build_login_pin_message(email: str, pin: str, *, minutes: int, sender: str = DEFAULT_FROM) -> EmailMessage:
     """Standalone login-PIN email. Not a TEMPLATES entry (those are
     RenderContext -> (subject, body) callables). The raw PIN lives only in this
     in-memory message — never persisted or logged."""
     if not email:
         raise ValueError("recipient has no email")
     msg = EmailMessage()
-    msg["From"] = settings.email_from
+    msg["From"] = sender
     msg["To"] = email  # EmailMessage default policy rejects CR/LF-injected headers
     msg["Subject"] = "Your Mathion sign-in PIN"
     msg["X-Mathion-Kind"] = LOGIN_PIN_KIND

@@ -61,3 +61,52 @@ Minor findings from the per-task review lanes of the Settings slice
   - `test_course_asset_read_is_bounded` proves MB+1 was read, not that
     nothing larger was.
 - `test_auth.py` imports mid-file with underscore aliases (E402).
+
+## Task 3 (email follows the panel)
+
+- The `run-*.sh` dev scripts don't set `MATHION_DISPATCHER_LOCK_PATH`. The
+  loop and lock now start at every boot, so a second dev server on the same
+  host (or a probe beside the user's own) refuses to start. D10 says the plan
+  handles this; give each script its own lock path before the Safari pass.
+- `off_interval_for`: with email on, `email_off_at` set and `email_on_at`
+  NULL, the filter has no upper bound, so nothing is ever sent, and nothing
+  says so. Only a turn-on that forgets to stamp `email_on_at` reaches it.
+  Task 4 must stamp it. Then treat that state as "no interval", or log it once.
+- `describe()` sentences that misname the failure:
+  - `SMTPNotSupportedError` from `login()` (a server without AUTH) or for
+    SMTPUTF8 says "The secure connection … failed.";
+  - a banner timeout that smtplib wraps as a disconnect says "Couldn't reach".
+- In `file` mode, a disk `OSError` from `FileMailer` is stored and logged as
+  "Couldn't reach  on port 0.", with no traceback. Describe only failures
+  from an `SMTPMailer`.
+- The dev modes' queue mail uses `DEFAULT_FROM` (the mailer is built once at
+  boot), while the PIN email in the same mode uses the saved From.
+- `_send_login_pin`'s `logger.exception` for non-SMTP failures can log a
+  `UnicodeEncodeError` that names one character of a copied non-ASCII
+  password and its position. This is pre-existing; D7 blocks new ones.
+- A temporary 4xx reply to MAIL FROM (a provider's sending limit) arrives as
+  `SMTPSenderRefused`, so the card says "The mail server refused <from> as the
+  sender." and sends the superuser to fix a From that is fine. Stopping and
+  backing off is right. For 4xx codes, say "The mail server asked Mathion to
+  try again later."
+- A 421 refused recipient closes the connection. The next message is charged
+  for the disconnect before the batch stops, so one extra retry is charged.
+- The failure line clears only after a message is sent. Consider also
+  clearing it after a good session start that sends nothing (every row
+  skipped or failed per message).
+- `FileMailer._allowed_kinds`: the comment says the lazy import isn't a cycle
+  break. It is now, since `templates.py` imports `DEFAULT_FROM` from
+  `mailer.py`.
+- `main.py`: `if task is not None` is dead now that the loop always starts,
+  and `lock_fd = None` is reassigned on the next line.
+- `SmtpFailure.batch_level` (session start) and `stops_the_batch` (mid-send)
+  disagree by design, and nothing reads the field. Document it or drop it.
+- `_fresh_row` calls `get_row(db)` only to make sure the row exists; the
+  tick can't reach it without a row, so that's one extra SELECT.
+- Test gaps:
+  - no `SMTP_SSL` + skip-cert test;
+  - no test that a tick with no rows leaves `send_failure_*` alone;
+  - `test_late_commit_in_off_interval_not_sent` doesn't straddle a real
+    transaction; the name over-claims;
+  - the PIN off test doesn't assert that `build_mailer` gave None for
+    `mode="smtp"`.

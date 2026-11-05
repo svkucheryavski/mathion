@@ -39,7 +39,7 @@ from mathion.notifications import (
     run_forever,
     acquire_singleton_lock,
     SHUTDOWN_TIMEOUT_SECONDS,
-    build_mailer_from_settings,
+    build_mailer,
 )
 from mathion.site_settings import MOVED_ENV_KEYS
 from mathion.superuser.log_redaction import install as install_log_redaction
@@ -91,13 +91,15 @@ async def lifespan(app):
         logger.info("These .env keys are ignored since this version; the panel's "
                     "Settings page sets them: %s.", ", ".join(ignored))
     app.state.shutdown = asyncio.Event()
-    app.state.mailer = build_mailer_from_settings(settings)
+    # A developer outbox (`file`/`memory`, D2c) is built once here; otherwise
+    # the loop builds the mailer from the panel's saved settings every tick.
+    # An unknown MATHION_EMAIL_MODE fails the boot here, as before.
+    app.state.mailer = build_mailer(None, settings.secret_key, settings.email_mode)
+    # Superuser Settings D10: the panel can turn email on at any time, so the
+    # loop and the single-sender lock start at every boot.
     app.state.lock_fd = None
-    if app.state.mailer is not None:
-        app.state.lock_fd = acquire_singleton_lock(settings)
-        task = asyncio.create_task(run_forever(app))
-    else:
-        task = None
+    app.state.lock_fd = acquire_singleton_lock(settings)
+    task = asyncio.create_task(run_forever(app))
 
     try:
         yield

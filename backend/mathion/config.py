@@ -24,12 +24,10 @@ class Settings(BaseSettings):
     )
 
     # --- Notification / email settings ---
+    # `file` and `memory` are developer outboxes that win over the panel;
+    # `smtp` and `disabled` mean "the panel's Settings decide" (superuser
+    # Settings D2c). The mail server, login and From live in the panel.
     email_mode: str = "disabled"           # smtp | file | memory | disabled
-    smtp_host: str = ""
-    smtp_port: int = 587
-    smtp_username: str = ""
-    smtp_password: str = ""
-    email_from: str = "Mathion <noreply@mathion.test>"
     email_outbox: str = "./outbox/"
     base_url: str = "http://localhost:8000"
     dispatcher_lock_path: str = "/tmp/mathion.dispatcher.lock"

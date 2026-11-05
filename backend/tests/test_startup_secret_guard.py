@@ -24,6 +24,14 @@ import mathion.config
 import mathion.main
 
 
+@pytest.fixture(autouse=True)
+def _own_lock_path(tmp_path, monkeypatch):
+    # Superuser Settings D10: every boot takes the single-sender lock, so a
+    # dev server holding the default path can't make these boots fail.
+    import mathion.config
+    monkeypatch.setattr(mathion.config.settings, "dispatcher_lock_path", str(tmp_path / "dispatcher.lock"))
+
+
 def _live():
     """(settings singleton, Settings class, app) the lifespan reads RIGHT NOW —
     after any test_main_spa.py reload. Settings.model_fields["secret_key"].default
