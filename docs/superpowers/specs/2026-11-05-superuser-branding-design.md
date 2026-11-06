@@ -1,6 +1,6 @@
 # Superuser panel: Branding — design
 
-**Status:** rev 12, 2026-11-05.
+**Status:** rev 13, 2026-11-06.
 - Rev 1 came from the brainstorm.
 - Rev 2 folded in the builder check: the header without a logo (user's), Reset waits for Save, and the downloaded theme's header comment (mine). The user approved rev 2.
 - Rev 3 folds in spec review round 1, three lanes (`.superpowers/sdd/2026-11-05-superuser-branding/spec-r1-opus-backend.md`, `spec-r1-opus-frontend.md`, `spec-r1-fable.md`). No user decision changed. New or changed:
@@ -37,6 +37,7 @@
 - Rev 10 folds in the confirming round 8 (`spec-r8-opus.md`: nothing found; `spec-r8-fable.md`: one Minor): where the shared startup request lives.
 - Rev 11 folds in the confirming round 9 (`spec-r9-opus.md`, `spec-r9-fable.md`, the same one Minor): the startup request is made on every page, and awaited only when the inline data is missing.
 - Rev 12 folds in the confirming round 10 (`spec-r10-opus.md`, `spec-r10-fable.md`, one Minor each): the fallback waits for the theme link before mounting; which sign-in tests stay.
+- Rev 13 (user's, 2026-11-06, during Task 1): the default tab icon is the user's own drawing (D6).
 
 **Builds on:**
 - `docs/superpowers/specs/2026-11-04-superuser-settings-design.md` (the panel's Settings page, its cards and Edit dialogs, and §7, the decisions noted for this project);
@@ -144,7 +145,7 @@ Each has a Mathion default that is always there underneath, and each can be rese
   - **In the browser** (mine, from review), as for the theme (D10): the dialog reads the file's bytes once, when it's chosen, and sends those same bytes on Save. It runs D5's whole check on them at once (CRC-32 is a few lines of own code), with D4's or D6's pixel caps, so a refused file never reaches the preview. D5 doesn't decode the image data, so the preview image failing to decode (`img.decode()` rejecting; a partly corrupt PNG can still fire `load`) is a refusal too: "This PNG can't be shown by a browser." As for the colours check, Save stays blocked until the decode for the chosen file has answered, and a decode result for an earlier choice, or one still running when Reset is pressed, is ignored. A refused choice drops every pending change in the dialog (a chosen file or Reset): the preview shows the saved item, and Save is blocked again. The server checks again on Save. A proxy's bare 413 shows "This file is over the server's upload limit."
 - **D6. The tab icon** (user's: "better to have possibility to replace it as well"). A separate PNG, because a wide logo doesn't fit a square tab.
   - **Rules** (mine, made advice by §2): D5's checks; at most 1024 px on a side and up to 1 MB, for memory ("The tab icon can be at most 1024 px on a side."; the logo's 4-million-pixel rule can't be reached here). The rest is advice that never blocks: shorter side under 180 px, "This icon is N px, so it may look soft in tabs and on phones (180 px or more recommended)." (N is the shorter side); not square, "This icon isn't square, so tabs and phones will squeeze it." Other sentences follow D5's pattern.
-  - **Default** (mine): the Mathion mark reversed on the steel-blue tile, the "favicon" form `Logo.svelte` already plans. It's an SVG for browsers that take one, and PNGs at 32 and 180 px, made once from the SVG while building this. Mathion has no tab icon today, so browsers show their blank default.
+  - **Default** (user's, 2026-11-06): the user's own drawing, the two peaks (gold behind, steel blue in front) on a white square (`backend/branding-defaults/icon.svg`). It's an SVG for browsers that take one, and PNGs at 32 and 180 px, made once from the SVG while building this. Mathion has no tab icon today, so browsers show their blank default.
     - **It ships inside the Python package** (mine, from review). The image installs only the `mathion` package's Python files (no package data) and the built frontend, so loose image files next to the code would be missing in production while tests pass. The source files are committed in the repo (for example `backend/branding-defaults/`), and a generated, committed module (for example `mathion/branding_defaults.py`) holds their bytes. A test fails when the module and the files differ, as for `theme_vars.py` (D8).
   - **Where it's used:** the tab icon (`<link rel="icon">`), the phone home-screen icon (`apple-touch-icon`), and `/favicon.ico`, which today returns the app's page as HTML. It now returns the uploaded icon, or the 32 px default. Which links the head carries in each state is in D13.
   - Safari keeps tab icons a long time, so a changed icon may show there later than D14 says (noted for the Safari pass).
