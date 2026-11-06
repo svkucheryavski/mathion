@@ -195,3 +195,29 @@ def test_branding_defaults_match_files():
         assert value == (folder / file).read_bytes()
         assert value[:8] == b"\x89PNG\r\n\x1a\n" and value[12:16] == b"IHDR"
         assert struct.unpack(">II", value[16:24]) == (size, size)
+
+
+# --- the theme fields (D10, D13) ---
+
+def test_load_branding_theme_text(db):
+    assert (load_branding().theme_text, load_branding().theme_hash) == ("", None)
+    _save(db, theme_changes={"--bg": "#fff", "--gone": "#000", "--primary": "var(--radius)"})
+    b = load_branding()
+    assert b.theme_changes == {"--bg": "#fff"}
+    assert b.theme_text == ":root:root {\n  --bg: #fff;\n}\n"
+    assert b.theme_hash == short_hash(b.theme_text.encode())
+
+
+def test_theme_bug_is_not_an_outage(db, monkeypatch, caplog):
+    _save(db, site_name="Riverside", theme_changes={"--bg": "#fff"})
+
+    def broken(stored):
+        raise RuntimeError("parser bug")
+    monkeypatch.setattr(branding, "changes_in_use", broken)
+    with caplog.at_level(logging.WARNING):
+        b = load_branding()
+    assert b.name == "Riverside"
+    assert (b.theme_changes, b.theme_text, b.theme_hash) == ({}, "", None)
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any("database read failed" in m for m in messages)
+    assert any("stored colours" in m for m in messages)

@@ -527,6 +527,9 @@ else:
 # Polish 3 C2: 42962132 -> 17366996: --cancel-border var(--focus-line-strong)
 # -> #71839E, the lightest grey of that hue at >=3:1 on every ground a Cancel
 # meets (3.03:1 on --focus-2). The ONLY change.
+# Branding D8 (2026-11-06): 17366996 -> 0ca50118: +--toast-info #0a7ea4 in a new
+# `--- toast ---` section, the info toast's fill moved out of Toast.svelte so a
+# school theme reaches it. The ONLY change (dropping it reproduces 17366996).
 # D85 (user, 2026-10-31, Polish 3 Task 6): a loose list groups by item. Inside
 # an item every block but the last (a heading keeps its em margins) takes
 # --space-2 below it, items are --space-3 apart (li+li ca5345b0 -> dc00e0ee);
@@ -565,7 +568,7 @@ WANT_FULL = [
     ('', '.prose>:last-child,.prose :where(li,blockquote)>:last-child', 'ef0b7a11'),
     ('', ':focus-visible', 'ebbf7147'),
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible', '1684b043'),
-    ('', ':root', '17366996'),
+    ('', ':root', '0ca50118'),
     ('', '[tabindex="-1"]:focus-visible', 'f9b4dcdb'),
     ('', 'a', '1cdc0f83'), ('', 'a', '7bb41747'), ('', 'a:hover', '36ec7417'),
     ('', 'body', '0c999c4b'), ('', 'body', '77e2fef1'), ('', 'button', 'd50dfcde'),
@@ -640,7 +643,7 @@ else:
     print('FAIL  the hashless rule inventory changed (%d -> %d)' % (len(WANT_FULL), len(got_full)))
     cg, cw = Counter(got_full), Counter(WANT_FULL)
     for k in sorted((cg - cw).elements()):
-        print('        new/changed: %s%s  {%s}' % (k[0] + ' ' if k[0] else '', k[1],
+        print('        new/changed: %s%s  (decls %s) {%s}' % (k[0] + ' ' if k[0] else '', k[1], k[2],
                                                    ';'.join(sorted(decls(bodies[k])))[:90]))
     for k in sorted((cw - cg).elements()):
         print('        gone:        %s%s  (decls %s)' % (k[0] + ' ' if k[0] else '', k[1], k[2]))

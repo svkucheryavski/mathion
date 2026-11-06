@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from mathion.database import SessionLocal
 from mathion.models_auth import SiteBranding, SiteBrandingImage
+from mathion.theme_css import changes_in_use, write_stylesheet
 
 log = logging.getLogger(__name__)
 
@@ -100,6 +101,20 @@ def _read() -> Branding:
         )
 
 
+def _with_theme(branding: Branding) -> Branding:
+    """The stored colours in use and the stylesheet written from them (D10,
+    D13). Worked out after the database read, so a bug here isn't logged as
+    an outage; it answers Mathion's colours instead of failing the read."""
+    try:
+        changes = changes_in_use(branding.theme_changes)
+        text = write_stylesheet(changes)
+    except Exception:
+        log.exception("branding: the stored colours couldn't be written; using Mathion's colours")
+        return replace(branding, theme_changes={}, theme_text="", theme_hash=None)
+    return replace(branding, theme_changes=changes, theme_text=text,
+                   theme_hash=short_hash(text.encode()) if text else None)
+
+
 def _copy(branding: Branding) -> Branding:
     # Each caller gets its own dict, so no caller can change the kept copy.
     return replace(branding, theme_changes=dict(branding.theme_changes))
@@ -124,6 +139,7 @@ def load_branding() -> Branding:
                             type(e).__name__, reason)
                 _failing = True
             return _copy(_last_good)
+    branding = _with_theme(branding)
     with _lock:
         _last_good, _failing = branding, False
     return _copy(branding)
