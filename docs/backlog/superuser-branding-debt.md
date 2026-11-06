@@ -61,3 +61,12 @@ Minors from the per-task reviews and the whole-branch review, by task.
 - **`downloadTheme`'s test overwrites the real `URL`'s methods for the rest of its file, and leaves fake timers on if an assertion fails** (Opus r1 M2). Harmless today: it's the file's last test. Fix: `vi.spyOn` a defined `createObjectURL`, and `try/finally` around `useRealTimers()`.
 - **The file line's change from "checking…" to "N colours" isn't announced** (Fable r1 M1). A screen-reader user isn't told when the check answers and Save is ready; the blocked sentence is (role=status). Fix: `aria-live="polite"` on `.ec-file`. For the VoiceOver pass at beta.
 - **Untested: Cancel and Esc wait while Save runs** (Fable r1 note), as in Task 9; the code passes `closeDisabled={busy}` and disables Cancel.
+
+## Whole-branch review (aed0056..5f1a4c6)
+
+- **The Colours card lists changed names in the database's key order, not the theme's** (both seats). Postgres JSONB orders keys shortest first, so "--bg, --muted, --primary" can come out unlike the downloaded file. Fix: build the in-use set in `THEME_VARS` order in `changes_in_use` (`theme_css.py`).
+- **A backtick in an echoed value or name turns the rest of a problem sentence into code** (Opus M2). Fix: escape backticks when a problem echoes a value or a name (`theme_css.py`, the echo helper).
+- **Names echoed in problems aren't shown the way values are** (Opus M3). A name with a pasted zero-width space reads "`--bg` isn't a theme variable.", which looks false. Fix: run names through `_shown` too.
+- **`applyBranding` rebuilds the icon links after every panel save** (Fable M2). On an unbranded site a name or colours save drops `?v=` from the default icon links: one 304, nothing visible. Fix: skip the icon block when the icon didn't change.
+- **A panel save doesn't refresh the last good branding** (Fable M3). An outage that starts before the next read serves the pre-save branding until a read succeeds. Rare; next to Task 1's slow-read item.
+- **SiteLogo keeps a failed logo address failed until reload** (Fable M4, note). A 503 during an outage shows the lockup on open pages until they reload; matches D14.
