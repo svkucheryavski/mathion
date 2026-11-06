@@ -81,11 +81,13 @@ def _send_login_pin(email: str, raw_pin: str, minutes: int) -> None:
     mailer = site = None
     sending = False
     try:
+        site_name = load_branding().name  # Branding D3, D13: never fails, so the PIN still goes
         with SessionLocal() as db:
             site = load_site(db)
         mailer = build_mailer(site, settings.secret_key, settings.email_mode)  # one-shot
         if mailer is not None:
-            msg = build_login_pin_message(email, raw_pin, minutes=minutes, sender=mailer.sender)
+            msg = build_login_pin_message(email, raw_pin, minutes=minutes, sender=mailer.sender,
+                                          site_name=site_name)
             with mailer.session():
                 sending = True
                 mailer.send(msg)

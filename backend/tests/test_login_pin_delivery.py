@@ -315,3 +315,50 @@ def test_pin_email_refused_after_body_reaches_the_card(client, db, monkeypatch):
     client.post("/api/auth/request-pin", json={"email": "real@example.com"})
     assert _card(db) == ("The mail server refused a message: check that the login may send as "
                          "Mathion <noreply@uni.dk>.", None, 0)
+
+
+# --- superuser Branding D3, D13: the PIN email names the site, even during an outage ---
+
+def _pin_mailer(monkeypatch):
+    monkeypatch.setattr(settings, "debug", False)
+    monkeypatch.setattr(settings, "email_mode", "smtp")
+    mailer = MemoryMailer()
+    monkeypatch.setattr(auth_api, "build_mailer", lambda *a: mailer)
+    return mailer
+
+
+def test_pin_email_names_the_site(client, db, monkeypatch):
+    from mathion.models_auth import SiteBranding
+    _make_user(db)
+    db.add(SiteBranding(id=1, site_name="Riverside"))
+    db.commit()
+    mailer = _pin_mailer(monkeypatch)
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert mailer.sent[0]["Subject"] == "Your Riverside sign-in PIN"
+    assert mailer.sent[0].get_content().startswith("Your Riverside sign-in PIN is ")
+
+
+def test_pin_email_survives_branding_read_error(client, db, monkeypatch):
+    from mathion import branding
+    from mathion.models_auth import SiteBranding
+    _make_user(db)
+    _make_user(db, "other@example.com")
+    mailer = _pin_mailer(monkeypatch)
+
+    def refused():
+        raise RuntimeError("connection refused")
+
+    # Nothing read yet: the default name.
+    monkeypatch.setattr(branding, "_read", refused)
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert mailer.sent[-1]["Subject"] == "Your Mathion sign-in PIN"
+    # After a good read: the last good name.
+    monkeypatch.undo()
+    mailer = _pin_mailer(monkeypatch)
+    db.add(SiteBranding(id=1, site_name="Riverside"))
+    db.commit()
+    branding.load_branding()
+    monkeypatch.setattr(branding, "_read", refused)
+    client.post("/api/auth/request-pin", json={"email": "other@example.com"})
+    assert len(mailer.sent) == 1
+    assert mailer.sent[0]["Subject"] == "Your Riverside sign-in PIN"

@@ -29,3 +29,8 @@ Minors from the per-task reviews and the whole-branch review, by task.
 - **The 1 MB + 1 byte cap runs after the upload is spooled** (Opus r1 M1). Starlette receives and spools the whole multipart body before the handler reads its capped part, so a large file costs disk until the proxy's limit (60 MB) stops it. Every upload route in the app works this way; D5's "never read whole" holds for the checks. Fix, if it matters: a streaming size check before the multipart parser.
 - **A release can make a stored colour equal Mathion's default** (Opus r1 M2). The card then still counts it as a change, and re-uploading the school's own download warns "puts back Mathion's colour" though nothing visible changes. Fix: `changes_in_use` also leaves out stored values equal to the current default, logged once.
 - **The image upsert sends the bytes twice** (Fable r1 M1). `save_image` binds `data` in `values()` and again in `set_`, so a 1 MB logo travels as 2 MB to Postgres. Fix: `set_={"data": stmt.excluded.data}`.
+
+## Task 6 (the site name in every email)
+
+- **The stored name isn't re-checked when read back** (Opus r1 M1). Only `check_site_name` and the reset write it today, but a hand edit of the row, or a future writer, could store a name with a line break; every PIN email would then fail its header and be dropped, which D3's one-line rule exists to prevent. Fix: in `branding._from_row`, keep the stored name only when `check_site_name` returns it unchanged, else "Mathion", logged once.
+- **`NAME_WITH_EMOJI` sits between the import blocks** (Fable r1 M1) in `backend/tests/test_notifications_templates.py:7` (E402). Move it below the imports next time the file is touched.

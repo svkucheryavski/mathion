@@ -447,3 +447,36 @@ def test_course_slug_read_at_send_time(db, admin_row):
     tick(db, mailer, now=datetime.now(timezone.utc))
     body = mailer.sent[0].get_content()
     assert "/courses/stat-2027/edit" in body
+
+
+# --- superuser Branding D3: the dispatcher reads the site name once per tick ---
+
+def test_tick_reads_branding_once(db, seeded_run, monkeypatch):
+    from types import SimpleNamespace
+    from mathion.branding import Branding
+    from mathion.notifications import dispatcher
+    for _ in range(3):
+        db.add(NotificationLogEntry(user_id=seeded_run["student_user"].id, kind="run_enrolled",
+                                    payload={"run_id": seeded_run["run"].id}))
+    db.commit()
+    calls = []
+
+    def load():
+        calls.append(1)
+        return Branding(name="Riverside")
+
+    monkeypatch.setattr(dispatcher, "load_branding", load)
+    mailer = MemoryMailer()
+    state = SimpleNamespace(settings=SimpleNamespace(email_mode="memory", secret_key="s" * 48), mailer=mailer)
+    assert dispatcher._tick_once(state, datetime.now(timezone.utc)) == 3
+    assert len(calls) == 1
+    assert [m.get_content().endswith("\n\n\u2014 Riverside\n") for m in mailer.sent] == [True] * 3
+
+
+def test_tick_signs_with_mathion_by_default(db, seeded_run):
+    db.add(NotificationLogEntry(user_id=seeded_run["student_user"].id, kind="run_enrolled",
+                                payload={"run_id": seeded_run["run"].id}))
+    db.commit()
+    mailer = MemoryMailer()
+    tick(db, mailer, now=datetime.now(timezone.utc))
+    assert mailer.sent[0].get_content().endswith("\n\n\u2014 Mathion\n")
