@@ -57,6 +57,7 @@ describe('lib/router', () => {
       ['/superuser/T/users',                                                      'SuperuserShell',   { token: 'T' }],
       ['/superuser/T/courses',                                                    'SuperuserShell',   { token: 'T' }],
       ['/superuser/T/settings',                                                   'SuperuserShell',   { token: 'T' }],
+      ['/superuser/T/branding',                                                   'SuperuserShell',   { token: 'T' }],
     ] as const)('routes.ts wires %s → %s', (path, component, params) => {
       const m = matchRoute(appRoutes, path);
       expect(m?.route.component).toBe(component);

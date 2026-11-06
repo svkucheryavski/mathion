@@ -924,10 +924,65 @@ class SuperuserStatsResponse(BaseModel):
     active_users_7d: int
 
 
+class LogoPublic(BaseModel):
+    version: str
+    width: int
+    height: int
+
+
+class BrandingPublic(BaseModel):
+    """Superuser Branding D13: what any page may know; `icon` and `theme` are versions."""
+    name: str
+    logo: LogoPublic | None
+    icon: str | None
+    theme: str | None
+
+
+class ImageSize(BaseModel):
+    width: int
+    height: int
+
+
+class ThemeVarOut(BaseModel):
+    name: str
+    default: str
+    heading: str
+
+
+class PanelColours(BaseModel):
+    """Branding D9, D10: what the card and the download need."""
+    vars: list[ThemeVarOut]
+    changes: dict[str, str]   # the stored changes in use
+    warnings: list[str]
+
+
+class PanelBranding(BaseModel):
+    name: str
+    logo: ImageSize | None
+    icon: ImageSize | None
+    colours: PanelColours
+    public: BrandingPublic    # D14: the panel shows a save at once
+
+
+class ThemeCheck(BaseModel):
+    """Branding D10: the check that saves nothing."""
+    changes: dict[str, str]
+    problems: list[str]
+    more: int
+    warnings: list[str]
+    blocked: str | None
+
+
+class BrandingNameIn(BaseModel):
+    name: str | None = None
+    reset: bool = False
+
+
 class AuthConfigResponse(BaseModel):
     send_pin_enabled: bool
     longest_sign_in_days: int  # superuser Settings D12
     max_file_mb: int           # superuser Settings D11b
+    branding: BrandingPublic   # superuser Branding D13
 
 
 # --- The superuser panel: Courses (spec D4-D13) and Users (D14-D21) ---

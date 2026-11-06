@@ -641,3 +641,22 @@ def test_guard_and_csrf(panel, db):
     for method, url, body in calls:
         r = plain.request(method, url, json=body)
         assert r.status_code == 403, (method, url, r.status_code)
+
+
+# --- superuser Branding D3: the test email names the site ---
+
+def test_test_email_names_the_site():
+    from mathion.api.superuser_settings import _test_message
+    msg = _test_message("a@x.dk", "b@x.dk", "Riverside")
+    assert msg["Subject"] == "Test email from Riverside"
+    assert msg.get_content() == ("This is a test from the Settings page of your Riverside server. "
+                                 "Email from Riverside reaches this inbox.\n")
+
+
+def test_test_email_reads_the_saved_name(panel, db, smtp):
+    from mathion.models_auth import SiteBranding
+    db.add(SiteBranding(id=1, site_name="Riverside"))
+    db.commit()
+    r = _test(panel)
+    assert r.status_code == 200, r.text
+    assert smtp.sent[0]["Subject"] == "Test email from Riverside"

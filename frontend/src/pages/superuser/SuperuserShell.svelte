@@ -3,31 +3,32 @@
   import { navigate, currentRoute } from '../../lib/router.svelte';
   import { routeClick } from '../../lib/routeClick';
   import { session } from '../../stores/session.svelte';
-  import { PRODUCT_NAME } from '../../lib/branding';
   import type { PanelPage } from '../../lib/superuser';
-  import Logo from '../../components/ui/Logo.svelte';
+  import SiteLogo from '../../components/chrome/SiteLogo.svelte';
   import Button from '../../components/ui/Button.svelte';
   import PanelHead from '../../components/superuser/PanelHead.svelte';
   import SuperuserDashboard from './SuperuserDashboard.svelte';
   import SuperuserCourses from './SuperuserCourses.svelte';
   import SuperuserUsers from './SuperuserUsers.svelte';
   import SuperuserSettings from './SuperuserSettings.svelte';
+  import SuperuserBranding from './SuperuserBranding.svelte';
 
   let { token }: { token: string } = $props();
 
   const displayName = $derived(session.user?.full_name ?? session.user?.email ?? '');
 
-  // D23: /superuser/{token}, then /users, /courses and /settings (Settings D4).
+  // D23: /superuser/{token}, then /users, /courses, /settings (Settings D4) and /branding (Branding D1).
   const PAGES: { page: PanelPage; label: string; suffix: string }[] = [
     { page: 'dashboard', label: 'Dashboard', suffix: '' },
     { page: 'users', label: 'Users', suffix: '/users' },
     { page: 'courses', label: 'Courses', suffix: '/courses' },
     { page: 'settings', label: 'Settings', suffix: '/settings' },
+    { page: 'branding', label: 'Branding', suffix: '/branding' },
   ];
   // The segment after the token, so a token spelled "users" still reads as the Dashboard.
   const page = $derived.by((): PanelPage => {
     const seg = currentRoute.path.split('/').filter(Boolean)[2];
-    return seg === 'users' || seg === 'courses' || seg === 'settings' ? seg : 'dashboard';
+    return seg === 'users' || seg === 'courses' || seg === 'settings' || seg === 'branding' ? seg : 'dashboard';
   });
   const current = $derived(PAGES.find((p) => p.page === page)!);
 
@@ -63,10 +64,7 @@
        away from it. -->
   <header class="su-header">
     <div class="su-row">
-      <span class="brand">
-        <span class="brand-mark"><Logo /></span>
-        <span class="wordmark">{PRODUCT_NAME}</span>
-      </span>
+      <span class="brand"><SiteLogo size="header" /></span>
       <nav class="su-pills" aria-label="Superuser panel">
         {#each PAGES as p (p.page)}
           {@const href = `/superuser/${token}${p.suffix}`}
@@ -97,6 +95,8 @@
       <SuperuserCourses {token} {onAuth} />
     {:else if page === 'settings'}
       <SuperuserSettings {token} {onAuth} />
+    {:else if page === 'branding'}
+      <SuperuserBranding {token} {onAuth} />
     {:else}
       <SuperuserUsers {token} {onAuth} />
     {/if}
@@ -120,15 +120,8 @@
     padding: 0 var(--space-3);
     height: 100%;
   }
-  /* AppHeader's brand lockup, not a link here. */
-  .brand { display: inline-flex; align-items: center; gap: 7px; }
-  .brand-mark { display: inline-flex; transform: translateY(-4.35px); }
-  .wordmark {
-    font-size: 14px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    color: var(--text);
-  }
+  /* AppHeader's brand, not a link here; the logo or lockup is SiteLogo's (Branding D4). */
+  .brand { display: inline-flex; align-items: center; flex: none; }
   /* AppHeader's nav pills (D23); the row takes the free space so the name and
      Sign out sit right. */
   .su-pills { display: flex; gap: var(--space-2); flex: 1; }

@@ -26,5 +26,5 @@
   /* Distinct teal/blue for "info" kind — visually separates "Saved (refresh
      failed — reload to see latest)" from a plain success or error. Reads
      against white text the same way --primary does. */
-  .info { background: #0a7ea4; }
+  .info { background: var(--toast-info); }
 </style>

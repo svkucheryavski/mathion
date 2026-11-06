@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2822
+EXPECTED_CHECKS=2937
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -527,6 +527,9 @@ else:
 # Polish 3 C2: 42962132 -> 17366996: --cancel-border var(--focus-line-strong)
 # -> #71839E, the lightest grey of that hue at >=3:1 on every ground a Cancel
 # meets (3.03:1 on --focus-2). The ONLY change.
+# Branding D8 (2026-11-06): 17366996 -> 0ca50118: +--toast-info #0a7ea4 in a new
+# `--- toast ---` section, the info toast's fill moved out of Toast.svelte so a
+# school theme reaches it. The ONLY change (dropping it reproduces 17366996).
 # D85 (user, 2026-10-31, Polish 3 Task 6): a loose list groups by item. Inside
 # an item every block but the last (a heading keeps its em margins) takes
 # --space-2 below it, items are --space-3 apart (li+li ca5345b0 -> dc00e0ee);
@@ -565,7 +568,7 @@ WANT_FULL = [
     ('', '.prose>:last-child,.prose :where(li,blockquote)>:last-child', 'ef0b7a11'),
     ('', ':focus-visible', 'ebbf7147'),
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible', '1684b043'),
-    ('', ':root', '17366996'),
+    ('', ':root', '0ca50118'),
     ('', '[tabindex="-1"]:focus-visible', 'f9b4dcdb'),
     ('', 'a', '1cdc0f83'), ('', 'a', '7bb41747'), ('', 'a:hover', '36ec7417'),
     ('', 'body', '0c999c4b'), ('', 'body', '77e2fef1'), ('', 'button', 'd50dfcde'),
@@ -640,7 +643,7 @@ else:
     print('FAIL  the hashless rule inventory changed (%d -> %d)' % (len(WANT_FULL), len(got_full)))
     cg, cw = Counter(got_full), Counter(WANT_FULL)
     for k in sorted((cg - cw).elements()):
-        print('        new/changed: %s%s  {%s}' % (k[0] + ' ' if k[0] else '', k[1],
+        print('        new/changed: %s%s  (decls %s) {%s}' % (k[0] + ' ' if k[0] else '', k[1], k[2],
                                                    ';'.join(sorted(decls(bodies[k])))[:90]))
     for k in sorted((cw - cg).elements()):
         print('        gone:        %s%s  (decls %s)' % (k[0] + ' ' if k[0] else '', k[1], k[2]))
@@ -4548,6 +4551,10 @@ if [[ -n $REPLY ]]; then
   N=AppHeader; H=$REPLY
   d '\.app-header' '' 'background:var\(--surface\)' 'border-bottom:1px solid var\(--border\)'
   d 'nav' '' 'max-width:var\(--page-max\)' 'margin:0 auto' 'padding:0 var\(--space-3\)'
+  # Branding D4: the logo never shrinks; a long name gets an ellipsis at 400px.
+  d '\.brand' '' 'flex:none'
+  d '\.right' '' 'min-width:0'
+  d '\.name' '' 'overflow:hidden' 'text-overflow:ellipsis' 'white-space:nowrap'
 fi
 # R3 / T1 ruling: the canvas shades <body> through a scoped :has() and the tokens
 # only. Polish 2 D50: with nothing open (d0) the page ground is already
@@ -5961,11 +5968,46 @@ if [[ -n $REPLY ]]; then
   d '\.su-pill' '' 'text-decoration:none' 'color:var\(--muted\)' 'padding:4px 10px' 'border-radius:4px' '--ring: var\(--gold-text\)'
   chk "\.su-pill\[aria-current=page\]\.${H}" 'color:var\(--gold-text\)' 'background:var\(--gold-soft\)' 'font-weight:500'
   none "SuperuserShell has no .su-label rule left (D23)" "\.su-label\."
-  d '\.brand-mark' '' 'transform:translateY\(-4\.35px\)'
-  d '\.wordmark' '' 'font-size:14px' 'font-weight:600'
+  # The lockup moved to SiteLogo (Branding D4); the brand only holds it.
+  d '\.brand' '' 'flex:none'
   d '\.name' '' 'font-size:12\.5px'
   d '\.su-main' '' 'max-width:var\(--page-max\)' 'margin:0 auto'
   sweep SuperuserShell $H
+fi
+# Branding D4: the uploaded logo hugs its width inside a pixel box, or the drawn
+# lockup (moved here from AppHeader and SuperuserShell) shows.
+own logo-header SiteLogo.svelte
+uniq1 logo-header
+if [[ -n $REPLY ]]; then
+  N=SiteLogo; H=$REPLY
+  d '\.logo-header' '' 'height:20px' 'width:auto' 'max-width:160px' 'object-fit:contain'
+  d '\.logo-login' '' 'height:28px' 'width:auto' 'max-width:224px' 'object-fit:contain'
+  d '\.mark-header' '' 'transform:translateY\(-4\.35px\)'
+  d '\.wordmark-header' '' 'font-size:14px' 'font-weight:600'
+  d '\.wordmark-login' '' 'font-size:15px'
+  sweep SiteLogo $H
+fi
+# Branding D11: one column at least as tall as the window, the page area taking
+# what is left, and neither sets overflow (the window stays the scroller, so
+# sticky table headers keep sticking).
+own shell App.svelte
+own app-page App.svelte
+uniq1 shell
+if [[ -n $REPLY ]]; then
+  N=App; H=$REPLY
+  d '\.shell' '' 'display:flex' 'flex-direction:column' 'min-height:100vh' 'min-height:100dvh'
+  none "App .shell sets no overflow" "\.shell\.${H}\{([^}]*;)?overflow"
+  d '\.app-page' '' 'flex:1'
+  none "App .app-page sets no overflow" "\.app-page\.${H}\{([^}]*;)?overflow"
+fi
+own powered PoweredBy.svelte
+uniq1 powered
+if [[ -n $REPLY ]]; then
+  N=PoweredBy; H=$REPLY
+  d '\.powered' '' 'font-size:12px' 'text-align:center' 'color:var\(--muted\)'
+  # The link is underlined at rest, so it reads as a link in the muted line (user, 2026-11-06).
+  chk "\.powered\.${H} a:where\(\.${H}\)" 'text-decoration:underline'
+  sweep PoweredBy $H
 fi
 uniq1 panel-error
 if [[ -n $REPLY ]]; then
@@ -6078,7 +6120,7 @@ if [[ -n $REPLY ]]; then
   sweep NoteStrip $H
 fi
 # D8, D12, D17, D24: the panel dialogs' fields, the item modal's field look.
-for pair in NewCourseDialog:nc-input EditCourseDialog:ec-input AdminEmailField:ae-input DeleteCourseDialog:dc-input NewAccountDialog:na-input EditAccountDialog:ea-input EditEmailDialog:ee-input EditLimitsDialog:el-input EditSignInDialog:es-input; do
+for pair in NewCourseDialog:nc-input EditCourseDialog:ec-input AdminEmailField:ae-input DeleteCourseDialog:dc-input NewAccountDialog:na-input EditAccountDialog:ea-input EditEmailDialog:ee-input EditLimitsDialog:el-input EditSignInDialog:es-input EditSiteNameDialog:sn-input; do
   uniq1 ${pair#*:}
   if [[ -n $REPLY ]]; then
     N=${pair%%:*}; H=$REPLY
@@ -6161,6 +6203,64 @@ uniq1 es-err
 if [[ -n $REPLY ]]; then
   N=EditSignInDialog; H=$REPLY
   d '\.es-err' '' 'color:var\(--danger\)'
+fi
+
+# The panel's Branding page (Branding D1, D2, D4): Settings' cards and rows,
+# the logo at its real header size in a dashed box.
+own b-card SuperuserBranding.svelte
+uniq1 b-card
+if [[ -n $REPLY ]]; then
+  N=SuperuserBranding; H=$REPLY
+  d '\.b-page' '' 'max-width:760px'
+  d '\.b-card' '' 'background:var\(--surface\)' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius-lg\)' 'margin:0 0 14px'
+  d '\.b-card-head' '' 'display:flex' 'gap:10px' 'padding:10px 12px 10px 16px' 'border-bottom:1px solid var\(--border\)'
+  chk "\.b-card-head\.${H} h2:where\(\.${H}\)" 'flex:1' 'font-size:15px' 'font-weight:600' 'color:var\(--text\)'
+  chk "dl\.${H}" 'display:grid' 'grid-template-columns:210px 1fr' 'padding:6px 16px 10px'
+  chk "dt\.${H}" 'padding:5px 0' 'color:var\(--muted\)'
+  chk "dd\.${H}" 'padding:5px 0' 'color:var\(--text\)'
+  d '\.b-box' '' 'width:160px' 'height:20px' 'border:1px dashed var\(--border-strong\)'
+  d '\.b-note' '' 'font-size:12\.5px' 'color:var\(--muted\)'
+  d '\.b-foot' '' 'font-size:12\.5px' 'color:var\(--muted\)'
+  d '\.b-warnings' '' 'color:var\(--gold-text\)'
+  sweep SuperuserBranding $H
+fi
+uniq1 sn-err
+if [[ -n $REPLY ]]; then
+  N=EditSiteNameDialog; H=$REPLY
+  d '\.sn-hint' '' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.sn-err' '' 'color:var\(--danger\)'
+fi
+# D4-D6: the image dialogs: the real-size boxes, the icon on light and dark,
+# the advice in gold (it never blocks), a refusal in red.
+uniq1 im-box
+if [[ -n $REPLY ]]; then
+  N=EditImageDialog; H=$REPLY
+  d '\.im-box' '' 'border:1px dashed var\(--border-strong\)' 'background:var\(--surface\)'
+  d '\.im-box\.header' '' 'width:160px' 'height:20px'
+  d '\.im-box\.login' '' 'width:224px' 'height:28px'
+  d '\.im-strip' '' 'background:var\(--surface\)'
+  d '\.im-strip\.dark' '' 'background:var\(--text\)'
+  d '\.im-advice' '' 'color:var\(--gold-text\)'
+  d '\.im-hint' '' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.im-err' '' 'color:var\(--danger\)'
+  sweep EditImageDialog $H
+fi
+
+# D10: the Edit colours dialog: the sample box takes only the colours it
+# declares; advice in gold, problems and refusals in red.
+uniq1 ec-preview
+if [[ -n $REPLY ]]; then
+  N=EditColoursDialog; H=$REPLY
+  d '\.ec-preview' '' 'border:1px solid var\(--border\)' 'overflow:hidden' 'background:var\(--bg\)' 'color:var\(--text\)'
+  d '\.pv-head' '' 'background:var\(--surface\)' 'border-bottom:1px solid var\(--border\)'
+  d '\.pv-pill\.on' '' 'color:var\(--gold-text\)' 'background:var\(--gold-soft\)'
+  d '\.pv-card' '' 'background:var\(--surface\)' 'border:1px solid var\(--border\)'
+  d '\.pv-meta' '' 'color:var\(--muted\)'
+  d '\.ec-hint' '' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.ec-warnings' '' 'color:var\(--gold-text\)'
+  d '\.ec-problems' '' 'color:var\(--danger\)'
+  d '\.ec-err' '' 'color:var\(--danger\)'
+  sweep EditColoursDialog $H
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

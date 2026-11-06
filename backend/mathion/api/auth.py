@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import exists, select
 
 from mathion.auth import destroy_session, request_pin, validate_session, verify_pin
+from mathion.branding import load_branding
 from mathion.config import settings
 from mathion.database import SessionLocal, get_db
 from mathion.dependencies import get_current_user
@@ -15,6 +16,7 @@ from mathion.notifications.dispatcher import record_send_outcome, refusal_on_car
 from mathion.notifications.mailer import DEV_MODES, build_mailer
 from mathion.notifications.smtp_errors import SMTP_FAILURES, describe, stops_the_batch
 from mathion.notifications.templates import build_login_pin_message
+from mathion.page_fill import branding_public
 from mathion.schemas import AuthConfigResponse, PinRequestSchema, PinVerifySchema, UserResponse, UserUpdate
 from mathion.site_settings import load as load_site, password_is_readable
 from mathion.superuser import service as panel_service
@@ -54,7 +56,10 @@ def api_auth_config(db: Session = Depends(get_db)) -> AuthConfigResponse:
     # the `file` outbox, or the panel's email switch on with a password this
     # server can read (or no login). Excludes the one-shot `memory` sink.
     # Public, no auth, no CSRF (GET), so it carries nothing beyond what the
-    # login page and the upload checks need (superuser Settings D10b).
+    # login page and the upload checks need (superuser Settings D10b), and the
+    # public branding for the dev server and an unfilled page (Branding D13),
+    # read first so it never waits on a second pool connection behind this one.
+    public = branding_public(load_branding())
     site = load_site(db)
     panel_sends = (settings.email_mode not in DEV_MODES and site.email_on
                    and password_is_readable(site, settings.secret_key))
@@ -62,6 +67,7 @@ def api_auth_config(db: Session = Depends(get_db)) -> AuthConfigResponse:
         send_pin_enabled=settings.debug or settings.email_mode == "file" or panel_sends,
         longest_sign_in_days=site.longest_sign_in_days,
         max_file_mb=site.max_file_mb,
+        branding=public,
     )
 
 
@@ -75,11 +81,13 @@ def _send_login_pin(email: str, raw_pin: str, minutes: int) -> None:
     mailer = site = None
     sending = False
     try:
+        site_name = load_branding().name  # Branding D3, D13: never fails, so the PIN still goes
         with SessionLocal() as db:
             site = load_site(db)
         mailer = build_mailer(site, settings.secret_key, settings.email_mode)  # one-shot
         if mailer is not None:
-            msg = build_login_pin_message(email, raw_pin, minutes=minutes, sender=mailer.sender)
+            msg = build_login_pin_message(email, raw_pin, minutes=minutes, sender=mailer.sender,
+                                          site_name=site_name)
             with mailer.session():
                 sending = True
                 mailer.send(msg)

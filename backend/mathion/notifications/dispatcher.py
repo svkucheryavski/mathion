@@ -7,6 +7,7 @@ from sqlalchemy import and_, not_, select
 from sqlalchemy.exc import SQLAlchemyError, PendingRollbackError, NoResultFound
 from sqlalchemy.orm import joinedload
 
+from mathion.branding import load_branding
 from mathion.config import settings
 from mathion.database import SessionLocal
 from mathion.models import Course, CourseAdmin, Run, CourseVersion, MiniProject, Submission
@@ -78,7 +79,7 @@ def skip_reason(db, row: NotificationLogEntry) -> str | None:
     return None
 
 
-def _build_render_context(db, row: NotificationLogEntry) -> RenderContext:
+def _build_render_context(db, row: NotificationLogEntry, site_name: str = "Mathion") -> RenderContext:
     payload = row.payload or {}
     if row.kind == COURSE_ADMIN_ASSIGNED:
         course = db.get(Course, payload["course_id"])
@@ -87,7 +88,7 @@ def _build_render_context(db, row: NotificationLogEntry) -> RenderContext:
         user = db.get(User, row.user_id)
         if user is None:
             raise LookupError(f"referent missing: user:{row.user_id}")
-        return RenderContext(user=user, base_url=settings.base_url, course=course)
+        return RenderContext(user=user, base_url=settings.base_url, course=course, site_name=site_name)
     if "run_id" not in payload:
         raise KeyError(f"payload missing run_id for kind={row.kind!r}")
 
@@ -123,7 +124,7 @@ def _build_render_context(db, row: NotificationLogEntry) -> RenderContext:
         if sub is None:
             raise LookupError(f"referent missing: submission:{payload['submission_id']}")
 
-    return RenderContext(user=user, run=run, base_url=settings.base_url, mp=mp, sub=sub)
+    return RenderContext(user=user, run=run, base_url=settings.base_url, mp=mp, sub=sub, site_name=site_name)
 
 
 @dataclass
@@ -201,7 +202,7 @@ def refusal_on_card(send_exc: BaseException, failure: SmtpFailure | None, sender
 
 
 def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = True,
-         view=None) -> TickResult:
+         view=None, site_name: str = "Mathion") -> TickResult:
     """One batch. Each row's success-path and error-path commit are wrapped in
     separate try blocks with explicit rollback on commit failure, so a poisoned
     session never blocks the batch.
@@ -289,7 +290,7 @@ def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = T
             send_exc: BaseException | None = None
             recipient = ""
             try:
-                ctx = _build_render_context(db, row)
+                ctx = _build_render_context(db, row, site_name)
                 recipient = ctx.user.email or ""
                 subject, body = render(row.kind, ctx)
                 msg = _build_email_message(subject, body, ctx, kind=row.kind, sender=mailer.sender)
@@ -426,10 +427,13 @@ def _tick_once(app_state, now: datetime) -> int:
     """One turn of the loop (D10's seam): read the mode and the saved settings,
     build the mailer, pass `tick` the off interval, keep the back-off."""
     s = app_state.settings
+    # Branding D3, D13: the site name, once per tick, before this tick's own
+    # session takes a connection. The read never fails.
+    site_name = load_branding().name
     with SessionLocal() as db:
         if s.email_mode in DEV_MODES:
             # D10c: a developer outbox ignores the switch and the off interval.
-            return _run(db, app_state.mailer, now=now).processed
+            return _run(db, app_state.mailer, now=now, site_name=site_name).processed
         view = load_site(db)
         if not view.email_on:
             return 0  # D10a: while email is off, nothing is sent and nothing is marked
@@ -438,7 +442,8 @@ def _tick_once(app_state, now: datetime) -> int:
         mailer = build_mailer(view, s.secret_key, s.email_mode)
         if mailer is None:
             return 0
-        result = _run(db, mailer, now=now, off_interval=off_interval_for(view), log_failures=False, view=view)
+        result = _run(db, mailer, now=now, off_interval=off_interval_for(view), log_failures=False, view=view,
+                      site_name=site_name)
         _record(db, view, result, now)
         return result.processed
 

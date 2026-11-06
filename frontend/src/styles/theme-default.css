@@ -55,6 +55,9 @@
   --due-near: #C2410C;        /* D80: a deadline 7-13 days away (orange), 5.2:1 on white */
   --success: #065F46;
 
+  /* --- toast --- */
+  --toast-info: #0a7ea4;      /* the info toast: separates "Saved (refresh failed)" from a plain success or error */
+
   /* --- geometry --- */
   --radius: 5px;
   --radius-lg: 8px;

@@ -20,6 +20,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from mathion.api.superuser import require_superuser_panel, require_superuser_panel_write
+from mathion.branding import load_branding
 from mathion.config import settings
 from mathion.database import SessionLocal, get_db
 from mathion.models_auth import NotificationLogEntry, SiteSettings, User
@@ -341,13 +342,13 @@ def _record_test(fp: str, ok: bool, message: str) -> None:
         db.commit()
 
 
-def _test_message(sender: str, recipient: str) -> EmailMessage:
+def _test_message(sender: str, recipient: str, site_name: str) -> EmailMessage:
     msg = EmailMessage()
-    msg["Subject"] = "Test email from Mathion"
+    msg["Subject"] = f"Test email from {site_name}"  # Branding D3
     msg["From"] = sender
     msg["To"] = recipient
-    msg.set_content("This is a test from the Settings page of your Mathion server. "
-                    "Email from Mathion reaches this inbox.\n")
+    msg.set_content(f"This is a test from the Settings page of your {site_name} server. "
+                    f"Email from {site_name} reaches this inbox.\n")
     return msg
 
 
@@ -356,8 +357,11 @@ def _run_test(attempt: _Attempt, data: EmailTestIn, password: str, recipient: st
         mailer = SMTPMailer(data.host, data.port, data.encryption, data.username, password,
                             verify_cert=not data.skip_cert_check, timeout=SMTP_TIMEOUT_SECONDS)
         try:
+            # Built before the session opens, and inside this try, so a bad
+            # header still settles as "Sending failed".
+            msg = _test_message(data.from_address, recipient, load_branding().name)
             with mailer.session():
-                mailer.send(_test_message(data.from_address, recipient))
+                mailer.send(msg)
         except SMTP_FAILURES as exc:
             failure = describe(exc, host=data.host, port=data.port, sender=data.from_address,
                                recipient=recipient, encryption=data.encryption, timeout=SMTP_TIMEOUT_SECONDS)

@@ -1,0 +1,72 @@
+# Superuser Branding: deferred work
+
+Minors from the per-task reviews and the whole-branch review, by task.
+
+## Task 1 (storage, name rule, the read that never fails)
+
+- **A slow read can overwrite a newer kept copy** (Opus r1 M2). Two reads that overlap a save can finish out of order, so the last good copy may briefly be the older one. It only matters during the next outage, and the next successful read corrects it. Fix if it ever shows: keep the copy with a read counter and drop older results.
+- **The 60-character limit counts code points** (Fable r1 M6). A browser's `maxlength` and `.length` count UTF-16 units, so a name with emoji may be cut short in the dialog before the server's limit. Task 9: don't put `maxlength` on the name field; let the server's sentence speak.
+- **No test checks the outage log's text** (Opus r3 M7), only how many lines it logs. If a later edit logged the whole error, SQL would come back into the log unnoticed. Fix: in `test_load_branding_logs_first_failure_after_startup`, assert the message contains `does not exist` and neither `SELECT` nor a line break.
+
+## Task 2 (theme variables, the toast colour, the theme parser)
+
+- **An empty value is echoed as empty backticks** (Opus r1 M5): `--bg: ;` gives "Line 2: `` isn't a colour. …". Not wrong, just odd. Fix if a school trips on it: a separate sentence for a missing value.
+- **The echo's `\u` codes can be cut or too long** (Opus r3 M9, Fable r3 M7). The 40-character cut runs after escaping, so it can split a ` `; a character above U+FFFF shows as `\u` plus five hex digits (`ὤ2`). Cosmetic: the value is refused either way. Fix: cut before escaping, and use `\U0001f642` above U+FFFF.
+- **A leading or trailing NBSP around a value is accepted** (Fable r3 note). `_RE_DECL`'s `\s*` and `strip()` take Unicode whitespace, so `--text: red;` stores `red`. Harmless (the stored value is clean), but D10 says any non-ASCII character is refused. Fix: strip only CSS whitespace.
+
+## Task 3 (readability warnings, the PNG check)
+
+- **Rarer broken PNGs still pass the server's check** (Opus r2 M2, Fable r2 notes): a `PLTE` whose length isn't a non-zero multiple of 3 (or is over 768, or over 3 × 2^depth), two `PLTE`s, a `PLTE` on a grey image, an `IDAT` run split by another chunk. PNG forbids them; no common tool writes them; D5 doesn't ask, and the dialog's `img.decode()` refuses them before Save, so only a direct API call could store one. Fix in both copies of the check (server and Task 9's browser copy) if it ever matters.
+
+## Task 4 (public files, the filled page head, the public config)
+
+- **An unfilled page can be cached** (Opus r1 M1, Fable r1 M1). When the built page's markers are missing, `_spa_fallback` sends the file as before: with its `ETag` and `Last-Modified` and no `Cache-Control`. A browser may then reuse an old shell that names a script the new build no longer has, and show a blank app until reload. This predates the slice, and the markers are checked on every test run. Fix: pass `_page_cache_headers(full_path)` on that branch too, and assert `no-cache` in `test_unmarked_page_is_served_unfilled`.
+- **`/favicon.ico` after a restart during an outage** (Opus r1 M2). With nothing read since startup, the address can't tell "no upload" from "not read yet", so a browser revalidating the school's icon gets Mathion's default until its next revalidation. Short-lived. Fix: answer 503 when the request's `If-None-Match` isn't the default's and nothing has been read yet.
+
+## Task 5 (the panel's Branding API)
+
+- **The 1 MB + 1 byte cap runs after the upload is spooled** (Opus r1 M1). Starlette receives and spools the whole multipart body before the handler reads its capped part, so a large file costs disk until the proxy's limit (60 MB) stops it. Every upload route in the app works this way; D5's "never read whole" holds for the checks. Fix, if it matters: a streaming size check before the multipart parser.
+- **A release can make a stored colour equal Mathion's default** (Opus r1 M2). The card then still counts it as a change, and re-uploading the school's own download warns "puts back Mathion's colour" though nothing visible changes. Fix: `changes_in_use` also leaves out stored values equal to the current default, logged once.
+- **The image upsert sends the bytes twice** (Fable r1 M1). `save_image` binds `data` in `values()` and again in `set_`, so a 1 MB logo travels as 2 MB to Postgres. Fix: `set_={"data": stmt.excluded.data}`.
+
+## Task 6 (the site name in every email)
+
+- **The stored name isn't re-checked when read back** (Opus r1 M1). Only `check_site_name` and the reset write it today, but a hand edit of the row, or a future writer, could store a name with a line break; every PIN email would then fail its header and be dropped, which D3's one-line rule exists to prevent. Fix: in `branding._from_row`, keep the stored name only when `check_site_name` returns it unchanged, else "Mathion", logged once.
+- **`NAME_WITH_EMOJI` sits between the import blocks** (Fable r1 M1) in `backend/tests/test_notifications_templates.py:7` (E402). Move it below the imports next time the file is touched.
+
+## Task 7 (`mathion branding reset`)
+
+- **`branding.reset()`'s returned list has no reader** (Fable r1 M1). The command prints D15's two fixed sentences, so the list (added in Task 5 for this command) is checked only by its own test, and the two could drift. Fix: drop the return value and its two assertions in `test_superuser_branding.py`, or build the sentence from it.
+- **A successful run drops the child's error output** (Opus r1 M3). `Runner.Stream` keeps stderr only for an `ExitError`, so a Compose warning on a run that exits 0 isn't shown. Harmless: the printed line is the record (D15).
+
+## Task 8 (the branding store, startup, the site logo, the footer)
+
+- **`main.ts`'s startup has no test** (Opus r1 M3), so the order (events and router before any wait, one config request) and the dev fallback's path are checked only by reading. The never-blank half is now covered by `applyBranding`'s `THEME_WAIT_MS` tests. Fix: move the body of `start()` into a function in `lib/` that takes the document and the mount, and test it.
+- **The server's logo preload isn't updated after a save in the panel** (Fable r1 note). `applyBranding` rewrites the title, the icons and the theme, but the head's `<link rel="preload" as="image">` keeps the old logo's address until the next page load. Harmless: a preload only warms the cache. Task 9 may drop or update it with the rest.
+- **In the dev fallback, the session request waits for the config** (Fable r1 note): `bootstrapSession()` starts after the awaited branding, one round trip later than on a filled page. Dev and unfilled pages only.
+- **`applyBranding`'s loading link is shared across documents** (Opus r2 M1). The same-theme check and the settling of a superseded call never compare documents, so only tests (one document each) can reach it: a future test that leaves a theme link loading would make the next test add no link and wait 3 s. Fix: also require `pending.link.ownerDocument === doc`, or reset `pending` in `beforeEach`.
+- **After a timeout, the same theme again adds a second link** (Fable r2 note). The browser fetches it once, and whichever copy loads first removes the others. Harmless.
+
+## Task 9 (the Branding page, the name dialog, the image dialogs)
+
+- **Save stays ready with the first file while a second one is read** (Opus r1 M1). Between choosing another file and its read finishing, Save sends the first, decoded file. The previews and the file line still show that first file, so what saves is what's on screen; the gap is milliseconds on a local disk, longer for an iCloud file not yet downloaded. Fix: in `onChoose`, set `pending = null` and `error = null` right after `++turn`, with a test.
+- **The two PNG checks share no test files** (Opus r1 M2). `pngCheck.ts` mirrors `backend/mathion/png_check.py`, and a fuzz of about 12,000 files found no difference, but a later change to one side fails no suite. Fix: one corpus of PNGs with their expected answers, read by both suites.
+- **A huge file is read whole before the 1 MB check** (Fable r1 M1). The picker accepts PNGs, but "All files" lets a superuser pick, say, a video; FileReader then loads all of it before refusing it. Fix: refuse at once when `file.size > PNG_MAX_BYTES`, with the same sentence.
+- **Untested: Cancel and Esc wait while Save runs, and the unreadable-file sentence** (Fable r1 M2). Both dialogs pass `closeDisabled={busy}` and disable Cancel, as Settings' dialogs do, but no Branding test holds a save open and presses them; nor does one make FileReader fail. Fix: two tests in `SuperuserBranding.svelte.test.ts`.
+- **Notes** (Fable r1): the file line shows pixels, not bytes; the default lockup's small nudge can reach just past the 20 px dashed box (seen in the shots); Reset, then typing "Mathion" again, sends `{name: "Mathion"}`, not `{reset: true}` (same result).
+
+## Task 10 (the Colours dialog, preview and download)
+
+- **No suite checks that the download uploads cleanly** (Opus r1 M1). A review probe ran `themeFileText` through `parse_theme`: 0 problems, the right changes. But a later parser change could make every school's unchanged download fail its own upload, and no test would fail. Fix: commit the default download as a fixture; the TS test asserts `themeFileText` equals it, and a backend test asserts `parse_theme(fixture)` gives no problems and no changes.
+- **`downloadTheme`'s test overwrites the real `URL`'s methods for the rest of its file, and leaves fake timers on if an assertion fails** (Opus r1 M2). Harmless today: it's the file's last test. Fix: `vi.spyOn` a defined `createObjectURL`, and `try/finally` around `useRealTimers()`.
+- **The file line's change from "checking…" to "N colours" isn't announced** (Fable r1 M1). A screen-reader user isn't told when the check answers and Save is ready; the blocked sentence is (role=status). Fix: `aria-live="polite"` on `.ec-file`. For the VoiceOver pass at beta.
+- **Untested: Cancel and Esc wait while Save runs** (Fable r1 note), as in Task 9; the code passes `closeDisabled={busy}` and disables Cancel.
+
+## Whole-branch review (aed0056..5f1a4c6)
+
+- **The Colours card lists changed names in the database's key order, not the theme's** (both seats). Postgres JSONB orders keys shortest first, so "--bg, --muted, --primary" can come out unlike the downloaded file. Fix: build the in-use set in `THEME_VARS` order in `changes_in_use` (`theme_css.py`).
+- **A backtick in an echoed value or name turns the rest of a problem sentence into code** (Opus M2). Fix: escape backticks when a problem echoes a value or a name (`theme_css.py`, the echo helper).
+- **Names echoed in problems aren't shown the way values are** (Opus M3). A name with a pasted zero-width space reads "`--bg` isn't a theme variable.", which looks false. Fix: run names through `_shown` too.
+- **`applyBranding` rebuilds the icon links after every panel save** (Fable M2). On an unbranded site a name or colours save drops `?v=` from the default icon links: one 304, nothing visible. Fix: skip the icon block when the icon didn't change.
+- **A panel save doesn't refresh the last good branding** (Fable M3). An outage that starts before the next read serves the pre-save branding until a read succeeds. Rare; next to Task 1's slow-read item.
+- **SiteLogo keeps a failed logo address failed until reload** (Fable M4, note). A 503 during an outage shows the lockup on open pages until they reload; matches D14.

@@ -4,6 +4,8 @@ from unittest.mock import patch
 
 import pytest
 
+NAME_WITH_EMOJI = 'Riverside \U0001f3eb Sk\u00f8le'
+
 from mathion.notifications.templates import (
     TEMPLATES, RenderContext, render, _name, _student_url, _staff_url, _build_email_message,
 )
@@ -123,3 +125,47 @@ def test_build_email_message_set_content_uses_utf8():
     # set_content(..., charset="utf-8") writes a 7bit-friendly representation;
     # round-tripping via get_content() should decode the unicode losslessly.
     assert "héllo wörld" in msg.get_content()
+
+
+# --- superuser Branding D3: the site name signs every email ---
+
+@pytest.mark.parametrize("kind", sorted(TEMPLATES))
+def test_sign_off_uses_the_site_name(kind):
+    ctx = _ctx(course=SimpleNamespace(name="Statistics 101", slug="stat"))
+    with patch("mathion.api.mini_projects.mini_project_title", return_value="Block 3 Project"):
+        subject, body = render(kind, replace(ctx, site_name="Riverside"))
+        default_subject, default_body = render(kind, ctx)
+    assert body.endswith("\n\n— Riverside\n")
+    assert default_body.endswith("\n\n— Mathion\n")
+    assert subject == default_subject  # subjects name the run or the course
+    assert "Mathion" not in body
+
+
+def test_admin_note_names_the_site():
+    ctx = RenderContext(user=SimpleNamespace(full_name=None, email="a@x"), base_url="https://m.x",
+                        course=SimpleNamespace(name="Statistics 101", slug="stat"), site_name="Riverside")
+    _subject, body = render("course_admin_assigned", ctx)
+    assert 'You are now the admin of "Statistics 101" on Riverside. ' in body
+
+
+def test_render_context_defaults_to_mathion():
+    assert _ctx().site_name == "Mathion"
+
+
+def test_pin_email_uses_the_site_name():
+    from mathion.notifications.templates import build_login_pin_message
+    msg = build_login_pin_message("a@x.dk", "123456", minutes=15, site_name="Riverside")
+    assert msg["Subject"] == "Your Riverside sign-in PIN"
+    assert msg.get_content() == "Your Riverside sign-in PIN is 123456. It expires in 15 minutes.\n"
+    default = build_login_pin_message("a@x.dk", "123456", minutes=15)
+    assert default["Subject"] == "Your Mathion sign-in PIN"
+
+
+def test_pin_email_subject_keeps_emoji_and_accents():
+    from email import message_from_bytes, policy
+    from mathion.notifications.templates import build_login_pin_message
+    name = NAME_WITH_EMOJI
+    msg = build_login_pin_message("a@x.dk", "123456", minutes=15, site_name=name)
+    back = message_from_bytes(msg.as_bytes(), policy=policy.default)
+    assert back["Subject"] == f"Your {name} sign-in PIN"
+    assert back.get_content().startswith(f"Your {name} sign-in PIN is 123456.")

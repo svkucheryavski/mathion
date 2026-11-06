@@ -1,4 +1,5 @@
 import { api, ApiError, OFFLINE_MESSAGE } from './api';
+import type { BrandingPublic } from './branding.svelte';
 
 // Every panel call passes skipAuthRedirect: the panel's shell handles 401 and
 // 404 itself (panelError), instead of the app-wide onUnauthorized redirect.
@@ -314,10 +315,63 @@ export function testEmail(token: string, body: EmailTestBody): Promise<EmailTest
   return api.post<EmailTestResult>(`${base(token)}/settings/email/test`, body, opts);
 }
 
+// --- Branding (Branding D1-D10, D14), mirroring backend/mathion/schemas.py ---
+
+export type PanelImageSize = { width: number; height: number };
+export type PanelThemeVar = { name: string; default: string; heading: string };
+/** D9, D10: what the Colours card and the download need. */
+export type PanelColours = { vars: PanelThemeVar[]; changes: Record<string, string>; warnings: string[] };
+export type PanelBranding = {
+  name: string;
+  logo: PanelImageSize | null;
+  icon: PanelImageSize | null;
+  colours: PanelColours;
+  public: BrandingPublic; // D14: the panel shows a save at once
+};
+/** D10: the check that saves nothing. */
+export type ThemeCheck = {
+  changes: Record<string, string>;
+  problems: string[];
+  more: number;
+  warnings: string[];
+  blocked: string | null;
+};
+/** A file's bytes, or Reset to default (D2: one save per item). */
+export type BrandingPart = Uint8Array<ArrayBuffer> | 'reset';
+
+export function getBranding(token: string): Promise<PanelBranding> {
+  return api.get<PanelBranding>(`${base(token)}/branding`, opts);
+}
+
+export function saveSiteName(token: string, body: { name: string } | { reset: true }): Promise<PanelBranding> {
+  return api.put<PanelBranding>(`${base(token)}/branding/name`, body, opts);
+}
+
+// D5: a file part or reset=true, never both. The bytes are the ones the
+// dialog read and checked when the file was chosen.
+function brandingForm(part: BrandingPart, type: string, filename: string): FormData {
+  const form = new FormData();
+  if (part === 'reset') form.append('reset', 'true');
+  else form.append('file', new Blob([part], { type }), filename);
+  return form;
+}
+
+export function saveImage(token: string, kind: 'logo' | 'icon', part: BrandingPart, filename = `${kind}.png`): Promise<PanelBranding> {
+  return api.postForm<PanelBranding>(`${base(token)}/branding/${kind}`, brandingForm(part, 'image/png', filename), opts);
+}
+
+export function checkTheme(token: string, bytes: Uint8Array<ArrayBuffer>, filename: string): Promise<ThemeCheck> {
+  return api.postForm<ThemeCheck>(`${base(token)}/branding/theme/check`, brandingForm(bytes, 'text/css', filename), opts);
+}
+
+export function saveTheme(token: string, part: BrandingPart, filename = 'theme.css'): Promise<PanelBranding> {
+  return api.postForm<PanelBranding>(`${base(token)}/branding/theme`, brandingForm(part, 'text/css', filename), opts);
+}
+
 // --- The shell (D23, D25) ---
 
-/** The panel's four pages; the shell reads it from the route. */
-export type PanelPage = 'dashboard' | 'users' | 'courses' | 'settings';
+/** The panel's five pages; the shell reads it from the route. */
+export type PanelPage = 'dashboard' | 'users' | 'courses' | 'settings' | 'branding';
 
 // --- Errors (D25) ---
 

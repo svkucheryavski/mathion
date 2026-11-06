@@ -90,7 +90,7 @@ and joins, no fill. Same geometry at every size — only the box and stroke chan
 | app header, beside the 14px wordmark | 26px wide | 3.6 |
 | login card, beside the 15px wordmark | 28px | 4 |
 | marketing | 56px | 3.2 |
-| favicon / reversed on `--primary` | 24px on a 40px #3F5C77 tile, radius 9 | 3.2, front `#fff`, back `rgba(255,255,255,.55)` |
+| reversed on `--primary` (not the tab icon: that's `backend/branding-defaults/icon.svg`, Branding D6) | 24px on a 40px #3F5C77 tile, radius 9 | 3.2, front `#fff`, back `rgba(255,255,255,.55)` |
 
 **Header geometry is exact.** The mark's viewBox is cropped to its ink —
 `viewBox="0 0 32 23.6"` (the source art is 32×32; strokes bottom out at

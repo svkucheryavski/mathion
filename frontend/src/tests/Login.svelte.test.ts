@@ -161,7 +161,7 @@ it('§2a: segmented duration in a card+logo; selecting 30 submits numeric durati
 
   expect(target.querySelector('.card')).not.toBeNull();
   expect(target.querySelector('.brand svg')).not.toBeNull();
-  expect(target.querySelector('.brand .wordmark')?.textContent).toContain('Mathion');
+  expect(target.querySelector('.brand .wordmark-login')?.textContent).toContain('Mathion');
   expect(target.querySelector('[role="radiogroup"]')).not.toBeNull();
   expect(target.querySelector('select')).toBeNull();
   expect(target.querySelector('input[name="pin"]')?.classList.contains('mono')).toBe(true);
@@ -240,9 +240,9 @@ it('D12: longest 30 days offers 1, 7 and 30, with 7 selected', async () => {
   expect(selectedText()).toBe('7 days');
 });
 
-it("D10b: with email off, the page says to ask the person who runs this Mathion for a PIN", async () => {
+it("D10b: with email off, the page says to ask the person who runs this site for a PIN (Branding D3)", async () => {
   await mountWithConfig({ send_pin_enabled: false });
   expect(target.querySelector('.subtitle')?.textContent).toBe(
-    "Email isn't set up on this server, so PINs aren't emailed. Ask the person who runs this Mathion for one.");
+    "Email isn't set up on this server, so PINs aren't emailed. Ask the person who runs this site for one.");
   expect(target.textContent).not.toContain('server terminal');
 });

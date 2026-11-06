@@ -21,6 +21,7 @@ class RenderContext:
     course: Optional[Course] = None  # set instead of `run` for a course-scoped kind
     mp: Optional[MiniProject] = None
     sub: Optional[Submission] = None
+    site_name: str = "Mathion"  # superuser Branding D3: read once per batch
 
     @property
     def course_slug(self) -> str:
@@ -51,7 +52,7 @@ def _evaluation_received(ctx):
         f"Hi {_name(ctx.user)},\n\n"
         f'Your submission to "{mini_project_title(ctx.mp.block)}" has been evaluated.\n\n'
         f"View it: {_student_url(ctx)}\n\n"
-        "— Mathion\n")
+        f"— {ctx.site_name}\n")
     return subject, body
 
 
@@ -61,7 +62,7 @@ def _run_enrolled(ctx):
         f"Hi {_name(ctx.user)},\n\n"
         f'You\'ve been enrolled in "{ctx.run.title}".\n\n'
         f"Open it: {_student_url(ctx)}\n\n"
-        "— Mathion\n")
+        f"— {ctx.site_name}\n")
     return subject, body
 
 
@@ -71,7 +72,7 @@ def _run_teacher_assigned(ctx):
         f"Hi {_name(ctx.user)},\n\n"
         f'You\'ve been assigned as a teacher on "{ctx.run.title}".\n\n'
         f"Open it: {_staff_url(ctx)}\n\n"
-        "— Mathion\n")
+        f"— {ctx.site_name}\n")
     return subject, body
 
 
@@ -82,7 +83,7 @@ def _mini_project_published(ctx):
         f"Hi {_name(ctx.user)},\n\n"
         f'A new mini-project "{mini_project_title(ctx.mp.block)}" is available in "{ctx.run.title}".\n\n'
         f"Open it: {_student_url(ctx)}\n\n"
-        "— Mathion\n")
+        f"— {ctx.site_name}\n")
     return subject, body
 
 
@@ -90,10 +91,10 @@ def _course_admin_assigned(ctx):
     subject = f"You are now the admin of {ctx.course.name}"
     body = (
         f"Hi {_name(ctx.user)},\n\n"
-        f'You are now the admin of "{ctx.course.name}" on Mathion. '
+        f'You are now the admin of "{ctx.course.name}" on {ctx.site_name}. '
         "You can work on it in the course editor.\n\n"
         f"Open it: {ctx.base_url}/courses/{ctx.course_slug}/edit\n\n"
-        "— Mathion\n")
+        f"— {ctx.site_name}\n")
     return subject, body
 
 
@@ -127,7 +128,8 @@ def _build_email_message(subject, body, ctx, *, kind: str, sender: str = DEFAULT
 LOGIN_PIN_KIND = "login_pin"
 
 
-def build_login_pin_message(email: str, pin: str, *, minutes: int, sender: str = DEFAULT_FROM) -> EmailMessage:
+def build_login_pin_message(email: str, pin: str, *, minutes: int, sender: str = DEFAULT_FROM,
+                            site_name: str = "Mathion") -> EmailMessage:
     """Standalone login-PIN email. Not a TEMPLATES entry (those are
     RenderContext -> (subject, body) callables). The raw PIN lives only in this
     in-memory message — never persisted or logged."""
@@ -136,10 +138,10 @@ def build_login_pin_message(email: str, pin: str, *, minutes: int, sender: str =
     msg = EmailMessage()
     msg["From"] = sender
     msg["To"] = email  # EmailMessage default policy rejects CR/LF-injected headers
-    msg["Subject"] = "Your Mathion sign-in PIN"
+    msg["Subject"] = f"Your {site_name} sign-in PIN"
     msg["X-Mathion-Kind"] = LOGIN_PIN_KIND
     msg.set_content(
-        f"Your Mathion sign-in PIN is {pin}. "
+        f"Your {site_name} sign-in PIN is {pin}. "
         f"It expires in {minutes} minutes.",
         charset="utf-8",
     )
