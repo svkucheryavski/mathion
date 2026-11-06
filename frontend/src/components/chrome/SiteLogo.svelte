@@ -4,21 +4,30 @@
   // header, the panel shell ('header') and the sign-in page ('login').
   // The image hugs its width: 20px tall up to 160px wide (28/224 on the sign-in
   // page). width/height give only its shape, so its space is kept while it loads.
+  // `image` is for the panel's previews (D2): a given image, or null for the
+  // lockup, instead of the store's logo.
   import { branding, PRODUCT_NAME } from '../../lib/branding.svelte';
   import Logo from '../ui/Logo.svelte';
 
-  let { size }: { size: 'header' | 'login' } = $props();
+  type Image = { src: string; width: number; height: number };
+  let { size, image }: { size: 'header' | 'login'; image?: Image | null } = $props();
 
-  // The version that failed to load; a new upload is tried again.
+  const fromStore = $derived(branding.logo
+    ? { src: `/api/branding/logo.png?v=${branding.logo.version}`, width: branding.logo.width, height: branding.logo.height }
+    : null);
+  // The address that failed to load; a new upload is tried again.
   let failed = $state<string | null>(null);
-  const logo = $derived(branding.logo && branding.logo.version !== failed ? branding.logo : null);
+  const logo = $derived.by(() => {
+    const l = image === undefined ? fromStore : image;
+    return l && l.src !== failed ? l : null;
+  });
 </script>
 
 {#if logo}
   <img class={size === 'header' ? 'logo-header' : 'logo-login'}
-       src={`/api/branding/logo.png?v=${logo.version}`}
+       src={logo.src}
        alt={branding.name} width={logo.width} height={logo.height}
-       onerror={() => { failed = logo.version; }} />
+       onerror={() => { failed = logo.src; }} />
 {:else if size === 'header'}
   <span class="lockup-header">
     <span class="mark-header"><Logo /></span>

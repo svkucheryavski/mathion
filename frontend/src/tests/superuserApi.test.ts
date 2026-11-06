@@ -4,6 +4,7 @@ import * as events from '../lib/events';
 import {
   panelError, listUsers, assignAdmin, updateUser, deleteCourse, lookupAccount, adminNote,
   countLine, roleChips, disableWarning, getSettings, saveEmail, saveLimits, saveSignIn, testEmail,
+  getBranding, saveSiteName, saveImage, checkTheme, saveTheme,
   type AdminAssignResult, type PanelUser, type PanelUserList, type PanelUserRole,
 } from '../lib/superuser';
 
@@ -254,3 +255,82 @@ it('the Settings calls: one GET, a PATCH per card, a POST for the test, all on t
   await expect(getSettings('T')).rejects.toBeInstanceOf(ApiError);
   expect(unauth).not.toHaveBeenCalled();
 });
+
+// --- Branding (D2, D5, D10, D14) ---
+
+/** A FormData part's bytes, read the way the dialog reads a file. */
+function partBytes(part: Blob): Promise<number[]> {
+  return new Promise((resolve) => {
+    const r = new FileReader();
+    r.onload = () => resolve([...new Uint8Array(r.result as ArrayBuffer)]);
+    r.readAsArrayBuffer(part);
+  });
+}
+
+it('Branding: the read and the name save are JSON calls with the token', async () => {
+  const unauth = vi.spyOn(events, 'emitUnauthorized');
+  const f = vi.fn(async (..._a: Parameters<typeof fetch>) => jsonResponse(200, {}));
+  vi.stubGlobal('fetch', f);
+  await getBranding('T');
+  expect(String(f.mock.calls[0][0])).toBe('/api/superuser/T/branding');
+  await saveSiteName('T', { name: 'Riverside' });
+  expect(String(f.mock.calls[1][0])).toBe('/api/superuser/T/branding/name');
+  expect(f.mock.calls[1][1]?.method).toBe('PUT');
+  expect(f.mock.calls[1][1]?.body).toBe(JSON.stringify({ name: 'Riverside' }));
+  await saveSiteName('T', { reset: true });
+  expect(f.mock.calls[2][1]?.body).toBe(JSON.stringify({ reset: true }));
+
+  f.mockImplementation(async () => jsonResponse(401, { detail: 'Not authenticated' }));
+  await expect(getBranding('T')).rejects.toMatchObject({ status: 401 });
+  expect(unauth).not.toHaveBeenCalled();
+});
+
+it('Branding: an image save posts the same bytes as a multipart file, with the CSRF header', async () => {
+  const unauth = vi.spyOn(events, 'emitUnauthorized');
+  const f = vi.fn(async (..._a: Parameters<typeof fetch>) => jsonResponse(200, {}));
+  vi.stubGlobal('fetch', f);
+  const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 7, 8, 9]);
+  await saveImage('T', 'logo', bytes, 'school.png');
+  const [url, init] = f.mock.calls[0];
+  expect(String(url)).toBe('/api/superuser/T/branding/logo');
+  expect(init?.method).toBe('POST');
+  expect(new Headers(init?.headers).get('X-Requested-With')).toBe('mathion');
+  // The browser sets the multipart boundary itself.
+  expect(new Headers(init?.headers).get('Content-Type')).toBeNull();
+  const fd = init?.body as FormData;
+  expect([...fd.keys()]).toEqual(['file']);
+  const file = fd.get('file') as File;
+  expect(file.name).toBe('school.png');
+  expect(file.type).toBe('image/png');
+  expect(await partBytes(file)).toEqual([...bytes]);
+
+  await saveImage('T', 'icon', 'reset');
+  const [url2, init2] = f.mock.calls[1];
+  expect(String(url2)).toBe('/api/superuser/T/branding/icon');
+  const fd2 = init2?.body as FormData;
+  expect([...fd2.entries()]).toEqual([['reset', 'true']]);
+
+  f.mockImplementation(async () => new Response('<html>413</html>', { status: 413, headers: { 'content-type': 'text/html' } }));
+  await expect(saveImage('T', 'logo', bytes, 'a.png')).rejects.toMatchObject({ status: 413, body: undefined });
+  f.mockImplementation(async () => jsonResponse(401, { detail: 'Not authenticated' }));
+  await expect(saveImage('T', 'logo', 'reset')).rejects.toMatchObject({ status: 401 });
+  expect(unauth).not.toHaveBeenCalled();
+});
+
+it('Branding: the theme check and the theme save post the bytes as a .css file', async () => {
+  const f = vi.fn(async (..._a: Parameters<typeof fetch>) => jsonResponse(200, {}));
+  vi.stubGlobal('fetch', f);
+  const css = new TextEncoder().encode(':root { --bg: #fff; }');
+  await checkTheme('T', css, 'aau.css');
+  expect(String(f.mock.calls[0][0])).toBe('/api/superuser/T/branding/theme/check');
+  const part = (f.mock.calls[0][1]?.body as FormData).get('file') as File;
+  expect(part.name).toBe('aau.css');
+  expect(part.type).toBe('text/css');
+  expect(await partBytes(part)).toEqual([...css]);
+
+  await saveTheme('T', css, 'aau.css');
+  expect(String(f.mock.calls[1][0])).toBe('/api/superuser/T/branding/theme');
+  await saveTheme('T', 'reset');
+  expect([...(f.mock.calls[2][1]?.body as FormData).entries()]).toEqual([['reset', 'true']]);
+});
+

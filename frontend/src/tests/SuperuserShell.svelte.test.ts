@@ -24,12 +24,18 @@ function dispatchFetch() {
     }
     if (s.includes('/api/superuser/') && s.includes('/courses')) return jsonResponse(200, []);
     if (s.includes('/api/superuser/') && s.includes('/settings')) return jsonResponse(200, SETTINGS);
+    if (s.includes('/api/superuser/') && s.includes('/branding')) return jsonResponse(200, BRANDING);
     if (s.includes('/api/superuser/')) {
       return jsonResponse(200, { total_users: 0, total_courses: 0, storage_bytes: 0, active_users_24h: 0, active_users_7d: 0 });
     }
     return jsonResponse(200, []);
   });
 }
+const BRANDING = {
+  name: 'Mathion', logo: null, icon: null,
+  colours: { vars: [], changes: {}, warnings: [] },
+  public: { name: 'Mathion', logo: null, icon: null, theme: null },
+};
 const SETTINGS = {
   email: {
     on: false, host: '', port: 587, encryption: 'starttls', skip_cert_check: false, username: '',
@@ -98,7 +104,7 @@ it('with no session (an expired link is checked before the session) the bar has 
   expect(target.querySelector('header.su-header .name')).toBeNull();
   expect(buttonByText(target, 'Sign out')).toBeNull();
   // The brand and the pills still show; the page itself does not.
-  expect(pillTexts()).toEqual(['Dashboard', 'Users', 'Courses', 'Settings']);
+  expect(pillTexts()).toEqual(['Dashboard', 'Users', 'Courses', 'Settings', 'Branding']);
   expect(target.querySelector('.dashboard')).toBeNull();
 });
 
@@ -156,7 +162,7 @@ it('suppresses AppHeader on /superuser paths but shows it on /courses', async ()
   expect(target.querySelector('header.su-header')).toBeNull();
 });
 
-it('the bar is the main site look: logo + wordmark, the four pills, the name, a ghost Sign out', async () => {
+it('the bar is the main site look: logo + wordmark, the five pills, the name, a ghost Sign out', async () => {
   vi.stubGlobal('fetch', dispatchFetch());
   session.user = {
     id: 1, email: 'su@x.com', full_name: 'Sue Perr', is_superuser: true,
@@ -168,7 +174,7 @@ it('the bar is the main site look: logo + wordmark, the four pills, the name, a 
   expect(header).not.toBeNull();
   expect(header.querySelector('.brand svg')).not.toBeNull();
   expect(header.querySelector('.brand .wordmark-header')?.textContent).toBe('Mathion');
-  expect(pillTexts()).toEqual(['Dashboard', 'Users', 'Courses', 'Settings']);
+  expect(pillTexts()).toEqual(['Dashboard', 'Users', 'Courses', 'Settings', 'Branding']);
   expect(header.querySelector('.name')?.textContent).toBe('Sue Perr');
   const signOut = buttonByText(target, 'Sign out')!;
   expect(signOut.dataset.variant).toBe('ghost');
@@ -193,7 +199,7 @@ it('the bar has no links outside the panel, so nothing leads away from it', asyn
   await settle();
   expect(target.querySelector('header.su-header .name')).not.toBeNull();
   const hrefs = [...target.querySelectorAll('header.su-header a')].map((a) => a.getAttribute('href'));
-  expect(hrefs).toHaveLength(4);
+  expect(hrefs).toHaveLength(5);
   for (const h of hrefs) expect(h === '/superuser/tok' || h!.startsWith('/superuser/tok/')).toBe(true);
 });
 
@@ -209,15 +215,15 @@ it('the page has a Dashboard heading above the cards, in the page column', async
   expect(h1.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
-it('the pills are same-tab links to the four pages; the current one is marked (D23)', async () => {
+it('the pills are same-tab links to the five pages; the current one is marked (D23, Branding D1)', async () => {
   vi.stubGlobal('fetch', dispatchFetch());
   router.currentRoute.path = '/superuser/T/users';
   component = mount(SuperuserShell, { target, props: { token: 'T' } });
   await settle();
   const nav = target.querySelector('header.su-header nav')!;
   expect(nav.getAttribute('aria-label')).toBe('Superuser panel');
-  expect(pills().map((a) => a.getAttribute('href'))).toEqual(['/superuser/T', '/superuser/T/users', '/superuser/T/courses', '/superuser/T/settings']);
-  expect(pills().map((a) => a.getAttribute('aria-current'))).toEqual([null, 'page', null, null]);
+  expect(pills().map((a) => a.getAttribute('href'))).toEqual(['/superuser/T', '/superuser/T/users', '/superuser/T/courses', '/superuser/T/settings', '/superuser/T/branding']);
+  expect(pills().map((a) => a.getAttribute('aria-current'))).toEqual([null, 'page', null, null, null]);
   for (const a of pills()) expect(a.hasAttribute('target')).toBe(false);
 });
 
@@ -269,6 +275,13 @@ it('the heading and the page follow the route', async () => {
   expect([...target.querySelectorAll('main.su-main section.s-card h2')].map((h) => h.textContent))
     .toEqual(['Email', 'File limits', 'Sign-in', 'Site']);
   expect(pills()[3].getAttribute('aria-current')).toBe('page');
+  router.currentRoute.path = '/superuser/T/branding';
+  await settle();
+  expect(target.querySelector('main.su-main h1')?.textContent).toBe('Branding');
+  // The Branding page itself mounted: its four cards (Branding D1).
+  expect([...target.querySelectorAll('main.su-main section.b-card h2')].map((h) => h.textContent))
+    .toEqual(['Site name', 'Logo', 'Tab icon', 'Colours']);
+  expect(pills()[4].getAttribute('aria-current')).toBe('page');
 });
 
 it("a 404 from a page's load shows the expired-link text instead of the page", async () => {

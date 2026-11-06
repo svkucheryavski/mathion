@@ -93,4 +93,7 @@ export const api = {
     }),
   delete: (path: string, opts?: RequestOpts) =>
     request<void>(path, { ...opts, method: 'DELETE' }),
+  /** A multipart POST; no Content-Type, so the browser sets the boundary. */
+  postForm: <T>(path: string, form: FormData, opts?: RequestOpts) =>
+    request<T>(path, { ...opts, method: 'POST', body: form }),
 };

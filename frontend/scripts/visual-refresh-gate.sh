@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2859
+EXPECTED_CHECKS=2918
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -6120,7 +6120,7 @@ if [[ -n $REPLY ]]; then
   sweep NoteStrip $H
 fi
 # D8, D12, D17, D24: the panel dialogs' fields, the item modal's field look.
-for pair in NewCourseDialog:nc-input EditCourseDialog:ec-input AdminEmailField:ae-input DeleteCourseDialog:dc-input NewAccountDialog:na-input EditAccountDialog:ea-input EditEmailDialog:ee-input EditLimitsDialog:el-input EditSignInDialog:es-input; do
+for pair in NewCourseDialog:nc-input EditCourseDialog:ec-input AdminEmailField:ae-input DeleteCourseDialog:dc-input NewAccountDialog:na-input EditAccountDialog:ea-input EditEmailDialog:ee-input EditLimitsDialog:el-input EditSignInDialog:es-input EditSiteNameDialog:sn-input; do
   uniq1 ${pair#*:}
   if [[ -n $REPLY ]]; then
     N=${pair%%:*}; H=$REPLY
@@ -6203,6 +6203,46 @@ uniq1 es-err
 if [[ -n $REPLY ]]; then
   N=EditSignInDialog; H=$REPLY
   d '\.es-err' '' 'color:var\(--danger\)'
+fi
+
+# The panel's Branding page (Branding D1, D2, D4): Settings' cards and rows,
+# the logo at its real header size in a dashed box.
+own b-card SuperuserBranding.svelte
+uniq1 b-card
+if [[ -n $REPLY ]]; then
+  N=SuperuserBranding; H=$REPLY
+  d '\.b-page' '' 'max-width:760px'
+  d '\.b-card' '' 'background:var\(--surface\)' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius-lg\)' 'margin:0 0 14px'
+  d '\.b-card-head' '' 'display:flex' 'gap:10px' 'padding:10px 12px 10px 16px' 'border-bottom:1px solid var\(--border\)'
+  chk "\.b-card-head\.${H} h2:where\(\.${H}\)" 'flex:1' 'font-size:15px' 'line-height:28px' 'font-weight:600' 'color:var\(--text\)'
+  chk "dl\.${H}" 'display:grid' 'grid-template-columns:210px 1fr' 'padding:6px 16px 10px'
+  chk "dt\.${H}" 'padding:5px 0' 'color:var\(--muted\)'
+  chk "dd\.${H}" 'padding:5px 0' 'color:var\(--text\)'
+  d '\.b-box' '' 'width:160px' 'height:20px' 'border:1px dashed var\(--border-strong\)'
+  d '\.b-note' '' 'font-size:12\.5px' 'color:var\(--muted\)'
+  d '\.b-foot' '' 'font-size:12\.5px' 'color:var\(--muted\)'
+  sweep SuperuserBranding $H
+fi
+uniq1 sn-err
+if [[ -n $REPLY ]]; then
+  N=EditSiteNameDialog; H=$REPLY
+  d '\.sn-hint' '' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.sn-err' '' 'color:var\(--danger\)'
+fi
+# D4-D6: the image dialogs: the real-size boxes, the icon on light and dark,
+# the advice in gold (it never blocks), a refusal in red.
+uniq1 im-box
+if [[ -n $REPLY ]]; then
+  N=EditImageDialog; H=$REPLY
+  d '\.im-box' '' 'border:1px dashed var\(--border-strong\)' 'background:var\(--surface\)'
+  d '\.im-box\.header' '' 'width:160px' 'height:20px'
+  d '\.im-box\.login' '' 'width:224px' 'height:28px'
+  d '\.im-strip' '' 'background:var\(--surface\)'
+  d '\.im-strip\.dark' '' 'background:var\(--text\)'
+  d '\.im-advice' '' 'color:var\(--gold-text\)'
+  d '\.im-hint' '' 'font-size:12px' 'color:var\(--muted\)'
+  d '\.im-err' '' 'color:var\(--danger\)'
+  sweep EditImageDialog $H
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).
