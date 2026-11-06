@@ -18,3 +18,8 @@ Minors from the per-task reviews and the whole-branch review, by task.
 ## Task 3 (readability warnings, the PNG check)
 
 - **Rarer broken PNGs still pass the server's check** (Opus r2 M2, Fable r2 notes): a `PLTE` whose length isn't a non-zero multiple of 3 (or is over 768, or over 3 × 2^depth), two `PLTE`s, a `PLTE` on a grey image, an `IDAT` run split by another chunk. PNG forbids them; no common tool writes them; D5 doesn't ask, and the dialog's `img.decode()` refuses them before Save, so only a direct API call could store one. Fix in both copies of the check (server and Task 9's browser copy) if it ever matters.
+
+## Task 4 (public files, the filled page head, the public config)
+
+- **An unfilled page can be cached** (Opus r1 M1, Fable r1 M1). When the built page's markers are missing, `_spa_fallback` sends the file as before: with its `ETag` and `Last-Modified` and no `Cache-Control`. A browser may then reuse an old shell that names a script the new build no longer has, and show a blank app until reload. This predates the slice, and the markers are checked on every test run. Fix: pass `_page_cache_headers(full_path)` on that branch too, and assert `no-cache` in `test_unmarked_page_is_served_unfilled`.
+- **`/favicon.ico` after a restart during an outage** (Opus r1 M2). With nothing read since startup, the address can't tell "no upload" from "not read yet", so a browser revalidating the school's icon gets Mathion's default until its next revalidation. Short-lived. Fix: answer 503 when the request's `If-None-Match` isn't the default's and nothing has been read yet.

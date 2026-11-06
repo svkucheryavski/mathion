@@ -8,10 +8,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from sqlalchemy.engine import make_url
 
 from mathion.api.auth import router as auth_router
+from mathion.api.branding import favicon_ico, router as branding_router
 from mathion.api.blocks import router as blocks_router
 from mathion.api.content import router as content_router
 from mathion.api.courses import router as courses_router
@@ -37,6 +38,7 @@ from mathion.api.superuser_settings import router as superuser_settings_router
 from mathion.api.superuser_users import router as superuser_users_router
 from mathion.api.teaching import router as teaching_router
 from mathion.api.versions import router as versions_router
+from mathion.branding import load_branding
 from mathion.config import settings, Settings
 from mathion.notifications import (
     run_forever,
@@ -44,6 +46,7 @@ from mathion.notifications import (
     SHUTDOWN_TIMEOUT_SECONDS,
     build_mailer,
 )
+from mathion.page_fill import fill_index, load_index
 from mathion.site_settings import MOVED_ENV_KEYS
 from mathion.superuser.log_redaction import install as install_log_redaction
 
@@ -175,6 +178,7 @@ app.include_router(superuser_router)
 app.include_router(superuser_courses_router)
 app.include_router(superuser_users_router)
 app.include_router(superuser_settings_router)
+app.include_router(branding_router)
 
 
 @app.get("/health")
@@ -185,6 +189,10 @@ def health_check():
 @app.get("/version")
 def version_endpoint() -> dict:
     return {"version": settings.version}
+
+
+# Branding D13: the tab icon, whether or not the built frontend exists.
+app.add_api_route("/favicon.ico", favicon_ico, methods=["GET", "HEAD"], include_in_schema=False)
 
 
 # The two SPA additions MUST come AFTER the include_router() calls above AND
@@ -210,6 +218,11 @@ def _panel_cache_headers(full_path: str) -> dict[str, str] | None:
     return None
 
 
+def _page_cache_headers(full_path: str) -> dict[str, str]:
+    """The filled page names the current branding versions: never cached (Branding D13)."""
+    return _panel_cache_headers(full_path) or {"Cache-Control": "no-cache"}
+
+
 # Guard 2: conditional SPA fallback. Starlette 1.x StaticFiles(html=True)
 # no longer serves index.html as a universal catch-all for unknown paths, so
 # we implement the SPA pattern manually:
@@ -219,7 +232,9 @@ def _panel_cache_headers(full_path: str) -> dict[str, str] | None:
 #     the browser.
 # The entire block is skipped when the dist directory is missing so that
 # pure-backend dev / CI without a frontend build still works.
+# The page itself is read once, here, and filled per request (Branding D13).
 _frontend_dist = Path(settings.frontend_dist)
+_index = load_index(_frontend_dist / "index.html") if _frontend_dist.is_dir() else None
 if _frontend_dist.is_dir():
 
     @app.api_route(
@@ -227,7 +242,7 @@ if _frontend_dist.is_dir():
         methods=["GET", "HEAD"],
         include_in_schema=False,
     )
-    def _spa_fallback(full_path: str) -> FileResponse:
+    def _spa_fallback(full_path: str) -> Response:
         candidate = _frontend_dist / full_path
         # Path-traversal guard: a resolved candidate must stay inside dist/.
         # If it doesn't, return a 404 rather than the SPA shell so malformed
@@ -238,6 +253,9 @@ if _frontend_dist.is_dir():
         except ValueError:
             raise HTTPException(status_code=404)
         headers = _panel_cache_headers(full_path)
-        if candidate.is_file():
+        index = _frontend_dist.resolve() / "index.html"
+        if candidate.is_file() and candidate != index:
             return FileResponse(candidate, headers=headers)
-        return FileResponse(_frontend_dist / "index.html", headers=headers)
+        if _index is None:
+            return FileResponse(index, headers=headers)
+        return HTMLResponse(fill_index(_index, load_branding()), headers=_page_cache_headers(full_path))

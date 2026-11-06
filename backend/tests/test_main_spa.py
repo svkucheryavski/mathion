@@ -1,6 +1,8 @@
 """SPA static-mount + /api catch-all behavior."""
 import importlib
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 
@@ -8,7 +10,8 @@ def _client_with_dist(tmp_path, monkeypatch):
     """Return a TestClient where settings.frontend_dist points at a real dir."""
     dist = tmp_path / "dist"
     dist.mkdir()
-    (dist / "index.html").write_text("<!doctype html><html>SPA</html>")
+    (dist / "index.html").write_text(
+        "<!doctype html><html><head><title>Mathion</title><!--branding--></head><body>SPA</body></html>")
     assets_dir = dist / "_app"
     assets_dir.mkdir()
     (assets_dir / "bundle.js").write_text("console.log('hi')")
@@ -70,3 +73,29 @@ def test_missing_dist_does_not_break_app(tmp_path, monkeypatch):
     assert client.get("/health").status_code == 200
     # No SPA fallback — non-API path returns 404.
     assert client.get("/courses/anything").status_code == 404
+
+
+@pytest.mark.parametrize("path", ["/", "/index.html", "/courses/some-deep-spa-path", "/superuser/abc"])
+def test_page_is_filled(tmp_path, monkeypatch, path):
+    # Branding D13: every way to the app's page answers the filled head.
+    client = _client_with_dist(tmp_path, monkeypatch)
+    for response in (client.get(path), client.head(path)):
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "text/html; charset=utf-8"
+    page = client.get(path).text
+    assert "<title data-branding>Mathion</title>" in page
+    assert 'id="branding" data-branding>' in page and "<!--branding-->" not in page
+    assert "SPA" in page
+
+
+def test_unmarked_page_is_served_unfilled(tmp_path, monkeypatch):
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html><html>SPA</html>")
+    monkeypatch.setenv("MATHION_FRONTEND_DIST", str(dist))
+    import mathion.config
+    import mathion.main
+    importlib.reload(mathion.config)
+    importlib.reload(mathion.main)
+    response = TestClient(mathion.main.app).get("/courses")
+    assert response.status_code == 200 and response.text == "<!doctype html><html>SPA</html>"

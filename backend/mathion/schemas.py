@@ -924,10 +924,25 @@ class SuperuserStatsResponse(BaseModel):
     active_users_7d: int
 
 
+class LogoPublic(BaseModel):
+    version: str
+    width: int
+    height: int
+
+
+class BrandingPublic(BaseModel):
+    """Superuser Branding D13: what any page may know; `icon` and `theme` are versions."""
+    name: str
+    logo: LogoPublic | None
+    icon: str | None
+    theme: str | None
+
+
 class AuthConfigResponse(BaseModel):
     send_pin_enabled: bool
     longest_sign_in_days: int  # superuser Settings D12
     max_file_mb: int           # superuser Settings D11b
+    branding: BrandingPublic   # superuser Branding D13
 
 
 # --- The superuser panel: Courses (spec D4-D13) and Users (D14-D21) ---
