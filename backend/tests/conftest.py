@@ -272,10 +272,13 @@ def _isolation():
     """Function-scoped truncation, autouse so a test that writes through the app
     WITHOUT requesting `db` still cannot leak rows into the next test (spec §5).
     `db` also depends on this fixture, so for DB-using tests pytest LIFO-finalizes
-    db (session close) BEFORE this truncates — encoding the teardown order."""
+    db (session close) BEFORE this truncates — encoding the teardown order.
+    The branding read's last good copy (Branding D13) is forgotten with the rows."""
+    from mathion import branding
     yield
     with engine.begin() as conn:
         _truncate_all(conn)
+    branding.reset_cache()
 
 
 @pytest.fixture

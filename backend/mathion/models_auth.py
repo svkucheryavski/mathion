@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, JSON, String, Text, ForeignKey, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, JSON, LargeBinary, String, Text, ForeignKey, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from mathion.database import Base
@@ -162,3 +163,32 @@ class SiteSettings(Base):
     send_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     send_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     send_backoff_step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class SiteBranding(Base):
+    """The panel's Branding (superuser Branding spec D12): one row, id 1. A
+    missing row means the defaults (`mathion.branding.load_branding`)."""
+    __tablename__ = "site_branding"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_site_branding_one_row"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    site_name: Mapped[str] = mapped_column(String(60), nullable=False, default="Mathion")
+    # D5, D6: the stored image's size and short hash; NULL when there's none.
+    logo_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    logo_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    logo_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    icon_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    icon_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    icon_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # D9, D10: variable name -> value, only the ones that differ from the default.
+    # Assign a new dict to save; a change made in place isn't tracked.
+    theme_changes: Mapped[dict[str, str]] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class SiteBrandingImage(Base):
+    """The logo's and the tab icon's bytes, apart from the row every page reads."""
+    __tablename__ = "site_branding_images"
+    __table_args__ = (CheckConstraint("kind IN ('logo', 'icon')", name="ck_site_branding_images_kind"),)
+
+    kind: Mapped[str] = mapped_column(String(4), primary_key=True)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
