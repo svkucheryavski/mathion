@@ -938,6 +938,46 @@ class BrandingPublic(BaseModel):
     theme: str | None
 
 
+class ImageSize(BaseModel):
+    width: int
+    height: int
+
+
+class ThemeVarOut(BaseModel):
+    name: str
+    default: str
+    heading: str
+
+
+class PanelColours(BaseModel):
+    """Branding D9, D10: what the card and the download need."""
+    vars: list[ThemeVarOut]
+    changes: dict[str, str]   # the stored changes in use
+    warnings: list[str]
+
+
+class PanelBranding(BaseModel):
+    name: str
+    logo: ImageSize | None
+    icon: ImageSize | None
+    colours: PanelColours
+    public: BrandingPublic    # D14: the panel shows a save at once
+
+
+class ThemeCheck(BaseModel):
+    """Branding D10: the check that saves nothing."""
+    changes: dict[str, str]
+    problems: list[str]
+    more: int
+    warnings: list[str]
+    blocked: str | None
+
+
+class BrandingNameIn(BaseModel):
+    name: str | None = None
+    reset: bool = False
+
+
 class AuthConfigResponse(BaseModel):
     send_pin_enabled: bool
     longest_sign_in_days: int  # superuser Settings D12

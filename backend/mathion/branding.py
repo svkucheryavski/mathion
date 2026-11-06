@@ -3,6 +3,8 @@ tab icon and the colour changes.
 
 `check_site_name` is D3's rule. `load_branding` is D13's one read that never
 fails: it answers the last branding it read successfully, or the defaults.
+The writers (D12) lock the one row and change only their own item; the caller
+commits.
 """
 import hashlib
 import logging
@@ -10,7 +12,9 @@ import threading
 import unicodedata
 from dataclasses import dataclass, field, replace
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import Session
 
 from mathion.database import SessionLocal
 from mathion.models_auth import SiteBranding, SiteBrandingImage
@@ -87,18 +91,22 @@ def _image(width: int | None, height: int | None, hash_: str | None) -> ImageMet
     return ImageMeta(width, height, hash_)
 
 
-def _read() -> Branding:
+def _from_row(db: Session) -> Branding:
     # The row only: the image bytes live in their own table (D12).
+    row = db.execute(select(SiteBranding).where(SiteBranding.id == 1)).scalar_one_or_none()
+    if row is None:
+        return Branding()
+    return Branding(
+        name=row.site_name,
+        logo=_image(row.logo_width, row.logo_height, row.logo_hash),
+        icon=_image(row.icon_width, row.icon_height, row.icon_hash),
+        theme_changes=dict(row.theme_changes or {}),
+    )
+
+
+def _read() -> Branding:
     with SessionLocal() as db:
-        row = db.execute(select(SiteBranding).where(SiteBranding.id == 1)).scalar_one_or_none()
-        if row is None:
-            return Branding()
-        return Branding(
-            name=row.site_name,
-            logo=_image(row.logo_width, row.logo_height, row.logo_hash),
-            icon=_image(row.icon_width, row.icon_height, row.icon_hash),
-            theme_changes=dict(row.theme_changes or {}),
-        )
+        return _from_row(db)
 
 
 def _with_theme(branding: Branding) -> Branding:
@@ -145,6 +153,12 @@ def load_branding() -> Branding:
     return _copy(branding)
 
 
+def read_in(db: Session) -> Branding:
+    """The branding through the caller's session: the panel's read after its
+    own save, which must see what it just committed (D14). Errors propagate."""
+    return _with_theme(_from_row(db))
+
+
 def last_good() -> Branding:
     with _lock:
         return _copy(_last_good)
@@ -164,3 +178,68 @@ def reset_cache() -> None:
     global _last_good, _failing
     with _lock:
         _last_good, _failing = DEFAULT_BRANDING, False
+
+
+# --- the writers (D12) ---
+
+_ITEM = {"logo": "logo", "icon": "tab icon"}
+
+
+def _locked_row(db: Session) -> SiteBranding:
+    """The row, created from the defaults when absent, locked and read fresh,
+    so two cards saved at once both land."""
+    db.execute(insert(SiteBranding).values(id=1).on_conflict_do_nothing(index_elements=["id"]))
+    return db.execute(select(SiteBranding).where(SiteBranding.id == 1).with_for_update()
+                      .execution_options(populate_existing=True)).scalar_one()
+
+
+def _changed(item: str, by: int | None) -> None:
+    # The item, never the content (D12).
+    log.info("branding: %s changed by %s", item, f"user {by}" if by is not None else "the server command")
+
+
+def save_name(db: Session, name: str, *, by: int | None = None) -> None:
+    _locked_row(db).site_name = name
+    _changed("site name", by)
+
+
+def save_image(db: Session, kind: str, data: bytes, width: int, height: int, *, by: int | None = None) -> None:
+    """The version is the hash of these bytes, written with them (D13)."""
+    row = _locked_row(db)
+    setattr(row, f"{kind}_width", width)
+    setattr(row, f"{kind}_height", height)
+    setattr(row, f"{kind}_hash", short_hash(data))
+    # An upsert, so the old bytes are never loaded.
+    db.execute(insert(SiteBrandingImage).values(kind=kind, data=data)
+               .on_conflict_do_update(index_elements=["kind"], set_={"data": data}))
+    _changed(_ITEM[kind], by)
+
+
+def clear_image(db: Session, kind: str, *, by: int | None = None) -> None:
+    row = _locked_row(db)
+    for column in ("width", "height", "hash"):
+        setattr(row, f"{kind}_{column}", None)
+    db.execute(delete(SiteBrandingImage).where(SiteBrandingImage.kind == kind))
+    _changed(_ITEM[kind], by)
+
+
+def save_theme(db: Session, changes: dict[str, str], *, by: int | None = None) -> None:
+    """Replaces the whole stored set, left-out entries included (D10)."""
+    _locked_row(db).theme_changes = dict(changes)  # a new dict: in-place changes aren't tracked
+    _changed("colours", by)
+
+
+def clear_theme(db: Session, *, by: int | None = None) -> None:
+    save_theme(db, {}, by=by)
+
+
+def reset(db: Session, everything: bool, *, by: int | None = None) -> list[str]:
+    """D15: the colours, or every item, back to the defaults. Answers what was reset."""
+    if not everything:
+        clear_theme(db, by=by)
+        return ["colours"]
+    save_name(db, NAME_DEFAULT, by=by)
+    clear_image(db, "logo", by=by)
+    clear_image(db, "icon", by=by)
+    clear_theme(db, by=by)
+    return ["site name", "logo", "tab icon", "colours"]
