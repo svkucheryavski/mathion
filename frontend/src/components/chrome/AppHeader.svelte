@@ -3,8 +3,7 @@
   import { currentRoute, navigate, defaultLandingPath } from '../../lib/router.svelte';
   import { routeClick } from '../../lib/routeClick';
   import { logout } from '../../lib/auth.svelte';
-  import { PRODUCT_NAME } from '../../lib/branding';
-  import Logo from '../ui/Logo.svelte';
+  import SiteLogo from './SiteLogo.svelte';
   import Button from '../ui/Button.svelte';
 
   const brandHref = $derived(defaultLandingPath(session.user));
@@ -23,8 +22,7 @@
     <a class="brand"
        href={brandHref}
        onclick={(e) => routeClick(e, brandHref)}>
-      <span class="brand-mark"><Logo /></span>
-      <span class="wordmark">{PRODUCT_NAME}</span>
+      <SiteLogo size="header" />
     </a>
 
     <div class="links">
@@ -66,26 +64,14 @@
     padding: 0 var(--space-3);
     height: 100%;
   }
-  /* SuperuserShell.svelte copies this bar, lockup and nav pills (its Dashboard,
-     Users and Courses pills, D23); change both.
-     Brand lockup — exact geometry (spec §2): mark + wordmark, centre-aligned,
-     gap 7px, mark nudged up 4.35px so its stroke ends land on the wordmark
-     baseline. */
+  /* SuperuserShell.svelte copies this bar and nav pills (its Dashboard, Users
+     and Courses pills, D23); change both. The logo or lockup is SiteLogo's
+     (Branding D4); it never shrinks, the name gives way instead. */
   .brand {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
+    flex: none;
     text-decoration: none;
-  }
-  .brand-mark {
-    display: inline-flex;
-    transform: translateY(-4.35px);
-  }
-  .wordmark {
-    font-size: 14px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    color: var(--text);
   }
   .links { display: flex; gap: var(--space-2); flex: 1; }
   /* Nav pills: inactive = muted, no chrome. */
@@ -103,6 +89,14 @@
     background: var(--gold-soft);
     font-weight: 500;
   }
-  .right { display: flex; align-items: center; gap: var(--space-2); }
-  .name { font-size: 12.5px; color: var(--muted); }
+  .right { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+  /* Branding D4: a long name gets an ellipsis at 400px, next to a wide logo. */
+  .name {
+    font-size: 12.5px;
+    color: var(--muted);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 </style>

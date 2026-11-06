@@ -3,11 +3,12 @@
   // transcribed from the visual-refresh handoff. Two forms share the same paths and
   // differ only in box + stroke:
   //   'header' = self-contained 26×19.2 mark, ink-cropped viewBox 0 0 32 23.6,
-  //              stroke 3.6 (AppHeader nudges it up 4.35px in its lockup).
+  //              stroke 3.6 (SiteLogo nudges it up 4.35px in its lockup).
   //   'login'  = 28px full-square mark, viewBox 0 0 32 32, stroke 4 (reference #2a
   //              line 1989); centred on (16,16) — no nudge.
-  // The 'favicon' form (24px reversed on a #3F5C77 tile) is added by the slice that
-  // needs it. Peaks are coloured via CSS (SVG presentation attrs can't resolve var()).
+  // The tab icon is not a form of this mark: it's a file, backend/branding-defaults/
+  // icon.svg (Branding D6). Peaks are coloured via CSS (SVG presentation attrs can't
+  // resolve var()).
   let { form = 'header' }: { form?: 'header' | 'login' } = $props();
   const geom = {
     header: { w: 26, h: 19.2, viewBox: '0 0 32 23.6', stroke: 3.6 },

@@ -6,7 +6,6 @@ Minors from the per-task reviews and the whole-branch review, by task.
 
 - **A slow read can overwrite a newer kept copy** (Opus r1 M2). Two reads that overlap a save can finish out of order, so the last good copy may briefly be the older one. It only matters during the next outage, and the next successful read corrects it. Fix if it ever shows: keep the copy with a read counter and drop older results.
 - **The 60-character limit counts code points** (Fable r1 M6). A browser's `maxlength` and `.length` count UTF-16 units, so a name with emoji may be cut short in the dialog before the server's limit. Task 9: don't put `maxlength` on the name field; let the server's sentence speak.
-- **The design system's "favicon" form is stale** (Fable r1 M7, follow-up F2): the default tab icon is now the user's own drawing, `backend/branding-defaults/icon.svg`, but three places still call the reversed tile the favicon: `Logo.svelte`'s comment, `frontend/src/styles/base.css:62-64` and `docs/design/visual-refresh/mathion-visual-spec.md:93`. Update all three when Task 8 touches the logo.
 - **No test checks the outage log's text** (Opus r3 M7), only how many lines it logs. If a later edit logged the whole error, SQL would come back into the log unnoticed. Fix: in `test_load_branding_logs_first_failure_after_startup`, assert the message contains `does not exist` and neither `SELECT` nor a line break.
 
 ## Task 2 (theme variables, the toast colour, the theme parser)
@@ -39,3 +38,11 @@ Minors from the per-task reviews and the whole-branch review, by task.
 
 - **`branding.reset()`'s returned list has no reader** (Fable r1 M1). The command prints D15's two fixed sentences, so the list (added in Task 5 for this command) is checked only by its own test, and the two could drift. Fix: drop the return value and its two assertions in `test_superuser_branding.py`, or build the sentence from it.
 - **A successful run drops the child's error output** (Opus r1 M3). `Runner.Stream` keeps stderr only for an `ExitError`, so a Compose warning on a run that exits 0 isn't shown. Harmless: the printed line is the record (D15).
+
+## Task 8 (the branding store, startup, the site logo, the footer)
+
+- **`main.ts`'s startup has no test** (Opus r1 M3), so the order (events and router before any wait, one config request) and the dev fallback's path are checked only by reading. The never-blank half is now covered by `applyBranding`'s `THEME_WAIT_MS` tests. Fix: move the body of `start()` into a function in `lib/` that takes the document and the mount, and test it.
+- **The server's logo preload isn't updated after a save in the panel** (Fable r1 note). `applyBranding` rewrites the title, the icons and the theme, but the head's `<link rel="preload" as="image">` keeps the old logo's address until the next page load. Harmless: a preload only warms the cache. Task 9 may drop or update it with the rest.
+- **In the dev fallback, the session request waits for the config** (Fable r1 note): `bootstrapSession()` starts after the awaited branding, one round trip later than on a filled page. Dev and unfilled pages only.
+- **`applyBranding`'s loading link is shared across documents** (Opus r2 M1). The same-theme check and the settling of a superseded call never compare documents, so only tests (one document each) can reach it: a future test that leaves a theme link loading would make the next test add no link and wait 3 s. Fix: also require `pending.link.ownerDocument === doc`, or reset `pending` in `beforeEach`.
+- **After a timeout, the same theme again adds a second link** (Fable r2 note). The browser fetches it once, and whichever copy loads first removes the others. Harmless.

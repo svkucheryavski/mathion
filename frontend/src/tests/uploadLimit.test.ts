@@ -46,3 +46,21 @@ it("a 413 with no sentence (a proxy's page) says the server's upload limit (D11a
   expect(tooLargeSentence(new ApiError(413, 'Upload failed'))).toBe("This file is over the server's upload limit.");
   expect(tooLargeSentence(Object.assign(new Error('too large'), { status: 413 }))).toBe("This file is over the server's upload limit.");
 });
+
+it('uses a given config answer instead of fetching again (Branding D13)', async () => {
+  const f = vi.fn(async () => jsonResponse(200, {}));
+  vi.stubGlobal('fetch', f);
+  const config = Promise.resolve({
+    send_pin_enabled: true, longest_sign_in_days: 30, max_file_mb: 33,
+    branding: { name: 'Mathion', logo: null, icon: null, theme: null },
+  });
+  await loadUploadLimit(config);
+  expect(uploadLimit.mb).toBe(33);
+  expect(f).not.toHaveBeenCalled();
+});
+
+it('a given config answer that fails leaves the limit unknown', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, {})));
+  await expect(loadUploadLimit(Promise.reject(new Error('down')))).resolves.toBeUndefined();
+  expect(uploadLimit.mb).toBeNull();
+});

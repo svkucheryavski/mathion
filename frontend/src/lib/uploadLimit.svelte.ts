@@ -1,17 +1,18 @@
 import { ApiError } from './api';
-import { getAuthConfig } from './auth.svelte';
+import { getAuthConfig, type AuthConfig } from './auth.svelte';
 
 // Settings D11b: the largest file the server takes, in whole MB (1 MB =
 // 1,048,576 bytes), as the panel saved it. Read once per page load from the
 // public /api/auth/config; null until it arrives or if it fails, and then the
 // browser skips its own size check and the help text leaves the number out.
+// main.ts hands in its one startup config request (Branding D13).
 // The browser's check is a convenience; the server's sentence is the rule.
 export const uploadLimit = $state<{ mb: number | null }>({ mb: null });
 
 let loading: Promise<void> | null = null;
 
-export function loadUploadLimit(): Promise<void> {
-  loading ??= getAuthConfig()
+export function loadUploadLimit(config?: Promise<AuthConfig>): Promise<void> {
+  loading ??= (config ?? getAuthConfig())
     .then((c) => { uploadLimit.mb = c.max_file_mb; })
     .catch(() => {});
   return loading;

@@ -167,7 +167,7 @@ it('the bar is the main site look: logo + wordmark, the four pills, the name, a 
   const header = target.querySelector('header.su-header')!;
   expect(header).not.toBeNull();
   expect(header.querySelector('.brand svg')).not.toBeNull();
-  expect(header.querySelector('.brand .wordmark')?.textContent).toBe('Mathion');
+  expect(header.querySelector('.brand .wordmark-header')?.textContent).toBe('Mathion');
   expect(pillTexts()).toEqual(['Dashboard', 'Users', 'Courses', 'Settings']);
   expect(header.querySelector('.name')?.textContent).toBe('Sue Perr');
   const signOut = buttonByText(target, 'Sign out')!;

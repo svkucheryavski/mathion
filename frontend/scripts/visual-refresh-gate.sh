@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2822
+EXPECTED_CHECKS=2859
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4551,6 +4551,10 @@ if [[ -n $REPLY ]]; then
   N=AppHeader; H=$REPLY
   d '\.app-header' '' 'background:var\(--surface\)' 'border-bottom:1px solid var\(--border\)'
   d 'nav' '' 'max-width:var\(--page-max\)' 'margin:0 auto' 'padding:0 var\(--space-3\)'
+  # Branding D4: the logo never shrinks; a long name gets an ellipsis at 400px.
+  d '\.brand' '' 'flex:none'
+  d '\.right' '' 'min-width:0'
+  d '\.name' '' 'overflow:hidden' 'text-overflow:ellipsis' 'white-space:nowrap'
 fi
 # R3 / T1 ruling: the canvas shades <body> through a scoped :has() and the tokens
 # only. Polish 2 D50: with nothing open (d0) the page ground is already
@@ -5964,11 +5968,46 @@ if [[ -n $REPLY ]]; then
   d '\.su-pill' '' 'text-decoration:none' 'color:var\(--muted\)' 'padding:4px 10px' 'border-radius:4px' '--ring: var\(--gold-text\)'
   chk "\.su-pill\[aria-current=page\]\.${H}" 'color:var\(--gold-text\)' 'background:var\(--gold-soft\)' 'font-weight:500'
   none "SuperuserShell has no .su-label rule left (D23)" "\.su-label\."
-  d '\.brand-mark' '' 'transform:translateY\(-4\.35px\)'
-  d '\.wordmark' '' 'font-size:14px' 'font-weight:600'
+  # The lockup moved to SiteLogo (Branding D4); the brand only holds it.
+  d '\.brand' '' 'flex:none'
   d '\.name' '' 'font-size:12\.5px'
   d '\.su-main' '' 'max-width:var\(--page-max\)' 'margin:0 auto'
   sweep SuperuserShell $H
+fi
+# Branding D4: the uploaded logo hugs its width inside a pixel box, or the drawn
+# lockup (moved here from AppHeader and SuperuserShell) shows.
+own logo-header SiteLogo.svelte
+uniq1 logo-header
+if [[ -n $REPLY ]]; then
+  N=SiteLogo; H=$REPLY
+  d '\.logo-header' '' 'height:20px' 'width:auto' 'max-width:160px' 'object-fit:contain'
+  d '\.logo-login' '' 'height:28px' 'width:auto' 'max-width:224px' 'object-fit:contain'
+  d '\.mark-header' '' 'transform:translateY\(-4\.35px\)'
+  d '\.wordmark-header' '' 'font-size:14px' 'font-weight:600'
+  d '\.wordmark-login' '' 'font-size:15px'
+  sweep SiteLogo $H
+fi
+# Branding D11: one column at least as tall as the window, the page area taking
+# what is left, and neither sets overflow (the window stays the scroller, so
+# sticky table headers keep sticking).
+own shell App.svelte
+own app-page App.svelte
+uniq1 shell
+if [[ -n $REPLY ]]; then
+  N=App; H=$REPLY
+  d '\.shell' '' 'display:flex' 'flex-direction:column' 'min-height:100vh' 'min-height:100dvh'
+  none "App .shell sets no overflow" "\.shell\.${H}\{([^}]*;)?overflow"
+  d '\.app-page' '' 'flex:1'
+  none "App .app-page sets no overflow" "\.app-page\.${H}\{([^}]*;)?overflow"
+fi
+own powered PoweredBy.svelte
+uniq1 powered
+if [[ -n $REPLY ]]; then
+  N=PoweredBy; H=$REPLY
+  d '\.powered' '' 'font-size:12px' 'text-align:center' 'color:var\(--muted\)'
+  # The link is underlined at rest, so it reads as a link in the muted line (user, 2026-11-06).
+  chk "\.powered\.${H} a:where\(\.${H}\)" 'text-decoration:underline'
+  sweep PoweredBy $H
 fi
 uniq1 panel-error
 if [[ -n $REPLY ]]; then

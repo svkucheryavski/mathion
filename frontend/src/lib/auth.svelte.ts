@@ -4,6 +4,7 @@ import { clearCourse } from '../stores/currentCourse.svelte';
 import { clearToasts } from '../stores/toasts.svelte';
 import { clearAllDrafts, dropDraftsNotOwnedBy } from '../stores/quizDrafts.svelte';
 import type { User } from './types';
+import type { BrandingPublic } from './branding.svelte';
 
 export async function bootstrapSession(): Promise<void> {
   try {
@@ -45,7 +46,10 @@ export async function verifyPin(
 }
 
 /** The public sign-in config (Settings D10b): nothing else is public. */
-export type AuthConfig = { send_pin_enabled: boolean; longest_sign_in_days: number; max_file_mb: number };
+export type AuthConfig = {
+  send_pin_enabled: boolean; longest_sign_in_days: number; max_file_mb: number;
+  branding: BrandingPublic; // Branding D13, for the dev server's fallback
+};
 
 export async function getAuthConfig(): Promise<AuthConfig> {
   // Public endpoint; never 401s, so no skipAuthRedirect needed.

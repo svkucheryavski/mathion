@@ -7,9 +7,8 @@
   import Input from '../components/ui/Input.svelte';
   import FormRow from '../components/ui/FormRow.svelte';
   import Spinner from '../components/ui/Spinner.svelte';
-  import Logo from '../components/ui/Logo.svelte';
+  import SiteLogo from '../components/chrome/SiteLogo.svelte';
   import Segmented from '../components/ui/Segmented.svelte';
-  import { PRODUCT_NAME } from '../lib/branding';
 
   // Capture + clear the superuser return path SYNCHRONOUSLY at init, before any
   // await — bounds the key's lifetime to this Login mount so an abandoned panel
@@ -88,13 +87,13 @@
 
 <div class="login">
   <div class="card">
-    <div class="brand"><Logo form="login" /><span class="wordmark">{PRODUCT_NAME}</span></div>
+    <div class="brand"><SiteLogo size="login" /></div>
     <h1>Sign in</h1>
 
     {#if sendPinEnabled === undefined}
       <div class="loading"><Spinner /></div>
     {:else if sendPinEnabled === false}
-      <p class="subtitle">Email isn't set up on this server, so PINs aren't emailed. Ask the person who runs this Mathion for one.</p>
+      <p class="subtitle">Email isn't set up on this server, so PINs aren't emailed. Ask the person who runs this site for one.</p>
       <form onsubmit={onSubmitPin}>
         <FormRow label="Email">
           <Input type="email" bind:value={email} autocomplete="email" autofocus name="email" />
@@ -132,8 +131,7 @@
   .login { display: flex; justify-content: center; padding: var(--space-6) var(--space-3); }
   .card { width: 100%; max-width: 380px; /* ref 1987 fixed 380 → max-width for responsiveness */ background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 28px; /* ref 1987 */ box-shadow: 0 1px 2px rgba(20, 24, 35, .06); /* ref 1987 — no --shadow token */ }
   .card h1 { margin-bottom: 6px; /* ref 1992 */ }
-  .brand { display: flex; align-items: center; gap: var(--space-2); margin-bottom: 20px; /* ref 1988 */ }
-  .wordmark { font-size: 15px; /* ref 1990 */ font-weight: 600; letter-spacing: -.01em; color: var(--text); }
+  .brand { margin-bottom: 20px; /* ref 1988 */ }
   .subtitle { font-size: 13px; /* ref 1993 */ line-height: 1.5; color: var(--muted); margin: 0 0 20px; }
   .actions { display: flex; align-items: center; gap: 10px; /* ref 2009 */ }
   .loading { display: flex; justify-content: center; padding: var(--space-4); }

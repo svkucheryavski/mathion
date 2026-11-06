@@ -6,6 +6,7 @@
   import { session } from './stores/session.svelte';
   import Toaster from './components/chrome/Toaster.svelte';
   import AppHeader from './components/chrome/AppHeader.svelte';
+  import PoweredBy from './components/chrome/PoweredBy.svelte';
   import Spinner from './components/ui/Spinner.svelte';
   import Login from './pages/Login.svelte';
   import CourseList from './pages/CourseList.svelte';
@@ -37,6 +38,9 @@
   };
 
   const matched = $derived(matchRoute(routes, currentRoute.path));
+  // Branding D11: the footer on every page but the item player (its bottom bar
+  // is fixed and see-through), and not while the session loads.
+  const showFooter = $derived(!session.loading && matched?.route.component !== 'SequencePlayer');
 
   // C6: plain same-origin links (authored content, the course page's rows) route in-app.
   $effect(() => installLinkRouter());
@@ -65,20 +69,37 @@
   });
 </script>
 
-{#if !session.loading && session.user && currentRoute.path !== '/login' && !currentRoute.path.startsWith('/superuser')}
-  <AppHeader />
-{/if}
+<!-- Branding D11: one column at least as tall as the window; the page area
+     takes what's left, so on a short page the footer sits at the bottom with no
+     scrolling. No overflow on either: the window stays the scroller (sticky
+     table headers, the player's scroll padding). -->
+<div class="shell">
+  {#if !session.loading && session.user && currentRoute.path !== '/login' && !currentRoute.path.startsWith('/superuser')}
+    <AppHeader />
+  {/if}
 
-{#if session.loading}
-  <div class="loading"><Spinner /></div>
-{:else if matched}
-  {@const Comp = componentMap[matched.route.component]}
-  <Comp {...matched.params} />
-{:else}
-  <NotFound />
-{/if}
+  <div class="app-page">
+    {#if session.loading}
+      <div class="loading"><Spinner /></div>
+    {:else if matched}
+      {@const Comp = componentMap[matched.route.component]}
+      <Comp {...matched.params} />
+    {:else}
+      <NotFound />
+    {/if}
+  </div>
+
+  {#if showFooter}<PoweredBy />{/if}
+</div>
 <Toaster />
 
 <style>
+  .shell {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+  .app-page { flex: 1; }
   .loading { display: flex; justify-content: center; padding: var(--space-6); }
 </style>
