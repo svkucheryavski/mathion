@@ -33,6 +33,11 @@ open at the firewall and DNS pointing at this host. NOTE: running an OLDER CLI's
 \fBtls enable\fR against a NEWER install rewrites the on-disk compose with the older embed
 (unsupported \- upgrade the CLI first).
 .TP
+.B branding reset
+Remove the colour changes made on the superuser panel's Branding page, the way back
+when a theme makes even the panel hard to use. The site name, logo and tab icon stay;
+\fB\-\-all\fR resets them too. It asks first; \fB\-\-yes\fR skips the prompt.
+.TP
 .B superuser\fR, \fBpin\fR, \fBversion\fR, \fBuninstall
 Manage the superuser, pin the image, print versions, remove the deployment.
 Add \fB\-\-short\fR to print only the CLI version (the self-update oracle).

@@ -96,3 +96,49 @@ def test_activate_reports_superuser_and_supersedes(db):
     with pytest.raises(HTTPException):
         panel_service.validate(db, first.token)
     assert panel_service.validate(db, second.token) is not None
+
+
+# --- superuser Branding D15: `branding-reset` ---
+
+def _branded(db):
+    from mathion import branding
+    from tests.test_png_check import chunk, idat, ihdr, png
+    data = png(ihdr(width=32, height=32), idat(), chunk(b"IEND", b""))
+    branding.save_name(db, "Riverside")
+    branding.save_image(db, "logo", data, 32, 32)
+    branding.save_image(db, "icon", data, 32, 32)
+    branding.save_theme(db, {"--bg": "#fff8e7"})
+    db.commit()
+
+
+def test_branding_reset_removes_only_the_colours(db, capsys, monkeypatch):
+    from mathion.models_auth import SiteBranding
+    from mathion.superuser import __main__ as cli
+    _branded(db)
+    monkeypatch.setattr(cli, "SessionLocal", lambda: db)
+    assert cli.main(["branding-reset"]) == 0
+    assert capsys.readouterr().out == "Removed the colour changes.\n"
+    db.expire_all()
+    row = db.get(SiteBranding, 1)
+    assert row.theme_changes == {}
+    assert row.site_name == "Riverside" and row.logo_hash is not None and row.icon_hash is not None
+
+
+def test_branding_reset_all(db, capsys, monkeypatch):
+    from mathion.models_auth import SiteBranding, SiteBrandingImage
+    from mathion.superuser import __main__ as cli
+    _branded(db)
+    monkeypatch.setattr(cli, "SessionLocal", lambda: db)
+    assert cli.main(["branding-reset", "--all"]) == 0
+    assert capsys.readouterr().out == "Reset the site name, logo, tab icon and colours.\n"
+    db.expire_all()
+    row = db.get(SiteBranding, 1)
+    assert (row.site_name, row.logo_hash, row.icon_hash, row.theme_changes) == ("Mathion", None, None, {})
+    assert db.query(SiteBrandingImage).count() == 0
+
+
+def test_branding_reset_on_an_unbranded_site(db, capsys, monkeypatch):
+    from mathion.superuser import __main__ as cli
+    monkeypatch.setattr(cli, "SessionLocal", lambda: db)
+    assert cli.main(["branding-reset"]) == 0
+    assert capsys.readouterr().out == "Removed the colour changes.\n"

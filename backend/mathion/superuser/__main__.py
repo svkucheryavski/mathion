@@ -1,5 +1,6 @@
 import argparse
 
+from mathion import branding
 from mathion.database import SessionLocal
 from mathion.superuser.service import (
     DisabledUser, PinIssued, UnknownUser,
@@ -15,6 +16,8 @@ def main(argv: list[str] | None = None) -> int:
     p_pin = sub.add_parser("pin")
     p_pin.add_argument("email")
     sub.add_parser("activate")
+    p_reset = sub.add_parser("branding-reset")  # Branding D15: the way back from the server
+    p_reset.add_argument("--all", action="store_true")
     args = parser.parse_args(argv)
 
     db = SessionLocal()
@@ -47,6 +50,14 @@ def main(argv: list[str] | None = None) -> int:
                     "or this URL will 404"
                 )
             print(result.url)
+            return 0
+
+        if args.command == "branding-reset":
+            branding.reset(db, everything=args.all)
+            db.commit()
+            # The printed line is the record: this runs in its own process.
+            print("Reset the site name, logo, tab icon and colours." if args.all
+                  else "Removed the colour changes.")
             return 0
 
         return 1

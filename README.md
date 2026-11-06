@@ -200,6 +200,7 @@ or read root-owned config):
 | `mathion version` | Print CLI + pinned image version. |
 | `mathion superuser <email>` | Create or promote a superuser account (idempotent). |
 | `mathion pin <email>` | Issue a sign-in PIN (the panel's Settings page sets how long a PIN lasts). |
+| `mathion branding reset [--all] [--yes]` | Remove the colour changes from the panel's Branding page (`--all` also resets the site name, logo and tab icon). |
 | `mathion uninstall` | Stop and remove containers (keeps data + config). |
 | `mathion uninstall --purge` | Also remove volumes and config — **destructive**; requires typing the project name to confirm. |
 

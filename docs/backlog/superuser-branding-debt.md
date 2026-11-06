@@ -34,3 +34,8 @@ Minors from the per-task reviews and the whole-branch review, by task.
 
 - **The stored name isn't re-checked when read back** (Opus r1 M1). Only `check_site_name` and the reset write it today, but a hand edit of the row, or a future writer, could store a name with a line break; every PIN email would then fail its header and be dropped, which D3's one-line rule exists to prevent. Fix: in `branding._from_row`, keep the stored name only when `check_site_name` returns it unchanged, else "Mathion", logged once.
 - **`NAME_WITH_EMOJI` sits between the import blocks** (Fable r1 M1) in `backend/tests/test_notifications_templates.py:7` (E402). Move it below the imports next time the file is touched.
+
+## Task 7 (`mathion branding reset`)
+
+- **`branding.reset()`'s returned list has no reader** (Fable r1 M1). The command prints D15's two fixed sentences, so the list (added in Task 5 for this command) is checked only by its own test, and the two could drift. Fix: drop the return value and its two assertions in `test_superuser_branding.py`, or build the sentence from it.
+- **A successful run drops the child's error output** (Opus r1 M3). `Runner.Stream` keeps stderr only for an `ExitError`, so a Compose warning on a run that exits 0 isn't shown. Harmless: the printed line is the record (D15).
