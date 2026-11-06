@@ -4,6 +4,8 @@ import SuperuserBranding from '../pages/superuser/SuperuserBranding.svelte';
 import type { PanelBranding } from '../lib/superuser';
 import { branding, setBranding, DEFAULT_BRANDING } from '../lib/branding.svelte';
 import { crc32 } from '../lib/pngCheck';
+import { themeFileText } from '../lib/themeFile';
+import { THEME_VARS } from './support/themeVars';
 
 // Branding D1, D2, D3-D6, D14: the page's four cards, the name dialog and the
 // image dialogs.
@@ -461,5 +463,75 @@ describe('the Edit logo and Edit tab icon dialogs (D2, D4-D6)', () => {
     expect(rows(card('Tab icon'))['Icon'].querySelector('.b-note')?.textContent).toBe('your upload');
     // D14: the panel's own tab icon follows at once.
     expect(document.head.querySelector('link[rel="icon"]')?.getAttribute('href')).toBe(`/api/branding/icon.png?v=${'e'.repeat(16)}`);
+  });
+});
+
+describe('the Colours card (D2, D9, D10)', () => {
+  function coloured(changes: Record<string, string>, warnings: string[] = []): PanelBranding {
+    const b = base();
+    b.colours = { vars: THEME_VARS, changes, warnings };
+    if (Object.keys(changes).length) b.public.theme = 'e'.repeat(16);
+    return b;
+  }
+  const download = () => [...card('Colours').querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent!.trim() === 'Download the current theme');
+
+  it('has the pencil and the Download button, and no warnings on the default', async () => {
+    await render(coloured({}));
+    expect(pencil(card('Colours'))?.getAttribute('aria-label')).toBe('Edit colours');
+    expect(download()).toBeDefined();
+    expect(card('Colours').querySelector('.b-warnings')).toBeNull();
+  });
+
+  it("shows the saved colours' contrast warnings, names as code", async () => {
+    await render(coloured({ '--muted': '#aaa' }, ['Text may be hard to read: `--muted` on `--surface` is 2.3:1 (4.5:1 recommended).']));
+    const w = card('Colours').querySelectorAll('.b-warnings li');
+    expect([...w].map((li) => li.textContent)).toEqual(['Text may be hard to read: --muted on --surface is 2.3:1 (4.5:1 recommended).']);
+    expect([...w[0].querySelectorAll('code')].map((c) => c.textContent)).toEqual(['--muted', '--surface']);
+  });
+
+  it('Download builds the file in the browser from the read: theme.css, no request', async () => {
+    await render(coloured({ '--primary': '#7a1f2b' }));
+    let blob: Blob | null = null;
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: (b: Blob) => { blob = b; return 'blob:t'; }, revokeObjectURL: () => {} }));
+    let clicked: HTMLAnchorElement | null = null;
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { clicked = this; });
+    const before = calls.length;
+    download()!.click();
+    expect(calls.length).toBe(before);
+    expect(clicked!.download).toBe('theme.css');
+    expect(new TextDecoder().decode(new Uint8Array(await partBytes(blob!)))).toBe(themeFileText({ vars: THEME_VARS, changes: { '--primary': '#7a1f2b' }, warnings: [] }));
+  });
+
+  it('the pencil opens Edit colours; a save shows on the card and in the panel at once', async () => {
+    await render(coloured({ '--bg': '#fff8e7' }));
+    routes['POST /branding/theme'] = () => [200, coloured({})];
+    await open('Colours');
+    expect(panel()!.querySelector('h2')?.textContent).toBe('Edit colours');
+    footButton('Reset to default')!.click(); flushSync();
+    save().click(); await settle();
+    const sent = posts('/branding/theme');
+    expect(sent).toHaveLength(1);
+    expect((sent[0].body as FormData).get('reset')).toBe('true');
+    expect(panel()).toBeNull();
+    expect(rows(card('Colours'))['Theme'].textContent).toBe('default');
+    expect(branding.theme).toBeNull();
+  });
+
+  it('a chosen file goes to the check, then Save sends the same file', async () => {
+    await render(coloured({}));
+    routes['POST /branding/theme/check'] = () => [200, { changes: { '--primary': '#7a1f2b' }, problems: [], more: 0, warnings: [], blocked: null }];
+    routes['POST /branding/theme'] = () => [200, coloured({ '--primary': '#7a1f2b' })];
+    await open('Colours');
+    const input = panel()!.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const css = ':root { --primary: #7a1f2b; }';
+    Object.defineProperty(input, 'files', { value: [new File([css], 'school.css', { type: 'text/css' })], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    for (let i = 0; i < 3; i++) await tick();
+    expect(posts('/branding/theme/check')).toHaveLength(1);
+    save().click(); await settle();
+    const part = (posts('/branding/theme')[0].body as FormData).get('file') as File;
+    expect(part.name).toBe('school.css');
+    expect(await partBytes(part)).toEqual([...new TextEncoder().encode(css)]);
+    expect(rows(card('Colours'))['Theme'].textContent).toBe('1 colour changed: --primary');
   });
 });

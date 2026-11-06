@@ -54,3 +54,10 @@ Minors from the per-task reviews and the whole-branch review, by task.
 - **A huge file is read whole before the 1 MB check** (Fable r1 M1). The picker accepts PNGs, but "All files" lets a superuser pick, say, a video; FileReader then loads all of it before refusing it. Fix: refuse at once when `file.size > PNG_MAX_BYTES`, with the same sentence.
 - **Untested: Cancel and Esc wait while Save runs, and the unreadable-file sentence** (Fable r1 M2). Both dialogs pass `closeDisabled={busy}` and disable Cancel, as Settings' dialogs do, but no Branding test holds a save open and presses them; nor does one make FileReader fail. Fix: two tests in `SuperuserBranding.svelte.test.ts`.
 - **Notes** (Fable r1): the file line shows pixels, not bytes; the default lockup's small nudge can reach just past the 20 px dashed box (seen in the shots); Reset, then typing "Mathion" again, sends `{name: "Mathion"}`, not `{reset: true}` (same result).
+
+## Task 10 (the Colours dialog, preview and download)
+
+- **No suite checks that the download uploads cleanly** (Opus r1 M1). A review probe ran `themeFileText` through `parse_theme`: 0 problems, the right changes. But a later parser change could make every school's unchanged download fail its own upload, and no test would fail. Fix: commit the default download as a fixture; the TS test asserts `themeFileText` equals it, and a backend test asserts `parse_theme(fixture)` gives no problems and no changes.
+- **`downloadTheme`'s test overwrites the real `URL`'s methods for the rest of its file, and leaves fake timers on if an assertion fails** (Opus r1 M2). Harmless today: it's the file's last test. Fix: `vi.spyOn` a defined `createObjectURL`, and `try/finally` around `useRealTimers()`.
+- **The file line's change from "checking…" to "N colours" isn't announced** (Fable r1 M1). A screen-reader user isn't told when the check answers and Save is ready; the blocked sentence is (role=status). Fix: `aria-live="polite"` on `.ec-file`. For the VoiceOver pass at beta.
+- **Untested: Cancel and Esc wait while Save runs** (Fable r1 note), as in Task 9; the code passes `closeDisabled={busy}` and disables Cancel.

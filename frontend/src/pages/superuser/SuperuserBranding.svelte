@@ -3,15 +3,18 @@
   // its current value; one pencil per card opens one Edit dialog, which holds
   // the upload and Reset to default. A save shows the saved values the server
   // answers with, and the panel's own head and logo follow at once (D14).
-  // The Colours card's pencil and download come with its dialog (Task 10).
+  // The Colours card also downloads the current theme (D9), built in the browser.
   import {
-    getBranding, saveSiteName, saveImage, panelError,
+    getBranding, saveSiteName, saveImage, checkTheme, saveTheme, panelError,
     type PanelBranding, type PanelOnAuth,
   } from '../../lib/superuser';
   import { applyBranding, setBranding } from '../../lib/branding.svelte';
+  import { downloadTheme, ticked } from '../../lib/themeFile';
   import PanelHead from '../../components/superuser/PanelHead.svelte';
   import EditSiteNameDialog from '../../components/superuser/EditSiteNameDialog.svelte';
   import EditImageDialog from '../../components/superuser/EditImageDialog.svelte';
+  import EditColoursDialog from '../../components/superuser/EditColoursDialog.svelte';
+  import Button from '../../components/ui/Button.svelte';
   import SiteLogo from '../../components/chrome/SiteLogo.svelte';
   import IconButton from '../../components/ui/IconButton.svelte';
   import Skeleton from '../../components/ui/Skeleton.svelte';
@@ -22,7 +25,7 @@
   let data = $state.raw<PanelBranding | null>(null);
   let loading = $state(true);
   let loadError = $state('');
-  let dialog = $state<'name' | 'logo' | 'icon' | null>(null);
+  let dialog = $state<'name' | 'logo' | 'icon' | 'colours' | null>(null);
 
   async function load(): Promise<void> {
     loading = true;
@@ -52,7 +55,7 @@
   const plural = (n: number) => `${n} ${n === 1 ? 'colour' : 'colours'} changed:`;
 </script>
 
-{#snippet pencil(label: string, kind: 'name' | 'logo' | 'icon')}
+{#snippet pencil(label: string, kind: 'name' | 'logo' | 'icon' | 'colours')}
   <IconButton glyph="pencil" size="md" title="Edit" aria-label={label} data-action="edit" onclick={() => (dialog = kind)} />
 {/snippet}
 
@@ -113,6 +116,7 @@
     <section class="b-card" aria-labelledby="b-colours">
       <div class="b-card-head">
         <h2 id="b-colours">Colours</h2>
+        {@render pencil('Edit colours', 'colours')}
       </div>
       <dl>
         <dt>Theme</dt>
@@ -120,6 +124,17 @@
           {#if changed.length === 0}default{:else}{plural(changed.length)} {#each changed as n, i (n)}<code>{n}</code>{i < changed.length - 1 ? ', ' : ''}{/each}{/if}
         </dd>
       </dl>
+      {#if data.colours.warnings.length}
+        <!-- D10: the saved colours' contrast warnings stay on the card. -->
+        <ul class="b-warnings">
+          {#each data.colours.warnings as w (w)}
+            <li>{#each ticked(w) as part, i (i)}{#if part.code}<code>{part.text}</code>{:else}{part.text}{/if}{/each}</li>
+          {/each}
+        </ul>
+      {/if}
+      <div class="b-actions">
+        <Button variant="secondary" onclick={() => data && downloadTheme(data.colours)}>Download the current theme</Button>
+      </div>
     </section>
 
     {#if dialog === 'name'}
@@ -132,6 +147,10 @@
       <EditImageDialog {kind} saved={size && version ? { ...size, version } : null} {onAuth}
         onClose={() => (dialog = null)} onDone={() => (dialog = null)}
         save={async (part, filename) => { show(await saveImage(token, kind, part, filename)); }} />
+    {:else if dialog === 'colours'}
+      <EditColoursDialog colours={data.colours} {onAuth} onClose={() => (dialog = null)} onDone={() => (dialog = null)}
+        check={(bytes, filename) => checkTheme(token, bytes, filename)}
+        save={async (part, filename) => { show(await saveTheme(token, part, filename)); }} />
     {/if}
   {/if}
 </div>
@@ -141,8 +160,7 @@
   .b-page { max-width: 760px; }
   .b-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); margin: 0 0 14px; }
   .b-card-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--border); }
-  /* As tall as the pencil, so a head without one (Colours, until Task 10) is the same height. */
-  .b-card-head h2 { flex: 1; margin: 0; font-size: 15px; line-height: 28px; font-weight: 600; color: var(--text); }
+  .b-card-head h2 { flex: 1; margin: 0; font-size: 15px; font-weight: 600; color: var(--text); }
   dl { display: grid; grid-template-columns: 210px 1fr; margin: 0; padding: 6px 16px 10px; font-size: 13px; }
   dt { padding: 5px 0; color: var(--muted); }
   dd { margin: 0; padding: 5px 0; color: var(--text); overflow-wrap: anywhere; }
@@ -160,4 +178,8 @@
   }
   .b-note { font-size: 12.5px; color: var(--muted); }
   .b-foot { margin: 0; padding: 0 16px 12px; font-size: 12.5px; color: var(--muted); }
+  /* D10: advice, never a refusal, so the image dialogs' gold. */
+  .b-warnings { margin: 0; padding: 0 16px 8px 34px; font-size: 12.5px; color: var(--gold-text); }
+  .b-warnings code { font-family: var(--font-mono); font-size: 12px; }
+  .b-actions { padding: 0 16px 14px; }
 </style>
