@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2937
+EXPECTED_CHECKS=2954
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -6120,7 +6120,8 @@ if [[ -n $REPLY ]]; then
   sweep NoteStrip $H
 fi
 # D8, D12, D17, D24: the panel dialogs' fields, the item modal's field look.
-for pair in NewCourseDialog:nc-input EditCourseDialog:ec-input AdminEmailField:ae-input DeleteCourseDialog:dc-input NewAccountDialog:na-input EditAccountDialog:ea-input EditEmailDialog:ee-input EditLimitsDialog:el-input EditSignInDialog:es-input EditSiteNameDialog:sn-input; do
+# Set up §6: the shared forms' fields components own the inputs the dialogs show.
+for pair in CourseFields:nc-input EditCourseDialog:ec-input AdminEmailField:ae-input DeleteCourseDialog:dc-input NewAccountDialog:na-input EditAccountDialog:ea-input EmailFields:ee-input LimitsFields:el-input SignInFields:es-input SiteNameField:sn-input; do
   uniq1 ${pair#*:}
   if [[ -n $REPLY ]]; then
     N=${pair%%:*}; H=$REPLY
@@ -6138,6 +6139,11 @@ uniq1 nc-err
 if [[ -n $REPLY ]]; then
   N=NewCourseDialog; H=$REPLY
   d '\.nc-err' '' 'color:var\(--danger\)'
+  sweep NewCourseDialog $H
+fi
+uniq1 nc-mono
+if [[ -n $REPLY ]]; then
+  N=CourseFields; H=$REPLY
   d '\.nc-mono' '' 'font-family:var\(--font-mono\)'
 fi
 
@@ -6182,27 +6188,38 @@ if [[ -n $REPLY ]]; then
 fi
 # D7, D9: the Edit email dialog: server and port on one row, greyed fields
 # when off, the test's answer in the accepted / danger-panel looks.
-uniq1 ee-result
+uniq1 ee-pair
 if [[ -n $REPLY ]]; then
-  N=EditEmailDialog; H=$REPLY
+  N=EmailFields; H=$REPLY
   d '\.ee-pair' '' 'display:grid' 'grid-template-columns:1fr 90px'
   d '\.ee-input' ':disabled' 'background:var\(--surface-2\)' 'color:var\(--muted\)'
   d '\.ee-hint' '' 'font-size:12px' 'color:var\(--muted\)'
+fi
+uniq1 ee-result
+if [[ -n $REPLY ]]; then
+  N=EditEmailDialog; H=$REPLY
   d '\.ee-result' '' 'padding:7px 10px' 'font-size:12\.5px'
   d '\.ee-result\.ok' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
   d '\.ee-result\.err' '' 'background:var\(--danger-panel-bg\)' 'color:var\(--danger-panel-fg\)'
   d '\.ee-err' '' 'color:var\(--danger\)'
+  sweep EditEmailDialog $H
 fi
 uniq1 el-hint
 if [[ -n $REPLY ]]; then
-  N=EditLimitsDialog; H=$REPLY
+  N=LimitsFields; H=$REPLY
   d '\.el-hint' '' 'font-size:12px' 'color:var\(--muted\)'
+fi
+uniq1 el-err
+if [[ -n $REPLY ]]; then
+  N=EditLimitsDialog; H=$REPLY
   d '\.el-err' '' 'color:var\(--danger\)'
+  sweep EditLimitsDialog $H
 fi
 uniq1 es-err
 if [[ -n $REPLY ]]; then
   N=EditSignInDialog; H=$REPLY
   d '\.es-err' '' 'color:var\(--danger\)'
+  sweep EditSignInDialog $H
 fi
 
 # The panel's Branding page (Branding D1, D2, D4): Settings' cards and rows,
@@ -6224,17 +6241,22 @@ if [[ -n $REPLY ]]; then
   d '\.b-warnings' '' 'color:var\(--gold-text\)'
   sweep SuperuserBranding $H
 fi
+uniq1 sn-hint
+if [[ -n $REPLY ]]; then
+  N=SiteNameField; H=$REPLY
+  d '\.sn-hint' '' 'font-size:12px' 'color:var\(--muted\)'
+fi
 uniq1 sn-err
 if [[ -n $REPLY ]]; then
   N=EditSiteNameDialog; H=$REPLY
-  d '\.sn-hint' '' 'font-size:12px' 'color:var\(--muted\)'
   d '\.sn-err' '' 'color:var\(--danger\)'
+  sweep EditSiteNameDialog $H
 fi
 # D4-D6: the image dialogs: the real-size boxes, the icon on light and dark,
 # the advice in gold (it never blocks), a refusal in red.
 uniq1 im-box
 if [[ -n $REPLY ]]; then
-  N=EditImageDialog; H=$REPLY
+  N=LogoPicker; H=$REPLY
   d '\.im-box' '' 'border:1px dashed var\(--border-strong\)' 'background:var\(--surface\)'
   d '\.im-box\.header' '' 'width:160px' 'height:20px'
   d '\.im-box\.login' '' 'width:224px' 'height:28px'
@@ -6242,6 +6264,11 @@ if [[ -n $REPLY ]]; then
   d '\.im-strip\.dark' '' 'background:var\(--text\)'
   d '\.im-advice' '' 'color:var\(--gold-text\)'
   d '\.im-hint' '' 'font-size:12px' 'color:var\(--muted\)'
+  sweep LogoPicker $H
+fi
+uniq1 im-err
+if [[ -n $REPLY ]]; then
+  N=EditImageDialog; H=$REPLY
   d '\.im-err' '' 'color:var\(--danger\)'
   sweep EditImageDialog $H
 fi
