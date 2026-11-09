@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2966
+EXPECTED_CHECKS=3009
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -5967,6 +5967,8 @@ if [[ -n $REPLY ]]; then
   d '\.su-pills' '' 'display:flex' 'flex:1'
   d '\.su-pill' '' 'text-decoration:none' 'color:var\(--muted\)' 'padding:4px 10px' 'border-radius:4px' '--ring: var\(--gold-text\)'
   chk "\.su-pill\[aria-current=page\]\.${H}" 'color:var\(--gold-text\)' 'background:var\(--gold-soft\)' 'font-weight:500'
+  # Set up D3: while a save runs the pills wait, in Button's blocked look.
+  chk "\.su-pill\[aria-disabled=true\]\.${H}" 'color:var\(--faint\)' 'cursor:not-allowed'
   none "SuperuserShell has no .su-label rule left (D23)" "\.su-label\."
   # The lockup moved to SiteLogo (Branding D4); the brand only holds it.
   d '\.brand' '' 'flex:none'
@@ -6303,6 +6305,52 @@ if [[ -n $REPLY ]]; then
   d '\.fc-keep\[aria-disabled=true\]' '' 'color:var\(--muted\)'
   d '\.fc-err' '' 'color:var\(--danger\)'
   sweep FinishCard $H
+fi
+
+# Set up D3-D6: the page (the steps on the left, the card on the right), the
+# step card and All set as the panel's white cards, the list's marks (a tick
+# on --success, dashed when passed), the email step's reason and test answer.
+own sp-grid SuperuserSetup.svelte
+uniq1 sp-grid
+if [[ -n $REPLY ]]; then
+  N=SuperuserSetup; H=$REPLY
+  d '\.sp-grid' '' 'grid-template-columns:200px minmax\(0,1fr\)'
+  sweep SuperuserSetup $H
+fi
+own st-card StepCard.svelte
+uniq1 st-card
+if [[ -n $REPLY ]]; then
+  N=StepCard; H=$REPLY
+  d '\.st-card' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius-lg\)' 'background:var\(--surface\)'
+  d '\.st-note' '' 'color:var\(--muted\)'
+  d '\.st-err' '' 'color:var\(--danger\)'
+  sweep StepCard $H
+fi
+own sl-item StepList.svelte
+uniq1 sl-item
+if [[ -n $REPLY ]]; then
+  N=StepList; H=$REPLY
+  d '\.sl-item\[aria-current=step\]' '' 'background:var\(--surface\)' 'border-color:var\(--border\)' 'color:var\(--text\)'
+  d '\.sl-item\[aria-disabled=true\]' '' 'cursor:default'
+  d '\.sl-mark\.done' '' 'background:var\(--success\)' 'color:var\(--primary-text\)'
+  d '\.sl-mark\.passed' '' 'border-style:dashed'
+  sweep StepList $H
+fi
+own as-card AllSetCard.svelte
+uniq1 as-card
+if [[ -n $REPLY ]]; then
+  N=AllSetCard; H=$REPLY
+  d '\.as-card' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius-lg\)' 'background:var\(--surface\)'
+  sweep AllSetCard $H
+fi
+own se-result StepEmail.svelte
+uniq1 se-result
+if [[ -n $REPLY ]]; then
+  N=StepEmail; H=$REPLY
+  d '\.se-reason' '' 'color:var\(--gold-text\)'
+  d '\.se-result\.ok' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
+  d '\.se-result\.err' '' 'background:var\(--danger-panel-bg\)' 'color:var\(--danger-panel-fg\)'
+  sweep StepEmail $H
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

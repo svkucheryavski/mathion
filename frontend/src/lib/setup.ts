@@ -1,7 +1,8 @@
 // Set up (superuser Set up spec): the wizard's state, its panel calls, and the
 // shell's entry rules (D1, D2). The state mirrors backend/mathion/schemas.py.
 import { api } from './api';
-import type { PanelAdmin } from './superuser';
+import type { PanelAdmin, PanelOnAuth } from './superuser';
+import type { SetupStore } from './setupStore.svelte';
 
 // Every panel call passes skipAuthRedirect: the shell handles 401 and 404 (D25).
 const opts = { skipAuthRedirect: true };
@@ -127,3 +128,51 @@ export function finishLines(state: PanelSetup): FinishLine[] {
   });
   return lines;
 }
+
+// --- D3, D3a, D4a, D5: the Set up page's card ---
+
+/** The card the page shows: a step, or All set. */
+export type Card = 1 | 2 | 3 | 4 | 'allset';
+export type StepN = 1 | 2 | 3 | 4;
+
+/** The list's labels (the mockup). */
+export const STEP_LABELS = ['Email', 'Site name and logo', 'First course', 'Sign-in and limits'] as const;
+
+/** D4a: steps 2 and 4 keep their defaults when skipped, and say so. */
+export const skipLabel = (n: StepN): string =>
+  n === 2 ? 'Keep the defaults' : n === 4 ? 'Keep these values' : 'Skip for now';
+
+/** D3: a tick when done, dashed when passed but not done, the number otherwise. */
+export const stepMark = (s: PanelSetupStep): 'done' | 'passed' | 'number' =>
+  s.done ? 'done' : s.passed ? 'passed' : 'number';
+
+/** This tab's own write always applies (D3a); over shows All set (D5). */
+export const cardAfterOwn = (state: PanelSetup): Card => (state.wizard_on ? (state.step as StepN) : 'allset');
+
+/** D3a: a re-read never moves a card that holds an error, typed values or a
+ *  note; All set stays; otherwise the newest state decides. */
+export function cardAfterRead(shown: Card, state: PanelSetup, held: boolean): Card {
+  if (held || shown === 'allset') return shown;
+  return cardAfterOwn(state);
+}
+
+/** The step contract (Tasks 7-9): what the page gives every step component. */
+export type StepProps = {
+  token: string;
+  setup: SetupStore;
+  onAuth: PanelOnAuth;
+  /** The signed-in superuser's email, for "you are its admin" (D8). */
+  me: string | null;
+  /** The step's saves and its "step saved" write are done: the page shows the
+   *  card the answer names. Never for an answer the step holds (step 3's note, D3a). */
+  onDone: (state: PanelSetup) => void;
+  /** Back and the skip button: the page asks first on unsaved changes (D3). */
+  back: () => void;
+  skip: () => void;
+  /** A failed "go to" or "skip", shown in the step's card (D3a). The newest
+   *  sentence shows: a new one clears the step's own error. */
+  moveError: string | null;
+  /** D3a: the step tells the page whether its card is held (an error, unsaved
+   *  changes, a note). The page itself holds while a write or `setup.saving` runs. */
+  onHold: (held: () => boolean) => void;
+};

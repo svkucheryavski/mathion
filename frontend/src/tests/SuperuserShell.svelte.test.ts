@@ -21,6 +21,9 @@ function jsonResponse(status: number, body: unknown) {
 function dispatchFetch() {
   return vi.fn(async (url: string) => {
     const s = String(url);
+    if (s.includes('/api/superuser/') && /\/setup\/(go|skip|saved)$/.test(s)) {
+      return setupWrite ? setupWrite() : jsonResponse(200, setupState);
+    }
     if (s.includes('/api/superuser/') && s.endsWith('/setup')) {
       setupReads++;
       return setupAnswer ? setupAnswer() : jsonResponse(200, setupState);
@@ -48,6 +51,7 @@ function setupOf(on: boolean): PanelSetup {
 let setupState: PanelSetup = setupOf(false);
 let setupAnswer: (() => Promise<Response> | Response) | null = null;
 let setupReads = 0;
+let setupWrite: (() => Promise<Response> | Response) | null = null;
 const BRANDING = {
   name: 'Mathion', logo: null, icon: null,
   colours: { vars: [], changes: {}, warnings: [] },
@@ -99,6 +103,7 @@ beforeEach(() => {
   setupState = setupOf(false);
   setupAnswer = null;
   setupReads = 0;
+  setupWrite = null;
   sessionStorage.clear();
 });
 afterEach(() => {
@@ -539,4 +544,93 @@ it('a pill click while dirty asks through the guard', async () => {
   await settle();
   expect(target.querySelector('.inline-confirm')?.textContent ?? '').toContain('Discard unsaved changes and continue?');
   expect(router.currentRoute.path).toBe('/superuser/T');
+});
+
+// --- Set up D3 and the Task 5 review's notes ---
+
+it("while a wizard write runs, the pills wait; they come back after", async () => {
+  setupState = setupOf(true);
+  let answer!: (r: Response) => void;
+  setupWrite = () => new Promise<Response>((r) => { answer = r; });
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T/setup';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  await settle();
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  buttonByText(target, 'Skip for now')!.click();
+  await settle();
+  expect(pills().every((a) => a.getAttribute('aria-disabled') === 'true')).toBe(true);
+  pills()[2].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+  expect(navSpy).not.toHaveBeenCalled();
+  answer(jsonResponse(200, { ...setupOf(true), step: 2 }));
+  await settle();
+  expect(pills().some((a) => a.hasAttribute('aria-disabled'))).toBe(false);
+});
+
+it("a modifier click on a pill before the first answer doesn't cancel this tab's redirect", async () => {
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  setupState = setupOf(true);
+  let answer!: (r: Response) => void;
+  setupAnswer = () => new Promise<Response>((r) => { answer = r; });
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  pills()[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, metaKey: true }));
+  answer(jsonResponse(200, setupOf(true)));
+  await settle();
+  expect(navSpy).toHaveBeenCalledWith('/superuser/T/setup', { replace: true });
+});
+
+it('the redirect to Set up never mounts the Dashboard, and reads the state once', async () => {
+  setupState = setupOf(true);
+  const f = dispatchFetch();
+  vi.stubGlobal('fetch', f);
+  router.currentRoute.path = '/superuser/T';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  await settle();
+  expect(router.currentRoute.path).toBe('/superuser/T/setup');
+  expect(f.mock.calls.map((c) => String(c[0])).filter((u) => u.endsWith('/stats'))).toEqual([]);
+  expect(setupReads).toBe(1);
+  expect(target.querySelector('.dashboard')).toBeNull();
+});
+
+it('Set up when over never mounts the Set up page on its way out', async () => {
+  vi.stubGlobal('fetch', dispatchFetch());
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  router.currentRoute.path = '/superuser/T/setup';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  let seen = false;
+  const watch = new MutationObserver((records) => {
+    for (const r of records) for (const node of r.addedNodes) {
+      if (node instanceof Element && (node.matches('.sp-page') || node.querySelector('.sp-page'))) seen = true;
+    }
+  });
+  watch.observe(target, { childList: true, subtree: true });
+  await settle();
+  watch.disconnect();
+  expect(navSpy).toHaveBeenCalledWith('/superuser/T', { replace: true });
+  expect(seen).toBe(false);
+});
+
+it("Cancel on the shell's leave question puts focus back on Sign out", async () => {
+  const real = dirtyMod.createDirtyRegistry;
+  let registry!: dirtyMod.DirtyRegistry;
+  vi.spyOn(dirtyMod, 'createDirtyRegistry').mockImplementation(() => (registry = real()));
+  vi.stubGlobal('fetch', dispatchFetch());
+  signIn();
+  router.currentRoute.path = '/superuser/T';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  registry.register({ isDirty: true, discard: vi.fn() });
+  const out = buttonByText(target, 'Sign out')!;
+  out.focus();
+  out.click();
+  await settle();
+  (target.querySelector('.inline-confirm button.cancel') as HTMLButtonElement).click();
+  await settle();
+  await settle();
+  expect(document.activeElement).toBe(out);
 });

@@ -93,13 +93,17 @@ export class SetupStore {
     return run;
   }
 
-  /** D3a: read every 4 minutes while `dirty()`, until 2 hours after the last edit. */
-  keepAlive(dirty: () => boolean): void {
+  /** D3a: read every 4 minutes while `dirty()`, until 2 hours after the last
+   *  edit. A step calls it when it opens and the returned stop when it closes;
+   *  `dispose()` is the shell's alone. */
+  keepAlive(dirty: () => boolean): () => void {
     this.#stopTimer();
-    if (this.#gone) return;
-    this.#timer = setInterval(() => {
+    if (this.#gone) return () => {};
+    const timer = setInterval(() => {
       if (dirty() && Date.now() - this.#lastEdit < KEEP_ALIVE_CAP_MS) void this.read();
     }, KEEP_ALIVE_MS);
+    this.#timer = timer;
+    return () => { if (this.#timer === timer) this.#stopTimer(); };
   }
 
   noteEdit(): void {

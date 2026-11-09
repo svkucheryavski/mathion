@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { finishLines, type PanelSetup } from '../lib/setup';
+import { cardAfterOwn, cardAfterRead, finishLines, skipLabel, stepMark, STEP_LABELS, type Card, type PanelSetup } from '../lib/setup';
 
 // Set up D12: the Finish setting up card's lines.
 
@@ -41,4 +41,42 @@ it("step 3 names the course with no admin; step 4's reason only while the defaul
 
 it('an all-done state has no lines', () => {
   expect(finishLines(state({}, [true, true, true, true]))).toEqual([]);
+});
+
+// --- D3, D3a, D4a, D5: the Set up page's card rules ---
+
+it('cardAfterRead: a held card stays; All set stays; otherwise the newest state decides', () => {
+  const on3 = state({ wizard_on: true, step: 3 });
+  const over = state({ wizard_on: false, step: 1 });
+  const table: [Card, PanelSetup, boolean, Card][] = [
+    [1, on3, true, 1],
+    [1, over, true, 1],
+    ['allset', on3, true, 'allset'],
+    ['allset', over, true, 'allset'],
+    [1, on3, false, 3],
+    [1, over, false, 'allset'],
+    ['allset', on3, false, 'allset'],
+    ['allset', over, false, 'allset'],
+    [3, on3, false, 3],
+  ];
+  for (const [shown, s, held, want] of table) expect(cardAfterRead(shown, s, held)).toBe(want);
+});
+
+it("cardAfterOwn: this tab's own write always applies", () => {
+  expect(cardAfterOwn(state({ wizard_on: true, step: 2 }))).toBe(2);
+  expect(cardAfterOwn(state({ wizard_on: false, step: 1 }))).toBe('allset');
+});
+
+it('the list labels (mockup) and the skip button per step (D4a)', () => {
+  expect(STEP_LABELS).toEqual(['Email', 'Site name and logo', 'First course', 'Sign-in and limits']);
+  expect([1, 2, 3, 4].map((n) => skipLabel(n as 1 | 2 | 3 | 4))).toEqual([
+    'Skip for now', 'Keep the defaults', 'Skip for now', 'Keep these values',
+  ]);
+});
+
+it('the list marks: a tick when done, dashed when passed but not done, the number otherwise', () => {
+  expect(stepMark({ passed: true, done: true, reason: null })).toBe('done');
+  expect(stepMark({ passed: false, done: true, reason: null })).toBe('done');
+  expect(stepMark({ passed: true, done: false, reason: 'Email is off.' })).toBe('passed');
+  expect(stepMark({ passed: false, done: false, reason: null })).toBe('number');
 });

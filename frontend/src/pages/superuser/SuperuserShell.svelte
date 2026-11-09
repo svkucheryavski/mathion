@@ -8,7 +8,7 @@
   import { SetupStore } from '../../lib/setupStore.svelte';
   import { clearMark, entryMove, markFor, setMark } from '../../lib/setup';
   import { createDirtyRegistry, DIRTY_REGISTRY_KEY } from '../../lib/dirtyRegistry.svelte';
-  import { DISCARD_NAV_ASK, InPlaceAsk, refused, type GuardAsk } from '../../lib/askInPlace.svelte';
+  import { DISCARD_NAV_ASK, focusAfter, InPlaceAsk, refused, type GuardAsk } from '../../lib/askInPlace.svelte';
   import AskSlot from '../../components/ui/AskSlot.svelte';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
   import SiteLogo from '../../components/chrome/SiteLogo.svelte';
@@ -63,13 +63,14 @@
   let entryOpen = true;
 
   onMount(() => {
-    void setup.read().then((s) => {
+    void setup.read().then(async (s) => {
       if (s) {
         // Only if the address is still the panel's own when it answers (D2).
-        if (entryOpen && entryMove(seg, s, markFor(token)) === 'to-setup') {
-          void navigate(`/superuser/${token}/setup`, { replace: true });
-        }
+        const toSetup = entryOpen && entryMove(seg, s, markFor(token)) === 'to-setup';
         if (s.wizard_on) setMark(token);
+        // The page shows only once the address is Set up's, so the Dashboard
+        // never mounts on the way.
+        if (toSetup) await navigate(`/superuser/${token}/setup`, { replace: true });
       }
       ready = true;
     });
@@ -114,18 +115,23 @@
   // D3: while a save runs, the pills wait.
   const waiting = $derived(setup.busy || setup.saving);
 
+  // D2: a pill click that routes in this tab cancels the redirect; a modifier
+  // click opens another tab and leaves this one alone.
   function onPill(e: MouseEvent, href: string): void {
-    entryOpen = false;
     routeClick(e, href);
+    if (e.defaultPrevented) entryOpen = false;
   }
 
   // D3: leaving with unsaved changes asks first, in place, at the top of the page.
   const registry = createDirtyRegistry();
   setContext(DIRTY_REGISTRY_KEY, registry);
+  // Cancel puts focus back on the control that asked: Sign out, or what had focus.
   const navAsk = new InPlaceAsk();
-  function askNav(): GuardAsk {
+  let signOutButton = $state<HTMLButtonElement | undefined>();
+  function askNav(from: Element | null = document.activeElement): GuardAsk {
     if (navAsk.open) { navAsk.focusCancel(); return refused(); }
     const promise = navAsk.ask(DISCARD_NAV_ASK).then((a) => {
+      if (a === 'cancel') void focusAfter(() => from);
       if (a !== 'confirm') return false;
       navAsk.settle();
       return true;
@@ -136,7 +142,7 @@
   async function onSignOut(): Promise<void> {
     // D3: Sign out navigates past the guard, so it asks itself.
     if (registry.isAnyDirty()) {
-      if (!(await askNav().promise)) return;
+      if (!(await askNav(signOutButton ?? null).promise)) return;
       registry.discardAll();
     }
     clearMark();   // Set up D2
@@ -174,7 +180,7 @@
       {#if session.user}
         <div class="right">
           <span class="name">{displayName}</span>
-          <Button variant="ghost" onclick={onSignOut}>Sign out</Button>
+          <Button variant="ghost" bind:element={signOutButton} onclick={onSignOut}>Sign out</Button>
         </div>
       {/if}
     </div>
@@ -184,12 +190,12 @@
     {#if expired}
       <PanelHead title={current.label} />
       <p class="su-expired">This panel link is not valid or has expired — re-run <code>activate</code> to mint a new one.</p>
-    {:else if !ready || setupEntry === 'leaving'}
+    {:else if !ready || setupEntry === 'leaving' || (page === 'setup' && setupEntry === null && setup.state !== null)}
       <!-- Set up D1, D2: only the bar until the state decides where to go. -->
     {:else}
       {#if navAsk.open}<div class="su-ask"><AskSlot ask={navAsk} /></div>{/if}
       {#if page === 'setup'}
-        <SuperuserSetup {setup} />
+        <SuperuserSetup {setup} {token} {onAuth} />
       {:else if page === 'dashboard'}
         <SuperuserDashboard {token} {onAuth} {setup} />
       {:else if page === 'courses'}
@@ -236,6 +242,9 @@
     border-radius: 4px;
     --ring: var(--gold-text);
   }
+  /* D3: while a save runs the pills wait, and look it (Button's blocked look);
+     the current one keeps its mark, below. */
+  .su-pill[aria-disabled="true"] { color: var(--faint); cursor: not-allowed; }
   .su-pill[aria-current="page"] {
     color: var(--gold-text);
     background: var(--gold-soft);

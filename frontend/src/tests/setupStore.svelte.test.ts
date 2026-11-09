@@ -160,6 +160,24 @@ describe('SetupStore', () => {
     expect(gets).toHaveLength(30);
   });
 
+  it("keepAlive's stop ends its own timer only, and the store keeps reading", async () => {
+    vi.useFakeTimers();
+    const stopOld = store.keepAlive(() => true);
+    store.noteEdit();
+    const stop = store.keepAlive(() => true);
+    stopOld();                              // an older step's stop leaves the new timer
+    vi.advanceTimersByTime(240_000);
+    expect(gets).toHaveLength(1);
+    gets[0].resolve(state());
+    await settle();
+    stop();
+    vi.advanceTimersByTime(480_000);
+    expect(gets).toHaveLength(1);
+    const read = store.read();              // not disposed: reads still apply
+    gets[1].resolve(state({ step: 2 }));
+    expect((await read)?.step).toBe(2);
+  });
+
   it('dispose stops the timer, and a late answer changes nothing', async () => {
     vi.useFakeTimers();
     store.keepAlive(() => true);
