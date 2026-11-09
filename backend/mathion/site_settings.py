@@ -81,6 +81,9 @@ class SiteSettingsView:
     send_failure_at: datetime | None = None
     send_retry_at: datetime | None = None
     send_backoff_step: int = 0
+    site_name_kept: bool = False
+    sign_in_kept: bool = False
+    last_sent_at: datetime | None = None
 
     @property
     def max_file_bytes(self) -> int:
