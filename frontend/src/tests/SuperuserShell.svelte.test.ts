@@ -4,6 +4,8 @@ import SuperuserShell from '../pages/superuser/SuperuserShell.svelte';
 import App from '../App.svelte';
 import * as router from '../lib/router.svelte';
 import { session } from '../stores/session.svelte';
+import * as dirtyMod from '../lib/dirtyRegistry.svelte';
+import { SETUP_MARK, type PanelSetup } from '../lib/setup';
 
 vi.mock('../lib/auth.svelte', () => ({
   logout: vi.fn(async () => {}),
@@ -19,6 +21,10 @@ function jsonResponse(status: number, body: unknown) {
 function dispatchFetch() {
   return vi.fn(async (url: string) => {
     const s = String(url);
+    if (s.includes('/api/superuser/') && s.endsWith('/setup')) {
+      setupReads++;
+      return setupAnswer ? setupAnswer() : jsonResponse(200, setupState);
+    }
     if (s.includes('/api/superuser/') && s.includes('/users')) {
       return jsonResponse(200, { users: [], total: 0, counts: { all: 0, admins: 0, teachers: 0, students: 0, disabled: 0 } });
     }
@@ -31,6 +37,17 @@ function dispatchFetch() {
     return jsonResponse(200, []);
   });
 }
+// Set up D13: the shell's one read. Over by default, as on an established site.
+function setupOf(on: boolean): PanelSetup {
+  return {
+    wizard_on: on, step: 1,
+    steps: [0, 1, 2, 3].map(() => ({ passed: false, done: false, reason: null })),
+    course: null, course_without_admin: null, email_set_up: false, pin_minutes: 10, defaults_in_use: true,
+  };
+}
+let setupState: PanelSetup = setupOf(false);
+let setupAnswer: (() => Promise<Response> | Response) | null = null;
+let setupReads = 0;
 const BRANDING = {
   name: 'Mathion', logo: null, icon: null,
   colours: { vars: [], changes: {}, warnings: [] },
@@ -79,6 +96,10 @@ beforeEach(() => {
   router.currentRoute.path = '/';
   router.currentRoute.search = '';
   router.currentRoute.hash = '';
+  setupState = setupOf(false);
+  setupAnswer = null;
+  setupReads = 0;
+  sessionStorage.clear();
 });
 afterEach(() => {
   if (component) { unmount(component); component = null; }
@@ -306,4 +327,216 @@ it('a 401 keeps the panel path for after sign-in and goes to /login', async () =
   expect(sessionStorage.getItem('superuser_return_path')).toBe('/superuser/T401');
   expect(navSpy).toHaveBeenCalledWith('/login', { replace: true, force: true });
   expect(String(navSpy.mock.calls[0][0])).toBe('/login');
+});
+
+// --- Set up D1, D2, D3, D13 ---
+
+it("opens on Set up when on, from the panel's own address, and marks the tab", async () => {
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  setupState = setupOf(true);
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  expect(navSpy).toHaveBeenCalledWith('/superuser/T/setup', { replace: true });
+  expect(sessionStorage.getItem(SETUP_MARK)).toBe('T');
+  expect(pillTexts()).toEqual(['Set up', 'Dashboard', 'Users', 'Courses', 'Settings', 'Branding']);
+  expect(pills()[0].getAttribute('href')).toBe('/superuser/T/setup');
+});
+
+it('shows only its bar until the first read answers', async () => {
+  let answer!: (r: Response) => void;
+  setupAnswer = () => new Promise<Response>((r) => { answer = r; });
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  expect(target.querySelector('header.su-header')).not.toBeNull();
+  expect(target.querySelector('main.su-main')?.children.length).toBe(0);
+  answer(jsonResponse(200, setupOf(false)));
+  await settle();
+  expect(target.querySelector('.dashboard')).not.toBeNull();
+});
+
+it('reload of Dashboard stays when marked', async () => {
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  sessionStorage.setItem(SETUP_MARK, 'T');
+  setupState = setupOf(true);
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  expect(navSpy).not.toHaveBeenCalled();
+  expect(target.querySelector('.dashboard')).not.toBeNull();
+  expect(pillTexts()[0]).toBe('Set up');
+});
+
+it("a mark for another link's token counts as none", async () => {
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  sessionStorage.setItem(SETUP_MARK, 'OLD');
+  setupState = setupOf(true);
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  expect(navSpy).toHaveBeenCalledWith('/superuser/T/setup', { replace: true });
+});
+
+it('another page marks the tab but stays put', async () => {
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  setupState = setupOf(true);
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T/users';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  expect(navSpy).not.toHaveBeenCalled();
+  expect(sessionStorage.getItem(SETUP_MARK)).toBe('T');
+});
+
+it('pill first while on, gone after over once you leave Set up', async () => {
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  setupState = setupOf(true);
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T/users';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  expect(pillTexts()[0]).toBe('Set up');
+  // Entered while the shell holds "on": the page opens; a later "over" keeps it (D1, D13).
+  setupState = setupOf(false);
+  router.currentRoute.path = '/superuser/T/setup';
+  await settle();
+  expect(target.querySelector('main.su-main h1')?.textContent).toBe('Set up your site');
+  expect(pillTexts()[0]).toBe('Set up');
+  expect(pills()[0].getAttribute('aria-current')).toBe('page');
+  expect(navSpy).not.toHaveBeenCalled();
+  router.currentRoute.path = '/superuser/T';
+  await settle();
+  expect(pillTexts()).toEqual(['Dashboard', 'Users', 'Courses', 'Settings', 'Branding']);
+});
+
+it("setup over on entry replaces the address with the panel's own", async () => {
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  sessionStorage.setItem(SETUP_MARK, 'T');
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T/setup';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  expect(navSpy).toHaveBeenCalledWith('/superuser/T', { replace: true });
+  expect(sessionStorage.getItem(SETUP_MARK)).toBe('T');   // only "on" writes it, only sign-out clears it
+});
+
+it('a failed first read: the Dashboard, no pill, no redirect; on Set up the error state', async () => {
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  setupAnswer = () => jsonResponse(500, { detail: 'Boom.' });
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  expect(navSpy).not.toHaveBeenCalled();
+  expect(target.querySelector('.dashboard')).not.toBeNull();
+  expect(pillTexts()[0]).toBe('Dashboard');
+  expect(sessionStorage.getItem(SETUP_MARK)).toBeNull();
+  router.currentRoute.path = '/superuser/T/setup';
+  await settle();
+  const err = target.querySelector('main.su-main .error-state');
+  expect(err?.textContent ?? '').toContain('Could not load set up.');
+  expect(err?.textContent ?? '').toContain('Boom.');
+  // Try again reads once more; over then leaves for the Dashboard (D1).
+  setupAnswer = null;
+  buttonByText(target, 'Try again')!.click();
+  await settle();
+  expect(navSpy).toHaveBeenCalledWith('/superuser/T', { replace: true });
+});
+
+it('pill click never redirects', async () => {
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  let answer!: (r: Response) => void;
+  setupAnswer = () => new Promise<Response>((r) => { answer = r; });
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  pills()[0].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+  expect(navSpy).toHaveBeenCalledWith('/superuser/T');
+  navSpy.mockClear();
+  answer(jsonResponse(200, setupOf(true)));
+  await settle();
+  expect(navSpy).not.toHaveBeenCalled();
+  expect(sessionStorage.getItem(SETUP_MARK)).toBe('T');
+});
+
+it('re-reads on page change', async () => {
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  expect(setupReads).toBe(1);
+  router.currentRoute.path = '/superuser/T/users';
+  await settle();
+  expect(setupReads).toBe(2);
+  router.currentRoute.path = '/superuser/T/courses';
+  await settle();
+  expect(setupReads).toBe(3);
+});
+
+it('expired view clears the mark', async () => {
+  sessionStorage.setItem(SETUP_MARK, 'T');
+  vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(404, { detail: 'Not Found' })));
+  router.currentRoute.path = '/superuser/T/setup';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  expect(target.querySelector('main.su-main h1')?.textContent).toBe('Set up');
+  expect(target.querySelector('.su-expired')).not.toBeNull();
+  expect(sessionStorage.getItem(SETUP_MARK)).toBeNull();
+});
+
+it('sign out asks when dirty, and clears the mark', async () => {
+  const auth = await import('../lib/auth.svelte');
+  (auth.logout as ReturnType<typeof vi.fn>).mockClear();
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  const real = dirtyMod.createDirtyRegistry;
+  let registry!: dirtyMod.DirtyRegistry;
+  vi.spyOn(dirtyMod, 'createDirtyRegistry').mockImplementation(() => (registry = real()));
+  sessionStorage.setItem(SETUP_MARK, 'T');
+  vi.stubGlobal('fetch', dispatchFetch());
+  signIn();
+  router.currentRoute.path = '/superuser/T';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  const discard = vi.fn();
+  registry.register({ isDirty: true, discard });
+  buttonByText(target, 'Sign out')!.click();
+  await settle();
+  expect(target.querySelector('.inline-confirm')?.textContent ?? '').toContain('Discard unsaved changes and continue?');
+  expect(auth.logout).not.toHaveBeenCalled();
+  // Cancel stays.
+  (target.querySelector('.inline-confirm button.cancel') as HTMLButtonElement).click();
+  await settle();
+  expect(target.querySelector('.inline-confirm')).toBeNull();
+  expect(auth.logout).not.toHaveBeenCalled();
+  // Discard signs out.
+  buttonByText(target, 'Sign out')!.click();
+  await settle();
+  (target.querySelector('.inline-confirm button.confirm') as HTMLButtonElement).click();
+  await settle();
+  expect(discard).toHaveBeenCalled();
+  expect(auth.logout).toHaveBeenCalled();
+  expect(navSpy).toHaveBeenCalledWith('/login', { replace: true, force: true });
+  expect(sessionStorage.getItem(SETUP_MARK)).toBeNull();
+});
+
+it('a pill click while dirty asks through the guard', async () => {
+  const real = dirtyMod.createDirtyRegistry;
+  let registry!: dirtyMod.DirtyRegistry;
+  vi.spyOn(dirtyMod, 'createDirtyRegistry').mockImplementation(() => (registry = real()));
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.__resetGuardsForTests();
+  router.currentRoute.path = '/superuser/T';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  registry.register({ isDirty: true });
+  pills()[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+  await settle();
+  expect(target.querySelector('.inline-confirm')?.textContent ?? '').toContain('Discard unsaved changes and continue?');
+  expect(router.currentRoute.path).toBe('/superuser/T');
 });

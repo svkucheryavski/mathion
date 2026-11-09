@@ -370,8 +370,8 @@ export function saveTheme(token: string, part: BrandingPart, filename = 'theme.c
 
 // --- The shell (D23, D25) ---
 
-/** The panel's five pages; the shell reads it from the route. */
-export type PanelPage = 'dashboard' | 'users' | 'courses' | 'settings' | 'branding';
+/** The panel's pages, Set up included (Set up D1); the shell reads it from the route. */
+export type PanelPage = 'setup' | 'dashboard' | 'users' | 'courses' | 'settings' | 'branding';
 
 // --- Errors (D25) ---
 
