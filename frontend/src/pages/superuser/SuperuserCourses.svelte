@@ -6,7 +6,7 @@
   // action replaces it (D5a).
   import { ApiError } from '../../lib/api';
   import {
-    adminNote, assignAdmin, createCourse, deleteCourse, listCourses, panelError, pinCommand, removeAdmin, updateCourse,
+    adminIsMe, adminNote, assignAdmin, createCourse, deleteCourse, listCourses, panelError, pinCommand, removeAdmin, updateCourse,
     type AdminAssignResult, type PanelCourse, type PanelOnAuth,
   } from '../../lib/superuser';
   import PanelHead from '../../components/superuser/PanelHead.svelte';
@@ -19,8 +19,10 @@
   import Skeleton from '../../components/ui/Skeleton.svelte';
   import ErrorState from '../../components/ui/ErrorState.svelte';
   import EmptyState from '../../components/ui/EmptyState.svelte';
+  import { session } from '../../stores/session.svelte';
+  import type { SetupStore } from '../../lib/setupStore.svelte';
 
-  let { token, onAuth }: { token: string; onAuth: PanelOnAuth } = $props();
+  let { token, onAuth, setup }: { token: string; onAuth: PanelOnAuth; setup: SetupStore } = $props();
 
   type Note = { id: number; text: string; command?: string };
   type Dialog = { kind: 'new' } | { kind: 'edit' | 'delete'; course: PanelCourse };
@@ -52,10 +54,15 @@
     void load();
   });
 
-  // D5a: the superuser always learns whether the colleague was told.
+  // D5a: the superuser always learns whether the colleague was told. Set up
+  // D8: "you are its admin" when it's the signed-in superuser, and Email's
+  // not-done reason after a queued email.
   function showResult(result: AdminAssignResult, kind: 'create' | 'assign'): void {
-    const command = result.admin_email === 'email_off' ? pinCommand(result.admin.email) : undefined;
-    note = { id: ++noteSeq, text: adminNote(result, kind), command };
+    const me = session.user?.email ?? null;
+    const emailReason = setup.state?.steps[0].reason ?? null;   // null once Email is done
+    const command = result.admin_email === 'email_off' && !adminIsMe(result.admin.email, me)
+      ? pinCommand(result.admin.email) : undefined;
+    note = { id: ++noteSeq, text: adminNote(result, kind, { me, emailReason }), command };
   }
 
   // D25: a 409 means the list on screen is stale (gone, or taken). The dialog

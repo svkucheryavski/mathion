@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2954
+EXPECTED_CHECKS=2966
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -6288,6 +6288,21 @@ if [[ -n $REPLY ]]; then
   d '\.ec-problems' '' 'color:var\(--danger\)'
   d '\.ec-err' '' 'color:var\(--danger\)'
   sweep EditColoursDialog $H
+fi
+
+# Set up D12: the Dashboard's Finish setting up card, a white box like the
+# stat cards; reasons muted, the actions as links, a blocked Keep muted.
+own fc-card FinishCard.svelte
+uniq1 fc-card
+if [[ -n $REPLY ]]; then
+  N=FinishCard; H=$REPLY
+  d '\.fc-card' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius-lg\)' 'background:var\(--surface\)'
+  d '\.fc-count' '' 'color:var\(--muted\)'
+  d '\.fc-reason' '' 'color:var\(--muted\)'
+  d '\.fc-link' '' 'color:var\(--primary\)'
+  d '\.fc-keep\[aria-disabled=true\]' '' 'color:var\(--muted\)'
+  d '\.fc-err' '' 'color:var\(--danger\)'
+  sweep FinishCard $H
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

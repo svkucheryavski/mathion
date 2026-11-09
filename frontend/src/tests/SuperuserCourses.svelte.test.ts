@@ -2,6 +2,9 @@ import { it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import SuperuserCourses from '../pages/superuser/SuperuserCourses.svelte';
 import type { PanelAdmin, PanelCourse, AdminAssignResult } from '../lib/superuser';
+import { SetupStore } from '../lib/setupStore.svelte';
+import type { PanelSetup } from '../lib/setup';
+import { session } from '../stores/session.svelte';
 
 async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 function jsonResponse(status: number, body: unknown) {
@@ -28,8 +31,10 @@ let calls: string[];
 let target: HTMLDivElement;
 let cmp: ReturnType<typeof mount> | null = null;
 let onAuth: ReturnType<typeof vi.fn>;
+let setup: SetupStore | null = null;
 
 beforeEach(() => {
+  setupState = null;
   calls = [];
   routes = { 'GET /courses': () => [200, courses()] };
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -43,15 +48,20 @@ beforeEach(() => {
 });
 afterEach(() => {
   if (cmp) unmount(cmp); cmp = null; target?.remove();
+  setup?.dispose(); setup = null;
+  session.user = null;
   document.documentElement.style.overflow = '';
   vi.useRealTimers(); vi.restoreAllMocks();
 });
 
+let setupState: PanelSetup | null = null;
 async function render() {
   target = document.createElement('div');
   document.body.appendChild(target);
   onAuth = vi.fn();
-  cmp = mount(SuperuserCourses, { target, props: { token: 'T', onAuth } });
+  setup = new SetupStore('T', onAuth);
+  if (setupState) setup.state = setupState;
+  cmp = mount(SuperuserCourses, { target, props: { token: 'T', onAuth, setup } });
   await settle();
 }
 const rows = () => [...target.querySelectorAll<HTMLTableRowElement>('tbody tr.c-row')];
@@ -302,4 +312,52 @@ it('the next note replaces the last one as a fresh element, so it is announced',
   expect(target.querySelectorAll('.note-strip')).toHaveLength(1);
   note()!.querySelector<HTMLButtonElement>('button[data-glyph="close"]')!.click(); await settle();
   expect(note()).toBeNull();
+});
+
+// --- Set up D8: the note when the admin is you, and Email's reason ---
+
+function stateWithEmail(done: boolean): PanelSetup {
+  return {
+    wizard_on: false, step: 1,
+    steps: [0, 1, 2, 3].map((i) => ({ passed: true, done: i > 0 || done, reason: i === 0 && !done ? 'Not tested yet: send a test email.' : null })),
+    course: null, course_without_admin: null, email_set_up: true, pin_minutes: 10, defaults_in_use: false,
+  };
+}
+function signIn(email: string) {
+  session.user = {
+    id: 1, email, full_name: 'Sam Admin', is_superuser: true, is_disabled: false,
+    photo_url: null, has_course_admin: false, has_run_teacher: false,
+  };
+}
+async function createVia(outcome: AdminAssignResult['admin_email']) {
+  routes['POST /courses'] = () => [201, assigned(courses()[0], outcome)];
+  routes['POST /accounts/lookup'] = () => [200, { status: 'existing', full_name: 'Anna Holm' }];
+  await render();
+  target.querySelector<HTMLButtonElement>('.panel-head button')!.click(); await settle();
+  type(panelInput('Course name'), 'Statistics 101');
+  type(panelInput("Admin's email"), 'aho@uni.dk');
+  footButton('Create').click(); await settle();
+}
+
+it('New course with yourself as admin: "you are its admin", no command (compared lower-cased)', async () => {
+  signIn('AHO@uni.dk');
+  await createVia('email_off');
+  expect(note()?.textContent?.trim()).toBe(
+    "Statistics 101 is created; you are its admin. You'll find it on the Courses page of the main site.");
+  expect(note()?.querySelector('code')).toBeNull();
+});
+
+it("a queued note adds Email's reason while the Email step isn't done", async () => {
+  setupState = stateWithEmail(false);
+  await createVia('queued');
+  expect(note()?.textContent?.trim()).toBe(
+    'Statistics 101 is created; Anna Holm is its admin. An email with a sign-in link is on its way to aho@uni.dk. '
+    + 'Not tested yet: send a test email.');
+});
+
+it('no reason once the Email step is done', async () => {
+  setupState = stateWithEmail(true);
+  await createVia('queued');
+  expect(note()?.textContent?.trim()).toBe(
+    'Statistics 101 is created; Anna Holm is its admin. An email with a sign-in link is on its way to aho@uni.dk.');
 });

@@ -41,3 +41,12 @@ Minors from the per-task reviews and the whole-branch review, by task, plus the 
 - **Cancel on the shell's leave question drops focus to `<body>`** (Opus r1 M4, Fable r1 M5). VersionsPage and VersionEditPage put it back with `focusAfter` on "cancel". Fix where the question ends up in Task 7.
 - **A ⌘-, Ctrl- or middle-click on a pill cancels this tab's redirect** (Opus r1 M6, Fable r1 M4), though the click opens another tab. Fix: `routeClick(e, href); if (e.defaultPrevented) entryOpen = false;`.
 - **Test gaps** (Opus r1 M5, Fable r1 note). Not pinned: a write queued while a read waits; a 404 to `onAuth` once; the four write calls' URLs; only the bar while "leaving"; re-entering `/setup` after it held "open" through an over answer, which should then leave.
+
+## Task 6 (the Finish setting up card and the Courses note)
+
+- **A failed Keep's sentence outlives its line** (Opus r1 M1). If a later read takes the Sign-in line away, the card's error stays under the other lines. Fix: clear `error` when the Sign-in line goes.
+- **A successful Keep drops focus to the page** (Opus r1 M2): it removes its own button. Fix: move focus to the card's heading (tabindex -1) or the next line's link.
+- **Keep makes the pills wait** (Opus r1 M3, Fable r1 M4). Ruling 1 sends it through `setup.write`, which sets `busy`; the "Do it now" links don't wait. Covered by Task 7's waiting-pill styling and test (Task 5 item above).
+- **Try again on the Dashboard gives no sign of a press** (Opus r1 M4, Fable r1 M3). It isn't blocked while its read runs, and a failure with the same sentence leaves the screen unchanged. Fix if wanted: a `reading` flag on the store, bound to the button's loading state.
+- **Test gaps** (Opus r1 M5, Fable r1 M1, M2, M5). Not pinned: Keep's double click and its `aria-disabled` while running; the Edit dialog's assign when the admin is you, at page level; "every step skipped (D4a)" in `setup.test.ts` only repeats "done steps are left out" (D4a is the server's): rename it.
+- **Where the "no `mathion pin` command when it's you" rule lives** (Fable r1 M2). The Courses page decides it, `adminNote` writes the sentence; Task 9's step note needs the same. Fix in Task 9: a helper beside `adminNote` that returns `{ text, command? }`, used by both.

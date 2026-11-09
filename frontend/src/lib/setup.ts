@@ -92,3 +92,38 @@ export function entryMove(seg: string | undefined, state: PanelSetup, marked: bo
   if (seg === 'setup') return state.wizard_on ? null : 'to-dashboard';
   return null;
 }
+
+// --- D12: the Finish setting up card ---
+
+/** One line of the card: a step not done, with its reason and where to do it. */
+export type FinishLine = {
+  step: 1 | 2 | 3 | 4;
+  title: string;
+  reason: string | null;
+  page: 'settings' | 'branding' | 'courses';
+  /** D12: only the Sign-in and limits line has Keep these values. */
+  keep: boolean;
+};
+
+const FINISH: { title: string; page: FinishLine['page'] }[] = [
+  { title: 'Email', page: 'settings' },
+  { title: 'Site name and logo', page: 'branding' },
+  { title: 'First course and its admin', page: 'courses' },
+  { title: 'Sign-in rules and limits', page: 'settings' },
+];
+
+/** D12: one line per step not done, in step order. D6's and D7's reasons come
+ *  from the server; step 3 names the course with no admin; step 4 says when
+ *  Mathion's defaults are in use. */
+export function finishLines(state: PanelSetup): FinishLine[] {
+  const lines: FinishLine[] = [];
+  state.steps.forEach((s, i) => {
+    if (s.done) return;
+    const step = (i + 1) as FinishLine['step'];
+    let reason = s.reason;
+    if (step === 3) reason = state.course_without_admin ? `${state.course_without_admin} has no admin` : null;
+    if (step === 4) reason = state.defaults_in_use ? "(Mathion's defaults are in use)" : null;
+    lines.push({ step, ...FINISH[i], reason, keep: step === 4 });
+  });
+  return lines;
+}

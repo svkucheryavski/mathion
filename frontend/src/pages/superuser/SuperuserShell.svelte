@@ -191,9 +191,9 @@
       {#if page === 'setup'}
         <SuperuserSetup {setup} />
       {:else if page === 'dashboard'}
-        <SuperuserDashboard {token} {onAuth} />
+        <SuperuserDashboard {token} {onAuth} {setup} />
       {:else if page === 'courses'}
-        <SuperuserCourses {token} {onAuth} />
+        <SuperuserCourses {token} {onAuth} {setup} />
       {:else if page === 'settings'}
         <SuperuserSettings {token} {onAuth} />
       {:else if page === 'branding'}

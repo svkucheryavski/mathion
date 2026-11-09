@@ -113,6 +113,39 @@ it('the result sentence falls back to the email for an admin with no name', () =
     'aho@uni.dk is now the admin of Statistics 101. An email with a sign-in link is on its way to aho@uni.dk.');
 });
 
+// --- adminNote when the admin is you, and Email's reason (Set up D8) ---
+
+it('the admin is you: the three notes, with no email, PIN or disabled sentence', () => {
+  const me = { me: 'aho@uni.dk' };
+  for (const outcome of ['queued', 'email_off', 'disabled'] as const) {
+    expect(adminNote(result({ admin_email: outcome }), 'create', me)).toBe(
+      "Statistics 101 is created; you are its admin. You'll find it on the Courses page of the main site.");
+    expect(adminNote(result({ admin_email: outcome }), 'assign', me)).toBe(
+      "You are now the admin of Statistics 101. You'll find it on the Courses page of the main site.");
+  }
+  expect(adminNote(result({ admin_email: 'unchanged' }), 'assign', me)).toBe('You are already its admin; nothing changed.');
+});
+
+it('you is compared lower-cased', () => {
+  expect(adminNote(result({}, { email: 'Me@X.org' }), 'create', { me: 'me@x.org' })).toBe(
+    "Statistics 101 is created; you are its admin. You'll find it on the Courses page of the main site.");
+});
+
+it('no signed-in email: the usual note', () => {
+  expect(adminNote(result(), 'create', { me: null })).toBe(
+    'Statistics 101 is created; Anna Holm is its admin. An email with a sign-in link is on its way to aho@uni.dk.');
+});
+
+it("queued with Email's reason: the reason follows after one space; other outcomes ignore it", () => {
+  const why = { emailReason: 'Not tested yet: send a test email.' };
+  expect(adminNote(result(), 'create', why)).toBe(
+    'Statistics 101 is created; Anna Holm is its admin. An email with a sign-in link is on its way to aho@uni.dk. '
+    + 'Not tested yet: send a test email.');
+  expect(adminNote(result({ admin_email: 'disabled' }), 'create', why)).not.toContain('Not tested yet');
+  expect(adminNote(result({ admin_email: 'unchanged' }), 'assign', why)).toBe('They are already the admin; nothing changed.');
+  expect(adminNote(result(), 'create', { me: 'aho@uni.dk', ...why })).not.toContain('Not tested yet');
+});
+
 // --- Users page copy (D14, D15, D18) ---
 
 function user(over: Partial<PanelUser> = {}): PanelUser {
