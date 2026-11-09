@@ -1,14 +1,21 @@
-"""The panel's Set up wizard (superuser Set up spec): when each step is done."""
+"""The panel's Set up wizard (superuser Set up spec): when each step is
+done, the state read, and the wizard's moves."""
 from dataclasses import dataclass
 
-from sqlalchemy import exists, select
+from psycopg.errors import UndefinedTable
+from sqlalchemy import exists, select, update
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
+from mathion import branding
+from mathion.api.superuser_courses import _panel_admin, email_is_set_up
 from mathion.branding import NAME_DEFAULT
+from mathion.config import settings
 from mathion.models import Course, CourseAdmin
-from mathion.models_auth import User
+from mathion.models_auth import SiteSetup, User
 from mathion.notifications.mailer import DEV_MODES
-from mathion.site_settings import DEFAULTS, SiteSettingsView, password_is_readable
+from mathion.schemas import PanelSetup, PanelSetupCourse, PanelSetupStep
+from mathion.site_settings import DEFAULTS, SiteSettingsView, get_row, load as load_site, password_is_readable
 
 STEPS = ("email", "site", "course", "sign_in")
 
@@ -83,3 +90,127 @@ def course_facts(db: Session) -> CourseFacts:
 def defaults_in_use(view: SiteSettingsView) -> bool:
     """D12: the six sign-in and limit values are all Mathion's."""
     return all(getattr(view, f) == getattr(DEFAULTS, f) for f in _SIGN_IN_FIELDS)
+
+
+# --- the state read and the moves (D4, D4a, D5, D5a, D10, D13) ---
+
+def _setup_row(db: Session, *, lock: bool = False) -> SiteSetup | None:
+    """The wizard's row; None when it or its table is missing (D10: over).
+    A savepoint, so a missing table never rolls back the caller's work."""
+    stmt = select(SiteSetup).where(SiteSetup.id == 1).execution_options(populate_existing=True)
+    if lock:
+        stmt = stmt.with_for_update()
+    try:
+        with db.begin_nested():
+            return db.execute(stmt).scalar_one_or_none()
+    except ProgrammingError as e:
+        if not isinstance(e.orig, UndefinedTable):
+            raise
+        return None
+
+
+def _done(db: Session) -> tuple[list[StepDone], SiteSettingsView, CourseFacts]:
+    view = load_site(db)
+    facts = course_facts(db)
+    done = [
+        email_done(view, settings.secret_key, settings.email_mode),
+        site_done(branding.read_in(db).name, view.site_name_kept),  # never the cached copy (§6)
+        StepDone(facts.first is not None),
+        StepDone(view.sign_in_kept),
+    ]
+    return done, view, facts
+
+
+def _passed(mask: int, done: list[StepDone]) -> list[bool]:
+    return [bool(mask & (1 << i)) or d.done for i, d in enumerate(done)]
+
+
+def _panel_course(facts: CourseFacts) -> PanelSetupCourse | None:
+    if facts.first is None:
+        return None
+    course, admin = facts.first
+    return PanelSetupCourse(name=course.name, sign_in_url=f"{settings.base_url}/courses/{course.slug}/edit",
+                            admin=_panel_admin(admin))
+
+
+def read(db: Session) -> PanelSetup:
+    """D13's one read. D5a: on with every step passed (done anywhere, or
+    skipped) stores "over" with one conditional update, then answers."""
+    row = _setup_row(db)
+    done, view, facts = _done(db)
+    passed = _passed(row.passed_mask if row is not None else 0, done)
+    on = row is not None and row.wizard_on
+    if on and all(passed):
+        db.execute(update(SiteSetup).where(SiteSetup.id == 1, SiteSetup.wizard_on).values(wizard_on=False))
+        db.commit()
+        on = False
+    return PanelSetup(
+        wizard_on=on,
+        step=row.step if on else 1,
+        steps=[PanelSetupStep(passed=p, done=d.done, reason=d.reason) for p, d in zip(passed, done)],
+        course=_panel_course(facts),
+        course_without_admin=facts.without_admin,
+        email_set_up=email_is_set_up(db),
+        pin_minutes=view.pin_minutes,
+        defaults_in_use=defaults_in_use(view),
+    )
+
+
+def _live_row(db: Session) -> SiteSetup | None:
+    """The row, locked, while the wizard is on; otherwise None and the
+    transaction ended, so a late write changes nothing (D5a)."""
+    row = _setup_row(db, lock=True)
+    if row is None or not row.wizard_on:
+        db.rollback()
+        return None
+    return row
+
+
+def go_to(db: Session, n: int) -> PanelSetup:
+    row = _live_row(db)
+    if row is not None:
+        row.step = n
+        db.commit()
+    return read(db)
+
+
+def _pass(db: Session, n: int, *, kept: bool) -> PanelSetup:
+    """D4: mark step n passed and go to the first step after it that isn't,
+    wrapping round; none left ends the wizard (D5). `kept` marks step 2's or
+    step 4's defaults kept (D4a, D7)."""
+    row = _live_row(db)
+    if row is None:
+        return read(db)
+    if kept and n == 2:
+        get_row(db).site_name_kept = True
+    elif kept and n == 4:
+        get_row(db).sign_in_kept = True
+    row.passed_mask |= 1 << (n - 1)
+    passed = _passed(row.passed_mask, _done(db)[0])
+    after = [(n + i - 1) % 4 + 1 for i in range(1, 4)]
+    nxt = next((k for k in after if not passed[k - 1]), None)
+    if nxt is None:
+        row.wizard_on = False
+    else:
+        row.step = nxt
+    db.commit()
+    return read(db)
+
+
+def skip(db: Session, n: int) -> PanelSetup:
+    """The skip button: no values saved; steps 2 and 4 keep their defaults (D4a)."""
+    return _pass(db, n, kept=n in (2, 4))
+
+
+def saved(db: Session, n: int) -> PanelSetup:
+    """After a step's own saves, or Continue. Step 2's save marks the name kept
+    (D7); step 4's keep goes through keep_sign_in."""
+    return _pass(db, n, kept=n == 2)
+
+
+def keep_sign_in(db: Session) -> PanelSetup:
+    """D9, D12: the Dashboard's Keep these values and step 4's unchanged save.
+    Not a wizard write: it marks the step whatever the wizard's state."""
+    get_row(db).sign_in_kept = True
+    db.commit()
+    return read(db)
