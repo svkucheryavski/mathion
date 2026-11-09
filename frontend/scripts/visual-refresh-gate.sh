@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3009
+EXPECTED_CHECKS=3022
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -6351,6 +6351,23 @@ if [[ -n $REPLY ]]; then
   d '\.se-result\.ok' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
   d '\.se-result\.err' '' 'background:var\(--danger-panel-bg\)' 'color:var\(--danger-panel-fg\)'
   sweep StepEmail $H
+fi
+# Set up D7, D9: steps 2 and 4, the name step's reason in --gold-text and
+# their lead-ins (Logo; Sign-in, File limits) as small headings.
+own ss-reason StepSite.svelte
+uniq1 ss-reason
+if [[ -n $REPLY ]]; then
+  N=StepSite; H=$REPLY
+  d '\.ss-reason' '' 'color:var\(--gold-text\)'
+  d '\.ss-sub' '' 'font-weight:600' 'color:var\(--text\)'
+  sweep StepSite $H
+fi
+own si-sub StepSignIn.svelte
+uniq1 si-sub
+if [[ -n $REPLY ]]; then
+  N=StepSignIn; H=$REPLY
+  d '\.si-sub' '' 'font-weight:600' 'color:var\(--text\)'
+  sweep StepSignIn $H
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

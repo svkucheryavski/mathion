@@ -14,6 +14,8 @@
   import StepCard from '../../components/superuser/setup/StepCard.svelte';
   import AllSetCard from '../../components/superuser/setup/AllSetCard.svelte';
   import StepEmail from '../../components/superuser/setup/StepEmail.svelte';
+  import StepSite from '../../components/superuser/setup/StepSite.svelte';
+  import StepSignIn from '../../components/superuser/setup/StepSignIn.svelte';
   import { DISCARD_NAV_ASK, focusAfter, InPlaceAsk } from '../../lib/askInPlace.svelte';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../../lib/dirtyRegistry.svelte';
   import { session } from '../../stores/session.svelte';
@@ -121,8 +123,12 @@
             <AllSetCard state={setup.state} {token} />
           {:else if card === 1}
             <StepEmail {...stepProps()} />
+          {:else if card === 2}
+            <StepSite {...stepProps()} />
+          {:else if card === 4}
+            <StepSignIn {...stepProps()} />
           {:else}
-            <!-- Tasks 8 and 9 fill steps 2-4; until then, their frame alone. -->
+            <!-- Task 9 fills step 3; until then, its frame alone. -->
             {@const n = card}
             <StepCard {n} title={STEP_LABELS[n - 1]} note={null} error={moveError} {busy} mode="none" canSave={false}
               onBack={back} onSkip={setup.state.steps[n - 1].done ? undefined : skip} onSave={() => {}} />

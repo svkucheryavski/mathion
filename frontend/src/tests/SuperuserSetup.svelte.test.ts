@@ -3,11 +3,14 @@ import { mount, unmount, flushSync } from 'svelte';
 import SuperuserSetup from '../pages/superuser/SuperuserSetup.svelte';
 import { SetupStore } from '../lib/setupStore.svelte';
 import type { PanelSetup } from '../lib/setup';
-import type { PanelSettings } from '../lib/superuser';
+import type { PanelBranding, PanelSettings } from '../lib/superuser';
+import { branding, setBranding, DEFAULT_BRANDING } from '../lib/branding.svelte';
+import { crc32 } from '../lib/pngCheck';
 import { createDirtyRegistry, DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../lib/dirtyRegistry.svelte';
 import * as router from '../lib/router.svelte';
 
-// Set up D3-D6: the page frame, its moves, All set and step 1 (Email).
+// Set up D3-D9: the page frame, its moves, All set, step 1 (Email), step 2
+// (Site name and logo) and step 4 (Sign-in rules and limits).
 
 const EMAIL_REASON = 'Not tested yet: send a test email.';
 function state(over: Partial<PanelSetup> = {}, done: boolean[] = [false, false, false, false], passed?: boolean[]): PanelSetup {
@@ -33,10 +36,33 @@ function settings(email: Partial<PanelSettings['email']> = {}): PanelSettings {
     site: { base_url: 'https://m.example' },
   };
 }
+function brandingOf(name = 'Mathion', logo = false): PanelBranding {
+  return {
+    name, logo: logo ? { width: 400, height: 80 } : null, icon: null,
+    colours: { vars: [], changes: {}, warnings: [] },
+    public: { name, logo: logo ? { version: 'a'.repeat(16), width: 400, height: 80 } : null, icon: null, theme: null },
+  };
+}
+// A real PNG of the given size (the check reads only the header and the CRCs).
+const u32 = (n: number) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+function chunk(kind: string, data: number[]) {
+  const k = [...kind].map((c) => c.charCodeAt(0));
+  return [...u32(data.length), ...k, ...data, ...u32(crc32(new Uint8Array([...k, ...data])))];
+}
+function pngOf(width: number, height: number): Uint8Array {
+  return new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ...chunk('IHDR', [...u32(width), ...u32(height), 8, 6, 0, 0, 0]),
+    ...chunk('IDAT', [0x78, 0x9c, 0x63, 0, 0, 0, 1, 0, 1]),
+    ...chunk('IEND', []),
+  ]);
+}
 function jsonResponse(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 async function settle() { for (let i = 0; i < 16; i++) await Promise.resolve(); flushSync(); }
+/** FileReader answers in a task, not a microtask. */
+async function tick() { await new Promise((r) => setTimeout(r, 0)); await settle(); }
 
 type Answer = [number, unknown];
 type Handler = (body: unknown) => Answer | Promise<Answer>;
@@ -47,23 +73,30 @@ let cmp: ReturnType<typeof mount> | null = null;
 let setup: SetupStore;
 let registry: DirtyRegistry;
 let onAuth: ReturnType<typeof vi.fn>;
+// img.decode() calls, in order, each answered by the test (jsdom has none).
+let decodes: { resolve: () => void; reject: () => void }[];
 
 beforeEach(() => {
   calls = [];
+  decodes = [];
   routes = {
     'GET /settings': () => [200, settings()],
+    'GET /branding': () => [200, brandingOf()],
     'POST /setup/skip': (b) => [200, state({ step: (b as { step: number }).step + 1 }, [false, false, false, false], [true, false, false, false])],
     'POST /setup/go': (b) => [200, state({ step: (b as { step: number }).step })],
   };
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const key = `${init?.method ?? 'GET'} ${String(url).replace('/api/superuser/T', '')}`;
-    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    const body = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body;
     calls.push({ key, body });
     const h = routes[key];
     if (!h) return jsonResponse(500, { detail: `no route ${key}` });
     const [status, answer] = await h(body);
     return jsonResponse(status, answer);
   }));
+  (HTMLImageElement.prototype as { decode?: () => Promise<void> }).decode = function () {
+    return new Promise<void>((resolve, reject) => decodes.push({ resolve, reject: () => reject(new Error('EncodingError')) }));
+  };
   target = document.createElement('div');
   document.body.appendChild(target);
   onAuth = vi.fn();
@@ -75,6 +108,9 @@ afterEach(() => {
   cmp = null;
   setup.dispose();
   target.remove();
+  delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
+  document.head.querySelectorAll('[data-branding]').forEach((e) => e.remove());
+  setBranding(DEFAULT_BRANDING);
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -99,7 +135,16 @@ const items = () => [...target.querySelectorAll<HTMLButtonElement>('.sl-item')];
 const err = () => card()?.querySelector('[role="alert"]')?.textContent ?? null;
 const input = (label: string) => [...target.querySelectorAll<HTMLInputElement>('input')].find((i) => i.labels?.[0]?.textContent?.trim() === label)!;
 function type(el: HTMLInputElement, v: string) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); flushSync(); }
-const writes = () => calls.filter((c) => c.key.startsWith('POST /setup') || c.key.startsWith('PATCH'));
+const writes = () => calls.filter((c) => /^(POST \/setup|POST \/branding|PATCH|PUT)/.test(c.key));
+const blocked = () => foot('save')!.getAttribute('aria-disabled') === 'true';
+const mark = (n: number) => items()[n - 1].querySelector('.sl-mark')!;
+/** Choose a file in the step's logo picker, as the browser's picker would. */
+async function choose(bytes: Uint8Array, name = 'school.png') {
+  const el = card()!.querySelector<HTMLInputElement>('input[type="file"]')!;
+  Object.defineProperty(el, 'files', { value: [new File([new Uint8Array(bytes)], name, { type: 'image/png' })], configurable: true });
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  for (let i = 0; i < 3; i++) await tick();
+}
 const confirmDiscard = () => target.querySelector<HTMLButtonElement>('[data-action="confirm-discard"]');
 const askCancel = () => target.querySelector<HTMLButtonElement>('.inline-confirm button.cancel');
 
@@ -543,4 +588,232 @@ it('a half-save re-reads the state, so the reason and the marks follow the saved
   expect(title()).toBe('Email');                // the error holds the card
   expect(err()).toBe('Boom.');
   expect(items()[0].querySelector('.sl-mark')!.classList.contains('done')).toBe(true);
+});
+
+// --- Step 2: Site name and logo (D7) ---
+
+it("step 2's title, note and the not-done reason, hidden while the form differs", async () => {
+  await render(state({ step: 2 }));
+  expect(title()).toBe('Site name and logo');
+  expect(card()!.querySelector('.st-note')?.textContent).toBe("Shown in every page's header and in emails.");
+  expect(card()!.textContent).toContain('The site is still called Mathion.');
+  expect(input('Site name').value).toBe('Mathion');
+  expect(blocked()).toBe(true);
+  type(input('Site name'), 'Riverside');
+  expect(card()!.textContent).not.toContain('The site is still called Mathion.');
+  expect(blocked()).toBe(false);
+});
+
+it('name then logo, each only when changed; Save and continue waits for the decode', async () => {
+  routes['PUT /branding/name'] = (b) => [200, brandingOf((b as { name: string }).name)];
+  routes['POST /branding/logo'] = () => [200, brandingOf('Riverside', true)];
+  routes['POST /setup/saved'] = () => [200, state({ step: 3 }, [false, true, false, false])];
+  await render(state({ step: 2 }));
+  type(input('Site name'), 'Riverside');
+  await choose(pngOf(400, 80));
+  expect(blocked()).toBe(true);
+  foot('save')!.click();
+  await settle();
+  expect(writes()).toEqual([]);
+  decodes[0].resolve();
+  await settle();
+  expect(blocked()).toBe(false);
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['PUT /branding/name', 'POST /branding/logo', 'POST /setup/saved']);
+  expect(writes()[0].body).toEqual({ name: 'Riverside' });
+  expect(((writes()[1].body as FormData).get('file') as File).name).toBe('school.png');
+  expect(writes()[2].body).toEqual({ step: 2 });
+  expect(title()).toBe('First course');
+});
+
+it('only the name when only the name changed, only the logo when only the logo changed', async () => {
+  routes['PUT /branding/name'] = (b) => [200, brandingOf((b as { name: string }).name)];
+  routes['POST /branding/logo'] = () => [200, brandingOf('Mathion', true)];
+  routes['POST /setup/saved'] = () => [200, state({ step: 3 }, [false, true, false, false])];
+  await render(state({ step: 2 }));
+  type(input('Site name'), 'Riverside');
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['PUT /branding/name', 'POST /setup/saved']);
+  unmount(cmp!);
+  cmp = null;
+  calls = [];
+  await render(state({ step: 2 }));
+  await choose(pngOf(400, 80));
+  decodes[0].resolve();
+  await settle();
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['POST /branding/logo', 'POST /setup/saved']);
+});
+
+it('logo refused after the name saved: name stays, error shows, retry sends only the logo', async () => {
+  routes['PUT /branding/name'] = (b) => [200, brandingOf((b as { name: string }).name)];
+  routes['POST /branding/logo'] = () => [422, { detail: 'This PNG is too small.' }];
+  routes['GET /setup'] = () => [200, state({ step: 2 }, [false, true, false, false])];
+  await render(state({ step: 2 }));
+  type(input('Site name'), 'Riverside');
+  await choose(pngOf(400, 80));
+  decodes[0].resolve();
+  await settle();
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['PUT /branding/name', 'POST /branding/logo']);
+  expect(err()).toBe('This PNG is too small.');
+  expect(title()).toBe('Site name and logo');
+  expect(input('Site name').value).toBe('Riverside');
+  // The half-save re-reads the state, so the list ticks the step (D5a).
+  expect(mark(2).classList.contains('done')).toBe(true);
+  routes['POST /branding/logo'] = () => [200, brandingOf('Riverside', true)];
+  routes['POST /setup/saved'] = () => [200, state({ step: 3 }, [false, true, false, false])];
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['PUT /branding/name', 'POST /branding/logo', 'POST /branding/logo', 'POST /setup/saved']);
+  expect(title()).toBe('First course');
+});
+
+it("a proxy 413 on the logo shows the upload limit's sentence", async () => {
+  routes['POST /branding/logo'] = () => [413, {}];
+  await render(state({ step: 2 }));
+  await choose(pngOf(400, 80));
+  decodes[0].resolve();
+  await settle();
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe("This file is over the server's upload limit.");
+});
+
+it('header shows the new name at once', async () => {
+  routes['PUT /branding/name'] = (b) => [200, brandingOf((b as { name: string }).name)];
+  routes['POST /setup/saved'] = () => [200, state({ step: 3 }, [false, true, false, false])];
+  await render(state({ step: 2 }));
+  type(input('Site name'), 'Riverside');
+  foot('save')!.click();
+  await settle();
+  expect(branding.name).toBe('Riverside');
+  expect(document.title).toBe('Riverside');
+});
+
+it('skip keeps the defaults: the button reads Keep the defaults, sends only the skip, and the list ticks it', async () => {
+  routes['POST /setup/skip'] = () => [200, state({ step: 3 }, [false, true, false, false])];
+  await render(state({ step: 2 }));
+  expect(foot('skip')!.textContent!.trim()).toBe('Keep the defaults');
+  foot('skip')!.click();
+  await settle();
+  expect(writes()).toEqual([{ key: 'POST /setup/skip', body: { step: 2 } }]);
+  expect(mark(2).classList.contains('done')).toBe(true);
+  expect(title()).toBe('First course');
+});
+
+it('a done step 2 shows Continue, which sends only step saved', async () => {
+  routes['GET /branding'] = () => [200, brandingOf('Riverside')];
+  routes['POST /setup/saved'] = () => [200, state({ step: 3 }, [false, true, false, false])];
+  await render(state({ step: 2 }, [false, true, false, false]));
+  expect(foot('save')!.textContent!.trim()).toBe('Continue');
+  expect(foot('skip')).toBeNull();
+  foot('save')!.click();
+  await settle();
+  expect(writes()).toEqual([{ key: 'POST /setup/saved', body: { step: 2 } }]);
+});
+
+// --- Step 4: Sign-in rules and limits (D9) ---
+
+it("step 4's title and note, filled with the saved values; Save and continue usable with nothing changed", async () => {
+  await render(state({ step: 4 }));
+  expect(title()).toBe('Sign-in rules and limits');
+  expect(card()!.querySelector('.st-note')?.textContent).toBe('How long a PIN lasts, how often people can ask for one, and how big files may be.');
+  expect(input('A PIN lasts (minutes)').value).toBe('10');
+  expect(input('Largest file (MB)').value).toBe('20');
+  expect(foot('save')!.textContent!.trim()).toBe('Save and continue');
+  expect(blocked()).toBe(false);
+});
+
+it('unchanged save sends keep-sign-in then step saved', async () => {
+  routes['POST /setup/keep-sign-in'] = () => [200, state({ step: 4 }, [false, false, false, true])];
+  routes['POST /setup/saved'] = () => [200, state({ step: 1 }, [false, false, false, true])];
+  await render(state({ step: 4 }));
+  foot('save')!.click();
+  await settle();
+  expect(writes()).toEqual([
+    { key: 'POST /setup/keep-sign-in', body: undefined },
+    { key: 'POST /setup/saved', body: { step: 4 } },
+  ]);
+  expect(title()).toBe('Email');
+});
+
+it('keep-sign-in that ends the wizard holds the card until step saved answers (D3a)', async () => {
+  const saved = deferred();
+  const over = state({ wizard_on: false }, [true, true, true, true]);
+  routes['POST /setup/keep-sign-in'] = () => [200, over];
+  routes['POST /setup/saved'] = () => saved.promise;
+  await render(state({ step: 4 }, [true, true, true, false]));
+  foot('save')!.click();
+  await settle();
+  await settle();
+  expect(title()).toBe('Sign-in rules and limits');
+  expect(target.querySelector('.as-card')).toBeNull();
+  saved.resolve([200, over]);
+  await settle();
+  expect(target.querySelector('.as-card')).not.toBeNull();
+});
+
+it('changed sign-in only sends only sign-in', async () => {
+  routes['PATCH /settings/sign-in'] = () => [200, settings()];
+  routes['POST /setup/saved'] = () => [200, state({ step: 1 }, [false, false, false, true])];
+  await render(state({ step: 4 }));
+  type(input('A PIN lasts (minutes)'), '15');
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['PATCH /settings/sign-in', 'POST /setup/saved']);
+  expect(writes()[0].body).toEqual({ pin_minutes: 15, pin_requests_per_hour: 5, pin_failures_per_hour: 10, longest_sign_in_days: 30 });
+});
+
+it('limits refused after sign-in saved, when that completed the last step: error and typed limits stay, retry sends only limits, then All set', async () => {
+  const over = state({ wizard_on: false }, [true, true, true, true]);
+  routes['PATCH /settings/sign-in'] = () => [200, settings()];
+  routes['PATCH /settings/limits'] = () => [422, { detail: 'The largest file is at most 1024 MB.' }];
+  routes['GET /setup'] = () => [200, over];
+  await render(state({ step: 4 }, [true, true, true, false]));
+  type(input('A PIN lasts (minutes)'), '15');
+  type(input('Largest file (MB)'), '5000');
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['PATCH /settings/sign-in', 'PATCH /settings/limits']);
+  expect(err()).toBe('The largest file is at most 1024 MB.');
+  expect(title()).toBe('Sign-in rules and limits');
+  expect(input('Largest file (MB)').value).toBe('5000');
+  expect(target.querySelector('.as-card')).toBeNull();
+  type(input('Largest file (MB)'), '50');
+  routes['PATCH /settings/limits'] = () => [200, settings()];
+  routes['POST /setup/saved'] = () => [200, over];
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['PATCH /settings/sign-in', 'PATCH /settings/limits', 'PATCH /settings/limits', 'POST /setup/saved']);
+  expect(target.querySelector('.as-card')).not.toBeNull();
+});
+
+it('"1.5" shows Type a whole number. (limits: Type a whole number of MB.) and sends nothing', async () => {
+  await render(state({ step: 4 }));
+  type(input('A PIN lasts (minutes)'), '1.5');
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Type a whole number.');
+  type(input('A PIN lasts (minutes)'), '10');
+  type(input('Largest file (MB)'), '1.5');
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Type a whole number of MB.');
+  expect(writes()).toEqual([]);
+});
+
+it('skip on step 4 reads Keep these values, sends the skip (never keep-sign-in), ticks it and moves the card on (D4a)', async () => {
+  routes['POST /setup/skip'] = () => [200, state({ step: 1 }, [false, false, false, true])];
+  await render(state({ step: 4 }));
+  expect(foot('skip')!.textContent!.trim()).toBe('Keep these values');
+  foot('skip')!.click();
+  await settle();
+  expect(writes()).toEqual([{ key: 'POST /setup/skip', body: { step: 4 } }]);
+  expect(mark(4).classList.contains('done')).toBe(true);
+  expect(title()).toBe('Email');
 });
