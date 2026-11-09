@@ -75,6 +75,13 @@
       ready = true;
     });
   });
+  // D2 (rev 17): after the mount's read has decided, any later answer that the
+  // wizard is on marks the tab too (Try again, a page change), so a tab whose
+  // first read failed is redirected once at most. Never once the expired view
+  // shows: another page's 404 leaves a setup read in flight free to land.
+  $effect(() => {
+    if (ready && !expired && setup.state?.wizard_on) untrack(() => setMark(token));
+  });
   onDestroy(() => {
     setup.dispose();
     navAsk.dismiss();

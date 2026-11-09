@@ -453,6 +453,100 @@ it('a failed first read: the Dashboard, no pill, no redirect; on Set up the erro
   expect(navSpy).toHaveBeenCalledWith('/superuser/T', { replace: true });
 });
 
+it('a failed first read, then Try again on Set up says on: the tab is marked (D2, once per tab)', async () => {
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  setupAnswer = () => jsonResponse(500, { detail: 'Boom.' });
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  router.currentRoute.path = '/superuser/T/setup';
+  await settle();
+  setupAnswer = null;
+  setupState = setupOf(true);
+  buttonByText(target, 'Try again')!.click();
+  await settle();
+  expect(target.querySelector('main.su-main .error-state')).toBeNull();
+  expect(navSpy).not.toHaveBeenCalled();
+  // A later reload of the Dashboard in this tab stays there.
+  expect(sessionStorage.getItem(SETUP_MARK)).toBe('T');
+});
+
+it("a failed first read, then the Dashboard's Try again says on: the tab is marked, no redirect (D2)", async () => {
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  setupAnswer = () => jsonResponse(500, { detail: 'Boom.' });
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  setupAnswer = null;
+  setupState = setupOf(true);
+  buttonByText(target, 'Try again')!.click();
+  await settle();
+  expect(pillTexts()[0]).toBe('Set up');
+  expect(navSpy).not.toHaveBeenCalled();
+  expect(sessionStorage.getItem(SETUP_MARK)).toBe('T');
+});
+
+it('a failed first read on another page, then a page-change re-read says on: the tab is marked (D2)', async () => {
+  const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  setupAnswer = () => jsonResponse(500, { detail: 'Boom.' });
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T/users';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  setupAnswer = null;
+  setupState = setupOf(true);
+  router.currentRoute.path = '/superuser/T';
+  await settle();
+  expect(setupReads).toBe(2);
+  expect(navSpy).not.toHaveBeenCalled();
+  expect(sessionStorage.getItem(SETUP_MARK)).toBe('T');
+});
+
+it('after the expired view, entering Set up with the last good "on" writes no mark (D2)', async () => {
+  vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  setupState = setupOf(true);
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T/users';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  expect(sessionStorage.getItem(SETUP_MARK)).toBe('T');
+  setupAnswer = () => jsonResponse(404, { detail: 'Not Found' });
+  router.currentRoute.path = '/superuser/T';
+  await settle();
+  expect(target.querySelector('.su-expired')).not.toBeNull();
+  expect(sessionStorage.getItem(SETUP_MARK)).toBeNull();
+  router.currentRoute.path = '/superuser/T/setup';
+  await settle();
+  expect(target.querySelector('.su-expired')).not.toBeNull();
+  expect(sessionStorage.getItem(SETUP_MARK)).toBeNull();
+});
+
+it("a read in flight when another page's 404 shows the expired view writes no mark when it lands (D2)", async () => {
+  vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
+  setupState = setupOf(true);
+  const inner = dispatchFetch();
+  let coursesGone = false;
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => (coursesGone && String(url).endsWith('/courses')
+    ? jsonResponse(404, { detail: 'Not Found' }) : inner(url))));
+  router.currentRoute.path = '/superuser/T/users';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  expect(sessionStorage.getItem(SETUP_MARK)).toBe('T');
+  // The page change's setup read waits; the Courses page's load answers 404.
+  let release!: () => void;
+  setupAnswer = () => new Promise<Response>((r) => { release = () => r(jsonResponse(200, setupOf(true))); });
+  coursesGone = true;
+  router.currentRoute.path = '/superuser/T/courses';
+  await settle();
+  expect(target.querySelector('.su-expired')).not.toBeNull();
+  expect(sessionStorage.getItem(SETUP_MARK)).toBeNull();
+  release();
+  await settle();
+  expect(sessionStorage.getItem(SETUP_MARK)).toBeNull();
+});
+
 it('pill click never redirects', async () => {
   const navSpy = vi.spyOn(router, 'navigate').mockImplementation(() => Promise.resolve(true));
   let answer!: (r: Response) => void;
