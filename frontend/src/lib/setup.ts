@@ -1,7 +1,7 @@
 // Set up (superuser Set up spec): the wizard's state, its panel calls, and the
 // shell's entry rules (D1, D2). The state mirrors backend/mathion/schemas.py.
 import { api } from './api';
-import type { PanelAdmin, PanelOnAuth } from './superuser';
+import { adminIsMe, emailOffSentence, pinCommand, type PanelAdmin, type PanelOnAuth } from './superuser';
 import type { SetupStore } from './setupStore.svelte';
 
 // Every panel call passes skipAuthRedirect: the shell handles 401 and 404 (D25).
@@ -50,6 +50,27 @@ export function setupSaved(token: string, step: number): Promise<PanelSetup> {
 /** D9, D12: keep the sign-in and limit values, whatever the wizard's state. */
 export function keepSignIn(token: string): Promise<PanelSetup> {
   return api.post<PanelSetup>(`${base(token)}/keep-sign-in`, undefined, opts);
+}
+
+/**
+ * D8: step 3's done view, from the state alone, so a reload keeps the sign-in
+ * instructions. The course and its admin ("you" when it's the signed-in
+ * superuser, then nothing more); then, as the Courses note orders them, a
+ * disabled account, or else how they sign in while email isn't set up. Null
+ * when no course with an admin exists.
+ */
+export function doneViewNote(state: PanelSetup, me: string | null): { text: string; command?: string } | null {
+  const course = state.course;
+  if (!course) return null;
+  const { admin } = course;
+  const opening = `A course exists: ${course.name}.`;
+  if (adminIsMe(admin.email, me)) return { text: `${opening} You are its admin.` };
+  const first = `${opening} ${admin.full_name ?? admin.email} is its admin.`;
+  if (admin.is_disabled) return { text: `${first} This account is disabled. Enable it on the Users page so they can sign in.` };
+  if (!state.email_set_up) {
+    return { text: `${first} ${emailOffSentence(course.sign_in_url, admin.email, state.pin_minutes)}`, command: pinCommand(admin.email) };
+  }
+  return { text: first };
 }
 
 // --- D2: once per browser tab and link ---
@@ -163,8 +184,9 @@ export type StepProps = {
   onAuth: PanelOnAuth;
   /** The signed-in superuser's email, for "you are its admin" (D8). */
   me: string | null;
-  /** The step's saves and its "step saved" write are done: the page shows the
-   *  card the answer names. Never for an answer the step holds (step 3's note, D3a). */
+  /** The step's saves and its "step saved" write are done, or step 3's 409
+   *  re-read found the wizard over: the page shows the card the state names.
+   *  Never for an answer the step holds (step 3's note, D3a). */
   onDone: (state: PanelSetup) => void;
   /** Back and the skip button: the page asks first on unsaved changes (D3). */
   back: () => void;

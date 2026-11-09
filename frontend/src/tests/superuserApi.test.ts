@@ -2,7 +2,7 @@ import { it, expect, vi, afterEach } from 'vitest';
 import { ApiError, OFFLINE_MESSAGE } from '../lib/api';
 import * as events from '../lib/events';
 import {
-  panelError, listUsers, assignAdmin, updateUser, deleteCourse, lookupAccount, adminNote,
+  panelError, listUsers, assignAdmin, updateUser, deleteCourse, lookupAccount, adminNote, adminNoteParts,
   countLine, roleChips, disableWarning, getSettings, saveEmail, saveLimits, saveSignIn, testEmail,
   getBranding, saveSiteName, saveImage, checkTheme, saveTheme,
   type AdminAssignResult, type PanelUser, type PanelUserList, type PanelUserRole,
@@ -367,3 +367,13 @@ it('Branding: the theme check and the theme save post the bytes as a .css file',
   expect([...(f.mock.calls[2][1]?.body as FormData).entries()]).toEqual([['reset', 'true']]);
 });
 
+
+it('adminNoteParts: the note, with the mathion pin command only when email is off and the admin is not you (Set up D8)', () => {
+  expect(adminNoteParts(result({ admin_email: 'email_off' }), 'create')).toEqual({
+    text: adminNote(result({ admin_email: 'email_off' }), 'create'), command: 'mathion pin aho@uni.dk',
+  });
+  expect(adminNoteParts(result({ admin_email: 'email_off' }), 'create', { me: 'AHO@uni.dk' })).toEqual({
+    text: 'Statistics 101 is created; you are its admin. You\'ll find it on the Courses page of the main site.',
+  });
+  expect(adminNoteParts(result(), 'assign')).toEqual({ text: adminNote(result(), 'assign') });
+});

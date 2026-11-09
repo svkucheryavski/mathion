@@ -3,14 +3,15 @@ import { mount, unmount, flushSync } from 'svelte';
 import SuperuserSetup from '../pages/superuser/SuperuserSetup.svelte';
 import { SetupStore } from '../lib/setupStore.svelte';
 import type { PanelSetup } from '../lib/setup';
-import type { PanelBranding, PanelSettings } from '../lib/superuser';
+import type { AdminAssignResult, PanelBranding, PanelSettings } from '../lib/superuser';
+import { session } from '../stores/session.svelte';
 import { branding, setBranding, DEFAULT_BRANDING } from '../lib/branding.svelte';
 import { crc32 } from '../lib/pngCheck';
 import { createDirtyRegistry, DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../lib/dirtyRegistry.svelte';
 import * as router from '../lib/router.svelte';
 
-// Set up D3-D9: the page frame, its moves, All set, step 1 (Email), step 2
-// (Site name and logo) and step 4 (Sign-in rules and limits).
+// Set up D3-D9: the page frame, its moves, All set, and the four steps: Email,
+// Site name and logo, First course and its admin, Sign-in rules and limits.
 
 const EMAIL_REASON = 'Not tested yet: send a test email.';
 function state(over: Partial<PanelSetup> = {}, done: boolean[] = [false, false, false, false], passed?: boolean[]): PanelSetup {
@@ -111,6 +112,7 @@ afterEach(() => {
   delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
   document.head.querySelectorAll('[data-branding]').forEach((e) => e.remove());
   setBranding(DEFAULT_BRANDING);
+  session.user = null;
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -135,7 +137,7 @@ const items = () => [...target.querySelectorAll<HTMLButtonElement>('.sl-item')];
 const err = () => card()?.querySelector('[role="alert"]')?.textContent ?? null;
 const input = (label: string) => [...target.querySelectorAll<HTMLInputElement>('input')].find((i) => i.labels?.[0]?.textContent?.trim() === label)!;
 function type(el: HTMLInputElement, v: string) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); flushSync(); }
-const writes = () => calls.filter((c) => /^(POST \/setup|POST \/branding|PATCH|PUT)/.test(c.key));
+const writes = () => calls.filter((c) => /^(POST \/setup|POST \/branding|POST \/courses|PATCH|PUT)/.test(c.key));
 const blocked = () => foot('save')!.getAttribute('aria-disabled') === 'true';
 const mark = (n: number) => items()[n - 1].querySelector('.sl-mark')!;
 /** Choose a file in the step's logo picker, as the browser's picker would. */
@@ -186,7 +188,7 @@ it('an unheld card follows a re-read', async () => {
   routes['GET /setup'] = () => [200, state({ step: 3 })];
   await setup.read();
   await settle();
-  expect(title()).toBe('First course');
+  expect(title()).toBe('First course and its admin');
 });
 
 it('own skip answer moves the card', async () => {
@@ -221,7 +223,7 @@ it('a list click goes to the step; Back goes to the one before', async () => {
   items()[2].click();
   await settle();
   expect(writes()).toEqual([{ key: 'POST /setup/go', body: { step: 3 } }]);
-  expect(title()).toBe('First course');
+  expect(title()).toBe('First course and its admin');
   foot('back')!.click();
   await settle();
   expect(writes()[1]).toEqual({ key: 'POST /setup/go', body: { step: 2 } });
@@ -246,7 +248,7 @@ it('Back/Skip/list on a dirty step asks first', async () => {
   confirmDiscard()!.click();
   await settle();
   expect(writes()).toEqual([{ key: 'POST /setup/go', body: { step: 3 } }]);
-  expect(title()).toBe('First course');
+  expect(title()).toBe('First course and its admin');
   expect(registry.isAnyDirty()).toBe(false);
 });
 
@@ -290,7 +292,7 @@ it('while a write runs, Back, the skip button and the list wait', async () => {
   await settle();
   await settle();
   expect(writes().map((c) => c.key)).toEqual(['POST /setup/skip']);   // nothing was queued behind it
-  expect(title()).toBe('First course');
+  expect(title()).toBe('First course and its admin');
   expect(foot('skip')!.getAttribute('aria-disabled')).toBeNull();
 });
 
@@ -624,7 +626,7 @@ it('name then logo, each only when changed; Save and continue waits for the deco
   expect(writes()[0].body).toEqual({ name: 'Riverside' });
   expect(((writes()[1].body as FormData).get('file') as File).name).toBe('school.png');
   expect(writes()[2].body).toEqual({ step: 2 });
-  expect(title()).toBe('First course');
+  expect(title()).toBe('First course and its admin');
 });
 
 it('only the name when only the name changed, only the logo when only the logo changed', async () => {
@@ -670,7 +672,7 @@ it('logo refused after the name saved: name stays, error shows, retry sends only
   foot('save')!.click();
   await settle();
   expect(writes().map((c) => c.key)).toEqual(['PUT /branding/name', 'POST /branding/logo', 'POST /branding/logo', 'POST /setup/saved']);
-  expect(title()).toBe('First course');
+  expect(title()).toBe('First course and its admin');
 });
 
 it("a proxy 413 on the logo shows the upload limit's sentence", async () => {
@@ -703,7 +705,7 @@ it('skip keeps the defaults: the button reads Keep the defaults, sends only the 
   await settle();
   expect(writes()).toEqual([{ key: 'POST /setup/skip', body: { step: 2 } }]);
   expect(mark(2).classList.contains('done')).toBe(true);
-  expect(title()).toBe('First course');
+  expect(title()).toBe('First course and its admin');
 });
 
 it('a done step 2 shows Continue, which sends only step saved', async () => {
@@ -816,4 +818,277 @@ it('skip on step 4 reads Keep these values, sends the skip (never keep-sign-in),
   expect(writes()).toEqual([{ key: 'POST /setup/skip', body: { step: 4 } }]);
   expect(mark(4).classList.contains('done')).toBe(true);
   expect(title()).toBe('Email');
+});
+
+// --- Step 3: First course and its admin (D8) ---
+
+const ADMIN = { id: 9, email: 'aho@uni.dk', full_name: 'Anna Holm', is_disabled: false };
+const SIGN_IN = 'https://m.example/courses/stat/edit';
+function created(over: Partial<AdminAssignResult> = {}): AdminAssignResult {
+  return {
+    course: { id: 1, name: 'Statistics 101', slug: 'statistics-101', admin: ADMIN, version_count: 1, run_count: 0, student_count: 0 },
+    admin: ADMIN, admin_email: 'email_off', pin_minutes: 10, sign_in_url: SIGN_IN, ...over,
+  };
+}
+const withCourse = (over: Partial<PanelSetup> = {}, done = [false, false, true, false]) =>
+  state({ step: 3, course: { name: 'Statistics 101', sign_in_url: SIGN_IN, admin: ADMIN }, ...over }, done);
+const OVER = state({ wizard_on: false }, [true, true, true, true]);
+const strip = () => card()?.querySelector<HTMLElement>('.note-strip') ?? null;
+function fillCourse(name = 'Statistics 101', email = 'aho@uni.dk') {
+  type(input('Course name'), name);
+  type(input("Admin's email"), email);
+}
+async function create(saved: Handler, answer: Answer = [200, created()]) {
+  routes['POST /courses'] = () => answer;
+  routes['POST /setup/saved'] = saved;
+  fillCourse();
+  foot('save')!.click();
+  await settle();
+}
+
+it("step 3's title, note and fields; Save and continue waits for all three", async () => {
+  await render(state({ step: 3 }));
+  expect(title()).toBe('First course and its admin');
+  expect(card()!.querySelector('.st-note')?.textContent).toBe('A course and the person who will build it.');
+  expect(blocked()).toBe(true);
+  type(input('Course name'), 'Statistics 101');
+  expect(blocked()).toBe(true);
+  type(input("Admin's email"), 'aho@uni.dk');
+  expect(blocked()).toBe(false);
+  expect(foot('skip')!.textContent!.trim()).toBe('Skip for now');
+});
+
+it('create sends the course, then step saved; the note shows the command as code and only Continue', async () => {
+  await render(state({ step: 3 }));
+  await create(() => [200, state({ step: 4 }, [false, false, true, false])]);
+  expect(writes().map((c) => c.key)).toEqual(['POST /courses', 'POST /setup/saved']);
+  expect(writes()[0].body).toMatchObject({ name: 'Statistics 101', admin_email: 'aho@uni.dk' });
+  expect(writes()[1].body).toEqual({ step: 3 });
+  expect(strip()!.textContent).toContain("Statistics 101 is created; Anna Holm is its admin. Email isn't set up on this server");
+  expect(strip()!.querySelector('code')?.textContent).toBe('mathion pin aho@uni.dk');
+  expect(strip()!.querySelector('button')).toBeNull();
+  expect(card()!.querySelector('input')).toBeNull();
+  expect(foot('save')!.textContent!.trim()).toBe('Continue');
+  expect(foot('back')).toBeNull();
+  expect(foot('skip')).toBeNull();
+  expect(mark(3).classList.contains('done')).toBe(true);
+  expect(registry.isAnyDirty()).toBe(false);
+});
+
+it('the note survives its own step-saved answer (step 4, or over) and a re-read', async () => {
+  await render(state({ step: 3 }));
+  await create(() => [200, OVER]);
+  expect(title()).toBe('First course and its admin');
+  expect(target.querySelector('.as-card')).toBeNull();
+  expect(strip()).not.toBeNull();
+  routes['GET /setup'] = () => [200, OVER];
+  await setup.read();
+  await settle();
+  expect(strip()).not.toBeNull();
+});
+
+it('when the admin is you the note says so, with no command', async () => {
+  session.user = { id: 1, email: 'AHO@uni.dk', full_name: 'Anna Holm', is_superuser: true, is_disabled: false, photo_url: null, has_course_admin: false, has_run_teacher: false };
+  await render(state({ step: 3 }));
+  await create(() => [200, state({ step: 4 }, [false, false, true, false])]);
+  expect(strip()!.textContent!.trim()).toBe("Statistics 101 is created; you are its admin. You'll find it on the Courses page of the main site.");
+  expect(strip()!.querySelector('code')).toBeNull();
+});
+
+it('Continue waits while step-saved runs, then moves by the newest state (All set when over)', async () => {
+  const d = deferred();
+  await render(state({ step: 3 }));
+  await create(() => d.promise);
+  expect(strip()).not.toBeNull();
+  expect(blocked()).toBe(true);
+  expect(items().every((b) => b.getAttribute('aria-disabled') === 'true')).toBe(true);
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['POST /courses', 'POST /setup/saved']);
+  d.resolve([200, OVER]);
+  await settle();
+  expect(strip()).not.toBeNull();
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['POST /courses', 'POST /setup/saved']);
+  expect(target.querySelector('.as-card')).not.toBeNull();
+});
+
+it('Continue after step-saved moves to the step the newest state names', async () => {
+  await render(state({ step: 3 }));
+  await create(() => [200, state({ step: 4 }, [false, false, true, false])]);
+  foot('save')!.click();
+  await settle();
+  expect(title()).toBe('Sign-in rules and limits');
+  expect(writes().map((c) => c.key)).toEqual(['POST /courses', 'POST /setup/saved']);
+});
+
+it('list click after step-saved answered goes to the clicked step, or All set when the go answer says over', async () => {
+  await render(state({ step: 3 }));
+  await create(() => [200, state({ step: 4 }, [false, false, true, false])]);
+  items()[0].click();
+  await settle();
+  expect(writes()[2]).toEqual({ key: 'POST /setup/go', body: { step: 1 } });
+  expect(title()).toBe('Email');
+  unmount(cmp!);
+  cmp = null;
+  await render(state({ step: 3 }));
+  await create(() => [200, OVER]);
+  routes['POST /setup/go'] = () => [200, OVER];
+  items()[1].click();
+  await settle();
+  expect(target.querySelector('.as-card')).not.toBeNull();
+});
+
+it('step-saved failed: the note stays, its error shows, Continue retries only step-saved', async () => {
+  routes['GET /setup'] = () => [200, state({ step: 3 }, [false, false, true, false])];
+  await render(state({ step: 3 }));
+  await create(() => [500, { detail: 'Boom.' }]);
+  expect(strip()).not.toBeNull();
+  expect(err()).toBe('Boom.');
+  expect(foot('save')!.textContent!.trim()).toBe('Continue');
+  routes['POST /setup/saved'] = () => [200, state({ step: 4 }, [false, false, true, false])];
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['POST /courses', 'POST /setup/saved', 'POST /setup/saved']);
+  expect(title()).toBe('Sign-in rules and limits');
+});
+
+it('409 shows the sentence, re-reads, and the done view replaces the form when step 3 is now done', async () => {
+  routes['GET /setup'] = () => [200, withCourse()];
+  await render(state({ step: 3 }));
+  await create(() => [200, state()], [409, { detail: 'The address statistics-101 is taken.' }]);
+  await settle();
+  expect(err()).toBe('The address statistics-101 is taken.');
+  expect(card()!.textContent).toContain('A course exists: Statistics 101. Anna Holm is its admin.');
+  expect(card()!.querySelector('input')).toBeNull();
+  expect(registry.isAnyDirty()).toBe(false);
+  expect(foot('save')!.textContent!.trim()).toBe('Continue');
+  expect(writes().map((c) => c.key)).toEqual(['POST /courses']);
+});
+
+it('409 when step 3 is still not done keeps the form and the typed values', async () => {
+  routes['GET /setup'] = () => [200, state({ step: 3 })];
+  await render(state({ step: 3 }));
+  await create(() => [200, state()], [409, { detail: 'The address statistics-101 is taken.' }]);
+  await settle();
+  expect(err()).toBe('The address statistics-101 is taken.');
+  expect(calls.filter((c) => c.key === 'GET /setup')).toHaveLength(1);
+  expect(input('Course name').value).toBe('Statistics 101');
+});
+
+it('done view repeats the sign-in sentence (email off, after a reload); Continue sends step saved', async () => {
+  routes['POST /setup/saved'] = () => [200, state({ step: 4 }, [false, false, true, false])];
+  await render(withCourse({ email_set_up: false }));
+  expect(card()!.textContent).toContain(
+    "A course exists: Statistics 101. Anna Holm is its admin. Email isn't set up on this server, so tell them yourself. "
+    + `They sign in at ${SIGN_IN} with a PIN: run mathion pin aho@uni.dk on the server (the PIN lasts 10 minutes).`);
+  expect(card()!.querySelector('code')?.textContent).toBe('mathion pin aho@uni.dk');
+  expect(card()!.querySelector('input')).toBeNull();
+  expect(foot('skip')).toBeNull();
+  expect(foot('back')).not.toBeNull();
+  foot('save')!.click();
+  await settle();
+  expect(writes()).toEqual([{ key: 'POST /setup/saved', body: { step: 3 } }]);
+  expect(title()).toBe('Sign-in rules and limits');
+});
+
+it('no-admin course opens the form with its line', async () => {
+  await render(state({ step: 3, course_without_admin: 'Chemometrics' }));
+  expect(card()!.textContent).toContain('Chemometrics has no admin: give it one on the Courses page, or create another course here.');
+  expect(input('Course name')).toBeDefined();
+});
+
+it('held form still creates what was typed (no 409)', async () => {
+  await render(state({ step: 3 }));
+  fillCourse();
+  routes['GET /setup'] = () => [200, state({ step: 3, course: { name: 'Other', sign_in_url: SIGN_IN, admin: ADMIN } }, [false, false, true, false])];
+  await setup.read();
+  await settle();
+  expect(input('Course name').value).toBe('Statistics 101');
+  routes['POST /courses'] = () => [200, created()];
+  routes['POST /setup/saved'] = () => [200, state({ step: 4 }, [false, false, true, false])];
+  foot('save')!.click();
+  await settle();
+  expect(writes()[0]).toMatchObject({ key: 'POST /courses', body: { name: 'Statistics 101' } });
+  expect(strip()).not.toBeNull();
+});
+
+// --- Task 9 review r1 ---
+
+it('an empty form turns into the done view when a re-read finds step 3 done (r1 Opus I1)', async () => {
+  await render(state({ step: 3 }));
+  expect(input('Course name')).toBeDefined();
+  routes['GET /setup'] = () => [200, withCourse()];
+  await setup.read();
+  await settle();
+  expect(title()).toBe('First course and its admin');
+  expect(card()!.textContent).toContain('A course exists: Statistics 101. Anna Holm is its admin.');
+  expect(card()!.querySelector('input')).toBeNull();
+  expect(foot('save')!.textContent!.trim()).toBe('Continue');
+});
+
+it('the done view gives way to the form when the course is gone (r1 Opus I1, Fable M3)', async () => {
+  await render(withCourse());
+  expect(card()!.querySelector('.sc-done')).not.toBeNull();
+  routes['GET /setup'] = () => [200, state({ step: 3 })];
+  await setup.read();
+  await settle();
+  expect(card()!.querySelector('.sc-done')).toBeNull();
+  expect(input('Course name')).toBeDefined();
+});
+
+it('a 409 whose re-read says the wizard is over shows All set, with no further write (r1 Fable I1)', async () => {
+  routes['GET /setup'] = () => [200, withCourse({ wizard_on: false }, [true, true, true, true])];
+  await render(state({ step: 3 }));
+  await create(() => [200, OVER], [409, { detail: 'The address statistics-101 is taken.' }]);
+  await settle();
+  expect(target.querySelector('.as-card')).not.toBeNull();
+  expect(writes().map((c) => c.key)).toEqual(['POST /courses']);
+  expect(registry.isAnyDirty()).toBe(false);
+});
+
+// --- Task 9 review r2 ---
+
+it('done view: a failed Continue keeps the done view and its error; Continue retries only step saved (r2 I1)', async () => {
+  routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
+  routes['GET /setup'] = () => [200, withCourse()];
+  await render(withCourse());
+  foot('save')!.click();
+  await settle();
+  expect(card()!.querySelector('.sc-done')).not.toBeNull();
+  expect(err()).toBe('Boom.');
+  expect(foot('save')!.textContent!.trim()).toBe('Continue');
+  expect(blocked()).toBe(false);
+  routes['POST /setup/saved'] = () => [200, state({ step: 4 }, [false, false, true, false])];
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['POST /setup/saved', 'POST /setup/saved']);
+  expect(title()).toBe('Sign-in rules and limits');
+});
+
+it('a 409 whose re-read says over while step 3 is not done keeps the typed values and the sentence (r2 Opus M2, D3a)', async () => {
+  routes['GET /setup'] = () => [200, state({ wizard_on: false }, [true, true, false, true])];
+  await render(state({ step: 3 }));
+  await create(() => [200, OVER], [409, { detail: 'The address statistics-101 is taken.' }]);
+  await settle();
+  expect(target.querySelector('.as-card')).toBeNull();
+  expect(err()).toBe('The address statistics-101 is taken.');
+  expect(input('Course name').value).toBe('Statistics 101');
+});
+
+it('typed values after a 409 done view gave way are never swapped out by a later re-read (r2 M1, D3a)', async () => {
+  routes['GET /setup'] = () => [200, withCourse()];
+  await render(state({ step: 3 }));
+  await create(() => [200, OVER], [409, { detail: 'The address statistics-101 is taken.' }]);
+  await settle();
+  expect(card()!.querySelector('.sc-done')).not.toBeNull();
+  routes['GET /setup'] = () => [200, state({ step: 3 })];
+  await setup.read();
+  await settle();
+  type(input('Course name'), 'Chemometrics');
+  routes['GET /setup'] = () => [200, withCourse()];
+  await setup.read();
+  await settle();
+  expect(input('Course name').value).toBe('Chemometrics');
 });

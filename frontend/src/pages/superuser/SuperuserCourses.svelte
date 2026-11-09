@@ -6,11 +6,12 @@
   // action replaces it (D5a).
   import { ApiError } from '../../lib/api';
   import {
-    adminIsMe, adminNote, assignAdmin, createCourse, deleteCourse, listCourses, panelError, pinCommand, removeAdmin, updateCourse,
+    adminNoteParts, assignAdmin, createCourse, deleteCourse, listCourses, panelError, removeAdmin, updateCourse,
     type AdminAssignResult, type PanelCourse, type PanelOnAuth,
   } from '../../lib/superuser';
   import PanelHead from '../../components/superuser/PanelHead.svelte';
   import NoteStrip from '../../components/superuser/NoteStrip.svelte';
+  import CommandText from '../../components/superuser/CommandText.svelte';
   import NewCourseDialog from '../../components/superuser/NewCourseDialog.svelte';
   import EditCourseDialog from '../../components/superuser/EditCourseDialog.svelte';
   import DeleteCourseDialog from '../../components/superuser/DeleteCourseDialog.svelte';
@@ -60,9 +61,7 @@
   function showResult(result: AdminAssignResult, kind: 'create' | 'assign'): void {
     const me = session.user?.email ?? null;
     const emailReason = setup.state?.steps[0].reason ?? null;   // null once Email is done
-    const command = result.admin_email === 'email_off' && !adminIsMe(result.admin.email, me)
-      ? pinCommand(result.admin.email) : undefined;
-    note = { id: ++noteSeq, text: adminNote(result, kind, { me, emailReason }), command };
+    note = { id: ++noteSeq, ...adminNoteParts(result, kind, { me, emailReason }) };
   }
 
   // D25: a 409 means the list on screen is stale (gone, or taken). The dialog
@@ -125,12 +124,7 @@
 {#if note}
   {#key note.id}
     <NoteStrip tone="info" onClose={() => (note = null)}>
-      {#if note.command && note.text.includes(note.command)}
-        {@const at = note.text.indexOf(note.command)}
-        {note.text.slice(0, at)}<code>{note.command}</code>{note.text.slice(at + note.command.length)}
-      {:else}
-        {note.text}
-      {/if}
+      <CommandText text={note.text} command={note.command} />
     </NoteStrip>
   {/key}
 {/if}

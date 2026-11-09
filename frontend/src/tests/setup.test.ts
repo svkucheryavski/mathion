@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { cardAfterOwn, cardAfterRead, finishLines, skipLabel, stepMark, STEP_LABELS, type Card, type PanelSetup } from '../lib/setup';
+import { cardAfterOwn, cardAfterRead, doneViewNote, finishLines, skipLabel, stepMark, STEP_LABELS, type Card, type PanelSetup } from '../lib/setup';
 
 // Set up D12: the Finish setting up card's lines.
 
@@ -79,4 +79,46 @@ it('the list marks: a tick when done, dashed when passed but not done, the numbe
   expect(stepMark({ passed: false, done: true, reason: null })).toBe('done');
   expect(stepMark({ passed: true, done: false, reason: 'Email is off.' })).toBe('passed');
   expect(stepMark({ passed: false, done: false, reason: null })).toBe('number');
+});
+
+// --- D8: step 3's done view ---
+
+function withCourse(admin: Partial<{ email: string; full_name: string | null; is_disabled: boolean }> = {}, over: Partial<PanelSetup> = {}): PanelSetup {
+  return state({
+    course: { name: 'Statistics 101', sign_in_url: 'https://m.example/courses/stat/edit', admin: { id: 9, email: 'aho@uni.dk', full_name: 'Anna Holm', is_disabled: false, ...admin } },
+    email_set_up: true,
+    ...over,
+  }, [false, false, true, false]);
+}
+
+it('doneViewNote: the admin is you — no further sentence', () => {
+  expect(doneViewNote(withCourse({}, { email_set_up: false }), 'Aho@uni.dk')).toEqual({ text: 'A course exists: Statistics 101. You are its admin.' });
+});
+
+it('doneViewNote: the admin is disabled', () => {
+  expect(doneViewNote(withCourse({ is_disabled: true }), null)).toEqual({
+    text: 'A course exists: Statistics 101. Anna Holm is its admin. This account is disabled. Enable it on the Users page so they can sign in.',
+  });
+});
+
+it('doneViewNote: email off — where they sign in, the mathion pin command and how long the PIN lasts', () => {
+  expect(doneViewNote(withCourse({ full_name: null }, { email_set_up: false, pin_minutes: 1 }), 'me@uni.dk')).toEqual({
+    text: "A course exists: Statistics 101. aho@uni.dk is its admin. Email isn't set up on this server, so tell them yourself. "
+      + 'They sign in at https://m.example/courses/stat/edit with a PIN: run mathion pin aho@uni.dk on the server (the PIN lasts 1 minute).',
+    command: 'mathion pin aho@uni.dk',
+  });
+});
+
+it('doneViewNote: email set up — no extra sentence', () => {
+  expect(doneViewNote(withCourse(), null)).toEqual({ text: 'A course exists: Statistics 101. Anna Holm is its admin.' });
+});
+
+it('doneViewNote: disabled and email off — disabled wins', () => {
+  expect(doneViewNote(withCourse({ is_disabled: true }, { email_set_up: false }), null)).toEqual({
+    text: 'A course exists: Statistics 101. Anna Holm is its admin. This account is disabled. Enable it on the Users page so they can sign in.',
+  });
+});
+
+it('doneViewNote: no course, no done view', () => {
+  expect(doneViewNote(state(), null)).toBeNull();
 });

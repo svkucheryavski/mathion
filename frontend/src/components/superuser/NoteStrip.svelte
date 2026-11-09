@@ -2,17 +2,18 @@
   // The panel's note under the page title (D5a, D25): it stays until closed or
   // replaced, unlike a toast, so the superuser can copy a command out of it.
   // An error reads as an alert in the danger look, so a refused confirm never
-  // passes for a result (Review Focus 4).
+  // passes for a result (Review Focus 4). Without `onClose` it has no close
+  // button: Set up's step 3 note stays until the person moves on (D8).
   import type { Snippet } from 'svelte';
   import IconButton from '../ui/IconButton.svelte';
 
-  type Props = { tone: 'info' | 'error'; onClose: () => void; children: Snippet };
+  type Props = { tone: 'info' | 'error'; onClose?: () => void; children: Snippet };
   let { tone, onClose, children }: Props = $props();
 </script>
 
 <div class="note-strip {tone}" role={tone === 'error' ? 'alert' : 'status'}>
   <div class="text">{@render children()}</div>
-  <IconButton glyph="close" title="Close" borderless onclick={onClose} />
+  {#if onClose}<IconButton glyph="close" title="Close" borderless onclick={onClose} />{/if}
 </div>
 
 <style>

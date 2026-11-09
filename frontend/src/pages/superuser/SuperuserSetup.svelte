@@ -11,16 +11,16 @@
   import ErrorState from '../../components/ui/ErrorState.svelte';
   import AskSlot from '../../components/ui/AskSlot.svelte';
   import StepList from '../../components/superuser/setup/StepList.svelte';
-  import StepCard from '../../components/superuser/setup/StepCard.svelte';
   import AllSetCard from '../../components/superuser/setup/AllSetCard.svelte';
   import StepEmail from '../../components/superuser/setup/StepEmail.svelte';
   import StepSite from '../../components/superuser/setup/StepSite.svelte';
   import StepSignIn from '../../components/superuser/setup/StepSignIn.svelte';
+  import StepCourse from '../../components/superuser/setup/StepCourse.svelte';
   import { DISCARD_NAV_ASK, focusAfter, InPlaceAsk } from '../../lib/askInPlace.svelte';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../../lib/dirtyRegistry.svelte';
   import { session } from '../../stores/session.svelte';
   import {
-    cardAfterOwn, cardAfterRead, setupGo, setupSkip, STEP_LABELS,
+    cardAfterOwn, cardAfterRead, setupGo, setupSkip,
     type Card, type PanelSetup, type StepN,
   } from '../../lib/setup';
   import { panelError, type PanelOnAuth } from '../../lib/superuser';
@@ -125,13 +125,10 @@
             <StepEmail {...stepProps()} />
           {:else if card === 2}
             <StepSite {...stepProps()} />
-          {:else if card === 4}
-            <StepSignIn {...stepProps()} />
+          {:else if card === 3}
+            <StepCourse {...stepProps()} />
           {:else}
-            <!-- Task 9 fills step 3; until then, its frame alone. -->
-            {@const n = card}
-            <StepCard {n} title={STEP_LABELS[n - 1]} note={null} error={moveError} {busy} mode="none" canSave={false}
-              onBack={back} onSkip={setup.state.steps[n - 1].done ? undefined : skip} onSave={() => {}} />
+            <StepSignIn {...stepProps()} />
           {/if}
         {/key}
         {#if ask.open}<div class="sp-ask"><AskSlot {ask} /></div>{/if}

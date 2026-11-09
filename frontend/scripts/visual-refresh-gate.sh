@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3022
+EXPECTED_CHECKS=3028
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -6368,6 +6368,15 @@ if [[ -n $REPLY ]]; then
   N=StepSignIn; H=$REPLY
   d '\.si-sub' '' 'font-weight:600' 'color:var\(--text\)'
   sweep StepSignIn $H
+fi
+# Set up D8: step 3, the no-admin line in --gold-text and the done view's text.
+own sc-line StepCourse.svelte
+uniq1 sc-line
+if [[ -n $REPLY ]]; then
+  N=StepCourse; H=$REPLY
+  d '\.sc-line' '' 'color:var\(--gold-text\)'
+  d '\.sc-done' '' 'color:var\(--text\)'
+  sweep StepCourse $H
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).
