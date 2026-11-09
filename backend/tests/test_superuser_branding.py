@@ -449,3 +449,46 @@ def test_guard_and_csrf(panel, auth_client, db):
     # No session at all: 401.
     assert TestClient(app).get(base).status_code == 401
     assert db.get(SiteBranding, 1) is None
+
+
+# --- Set up D7: a save of the name or the logo marks the site name kept ---
+
+def _site_kept(db) -> bool:
+    from mathion.site_settings import load
+    db.expire_all()
+    return load(db).site_name_kept
+
+
+def test_name_save_marks_site_kept(panel, db):
+    assert _site_kept(db) is False
+    _ok(_name(panel, {"name": "Riverside"}))
+    assert _site_kept(db) is True
+
+
+def test_name_reset_marks_site_kept(panel, db):
+    _ok(_name(panel, {"reset": True}))
+    assert _site_kept(db) is True
+
+
+def test_logo_save_marks_site_kept(panel, db):
+    _ok(_image(panel, "logo", _png(838, 174)))
+    assert _site_kept(db) is True
+
+
+def test_logo_reset_marks_site_kept(panel, db):
+    _ok(_image(panel, "logo", reset=True))
+    assert _site_kept(db) is True
+
+
+def test_icon_and_theme_saves_do_not_mark_site_kept(panel, db):
+    _ok(_image(panel, "icon", _png(64, 64)))
+    _ok(_image(panel, "icon", reset=True))
+    _ok(_theme(panel, _css("  --text: #111111;")))
+    _ok(_theme(panel, reset=True))
+    assert _site_kept(db) is False
+
+
+def test_refused_name_or_logo_marks_nothing(panel, db):
+    _refused(_name(panel, {"name": ""}), NAME_ONE_LINE)
+    _refused(_image(panel, "logo", b"not a png"), LOGO_PNG)
+    assert _site_kept(db) is False

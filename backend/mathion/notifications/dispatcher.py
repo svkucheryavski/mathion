@@ -371,7 +371,7 @@ def _fresh_row(db, view):
 
 def _record(db, view, result: TickResult, now: datetime) -> None:
     """D9c, D9d: store a failure on the server's side with its back-off, or
-    clear the stored one after a successful send."""
+    record a successful send (Set up D6) and clear the stored failure."""
     if result.failure is not None:
         row = _fresh_row(db, view)
         if row is None:
@@ -387,20 +387,20 @@ def _record(db, view, result: TickResult, now: datetime) -> None:
         row.send_backoff_step = min(step + 1, 6)
         db.commit()
     elif result.sent:
-        _clear_failure(db, view)
+        _record_sent(db, view, now)
     elif result.refused is not None:
         # Refusals and nothing through: the card says so, the queue goes on.
         record_send_outcome(db, view, result.refused, now)
 
 
-def _clear_failure(db, view) -> None:
-    """A message went out, so the server works: drop the stored failure and
-    the back-off."""
-    if view.send_failure_message is None and view.send_retry_at is None and not view.send_backoff_step:
-        return
+def _record_sent(db, view, now: datetime) -> None:
+    """A message went out, so the server works: note when (Set up D6), and
+    drop the stored failure and the back-off. Skipped when a save changed
+    the settings since `view` was read: the send says nothing about them."""
     row = _fresh_row(db, view)
     if row is None:
         return
+    row.last_sent_at = now
     row.send_failure_message = row.send_failure_at = row.send_retry_at = None
     row.send_backoff_step = 0
     db.commit()
@@ -409,9 +409,10 @@ def _clear_failure(db, view) -> None:
 def record_send_outcome(db, view, failure: SmtpFailure | None, now: datetime) -> None:
     """A send outside the queue (the login PIN, whole-branch review): a
     failure on the server's side shows on the Email card, without starting
-    the queue's back-off; a sent message clears a stored failure."""
+    the queue's back-off; a sent message is recorded and clears a stored
+    failure."""
     if failure is None:
-        _clear_failure(db, view)
+        _record_sent(db, view, now)
         return
     row = _fresh_row(db, view)
     if row is None:

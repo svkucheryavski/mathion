@@ -304,6 +304,31 @@ def test_sent_pin_email_clears_the_card(client, db, monkeypatch):
     assert _card(db) == (None, None, 0)
 
 
+def test_sent_pin_email_records_last_sent(client, db, monkeypatch):
+    # Set up D6: a healthy server (no stored failure) still records the send.
+    _make_user(db)
+    _smtp_on(monkeypatch, MemoryMailer())
+    before = datetime.now(timezone.utc)
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    db.expire_all()
+    sent = load(db).last_sent_at
+    assert sent is not None and sent >= before
+
+
+def test_failed_pin_email_records_no_send(client, db, monkeypatch):
+    class LoginRefused(MemoryMailer):
+        @contextmanager
+        def session(self):
+            raise smtplib.SMTPAuthenticationError(535, b"no")
+            yield
+
+    _make_user(db)
+    _smtp_on(monkeypatch, LoginRefused())
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    db.expire_all()
+    assert load(db).last_sent_at is None
+
+
 def test_pin_email_refused_after_body_reaches_the_card(client, db, monkeypatch):
     class Refused(MemoryMailer):
         def send(self, msg):
