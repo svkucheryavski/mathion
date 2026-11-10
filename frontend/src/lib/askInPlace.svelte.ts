@@ -179,6 +179,15 @@ export type AskHost = {
 
 export const PAGE_ASK_KEY = Symbol('pageAsk');
 
+/** A question as another part of the page sees it: open or not, and its Cancel. */
+export type AskView = { readonly open: boolean; focusCancel(): void };
+/** The superuser panel's leave question at the top of the page, as the shell
+ *  gives it to the pages under it. A page with a leave question of its own
+ *  claims it, so the shell asks nothing while that one is open (Set up D3);
+ *  the returned function releases it. */
+export type NavAskView = AskView & { claim(page: AskView): () => void };
+export const NAV_ASK_KEY = Symbol('navAsk');
+
 /** VersionEditPage's one navigation question and the modals that can draw it (D38, R46). */
 export class PageAsk {
   readonly ask = new InPlaceAsk();

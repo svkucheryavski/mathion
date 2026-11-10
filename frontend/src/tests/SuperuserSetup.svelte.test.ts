@@ -8,6 +8,7 @@ import { session } from '../stores/session.svelte';
 import { branding, setBranding, DEFAULT_BRANDING } from '../lib/branding.svelte';
 import { crc32 } from '../lib/pngCheck';
 import { createDirtyRegistry, DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../lib/dirtyRegistry.svelte';
+import { InPlaceAsk, NAV_ASK_KEY, type NavAskView } from '../lib/askInPlace.svelte';
 import * as router from '../lib/router.svelte';
 
 // Set up D3-D9: the page frame, its moves, All set, and the four steps: Email,
@@ -117,11 +118,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function render(s: PanelSetup = state()) {
+async function render(s: PanelSetup = state(), navAsk?: NavAskView) {
   setup.state = s;
-  cmp = mount(SuperuserSetup, {
-    target, props: { setup, token: 'T', onAuth }, context: new Map([[DIRTY_REGISTRY_KEY, registry]]),
-  });
+  const context = new Map<symbol, unknown>([[DIRTY_REGISTRY_KEY, registry]]);
+  if (navAsk) context.set(NAV_ASK_KEY, navAsk);
+  cmp = mount(SuperuserSetup, { target, props: { setup, token: 'T', onAuth }, context });
   await settle();
 }
 function deferred(): { promise: Promise<Answer>; resolve: (a: Answer) => void } {
@@ -147,6 +148,13 @@ async function choose(bytes: Uint8Array, name = 'school.png') {
   el.dispatchEvent(new Event('change', { bubbles: true }));
   for (let i = 0; i < 3; i++) await tick();
 }
+/** The same, without waiting for the file to be read. */
+function chooseNow(bytes: Uint8Array, name = 'school.png') {
+  const el = card()!.querySelector<HTMLInputElement>('input[type="file"]')!;
+  Object.defineProperty(el, 'files', { value: [new File([new Uint8Array(bytes)], name, { type: 'image/png' })], configurable: true });
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
+}
 const confirmDiscard = () => target.querySelector<HTMLButtonElement>('[data-action="confirm-discard"]');
 const askCancel = () => target.querySelector<HTMLButtonElement>('.inline-confirm button.cancel');
 
@@ -166,6 +174,8 @@ it('the list marks: a tick when done, dashed when passed and not done, the numbe
   expect(marks.map((m) => [...m.classList].find((c) => c === 'done' || c === 'passed' || c === 'number'))).toEqual(['done', 'passed', 'number', 'number']);
   expect(marks[2].textContent).toBe('3');
   expect(items()[2].getAttribute('aria-current')).toBe('step');
+  // The hidden text: passed but not done is "not done", whether skipped or saved (U2).
+  expect(items().map((b) => b.querySelector('.sl-vh')?.textContent ?? null)).toEqual(['(done)', '(not done)', null, null]);
 });
 
 it('held card ignores a re-read that moves the step', async () => {
@@ -263,6 +273,80 @@ it('a failed move after Discard keeps the step with its form reset', async () =>
   expect(title()).toBe('Email');
   expect(err()).toBe('Boom.');
   expect(input('Mail server').value).toBe('smtp.uni.dk');
+  expect(document.activeElement).toBe(foot('skip'));   // back on the control that asked
+});
+
+it("with the page's question open, a finished save moves the card on with no skip sent", async () => {
+  routes['PATCH /settings/email'] = () => [200, settings({ host: 'smtp.other.dk' })];
+  routes['POST /setup/saved'] = () => [200, state({ step: 2 })];
+  await render();
+  type(input('Mail server'), 'smtp.other.dk');
+  foot('skip')!.click();
+  await settle();
+  expect(confirmDiscard()).not.toBeNull();
+  foot('save')!.click();                          // the step's own save moves the card on
+  await settle();
+  expect(title()).toBe('Site name and logo');
+  expect(confirmDiscard()).toBeNull();
+  expect(writes().map((c) => c.key)).toEqual(['PATCH /settings/email', 'POST /setup/saved']);
+});
+
+it("the page's question goes when a re-read moves the card (the step no longer held)", async () => {
+  routes['GET /setup'] = () => [200, state({ step: 2 })];
+  await render();
+  type(input('Mail server'), 'smtp.other.dk');
+  foot('skip')!.click();
+  await settle();
+  expect(confirmDiscard()).not.toBeNull();
+  type(input('Mail server'), 'smtp.uni.dk');      // back to the saved value: nothing holds the card
+  await setup.read();
+  await settle();
+  expect(title()).toBe('Site name and logo');
+  expect(confirmDiscard()).toBeNull();
+  expect(writes()).toEqual([]);
+});
+
+it("the page's question is withdrawn when the page goes", async () => {
+  await render();
+  type(input('Mail server'), 'smtp.other.dk');
+  foot('skip')!.click();
+  await settle();
+  const dismiss = vi.spyOn(InPlaceAsk.prototype, 'dismiss');
+  const discardAll = vi.spyOn(registry, 'discardAll');
+  unmount(cmp!);
+  cmp = null;
+  expect(dismiss).toHaveBeenCalledTimes(1);
+  await settle();
+  expect(writes()).toEqual([]);
+  expect(discardAll).not.toHaveBeenCalled();       // answered "dismissed", not Discard
+});
+
+it("the page's question goes when the step's own save starts, so its Discard can't send a move mid-save", async () => {
+  const d = deferred();
+  routes['PATCH /settings/email'] = () => d.promise;
+  routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
+  routes['GET /setup'] = () => [200, state()];
+  await render();
+  type(input('Mail server'), 'smtp.other.dk');
+  foot('skip')!.click();
+  await settle();
+  expect(confirmDiscard()).not.toBeNull();
+  foot('save')!.click();
+  await settle();
+  expect(confirmDiscard()).toBeNull();
+  d.resolve([200, settings({ host: 'smtp.other.dk' })]);
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['PATCH /settings/email', 'POST /setup/saved']);
+});
+
+it("while the shell's question is open, a move asks nothing and brings that question back", async () => {
+  const focusCancel = vi.fn();
+  await render(state(), { open: true, focusCancel, claim: () => () => {} });
+  foot('skip')!.click();
+  await settle();
+  expect(focusCancel).toHaveBeenCalledTimes(1);
+  expect(writes()).toEqual([]);
+  expect(title()).toBe('Email');
 });
 
 it('focus moves to the card heading when the page shows a step and on step change', async () => {
@@ -352,6 +436,145 @@ it('Try again shows that it is reading and ignores presses until the read answer
   expect(again().getAttribute('aria-disabled')).toBeNull();
   again().click();
   expect(read).toHaveBeenCalledTimes(2);
+});
+
+// --- Task 7 test gaps (the minors round) ---
+
+it('the keep-alive stops when the step closes', async () => {
+  const stops: ReturnType<typeof vi.fn>[] = [];
+  const real = setup.keepAlive.bind(setup);
+  vi.spyOn(setup, 'keepAlive').mockImplementation((dirty) => {
+    const stop = vi.fn(real(dirty));
+    stops.push(stop);
+    return stop;
+  });
+  await render();
+  expect(stops).toHaveLength(1);
+  foot('skip')!.click();
+  await settle();
+  expect(title()).toBe('Site name and logo');
+  expect(stops[0]).toHaveBeenCalled();
+});
+
+it('a test answer about values edited since is dropped', async () => {
+  const d = deferred();
+  routes['POST /settings/email/test'] = () => d.promise;
+  routes['GET /setup'] = () => [200, state()];
+  await render();
+  [...card()!.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Send test email')!.click();
+  await settle();
+  type(input('Mail server'), 'smtp.other.dk');
+  d.resolve([200, { ok: true, message: 'Sent.' }]);
+  await settle();
+  expect(target.querySelector('.se-result')).toBeNull();
+});
+
+it('Esc in a field does nothing: the values stay and nothing asks or sends', async () => {
+  await render();
+  type(input('Mail server'), 'smtp.other.dk');
+  input('Mail server').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  await settle();
+  expect(input('Mail server').value).toBe('smtp.other.dk');
+  expect(confirmDiscard()).toBeNull();
+  expect(writes()).toEqual([]);
+});
+
+it("Cancel puts focus back on the list item or Back that asked", async () => {
+  await render(state({ step: 2 }));
+  type(input('Site name'), 'Lund');
+  items()[2].click();
+  await settle();
+  askCancel()!.click();
+  await settle();
+  expect(document.activeElement).toBe(items()[2]);
+  foot('back')!.click();
+  await settle();
+  askCancel()!.click();
+  await settle();
+  expect(document.activeElement).toBe(foot('back'));
+  expect(writes()).toEqual([]);
+});
+
+it('a submit while the values load (mode "none") sends nothing', async () => {
+  const d = deferred();
+  routes['GET /settings'] = () => d.promise;
+  await render();
+  expect(foot('save')).toBeNull();
+  card()!.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(writes()).toEqual([]);
+  d.resolve([200, settings()]);
+  await settle();
+});
+
+it('the values load fresh each time the step opens', async () => {
+  await render();
+  foot('skip')!.click();
+  await settle();
+  foot('back')!.click();
+  await settle();
+  expect(title()).toBe('Email');
+  expect(calls.filter((c) => c.key === 'GET /settings')).toHaveLength(2);
+});
+
+it("after a failed skip, a failed save's sentence replaces the skip's", async () => {
+  routes['POST /setup/skip'] = () => [500, { detail: 'Skip failed.' }];
+  routes['PATCH /settings/email'] = () => [500, { detail: 'Save failed.' }];
+  await render();
+  foot('skip')!.click();
+  await settle();
+  expect(err()).toBe('Skip failed.');
+  type(input('Mail server'), 'smtp.other.dk');
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Save failed.');
+});
+
+it('after a half-save, a failed second save keeps "step saved" due: back to the saved values, the next press sends only it', async () => {
+  let patches = 0;
+  routes['PATCH /settings/email'] = (b) => (++patches === 2
+    ? [500, { detail: 'Save failed.' }]
+    : [200, settings({ host: (b as { host: string }).host })]);
+  let saves = 0;
+  routes['POST /setup/saved'] = () => (++saves === 1 ? [500, { detail: 'Boom.' }] : [200, state({ step: 2 })]);
+  routes['GET /setup'] = () => [200, state()];
+  await render();
+  type(input('Mail server'), 'smtp.a.dk');
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Boom.');
+  type(input('Mail server'), 'smtp.b.dk');
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Save failed.');
+  type(input('Mail server'), 'smtp.a.dk');          // back to what saved: only "step saved" is due
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual([
+    'PATCH /settings/email', 'POST /setup/saved', 'PATCH /settings/email', 'POST /setup/saved',
+  ]);
+  expect(title()).toBe('Site name and logo');
+});
+
+it('a 401 on "step saved" goes to the shell, with no re-read', async () => {
+  routes['PATCH /settings/email'] = () => [200, settings({ host: 'smtp.other.dk' })];
+  routes['POST /setup/saved'] = () => [401, { detail: 'Not signed in' }];
+  await render();
+  type(input('Mail server'), 'smtp.other.dk');
+  foot('save')!.click();
+  await settle();
+  expect(onAuth).toHaveBeenCalled();
+  expect(calls.filter((c) => c.key === 'GET /setup')).toHaveLength(0);
+});
+
+it("a move's 404 goes to the shell and shows no sentence", async () => {
+  routes['POST /setup/skip'] = () => [404, { detail: 'Not Found' }];
+  await render();
+  foot('skip')!.click();
+  await settle();
+  expect(onAuth).toHaveBeenCalledWith('expired');
+  expect(err()).toBeNull();
+  expect(title()).toBe('Email');
 });
 
 // --- All set (D5) ---
@@ -618,6 +841,22 @@ it('a half-save re-reads the state, so the reason and the marks follow the saved
 });
 
 // --- Step 2: Site name and logo (D7) ---
+
+it('Save and continue waits while a chosen logo is still being read (Task 8 M3)', async () => {
+  routes['GET /branding'] = () => [200, brandingOf('Riverside')];
+  await render(state({ step: 2 }));
+  type(input('Site name'), 'Lund');
+  chooseNow(pngOf(400, 100));
+  expect(blocked()).toBe(true);
+  foot('save')!.click();
+  await settle();
+  expect(writes()).toEqual([]);
+  for (let i = 0; i < 3; i++) await tick();
+  expect(blocked()).toBe(true);                   // read; the decode is still to come
+  decodes[0].resolve();
+  await settle();
+  expect(blocked()).toBe(false);
+});
 
 it("step 2's title, note and the not-done reason, hidden while the form differs", async () => {
   await render(state({ step: 2 }));

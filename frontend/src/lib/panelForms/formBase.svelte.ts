@@ -4,7 +4,8 @@ export class PanelForm<S = undefined> {
   /** What the form was built with: the saved values. A plain copy. */
   readonly saved: S;
   error = $state<string | null>(null);
-  /** Bumped by every edit, so an answer about older values can be dropped. */
+  /** Bumped by every edit, so an answer about older values can be dropped.
+   *  Every change goes through `edited()`. */
   edits = 0;
 
   constructor(saved: S) {

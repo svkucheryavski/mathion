@@ -6,6 +6,7 @@ import * as router from '../lib/router.svelte';
 import { session } from '../stores/session.svelte';
 import * as dirtyMod from '../lib/dirtyRegistry.svelte';
 import { SETUP_MARK, type PanelSetup } from '../lib/setup';
+import { KEEP_ALIVE_MS } from '../lib/setupStore.svelte';
 
 vi.mock('../lib/auth.svelte', () => ({
   logout: vi.fn(async () => {}),
@@ -109,6 +110,7 @@ beforeEach(() => {
 afterEach(() => {
   if (component) { unmount(component); component = null; }
   document.body.removeChild(target);
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -646,6 +648,30 @@ it('a pill click while dirty asks through the guard', async () => {
 
 // --- Set up D3 and the Task 5 review's notes ---
 
+it("while a step's own save runs, the pills wait too (setup.saving)", async () => {
+  setupState = { ...setupOf(true), step: 2 };
+  let answer!: (r: Response) => void;
+  const routed = dispatchFetch();
+  vi.stubGlobal('fetch', vi.fn((url: string) => (String(url).endsWith('/branding/name')
+    ? new Promise<Response>((r) => { answer = r; })
+    : routed(url))));
+  router.currentRoute.path = '/superuser/T/setup';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  await settle();
+  const name = [...target.querySelectorAll<HTMLInputElement>('input')].find((i) => i.labels?.[0]?.textContent?.trim() === 'Site name')!;
+  name.value = 'Lund';
+  name.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  buttonByText(target, 'Save and continue')!.click();
+  await settle();
+  expect(pills().every((a) => a.getAttribute('aria-disabled') === 'true')).toBe(true);
+  answer(jsonResponse(200, { ...BRANDING, name: 'Lund', public: { ...BRANDING.public, name: 'Lund' } }));
+  await settle();
+  await settle();
+  expect(pills().some((a) => a.hasAttribute('aria-disabled'))).toBe(false);
+});
+
 it("while a wizard write runs, the pills wait; they come back after", async () => {
   setupState = setupOf(true);
   let answer!: (r: Response) => void;
@@ -711,6 +737,153 @@ it('Set up when over never mounts the Set up page on its way out', async () => {
   watch.disconnect();
   expect(navSpy).toHaveBeenCalledWith('/superuser/T', { replace: true });
   expect(seen).toBe(false);
+});
+
+// --- Set up D3: one leave question at a time, the shell's or the page's ---
+
+async function dirtySetupStep2(): Promise<void> {
+  setupState = { ...setupOf(true), step: 2 };
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.__resetGuardsForTests();
+  router.currentRoute.path = '/superuser/T/setup';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  await settle();
+  const name = [...target.querySelectorAll<HTMLInputElement>('input')].find((i) => i.labels?.[0]?.textContent?.trim() === 'Site name')!;
+  name.value = 'Lund';
+  name.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+}
+
+it("a pill click while the page's question is open asks nothing more and brings that one back", async () => {
+  await dirtySetupStep2();
+  buttonByText(target, 'Back')!.click();
+  await settle();
+  expect(target.querySelectorAll('.inline-confirm')).toHaveLength(1);
+  pills()[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+  await settle();
+  expect(target.querySelectorAll('.inline-confirm')).toHaveLength(1);
+  expect(document.activeElement).toBe(target.querySelector('.sp-ask .inline-confirm button.cancel'));
+  expect(router.currentRoute.path).toBe('/superuser/T/setup');
+});
+
+it("a move while the shell's question is open asks nothing more and brings that one back", async () => {
+  signIn();
+  let writes = 0;
+  setupWrite = () => { writes++; return jsonResponse(200, setupState); };
+  await dirtySetupStep2();
+  buttonByText(target, 'Sign out')!.click();
+  await settle();
+  expect(target.querySelectorAll('.inline-confirm')).toHaveLength(1);
+  buttonByText(target, 'Keep the defaults')!.click();
+  await settle();
+  expect(target.querySelectorAll('.inline-confirm')).toHaveLength(1);
+  expect(document.activeElement).toBe(target.querySelector('.su-ask .inline-confirm button.cancel'));
+  expect(writes).toBe(0);
+});
+
+it("the shell's question goes when a step's own save starts, so its Discard can't leave mid-save", async () => {
+  await dirtySetupStep2();
+  let answer!: (r: Response) => void;
+  const routed = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => (String(url).endsWith('/branding/name')
+    ? new Promise<Response>((r) => { answer = r; })
+    : routed(url, init))));
+  pills()[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+  await settle();
+  expect(target.querySelector('.su-ask .inline-confirm')).not.toBeNull();
+  buttonByText(target, 'Save and continue')!.click();
+  await settle();
+  expect(target.querySelector('.inline-confirm')).toBeNull();
+  answer(jsonResponse(200, { ...BRANDING, name: 'Lund', public: { ...BRANDING.public, name: 'Lund' } }));
+  await settle();
+  await settle();
+  expect(router.currentRoute.path).toBe('/superuser/T/setup');
+  // The guard wasn't left waiting on the withdrawn question: the next pill click goes.
+  pills()[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+  await settle();
+  expect(router.currentRoute.path).toBe('/superuser/T');
+});
+
+it('while a save runs, Sign out and a navigation wait: no question, no sign-out', async () => {
+  const auth = await import('../lib/auth.svelte');
+  (auth.logout as ReturnType<typeof vi.fn>).mockClear();
+  signIn();
+  await dirtySetupStep2();
+  let answer!: (r: Response) => void;
+  const routed = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => (String(url).endsWith('/branding/name')
+    ? new Promise<Response>((r) => { answer = r; })
+    : routed(url, init))));
+  buttonByText(target, 'Save and continue')!.click();
+  await settle();
+  const out = buttonByText(target, 'Sign out')!;
+  expect(out.getAttribute('aria-disabled')).toBe('true');
+  out.click();
+  await settle();
+  expect(target.querySelector('.inline-confirm')).toBeNull();
+  expect(auth.logout).not.toHaveBeenCalled();
+  const nav = router.navigate('/superuser/T');     // the browser's Back goes through the same guard
+  await settle();
+  expect(target.querySelector('.inline-confirm')).toBeNull();
+  expect(await nav).toBe(false);
+  answer(jsonResponse(200, { ...BRANDING, name: 'Lund', public: { ...BRANDING.public, name: 'Lund' } }));
+  await settle();
+  await settle();
+  expect(buttonByText(target, 'Sign out')!.getAttribute('aria-disabled')).toBeNull();
+});
+
+it('while a wizard write runs with nothing unsaved, Sign out waits too', async () => {
+  const auth = await import('../lib/auth.svelte');
+  (auth.logout as ReturnType<typeof vi.fn>).mockClear();
+  signIn();
+  setupState = setupOf(true);
+  let answer!: (r: Response) => void;
+  setupWrite = () => new Promise<Response>((r) => { answer = r; });
+  vi.stubGlobal('fetch', dispatchFetch());
+  router.currentRoute.path = '/superuser/T/setup';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  await settle();
+  buttonByText(target, 'Skip for now')!.click();
+  await settle();
+  buttonByText(target, 'Sign out')!.click();
+  await settle();
+  expect(auth.logout).not.toHaveBeenCalled();
+  answer(jsonResponse(200, { ...setupOf(true), step: 2 }));
+  await settle();
+});
+
+it("a link that expires while the shell's question is open withdraws it, so the pills work again", async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+  await dirtySetupStep2();
+  pills()[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+  await settle();
+  expect(target.querySelector('.su-ask .inline-confirm')).not.toBeNull();
+  setupAnswer = () => jsonResponse(404, { detail: 'Not Found' });
+  await vi.advanceTimersByTimeAsync(KEEP_ALIVE_MS);   // the keep-alive read finds the link expired
+  await settle();
+  expect(target.querySelector('.su-expired')).not.toBeNull();
+  pills()[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+  await settle();
+  expect(router.currentRoute.path).toBe('/superuser/T');
+});
+
+it("a link that expires while Sign out's question is open withdraws it: nobody is signed out", async () => {
+  const auth = await import('../lib/auth.svelte');
+  (auth.logout as ReturnType<typeof vi.fn>).mockClear();
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+  signIn();
+  await dirtySetupStep2();
+  buttonByText(target, 'Sign out')!.click();
+  await settle();
+  expect(target.querySelector('.su-ask .inline-confirm')).not.toBeNull();
+  setupAnswer = () => jsonResponse(404, { detail: 'Not Found' });
+  await vi.advanceTimersByTimeAsync(KEEP_ALIVE_MS);
+  await settle();
+  expect(target.querySelector('.su-expired')).not.toBeNull();
+  expect(target.querySelector('.inline-confirm')).toBeNull();
+  expect(auth.logout).not.toHaveBeenCalled();
 });
 
 it("Cancel on the shell's leave question puts focus back on Sign out", async () => {

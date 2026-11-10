@@ -25,7 +25,7 @@
         aria-disabled={blocked ? 'true' : undefined} onclick={() => { if (!blocked) onGo(n); }}>
         <span class="sl-mark {mark}" aria-hidden="true">{mark === 'done' ? '✓' : n}</span>
         <span class="sl-label">{label}</span>
-        {#if mark === 'done'}<span class="sl-vh">(done)</span>{:else if mark === 'passed'}<span class="sl-vh">(skipped)</span>{/if}
+        {#if mark === 'done'}<span class="sl-vh">(done)</span>{:else if mark === 'passed'}<span class="sl-vh">(not done)</span>{/if}
       </button>
     </li>
   {/each}

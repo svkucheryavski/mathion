@@ -4,7 +4,9 @@
   // re-read unless it holds an error, typed values or a note (D3a); this tab's
   // own moves always apply. Back, the skip button and a list click on a step
   // with unsaved changes ask first, under the card; Discard resets the form,
-  // then the move is sent, and a failed move keeps the step with its error.
+  // then the move is sent, and a failed move keeps the step with its error,
+  // focus back on the control that asked. One question at a time: the shell's
+  // (a pill, Sign out) or this page's, which goes with its card.
   // A first read that failed shows the panel's error state instead (D2).
   import { getContext, untrack } from 'svelte';
   import PanelHead from '../../components/superuser/PanelHead.svelte';
@@ -16,7 +18,7 @@
   import StepSite from '../../components/superuser/setup/StepSite.svelte';
   import StepSignIn from '../../components/superuser/setup/StepSignIn.svelte';
   import StepCourse from '../../components/superuser/setup/StepCourse.svelte';
-  import { DISCARD_NAV_ASK, focusAfter, InPlaceAsk } from '../../lib/askInPlace.svelte';
+  import { DISCARD_NAV_ASK, focusAfter, InPlaceAsk, NAV_ASK_KEY, type NavAskView } from '../../lib/askInPlace.svelte';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../../lib/dirtyRegistry.svelte';
   import { session } from '../../stores/session.svelte';
   import {
@@ -29,6 +31,7 @@
   let { setup, token, onAuth }: { setup: SetupStore; token: string; onAuth: PanelOnAuth } = $props();
 
   const registry = getContext<DirtyRegistry | undefined>(DIRTY_REGISTRY_KEY);
+  const navAsk = getContext<NavAskView | undefined>(NAV_ASK_KEY);
   const me = $derived(session.user?.email ?? null);
 
   let card = $state<Card | null>(null);
@@ -50,9 +53,13 @@
     });
   });
 
-  // A new card's step tells the page its own hold when it opens.
+  // A new card's step tells the page its own hold when it opens. A question
+  // asked about the old card goes with it, so its Discard can't send that move.
   function setCard(next: Card): void {
-    if (next !== card) hold.get = () => false;
+    if (next !== card) {
+      hold.get = () => false;
+      ask.dismiss();
+    }
     card = next;
   }
 
@@ -63,8 +70,15 @@
 
 
   // D3: the page's own leave question, under the card. Cancel puts focus back
-  // on the control that asked (`from`, a selector inside the page).
+  // on the control that asked (`from`, a selector inside the page). It is
+  // withdrawn when the page goes, and when a save starts (the moves wait then).
+  // The shell asks nothing while it is open.
   const ask = new InPlaceAsk();
+  $effect(() => () => ask.dismiss());
+  $effect(() => navAsk?.claim(ask));
+  $effect(() => {
+    if (busy) untrack(() => ask.dismiss());
+  });
   let pageEl = $state<HTMLElement | undefined>();
   async function leaveOk(from: string): Promise<boolean> {
     if (!registry?.isAnyDirty()) return true;
@@ -78,7 +92,10 @@
     return true;
   }
 
+  // One question at a time: while the shell's is open (a pill, Sign out), a
+  // move brings that one back instead.
   async function move(write: () => Promise<PanelSetup>, from: string): Promise<void> {
+    if (navAsk?.open) { navAsk.focusCancel(); return; }
     if (busy || ask.open) { ask.focusCancel(); return; }
     if (!(await leaveOk(from))) return;
     moveError = null;
@@ -86,6 +103,8 @@
       show(await setup.write(write));
     } catch (e) {
       moveError = panelError(e, onAuth);
+      // After Discard the question, and the focus it held, went: back to the asking control.
+      void focusAfter(() => pageEl?.querySelector(from));
     }
   }
 

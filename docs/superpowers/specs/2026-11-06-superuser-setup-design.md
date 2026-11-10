@@ -85,7 +85,7 @@
 - Rev 16 folds in the narrow round 13 (`spec-r13-opus.md`, `spec-r13-fable.md`), both 0 Critical and 0 Important. Mine, from the reviews: D3 and D4 name the skip button by its role; the D13 write behind the Dashboard's "Keep these values" is called the keep-sign-in write, apart from step 4's skip button of the same label, which sends the skip write.
 - Rev 16 also folds in the narrow rounds 14 and 15 (`spec-r14-*`, `spec-r15-*`, all 0 Critical and 0 Important): §6 names the keep-sign-in write and D9's mark; D3 and D3a say "the skip button".
 - Rev 17 (whole-branch review, Fable M2, from the user's "yes" to fixing it): D2's mark is also written by any later answer that says the wizard is on, once the mount's read has decided (Try again, a page change), so a tab whose first read failed is redirected to Set up once at most; nothing writes it once the expired-link view shows, even a read still in flight.
-- Rev 18 (the minors round, 2026-11-10): D6's send record is written once per run of healthy sends, not on every send, and never for a developer outbox; D13's read loads the settings once and builds its answer before the D5a commit; every bad step number gets D13's sentence; the installer's fourth next step names the panel's Set up page; D2's Try again shows its read, D12's Keep moves focus, and the Courses note reads a missing state first.
+- Rev 18 (the minors round, 2026-11-10): D6's send record is written once per run of healthy sends, not on every send, and never for a developer outbox; D13's read loads the settings once and builds its answer before the D5a commit; every bad step number gets D13's sentence; the installer's fourth next step names the panel's Set up page; D2's Try again shows its read, D12's Keep moves focus, and the Courses note reads a missing state first; D3's list says "(not done)" for a step passed but not done, and the leave questions are one at a time: the page's goes with its card or the page, both go when a save starts, and the shell's also when the link expires; Sign out, and the browser's Back when something is unsaved, wait during a save; and focus comes back after a failed move.
 
 **Builds on:**
 - `docs/superpowers/specs/2026-11-04-superuser-settings-design.md` (the Email, File limits and Sign-in cards and their Edit dialogs; D5, Save blocked until something changes; D8, the stored password; D9a, the card's test; D9d, the stuck queue; D2, the copy from `.env`; D2c, the developer modes);
@@ -152,15 +152,15 @@ The Set up page walks that person through the four things a site needs, once, an
   - **Marks in the list** (mine):
     - a tick when done;
     - the current step;
-    - a dashed circle when passed but not done (skipped, or saved without getting done);
+    - a dashed circle when passed but not done (skipped, or saved without getting done); a screen reader hears "(not done)" (rev 18, user's);
     - a plain number when not reached yet.
 
     Any step in the list can be clicked to go to it.
   - **Unsaved changes** (mine; anti-goal). Leaving a step whose fields differ from what was loaded asks first:
     - a pill click, a reload or a closed tab: through the app's existing guard (`DirtyGuard` and the dirty registry, `frontend/src/lib/dirtyRegistry.svelte.ts`), which also makes the browser ask on reload;
-    - Back, the skip button or a click in the list (the address stays `/setup`, so the guard doesn't see them): the page asks itself, with the same confirm;
+    - Back, the skip button or a click in the list (the address stays `/setup`, so the guard doesn't see them): the page asks itself, with the same confirm. One question at a time: while the shell's question is open (a pill, Sign out), these bring that one back instead, and while the page's is open, a pill or Sign out brings the page's back. The page's question goes when the card changes, when a save starts (the moves wait then) or when the page goes; the shell's goes when a save starts too, and when the link expires; and a move that fails after Discard puts focus back on the control that asked (rev 18);
     - Sign out, which navigates past the guard today: it asks first too.
-  - **While a save runs,** Back, the skip button, the list and the pills wait, as the dialogs' Cancel does (mine).
+  - **While a save runs,** Back, the skip button, the list, the pills and Sign out wait, as the dialogs' Cancel does (mine; Sign out, and the browser's Back when something is unsaved, rev 18).
   - **Keys and focus** (mine). Enter in a field is Save and continue when that is usable, as in the dialogs. Esc does nothing on the page. When the page first shows a step, and whenever the step changes, focus moves to the step card's heading.
   - **Nothing changed** (mine). A step that isn't done, with nothing changed, has Save and continue blocked (`aria-disabled`, as the dialogs' Save is). The skip button stays usable. Two exceptions: step 4 (D9), and a step whose own save succeeded but whose "step saved" write failed (the error shows, and Save and continue retries only that write).
 - **D3a. The card the person is working on stays** (mine, from review). An answer from the server never takes away something the person is looking at or typing:

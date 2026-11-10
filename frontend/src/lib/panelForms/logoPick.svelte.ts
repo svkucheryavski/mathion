@@ -1,7 +1,9 @@
 // Branding D2, D4-D6: a logo or tab icon being chosen. A chosen file's bytes
 // are read once and run through the server's whole check at once
 // (pngCheck), so a refused file never previews; the preview then waits for
-// img.decode(), and Save waits for it too. Save sends those same bytes.
+// img.decode(), and Save waits for it too. While the file is read the pick is
+// `checking`, a change that isn't ready, so Save waits then as well. Save
+// sends those same bytes.
 // Reset to default is a pending change like a chosen file; the last one wins.
 // A refusal drops every pending change, so the preview is the saved item.
 import { PanelForm } from './formBase.svelte';
@@ -45,6 +47,8 @@ function dataUrl(bytes: Uint8Array): string {
 export class LogoPick extends PanelForm<SavedImage> {
   readonly kind: 'logo' | 'icon';
   pending = $state<{ kind: 'file'; file: Chosen } | { kind: 'reset' } | null>(null);
+  /** A chosen file is being read and checked: a change, not yet ready. */
+  checking = $state(false);
   // Each choice and each Reset counts; a read or decode answer for an earlier one is ignored.
   private turn = 0;
 
@@ -53,9 +57,10 @@ export class LogoPick extends PanelForm<SavedImage> {
     this.kind = kind;
   }
 
-  readonly changed = $derived(this.pending !== null);
+  readonly changed = $derived(this.checking || this.pending !== null);
   readonly ready = $derived(
-    this.pending?.kind === 'reset' || (this.pending?.kind === 'file' && this.pending.file.decoded),
+    !this.checking
+    && (this.pending?.kind === 'reset' || (this.pending?.kind === 'file' && this.pending.file.decoded)),
   );
 
   /** What the previews show: a decoded choice, the default after Reset, or the saved item. */
@@ -75,18 +80,19 @@ export class LogoPick extends PanelForm<SavedImage> {
 
   async choose(file: File): Promise<void> {
     const mine = ++this.turn;
-    this.edits++;
+    this.edited();
+    this.checking = true;
     let bytes: Uint8Array<ArrayBuffer>;
     try {
       bytes = await readBytes(file);
     } catch {
-      if (mine === this.turn) this.refuse("This file can't be read.");
+      if (mine === this.turn) { this.checking = false; this.refuse("This file can't be read."); }
       return;
     }
     if (mine !== this.turn) return;
+    this.checking = false;
     const checked = checkPngBytes(bytes, this.kind);
     if ('refused' in checked) { this.refuse(checked.refused); return; }
-    this.error = null;
     const chosen: Chosen = { bytes, name: file.name, width: checked.width, height: checked.height,
       advice: checked.advice, url: dataUrl(bytes), decoded: false };
     this.pending = { kind: 'file', file: chosen };
@@ -101,8 +107,8 @@ export class LogoPick extends PanelForm<SavedImage> {
 
   reset(): void {
     this.turn++;
-    this.edits++;
+    this.edited();
+    this.checking = false;
     this.pending = { kind: 'reset' };
-    this.error = null;
   }
 }
