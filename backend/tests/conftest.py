@@ -251,9 +251,11 @@ def _build_schema():
     alembic_cfg = Config(str(Path(__file__).resolve().parent.parent / "alembic.ini"))
     command.upgrade(alembic_cfg, "head")
     # The site_settings migration copies the shell's .env into its row; every
-    # test starts without one (the defaults with email off).
+    # test starts without one (the defaults with email off). The site_setup
+    # migration turns the wizard on for a site with no course; every test
+    # starts with it over (Set up §4).
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE site_settings"))
+        conn.execute(text("TRUNCATE site_settings, site_setup"))
     yield
 
 

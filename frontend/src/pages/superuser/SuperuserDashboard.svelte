@@ -2,9 +2,14 @@
   import { getSuperuserStats, panelError, type PanelOnAuth, type SuperuserStats } from '../../lib/superuser';
   import { formatFileSize } from '../../lib/format';
   import PanelHead from '../../components/superuser/PanelHead.svelte';
+  import FinishCard from '../../components/superuser/FinishCard.svelte';
+  import ErrorState from '../../components/ui/ErrorState.svelte';
+  import type { SetupStore } from '../../lib/setupStore.svelte';
 
   // The shell handles the guard's 401 and 404 for every panel page (D25).
-  let { token, onAuth }: { token: string; onAuth: PanelOnAuth } = $props();
+  // Set up D12: the Finish setting up card sits above the stat cards; while no
+  // state read has succeeded, the error state takes its place (D2).
+  let { token, onAuth, setup }: { token: string; onAuth: PanelOnAuth; setup: SetupStore } = $props();
 
   let stats = $state<SuperuserStats | null>(null);
   let loading = $state(true);
@@ -30,6 +35,12 @@
 
 <PanelHead title="Dashboard" />
 <div class="dashboard">
+  {#if setup.failed}
+    <ErrorState title="Could not load set up." message={setup.error ?? undefined}
+      onretry={() => void setup.read()} retryLabel="Try again" />
+  {:else}
+    <FinishCard {setup} {token} {onAuth} />
+  {/if}
   {#if loading}
     <p>Loading…</p>
   {:else if error}
@@ -46,6 +57,7 @@
 </div>
 
 <style>
+  .dashboard { display: flex; flex-direction: column; gap: var(--space-3); }
   .cards { display: flex; flex-wrap: wrap; gap: var(--space-3); }
   /* The course page's side cards (CourseDeadlines .cdl): small white cards on
      the grey ground. */

@@ -1303,6 +1303,36 @@ class SignInIn(BaseModel):
     longest_sign_in_days: int
 
 
+# --- the panel's Set up wizard (superuser Set up spec D13) ---
+
+class PanelSetupStep(BaseModel):
+    passed: bool
+    done: bool
+    reason: str | None  # D6's and D7's not-done sentence
+
+
+class PanelSetupCourse(BaseModel):
+    # D8: the lowest-id course with an admin, for the done view.
+    name: str
+    sign_in_url: str
+    admin: PanelAdmin
+
+
+class PanelSetup(BaseModel):
+    wizard_on: bool
+    step: int  # 1-4; the stored step while on, else 1
+    steps: list[PanelSetupStep]  # four, in setup_state.STEPS order
+    course: PanelSetupCourse | None
+    course_without_admin: str | None
+    email_set_up: bool
+    pin_minutes: int
+    defaults_in_use: bool
+
+
+class SetupStepIn(BaseModel):
+    step: int
+
+
 class EmailTestResult(BaseModel):
     ok: bool
     message: str

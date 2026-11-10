@@ -420,6 +420,31 @@ def test_save_unchanged_keeps_card_test(panel, db, smtp):
     assert _get(panel)["email"]["card_test"]["ok"] is True
 
 
+SAVED_ON = dict(email_on=True, smtp_host="mail.uni.dk", smtp_port=587, smtp_encryption="starttls",
+                smtp_skip_cert_check=False, smtp_username="", email_from=FROM, email_off_at=None)
+SENT_AT = datetime(2026, 11, 1, 8, 0, tzinfo=timezone.utc)
+
+
+def test_email_save_with_changed_fingerprint_clears_last_sent(panel, db):
+    # Set up D6: a send with the old settings says nothing about the new ones.
+    set_site(db, **SAVED_ON, last_sent_at=SENT_AT)
+    assert _email(panel, port=2525).status_code == 200
+    assert _view(db).last_sent_at is None
+
+
+def test_email_save_unchanged_keeps_last_sent(panel, db):
+    set_site(db, **SAVED_ON, last_sent_at=SENT_AT)
+    assert _email(panel).status_code == 200
+    assert _view(db).last_sent_at == SENT_AT
+
+
+def test_off_save_keeps_last_sent(panel, db):
+    set_site(db, **SAVED_ON, last_sent_at=SENT_AT)
+    assert _email(panel, on=False).status_code == 200
+    v = _view(db)
+    assert (v.email_on, v.last_sent_at) == (False, SENT_AT)
+
+
 # --- the test itself (D9) ----------------------------------------------------------------------
 
 def test_test_endpoint_answer_has_no_server_text(panel, db, smtp):
@@ -660,3 +685,27 @@ def test_test_email_reads_the_saved_name(panel, db, smtp):
     r = _test(panel)
     assert r.status_code == 200, r.text
     assert smtp.sent[0]["Subject"] == "Test email from Riverside"
+
+
+# --- Set up D9: a save of either card marks the sign-in values kept ---
+
+def test_sign_in_save_marks_kept(panel, db):
+    client, base = panel
+    assert _view(db).sign_in_kept is False
+    r = client.patch(f"{base}/settings/sign-in", json=SIGN_IN)   # unchanged values count too
+    assert r.status_code == 200, r.text
+    assert _view(db).sign_in_kept is True
+
+
+def test_limits_save_marks_kept(panel, db):
+    client, base = panel
+    r = client.patch(f"{base}/settings/limits", json={"max_file_mb": 20, "max_total_mb": 500})
+    assert r.status_code == 200, r.text
+    assert _view(db).sign_in_kept is True
+
+
+def test_refused_sign_in_save_marks_nothing(panel, db):
+    client, base = panel
+    r = client.patch(f"{base}/settings/sign-in", json={**SIGN_IN, "pin_minutes": 4})
+    assert r.status_code == 422
+    assert _view(db).sign_in_kept is False

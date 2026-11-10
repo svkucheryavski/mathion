@@ -17,7 +17,7 @@ from mathion.png_check import PngRefused, check_png
 from mathion.schemas import (
     BrandingNameIn, ImageSize, PanelBranding, PanelColours, ThemeCheck, ThemeVarOut,
 )
-from mathion.site_settings import MB
+from mathion.site_settings import MB, get_row
 from mathion.theme_css import MAX_BYTES, parse_theme, same_colour
 from mathion.theme_vars import THEME_VARS
 
@@ -89,6 +89,7 @@ def save_name(data: BrandingNameIn, user: User = Depends(require_superuser_panel
         except BrandingRefusal as e:
             _bad(str(e))
     branding.save_name(db, name, by=user.id)
+    get_row(db).site_name_kept = True  # Set up D7: a reset counts too
     db.commit()
     return _panel(db)
 
@@ -115,6 +116,8 @@ def _save_image(kind: str, file: UploadFile | None, reset: bool, user: User, db:
         if width > side or height > side or (pixels is not None and width * height > pixels):
             _bad(too_large)
         branding.save_image(db, kind, data, width, height, by=user.id)
+    if kind == "logo":
+        get_row(db).site_name_kept = True  # Set up D7: a reset counts too; the tab icon doesn't
     db.commit()
     return _panel(db)
 

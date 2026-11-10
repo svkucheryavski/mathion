@@ -337,3 +337,43 @@ def test_refusal_beside_a_sent_message_leaves_the_card(db, seeded_run, mailer):
     assert (r1.retry_count, r1.error) == (1, None)
     assert _sent(db, r2) == [True]
     assert _fresh_view(db).send_failure_message is None
+
+
+# --- Set up D6: the time of the last successful send ---
+
+def test_sent_tick_records_last_sent_on_healthy_server(db, seeded_run, mailer):
+    # No failure stored: a healthy server still records the send.
+    set_site(db, **ON, email_off_at=None)
+    r = _row(db, seeded_run, T0)
+    now = T0 + H
+    _tick_once(_state(), now)
+    assert _sent(db, r) == [True]
+    assert _fresh_view(db).last_sent_at == now
+
+
+def test_sent_tick_skips_record_when_settings_changed(db, seeded_run, mailer):
+    class _SavedWhileSending(_Mailer):
+        def send(self, msg):
+            super().send(msg)
+            with SessionLocal() as other:
+                other.get(SiteSettings, 1).smtp_host = "mail2.uni.dk"
+                other.commit()
+    mailer["m"] = _SavedWhileSending()
+    set_site(db, **ON, email_off_at=None)
+    r = _row(db, seeded_run, T0)
+    _tick_once(_state(), T0 + H)
+    assert _sent(db, r) == [True]
+    view = _fresh_view(db)
+    assert (view.smtp_host, view.last_sent_at) == ("mail2.uni.dk", None)
+
+
+def test_refusal_tick_records_failure_not_send(db, seeded_run, mailer):
+    # One message goes out, then the server refuses the sender (D9c).
+    mailer["m"] = _Mailer(fail=smtplib.SMTPSenderRefused(553, b"no", "noreply@uni.dk"), on_calls=[2])
+    set_site(db, **ON, email_off_at=None)
+    r1, r2 = (_row(db, seeded_run, T0 + timedelta(seconds=i)) for i in range(2))
+    now = T0 + H
+    _tick_once(_state(), now)
+    assert _sent(db, r1, r2) == [True, False]
+    view = _fresh_view(db)
+    assert (view.send_failure_message, view.last_sent_at) == (SENDER_SENTENCE, None)

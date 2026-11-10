@@ -163,6 +163,11 @@ class SiteSettings(Base):
     send_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     send_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     send_backoff_step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Set up D7, D9: the site's name and the sign-in values were kept on purpose.
+    site_name_kept: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    sign_in_kept: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    # Set up D6: the last time a message went out.
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class SiteBranding(Base):
@@ -192,3 +197,19 @@ class SiteBrandingImage(Base):
 
     kind: Mapped[str] = mapped_column(String(4), primary_key=True)
     data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+
+
+class SiteSetup(Base):
+    """The panel's Set up wizard (superuser Set up spec D4, D10): one row, id 1.
+    A missing row means the wizard is over."""
+    __tablename__ = "site_setup"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_site_setup_one_row"),
+        CheckConstraint("step BETWEEN 1 AND 4", name="ck_site_setup_step"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    wizard_on: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    step: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # D4: bit 1 << (n - 1) is set once step n is passed (skipped, saved or done).
+    passed_mask: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

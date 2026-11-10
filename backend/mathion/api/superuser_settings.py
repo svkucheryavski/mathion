@@ -248,6 +248,8 @@ def save_email(data: EmailSettingsIn, _user: User = Depends(require_superuser_pa
         row.card_test_at, row.card_test_ok, row.card_test_message = row.test_at, row.test_ok, row.test_message
     elif new_fp != old_fp:
         row.card_test_at = row.card_test_ok = row.card_test_message = None
+    if new_fp != old_fp:
+        row.last_sent_at = None  # Set up D6: a send with the old settings says nothing about these
 
     if not row.email_on:
         # D10a: what was queued while email was off is never sent.
@@ -283,6 +285,7 @@ def save_limits(data: LimitsIn, _user: User = Depends(require_superuser_panel_wr
         _bad("The total can't be smaller than the largest file.")
     row = get_row(db)
     row.max_file_mb, row.max_total_mb = data.max_file_mb, data.max_total_mb
+    row.sign_in_kept = True  # Set up D9
     db.commit()
     return _panel_settings(db)
 
@@ -301,6 +304,7 @@ def save_sign_in(data: SignInIn, _user: User = Depends(require_superuser_panel_w
     row = get_row(db)
     row.pin_minutes, row.pin_requests_per_hour = data.pin_minutes, data.pin_requests_per_hour
     row.pin_failures_per_hour, row.longest_sign_in_days = data.pin_failures_per_hour, data.longest_sign_in_days
+    row.sign_in_kept = True  # Set up D9
     db.commit()
     return _panel_settings(db)
 

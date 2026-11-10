@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=2937
+EXPECTED_CHECKS=3028
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -5967,6 +5967,8 @@ if [[ -n $REPLY ]]; then
   d '\.su-pills' '' 'display:flex' 'flex:1'
   d '\.su-pill' '' 'text-decoration:none' 'color:var\(--muted\)' 'padding:4px 10px' 'border-radius:4px' '--ring: var\(--gold-text\)'
   chk "\.su-pill\[aria-current=page\]\.${H}" 'color:var\(--gold-text\)' 'background:var\(--gold-soft\)' 'font-weight:500'
+  # Set up D3: while a save runs the pills wait, in Button's blocked look.
+  chk "\.su-pill\[aria-disabled=true\]\.${H}" 'color:var\(--faint\)' 'cursor:not-allowed'
   none "SuperuserShell has no .su-label rule left (D23)" "\.su-label\."
   # The lockup moved to SiteLogo (Branding D4); the brand only holds it.
   d '\.brand' '' 'flex:none'
@@ -6120,7 +6122,8 @@ if [[ -n $REPLY ]]; then
   sweep NoteStrip $H
 fi
 # D8, D12, D17, D24: the panel dialogs' fields, the item modal's field look.
-for pair in NewCourseDialog:nc-input EditCourseDialog:ec-input AdminEmailField:ae-input DeleteCourseDialog:dc-input NewAccountDialog:na-input EditAccountDialog:ea-input EditEmailDialog:ee-input EditLimitsDialog:el-input EditSignInDialog:es-input EditSiteNameDialog:sn-input; do
+# Set up §6: the shared forms' fields components own the inputs the dialogs show.
+for pair in CourseFields:nc-input EditCourseDialog:ec-input AdminEmailField:ae-input DeleteCourseDialog:dc-input NewAccountDialog:na-input EditAccountDialog:ea-input EmailFields:ee-input LimitsFields:el-input SignInFields:es-input SiteNameField:sn-input; do
   uniq1 ${pair#*:}
   if [[ -n $REPLY ]]; then
     N=${pair%%:*}; H=$REPLY
@@ -6138,6 +6141,11 @@ uniq1 nc-err
 if [[ -n $REPLY ]]; then
   N=NewCourseDialog; H=$REPLY
   d '\.nc-err' '' 'color:var\(--danger\)'
+  sweep NewCourseDialog $H
+fi
+uniq1 nc-mono
+if [[ -n $REPLY ]]; then
+  N=CourseFields; H=$REPLY
   d '\.nc-mono' '' 'font-family:var\(--font-mono\)'
 fi
 
@@ -6182,27 +6190,38 @@ if [[ -n $REPLY ]]; then
 fi
 # D7, D9: the Edit email dialog: server and port on one row, greyed fields
 # when off, the test's answer in the accepted / danger-panel looks.
-uniq1 ee-result
+uniq1 ee-pair
 if [[ -n $REPLY ]]; then
-  N=EditEmailDialog; H=$REPLY
+  N=EmailFields; H=$REPLY
   d '\.ee-pair' '' 'display:grid' 'grid-template-columns:1fr 90px'
   d '\.ee-input' ':disabled' 'background:var\(--surface-2\)' 'color:var\(--muted\)'
   d '\.ee-hint' '' 'font-size:12px' 'color:var\(--muted\)'
+fi
+uniq1 ee-result
+if [[ -n $REPLY ]]; then
+  N=EditEmailDialog; H=$REPLY
   d '\.ee-result' '' 'padding:7px 10px' 'font-size:12\.5px'
   d '\.ee-result\.ok' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
   d '\.ee-result\.err' '' 'background:var\(--danger-panel-bg\)' 'color:var\(--danger-panel-fg\)'
   d '\.ee-err' '' 'color:var\(--danger\)'
+  sweep EditEmailDialog $H
 fi
 uniq1 el-hint
 if [[ -n $REPLY ]]; then
-  N=EditLimitsDialog; H=$REPLY
+  N=LimitsFields; H=$REPLY
   d '\.el-hint' '' 'font-size:12px' 'color:var\(--muted\)'
+fi
+uniq1 el-err
+if [[ -n $REPLY ]]; then
+  N=EditLimitsDialog; H=$REPLY
   d '\.el-err' '' 'color:var\(--danger\)'
+  sweep EditLimitsDialog $H
 fi
 uniq1 es-err
 if [[ -n $REPLY ]]; then
   N=EditSignInDialog; H=$REPLY
   d '\.es-err' '' 'color:var\(--danger\)'
+  sweep EditSignInDialog $H
 fi
 
 # The panel's Branding page (Branding D1, D2, D4): Settings' cards and rows,
@@ -6224,17 +6243,22 @@ if [[ -n $REPLY ]]; then
   d '\.b-warnings' '' 'color:var\(--gold-text\)'
   sweep SuperuserBranding $H
 fi
+uniq1 sn-hint
+if [[ -n $REPLY ]]; then
+  N=SiteNameField; H=$REPLY
+  d '\.sn-hint' '' 'font-size:12px' 'color:var\(--muted\)'
+fi
 uniq1 sn-err
 if [[ -n $REPLY ]]; then
   N=EditSiteNameDialog; H=$REPLY
-  d '\.sn-hint' '' 'font-size:12px' 'color:var\(--muted\)'
   d '\.sn-err' '' 'color:var\(--danger\)'
+  sweep EditSiteNameDialog $H
 fi
 # D4-D6: the image dialogs: the real-size boxes, the icon on light and dark,
 # the advice in gold (it never blocks), a refusal in red.
 uniq1 im-box
 if [[ -n $REPLY ]]; then
-  N=EditImageDialog; H=$REPLY
+  N=LogoPicker; H=$REPLY
   d '\.im-box' '' 'border:1px dashed var\(--border-strong\)' 'background:var\(--surface\)'
   d '\.im-box\.header' '' 'width:160px' 'height:20px'
   d '\.im-box\.login' '' 'width:224px' 'height:28px'
@@ -6242,6 +6266,11 @@ if [[ -n $REPLY ]]; then
   d '\.im-strip\.dark' '' 'background:var\(--text\)'
   d '\.im-advice' '' 'color:var\(--gold-text\)'
   d '\.im-hint' '' 'font-size:12px' 'color:var\(--muted\)'
+  sweep LogoPicker $H
+fi
+uniq1 im-err
+if [[ -n $REPLY ]]; then
+  N=EditImageDialog; H=$REPLY
   d '\.im-err' '' 'color:var\(--danger\)'
   sweep EditImageDialog $H
 fi
@@ -6261,6 +6290,93 @@ if [[ -n $REPLY ]]; then
   d '\.ec-problems' '' 'color:var\(--danger\)'
   d '\.ec-err' '' 'color:var\(--danger\)'
   sweep EditColoursDialog $H
+fi
+
+# Set up D12: the Dashboard's Finish setting up card, a white box like the
+# stat cards; reasons muted, the actions as links, a blocked Keep muted.
+own fc-card FinishCard.svelte
+uniq1 fc-card
+if [[ -n $REPLY ]]; then
+  N=FinishCard; H=$REPLY
+  d '\.fc-card' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius-lg\)' 'background:var\(--surface\)'
+  d '\.fc-count' '' 'color:var\(--muted\)'
+  d '\.fc-reason' '' 'color:var\(--muted\)'
+  d '\.fc-link' '' 'color:var\(--primary\)'
+  d '\.fc-keep\[aria-disabled=true\]' '' 'color:var\(--muted\)'
+  d '\.fc-err' '' 'color:var\(--danger\)'
+  sweep FinishCard $H
+fi
+
+# Set up D3-D6: the page (the steps on the left, the card on the right), the
+# step card and All set as the panel's white cards, the list's marks (a tick
+# on --success, dashed when passed), the email step's reason and test answer.
+own sp-grid SuperuserSetup.svelte
+uniq1 sp-grid
+if [[ -n $REPLY ]]; then
+  N=SuperuserSetup; H=$REPLY
+  d '\.sp-grid' '' 'grid-template-columns:200px minmax\(0,1fr\)'
+  sweep SuperuserSetup $H
+fi
+own st-card StepCard.svelte
+uniq1 st-card
+if [[ -n $REPLY ]]; then
+  N=StepCard; H=$REPLY
+  d '\.st-card' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius-lg\)' 'background:var\(--surface\)'
+  d '\.st-note' '' 'color:var\(--muted\)'
+  d '\.st-err' '' 'color:var\(--danger\)'
+  sweep StepCard $H
+fi
+own sl-item StepList.svelte
+uniq1 sl-item
+if [[ -n $REPLY ]]; then
+  N=StepList; H=$REPLY
+  d '\.sl-item\[aria-current=step\]' '' 'background:var\(--surface\)' 'border-color:var\(--border\)' 'color:var\(--text\)'
+  d '\.sl-item\[aria-disabled=true\]' '' 'cursor:default'
+  d '\.sl-mark\.done' '' 'background:var\(--success\)' 'color:var\(--primary-text\)'
+  d '\.sl-mark\.passed' '' 'border-style:dashed'
+  sweep StepList $H
+fi
+own as-card AllSetCard.svelte
+uniq1 as-card
+if [[ -n $REPLY ]]; then
+  N=AllSetCard; H=$REPLY
+  d '\.as-card' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius-lg\)' 'background:var\(--surface\)'
+  sweep AllSetCard $H
+fi
+own se-result StepEmail.svelte
+uniq1 se-result
+if [[ -n $REPLY ]]; then
+  N=StepEmail; H=$REPLY
+  d '\.se-reason' '' 'color:var\(--gold-text\)'
+  d '\.se-result\.ok' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
+  d '\.se-result\.err' '' 'background:var\(--danger-panel-bg\)' 'color:var\(--danger-panel-fg\)'
+  sweep StepEmail $H
+fi
+# Set up D7, D9: steps 2 and 4, the name step's reason in --gold-text and
+# their lead-ins (Logo; Sign-in, File limits) as small headings.
+own ss-reason StepSite.svelte
+uniq1 ss-reason
+if [[ -n $REPLY ]]; then
+  N=StepSite; H=$REPLY
+  d '\.ss-reason' '' 'color:var\(--gold-text\)'
+  d '\.ss-sub' '' 'font-weight:600' 'color:var\(--text\)'
+  sweep StepSite $H
+fi
+own si-sub StepSignIn.svelte
+uniq1 si-sub
+if [[ -n $REPLY ]]; then
+  N=StepSignIn; H=$REPLY
+  d '\.si-sub' '' 'font-weight:600' 'color:var\(--text\)'
+  sweep StepSignIn $H
+fi
+# Set up D8: step 3, the no-admin line in --gold-text and the done view's text.
+own sc-line StepCourse.svelte
+uniq1 sc-line
+if [[ -n $REPLY ]]; then
+  N=StepCourse; H=$REPLY
+  d '\.sc-line' '' 'color:var\(--gold-text\)'
+  d '\.sc-done' '' 'color:var\(--text\)'
+  sweep StepCourse $H
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

@@ -82,29 +82,66 @@ export function lookupAccount(token: string, email: string): Promise<AccountLook
 /** The `mathion pin` command the email-off note gives (D5a); the page shows it as code. */
 export const pinCommand = (email: string) => `mathion pin ${email}`;
 
+/** D5a: how an admin signs in while email isn't set up; the Courses note's
+ *  tail, and Set up D8's done view. */
+export function emailOffSentence(signInUrl: string, email: string, pinMinutes: number): string {
+  const minutes = `${pinMinutes} minute${pinMinutes === 1 ? '' : 's'}`;
+  return `Email isn't set up on this server, so tell them yourself. They sign in at ${signInUrl} `
+    + `with a PIN: run ${pinCommand(email)} on the server (the PIN lasts ${minutes}).`;
+}
+
+/** Set up D8: the admin is the signed-in superuser, compared lower-cased. */
+export const adminIsMe = (adminEmail: string, me: string | null | undefined): boolean =>
+  !!me && adminEmail.toLowerCase() === me.toLowerCase();
+
 /**
  * D5a: the note after New course (`create`) or an admin assign (`assign`). It
  * opens with the result, naming the admin by name or, without one, by email
- * (Review Focus 4); "unchanged" says only that nothing changed.
+ * (Review Focus 4); "unchanged" says only that nothing changed. Set up D8:
+ * when the admin is `me` the note is only that, with no email, PIN or
+ * disabled sentence; a queued email adds Email's not-done reason after it.
  */
-export function adminNote(result: AdminAssignResult, kind: 'create' | 'assign'): string {
+export function adminNote(
+  result: AdminAssignResult,
+  kind: 'create' | 'assign',
+  opts: { me?: string | null; emailReason?: string | null } = {},
+): string {
   const { course, admin } = result;
+  if (adminIsMe(admin.email, opts.me)) {
+    if (result.admin_email === 'unchanged') return 'You are already its admin; nothing changed.';
+    const found = "You'll find it on the Courses page of the main site.";
+    return kind === 'create'
+      ? `${course.name} is created; you are its admin. ${found}`
+      : `You are now the admin of ${course.name}. ${found}`;
+  }
   if (result.admin_email === 'unchanged') return 'They are already the admin; nothing changed.';
   const who = admin.full_name ?? admin.email;
   const opening = kind === 'create'
     ? `${course.name} is created; ${who} is its admin.`
     : `${who} is now the admin of ${course.name}.`;
   switch (result.admin_email) {
-    case 'queued':
-      return `${opening} An email with a sign-in link is on its way to ${admin.email}.`;
+    case 'queued': {
+      const sent = `${opening} An email with a sign-in link is on its way to ${admin.email}.`;
+      return opts.emailReason ? `${sent} ${opts.emailReason}` : sent;
+    }
     case 'disabled':
       return `${opening} No email sent: this account is disabled. Enable it on the Users page so they can sign in.`;
-    case 'email_off': {
-      const minutes = `${result.pin_minutes} minute${result.pin_minutes === 1 ? '' : 's'}`;
-      return `${opening} Email isn't set up on this server, so tell them yourself. They sign in at ${result.sign_in_url} `
-        + `with a PIN: run ${pinCommand(admin.email)} on the server (the PIN lasts ${minutes}).`;
-    }
+    case 'email_off':
+      return `${opening} ${emailOffSentence(result.sign_in_url, admin.email, result.pin_minutes)}`;
   }
+}
+
+/** D5a, Set up D8: the note and the `mathion pin` command it gives, which the
+ *  page shows as code; none when the admin is `me` (that note has no PIN). */
+export function adminNoteParts(
+  result: AdminAssignResult,
+  kind: 'create' | 'assign',
+  opts: { me?: string | null; emailReason?: string | null } = {},
+): { text: string; command?: string } {
+  const text = adminNote(result, kind, opts);
+  return result.admin_email === 'email_off' && !adminIsMe(result.admin.email, opts.me)
+    ? { text, command: pinCommand(result.admin.email) }
+    : { text };
 }
 
 // --- Users (spec D14-D21) ---
@@ -370,8 +407,8 @@ export function saveTheme(token: string, part: BrandingPart, filename = 'theme.c
 
 // --- The shell (D23, D25) ---
 
-/** The panel's five pages; the shell reads it from the route. */
-export type PanelPage = 'dashboard' | 'users' | 'courses' | 'settings' | 'branding';
+/** The panel's pages, Set up included (Set up D1); the shell reads it from the route. */
+export type PanelPage = 'setup' | 'dashboard' | 'users' | 'courses' | 'settings' | 'branding';
 
 // --- Errors (D25) ---
 
