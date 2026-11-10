@@ -85,7 +85,7 @@
 - Rev 16 folds in the narrow round 13 (`spec-r13-opus.md`, `spec-r13-fable.md`), both 0 Critical and 0 Important. Mine, from the reviews: D3 and D4 name the skip button by its role; the D13 write behind the Dashboard's "Keep these values" is called the keep-sign-in write, apart from step 4's skip button of the same label, which sends the skip write.
 - Rev 16 also folds in the narrow rounds 14 and 15 (`spec-r14-*`, `spec-r15-*`, all 0 Critical and 0 Important): §6 names the keep-sign-in write and D9's mark; D3 and D3a say "the skip button".
 - Rev 17 (whole-branch review, Fable M2, from the user's "yes" to fixing it): D2's mark is also written by any later answer that says the wizard is on, once the mount's read has decided (Try again, a page change), so a tab whose first read failed is redirected to Set up once at most; nothing writes it once the expired-link view shows, even a read still in flight.
-- Rev 18 (the minors round, 2026-11-10): D6's send record is written once per run of healthy sends, not on every send, and never for a developer outbox; D13's read loads the settings once and builds its answer before the D5a commit; every bad step number gets D13's sentence.
+- Rev 18 (the minors round, 2026-11-10): D6's send record is written once per run of healthy sends, not on every send, and never for a developer outbox; D13's read loads the settings once and builds its answer before the D5a commit; every bad step number gets D13's sentence; the installer's fourth next step names the panel's Set up page.
 
 **Builds on:**
 - `docs/superpowers/specs/2026-11-04-superuser-settings-design.md` (the Email, File limits and Sign-in cards and their Edit dialogs; D5, Save blocked until something changes; D8, the stored password; D9a, the card's test; D9d, the stuck queue; D2, the copy from `.env`; D2c, the developer modes);
@@ -119,7 +119,7 @@ The Set up page walks that person through the four things a site needs, once, an
 - new settings of any kind: every step saves through an existing endpoint. The only new stored facts are the wizard's own state, D6's record of a real send, and the "kept" marks of D7 and D9;
 - any new email to the new course's admin: New course already queues its "you are an admin" email when email is set up, and step 3 uses exactly that (D8);
 - a wizard for upgraded sites that already have a course (user's);
-- changes to the `mathion` CLI or its install messages. The install text calls the panel link "optional" (`cli/cmd/install.go:242`), though a site can't get a course without it; that line goes to the backlog. Whenever the panel is first opened, the wizard is there (§5).
+- changes to the `mathion` CLI or its install messages. The install text called the panel link "optional", though a site can't get a course without it; the minors round (rev 18, the user's wording) changed its fourth next step to "Open the superuser panel; its Set up page walks you through email, the site name, the first course and sign-in rules: docker compose ... exec -T app python -m mathion.superuser activate" (`nextSteps` in `cli/cmd/install.go`), shipped with the next CLI release. Whenever the panel is first opened, the wizard is there (§5).
 
 **Anti-goals** (a failure even if it works):
 - a second form for the same setting that behaves differently from the one on Settings, Branding or Courses. The one deliberate difference is D9's unchanged save (user's);

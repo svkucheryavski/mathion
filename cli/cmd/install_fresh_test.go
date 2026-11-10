@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
@@ -102,5 +104,28 @@ func TestFreshInstallSuperuserFailLeavesIncomplete(t *testing.T) {
 	}
 	if st.Schema != 2 || st.Complete || st.InstallComplete() {
 		t.Fatalf("a partial fresh install must leave Schema 2 complete:false; got %+v", st)
+	}
+}
+
+// The panel's Set up page is the next step after the first PIN, not an option
+// (superuser Set up spec, non-goal follow-up, user's U1 wording).
+func TestFreshInstallNamesThePanelsSetUp(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: &compose.FakeRunner{}, Out: &out, Err: os.Stderr}
+	if err := app.runInstallFresh(context.Background(), installOpts{
+		Domain: "learn.example.edu", AdminEmail: "you@example.edu", Version: "v0.1.1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	want := "  4. Open the superuser panel; its Set up page walks you through email, the site\n" +
+		"     name, the first course and sign-in rules:\n" +
+		"         docker compose ... exec -T app python -m mathion.superuser activate\n"
+	if !strings.Contains(got, want) {
+		t.Fatalf("next steps lack the Set up line:\n%s", got)
+	}
+	if strings.Contains(got, "(optional)") {
+		t.Fatalf("next steps still call the panel optional:\n%s", got)
 	}
 }

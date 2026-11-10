@@ -239,5 +239,7 @@ Deployment up. Next:
   2. Log in at https://%s — NOT http://127.0.0.1:8000 (the Secure session cookie
      won't persist over plain HTTP).
   3. Issue your first-login PIN:  sudo mathion pin %s
-  4. (optional) superuser panel URL: docker compose ... exec -T app python -m mathion.superuser activate
+  4. Open the superuser panel; its Set up page walks you through email, the site
+     name, the first course and sign-in rules:
+         docker compose ... exec -T app python -m mathion.superuser activate
 `

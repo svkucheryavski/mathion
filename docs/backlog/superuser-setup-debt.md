@@ -1,10 +1,6 @@
 # Superuser Set up: deferred work
 
-Minors from the per-task reviews and the whole-branch review, by task, plus the spec's follow-ups.
-
-## Spec follow-up
-
-- **The installer calls the panel link "optional"** (spec non-goals). `cli/cmd/install.go:242` ends its next steps with "(optional) superuser panel URL: …". With Set up, the panel is where a fresh site gets its email, name, first course and sign-in rules, so the link is the next step, not an option. Fix in a CLI release: drop "(optional)" and say the panel walks through setting up.
+Minors from the per-task reviews and the whole-branch review, by task.
 
 ## Task 4 (the six shared forms)
 

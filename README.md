@@ -235,7 +235,8 @@ docker compose -f docker-compose.prod.yml exec app python -m mathion.superuser p
 #    the Secure session cookie won't persist over plain HTTP) and log in with
 #    email + PIN.
 
-# 7. (optional) Superuser panel URL:
+# 7. Open the superuser panel; its Set up page walks you through email, the site
+#    name, the first course and sign-in rules:
 docker compose -f docker-compose.prod.yml exec app python -m mathion.superuser activate
 ```
 
