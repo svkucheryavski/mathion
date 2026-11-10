@@ -6,13 +6,6 @@ Minors from the per-task reviews and the whole-branch review, by task, plus the 
 
 - **The installer calls the panel link "optional"** (spec non-goals). `cli/cmd/install.go:242` ends its next steps with "(optional) superuser panel URL: …". With Set up, the panel is where a fresh site gets its email, name, first course and sign-in rules, so the link is the next step, not an option. Fix in a CLI release: drop "(optional)" and say the panel walks through setting up.
 
-## Task 3 (the wizard's moves and the panel API)
-
-- **The read that ends the wizard commits before it builds the answer** (Opus r1 M2, Fable r1 M3). `read` commits the D5a update, then `_panel_course(facts)` touches the expired Course and User: two extra queries, and an `ObjectDeletedError` (500) if that course or admin is deleted in the gap. The window is milliseconds. Fix: build the answer first, then run the conditional update and commit.
-- **Tests that pin less than they look** (Opus r1 M1, M3; Fable r1 M1). No test tells D4's "first after this step, wrapping round" from "first from step 1" (`_on(db, step=3, mask=0b0010)`, `skip(3)` → 4, not 1); the writes with a missing `site_setup` table are untested (the read is); `test_expired_token_404` passes without the router (an unknown path is 404 too): add a 200 with a live token beside it.
-- **Callers must commit before `read()`** (Opus r1 M4). The moves lock `site_setup` then write `site_settings`; a later endpoint that calls `read(db)` (whose D5a update locks `site_setup`) with its own `site_settings` change uncommitted would invert that and could deadlock two tabs. Note it in `read`'s docstring when a second caller appears. `setup_state` also imports the private `_panel_admin` and `email_set_up_in` from `api/superuser_courses.py` (the plan's choice); that becomes a cycle if Courses ever imports `setup_state`.
-- **The step number parses loosely, and only a range error gets the sentence** (Opus r1 M5, Fable r1 M2). Pydantic takes `true` as 1 and `"2"` or `2.0` as 2; a missing or non-integer step gets the list-shaped 422, not "The step must be from 1 to 4.". The page always sends an integer. Fix if wanted: `StrictInt` and a `field_validator` with the sentence.
-
 ## Task 4 (the six shared forms)
 
 - **The edit count isn't one convention** (Opus r1 M1, Fable r1 M3). `edits` is a plain field; `LogoPick.choose()` and `reset()` bump it directly (also for a file later refused), `SiteNameForm.resetToDefault()` doesn't bump it. No consumer reads it outside the email test today. Fix if a step needs it: make it `$state`, or route every change through `edited()`.

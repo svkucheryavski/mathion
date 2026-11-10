@@ -85,7 +85,7 @@
 - Rev 16 folds in the narrow round 13 (`spec-r13-opus.md`, `spec-r13-fable.md`), both 0 Critical and 0 Important. Mine, from the reviews: D3 and D4 name the skip button by its role; the D13 write behind the Dashboard's "Keep these values" is called the keep-sign-in write, apart from step 4's skip button of the same label, which sends the skip write.
 - Rev 16 also folds in the narrow rounds 14 and 15 (`spec-r14-*`, `spec-r15-*`, all 0 Critical and 0 Important): §6 names the keep-sign-in write and D9's mark; D3 and D3a say "the skip button".
 - Rev 17 (whole-branch review, Fable M2, from the user's "yes" to fixing it): D2's mark is also written by any later answer that says the wizard is on, once the mount's read has decided (Try again, a page change), so a tab whose first read failed is redirected to Set up once at most; nothing writes it once the expired-link view shows, even a read still in flight.
-- Rev 18 (the minors round, 2026-11-10): D6's send record is written once per run of healthy sends, not on every send, and never for a developer outbox; D13's read loads the settings once.
+- Rev 18 (the minors round, 2026-11-10): D6's send record is written once per run of healthy sends, not on every send, and never for a developer outbox; D13's read loads the settings once and builds its answer before the D5a commit; every bad step number gets D13's sentence.
 
 **Builds on:**
 - `docs/superpowers/specs/2026-11-04-superuser-settings-design.md` (the Email, File limits and Sign-in cards and their Edit dialogs; D5, Save blocked until something changes; D8, the stored password; D9a, the card's test; D9d, the stuck queue; D2, the copy from `.env`; D2c, the developer modes);
@@ -195,7 +195,7 @@ The Set up page walks that person through the four things a site needs, once, an
   - by an email test or a real send recorded in the background (D6).
 
   "Over" is stored by the first read or wizard write that finds it so. A step that later becomes undone (say, the only course is deleted) brings back its Dashboard line, never the wizard (D10).
-  - **How it's stored** (mine, from review). The state read and every wizard write (D13) check the done rules and the passed marks. When they find the wizard on and all four steps done, or all four passed (D4), they store "over" with one conditional update, and only then answer. So the next panel open lands on the Dashboard.
+  - **How it's stored** (mine, from review). The state read and every wizard write (D13) check the done rules and the passed marks. When they find the wizard on and all four steps done, or all four passed (D4), they store "over" with one conditional update, and only then answer. So the next panel open lands on the Dashboard. The read builds its answer before its own update commits, so a course deleted in the gap can't fail it (rev 18).
   - **Late writes:** a "go to step n", "skip", "step n saved" or Continue write that arrives after the wizard is over (a second tab, a held step-3 form, a retried step-4 limits save) changes nothing, the kept marks included. It answers 200 with the current state, never 404 or 409: the panel reads a 404 as an expired link (Users/Courses D25), and a 409 would make D8's Continue retry for ever.
   - **The page finding it over:** if the Set up page re-reads and finds the wizard over (ended by D5a or by another tab), it shows the All set card with D5's matching text. Two exceptions:
     - step 3's admin note is shown first (D8), and its Continue, or a list click, leads to All set;
@@ -302,6 +302,8 @@ A step that is already done shows its form filled with the saved values. When no
     - "step n saved" (after a step's saves succeed, or Continue; for step 2, it also sets the kept mark, D7).
 
     Each is a conditional update that applies only while the wizard is on, and each answers the whole state, as the read does, so no second read is needed. The keep-sign-in write, behind the Dashboard's "Keep these values", is a separate write that sets D9's mark whatever the wizard's state. Step 4's skip button, labelled the same, sends the skip write instead, which moves the wizard on (D4a).
+
+    A step that isn't a whole number from 1 to 4 (missing, `true`, `"2"`, `2.0`, out of range) answers 422 with "The step must be from 1 to 4." (mine, rev 18).
 
 ## 4. Constraints
 

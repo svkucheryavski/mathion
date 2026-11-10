@@ -19,7 +19,8 @@ _BAD_STEP = "The step must be from 1 to 4."
 
 
 def _step(data: SetupStepIn) -> int:
-    if not 1 <= data.step <= 4:
+    # A whole number only: bool is an int in Python, so the type is compared.
+    if type(data.step) is not int or not 1 <= data.step <= 4:
         raise HTTPException(status_code=422, detail=_BAD_STEP)
     return data.step
 

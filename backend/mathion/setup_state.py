@@ -8,13 +8,13 @@ from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from mathion import branding
-from mathion.api.superuser_courses import _panel_admin, email_set_up_in
 from mathion.branding import NAME_DEFAULT
 from mathion.config import settings
 from mathion.course_links import course_sign_in_url
 from mathion.models import Course, CourseAdmin
 from mathion.models_auth import SiteSetup, User
 from mathion.notifications.mailer import DEV_MODES
+from mathion.panel_people import email_set_up_in, panel_admin
 from mathion.schemas import PanelSetup, PanelSetupCourse, PanelSetupStep
 from mathion.site_settings import DEFAULTS, SiteSettingsView, get_row, load as load_site, password_is_readable
 
@@ -131,21 +131,25 @@ def _panel_course(facts: CourseFacts) -> PanelSetupCourse | None:
         return None
     course, admin = facts.first
     return PanelSetupCourse(name=course.name, sign_in_url=course_sign_in_url(course.slug),
-                            admin=_panel_admin(admin))
+                            admin=panel_admin(admin))
 
 
 def read(db: Session) -> PanelSetup:
     """D13's one read. D5a: on with every step passed (done anywhere, or
-    skipped) stores "over" with one conditional update, then answers."""
+    skipped) stores "over" with one conditional update. The answer is built
+    first, so a course or admin deleted before that commit can't fail it.
+
+    Lock order is `site_setup`, then `site_settings` (the moves). A caller
+    that changes `site_settings` commits that change before calling `read`,
+    or two tabs could deadlock on the D5a update."""
     row = _setup_row(db)
     done, view, facts = _done(db)
     passed = _passed(row.passed_mask if row is not None else 0, done)
     on = row is not None and row.wizard_on
-    if on and all(passed):
-        db.execute(update(SiteSetup).where(SiteSetup.id == 1, SiteSetup.wizard_on).values(wizard_on=False))
-        db.commit()
+    ends = on and all(passed)
+    if ends:
         on = False
-    return PanelSetup(
+    answer = PanelSetup(
         wizard_on=on,
         step=row.step if on else 1,
         steps=[PanelSetupStep(passed=p, done=d.done, reason=d.reason) for p, d in zip(passed, done)],
@@ -155,6 +159,10 @@ def read(db: Session) -> PanelSetup:
         pin_minutes=view.pin_minutes,
         defaults_in_use=defaults_in_use(view),
     )
+    if ends:
+        db.execute(update(SiteSetup).where(SiteSetup.id == 1, SiteSetup.wizard_on).values(wizard_on=False))
+        db.commit()
+    return answer
 
 
 def _live_row(db: Session) -> SiteSetup | None:

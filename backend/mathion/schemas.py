@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
@@ -1329,8 +1329,19 @@ class PanelSetup(BaseModel):
     defaults_in_use: bool
 
 
+def _step_schema(schema: dict) -> None:
+    schema.pop("default", None)
+    schema.update(type="integer", minimum=1, maximum=4)
+
+
 class SetupStepIn(BaseModel):
-    step: int
+    # Checked by the router, so every bad step (missing, true, "2", 2.0, out
+    # of range) gets the one sentence, never pydantic's list (Set up D13).
+    # The default only lets a missing step reach the router; the schema says
+    # what is accepted: a required whole number from 1 to 4.
+    model_config = ConfigDict(json_schema_extra={"required": ["step"]})
+
+    step: Any = Field(None, json_schema_extra=_step_schema)
 
 
 class EmailTestResult(BaseModel):
