@@ -6,7 +6,6 @@
   // changed, then "step 2 saved" (D4). A failure after a save keeps what saved
   // as the new starting point and retries only the rest (D3, Users/Courses
   // D24). The header shows a save at once, as on Branding (D14).
-  import { getContext, onDestroy, untrack } from 'svelte';
   import StepCard from './StepCard.svelte';
   import SiteNameField from '../fields/SiteNameField.svelte';
   import LogoPicker from '../fields/LogoPicker.svelte';
@@ -19,7 +18,7 @@
   import { tooLargeSentence } from '../../../lib/uploadLimit.svelte';
   import { getBranding, panelError, saveImage, saveSiteName, type PanelBranding } from '../../../lib/superuser';
   import { setupSaved, type StepProps } from '../../../lib/setup';
-  import { DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../../../lib/dirtyRegistry.svelte';
+  import { useStepGuards } from '../../../lib/stepGuards.svelte';
 
   let { token, setup, onAuth, onDone, back, skip, moveError, onHold }: StepProps = $props();
 
@@ -55,30 +54,30 @@
     if (!name || !logo) return 'none';
     return done && !changed && !due ? 'continue' : 'save';
   });
-  // D7: the reason speaks of the saved name, so it hides while the form differs.
-  const reason = $derived(!done && !changed ? step?.reason ?? null : null);
+  // D7: the reason speaks of the saved name, so it hides while the form
+  // differs, and while "step 2 saved" is still to send.
+  const reason = $derived(!done && !changed && !due ? step?.reason ?? null : null);
 
+  function clearErrors(): void {
+    if (name) name.error = null;
+    if (logo) logo.error = null;
+  }
   // D3: unsaved changes ask before leaving; Discard puts the loaded values back.
-  const tracker = {
-    get isDirty() { return changed; },
+  useStepGuards({
+    setup: () => setup, onHold: (h) => onHold(h), moveError: () => moveError,
+    dirty: () => changed,
     discard: () => {
       if (name) name = new SiteNameForm(name.saved);
       if (logo) logo = new LogoPick('logo', logo.saved);
     },
-  };
-  const registry = getContext<DirtyRegistry | undefined>(DIRTY_REGISTRY_KEY);
-  $effect(() => {
-    registry?.register(tracker);
-    return () => registry?.unregister(tracker);
+    held: () => !!name?.error || !!logo?.error,
+    clearErrors,
   });
-  // A failed move's sentence is the newest: it replaces the step's own errors.
-  $effect(() => {
-    if (moveError !== null) untrack(() => { if (name) name.error = null; if (logo) logo.error = null; });
-  });
-  // Told once, when the step opens; the page reads it at each re-read (D3a).
-  untrack(() => onHold(() => !!name?.error || !!logo?.error || tracker.isDirty));
-  // D3a: typed values keep the link alive while the step is open.
-  onDestroy(untrack(() => setup.keepAlive(() => tracker.isDirty)));
+
+  // D7 (U4): Remove drops a chosen logo; the saved one stays.
+  function removeLogo(): void {
+    if (logo) logo = new LogoPick('logo', logo.saved);
+  }
 
   /** D14: the header, title and icons show a save at once. */
   function show(b: PanelBranding): void {
@@ -86,7 +85,8 @@
   }
 
   async function sendSaved(): Promise<void> {
-    if (name) name.error = null;
+    // Both: an older logo sentence would hide this write's (it shows first).
+    clearErrors();
     try {
       const s = await setup.write(() => setupSaved(token, 2));
       due = false;
@@ -106,8 +106,7 @@
     if (mode === 'continue' || (due && !changed)) { await sendSaved(); return; }
     if (!ready) return;
     const pending = logo.pending;
-    name.error = null;
-    logo.error = null;
+    clearErrors();
     let failed: SiteNameForm | LogoPick = name;
     setup.saving = true;
     try {
@@ -155,7 +154,7 @@
     </div>
     <p class="ss-sub">Logo (optional)</p>
     <div class="ss-fields" onchange={() => setup.noteEdit()} onclick={() => setup.noteEdit()} role="presentation">
-      <LogoPicker form={logo} {busy} />
+      <LogoPicker form={logo} {busy} onRemove={removeLogo} />
     </div>
   {/if}
 </StepCard>

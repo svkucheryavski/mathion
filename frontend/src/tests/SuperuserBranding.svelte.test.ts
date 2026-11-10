@@ -314,6 +314,7 @@ describe('the Edit logo and Edit tab icon dialogs (D2, D4-D6)', () => {
     await choose(bytes);
     expect(read).toHaveBeenCalledTimes(1);
     expect(panel()!.querySelector('.im-file')?.textContent).toBe('school.png, 838 × 174 px');
+    expect(panel()!.querySelector('[data-action="remove"]')).toBeNull();   // Set up D7: the dialog has Cancel
     // Save waits for the decode.
     expect(blocked()).toBe(true);
     expect(previews().some((s) => s.startsWith('data:'))).toBe(false);

@@ -1,15 +1,18 @@
 <script lang="ts">
   // Branding D4-D6: the image's previews, the file choice, its advice and the
   // hint, shared by the Edit logo / Edit tab icon dialogs and Set up's Site
-  // name and logo step. The checks live in LogoPick.
+  // name and logo step. The checks live in LogoPick. With `onRemove` (Set up
+  // D7, U4), a chosen file's name has Remove beside it, which drops the choice;
+  // focus then goes to Choose.
   import Button from '../../ui/Button.svelte';
   import SiteLogo from '../../chrome/SiteLogo.svelte';
   import { IMAGE_TEXT, type LogoPick } from '../../../lib/panelForms/logoPick.svelte';
 
-  type Props = { form: LogoPick; busy: boolean };
-  let { form, busy }: Props = $props();
+  type Props = { form: LogoPick; busy: boolean; onRemove?: () => void };
+  let { form, busy, onRemove }: Props = $props();
 
   let picker = $state<HTMLInputElement | undefined>();
+  let chooseButton = $state<HTMLButtonElement | undefined>();
   const iconSrc = $derived(form.shown?.src ?? '/api/branding/icon-default.svg');
 
   function onChoose(e: Event) {
@@ -17,6 +20,11 @@
     const file = input.files?.[0];
     input.value = '';
     if (file) void form.choose(file);
+  }
+
+  function remove() {
+    onRemove?.();
+    chooseButton?.focus();
   }
 </script>
 
@@ -36,9 +44,13 @@
 {/if}
 
 <div class="im-choose">
-  <Button variant="secondary" disabled={busy} onclick={() => picker?.click()}>Choose a PNG…</Button>
+  <Button variant="secondary" disabled={busy} bind:element={chooseButton} onclick={() => picker?.click()}>Choose a PNG…</Button>
   {#if form.pending?.kind === 'file'}
     <span class="im-file">{form.pending.file.name}, {form.pending.file.width} × {form.pending.file.height} px</span>
+    {#if onRemove}
+      <button type="button" class="im-remove" data-action="remove" aria-label="Remove {form.pending.file.name}"
+        disabled={busy} onclick={remove}>Remove</button>
+    {/if}
   {/if}
   <input bind:this={picker} type="file" accept="image/png" hidden onchange={onChoose} />
 </div>
@@ -74,6 +86,10 @@
   .im-strip.dark { background: var(--text); }
   .im-choose { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
   .im-file { font-size: 12.5px; color: var(--text-2); overflow-wrap: anywhere; }
+  /* A link-look button, styled like FinishCard's Keep these values. */
+  .im-remove { flex: none; background: none; border: 0; padding: 0; font: inherit; font-size: 12.5px; color: var(--primary); cursor: pointer; }
+  .im-remove:hover { text-decoration: underline; }
+  .im-remove:disabled { color: var(--muted); cursor: default; text-decoration: none; }
   .im-advice { margin: 0; padding-left: 18px; font-size: 12px; color: var(--gold-text); }
   .im-hint { margin: 0; font-size: 12px; color: var(--muted); }
 </style>

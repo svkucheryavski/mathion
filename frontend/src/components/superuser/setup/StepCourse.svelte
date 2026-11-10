@@ -10,7 +10,6 @@
   // form holds typed values (D3a). A 409 re-reads the state: if step 3 is now
   // done, the done view replaces the form and its values, or All set shows
   // when the wizard is now over.
-  import { getContext, onDestroy, untrack } from 'svelte';
   import StepCard from './StepCard.svelte';
   import CourseFields from '../fields/CourseFields.svelte';
   import NoteStrip from '../NoteStrip.svelte';
@@ -19,7 +18,7 @@
   import { ApiError } from '../../../lib/api';
   import { adminNoteParts, createCourse, panelError } from '../../../lib/superuser';
   import { doneViewNote, setupSaved, type PanelSetup, type StepProps } from '../../../lib/setup';
-  import { DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../../../lib/dirtyRegistry.svelte';
+  import { useStepGuards } from '../../../lib/stepGuards.svelte';
 
   let { token, setup, onAuth, me, onDone, back, skip, moveError, onHold }: StepProps = $props();
 
@@ -41,23 +40,13 @@
   const mode = $derived(note || doneView ? 'continue' : 'save');
 
   // D3: unsaved changes ask before leaving; Discard empties the form.
-  const tracker = {
-    get isDirty() { return form.changed; },
+  useStepGuards({
+    setup: () => setup, onHold: (h) => onHold(h), moveError: () => moveError,
+    dirty: () => form.changed,
     discard: () => { form = new CourseForm(); },
-  };
-  const registry = getContext<DirtyRegistry | undefined>(DIRTY_REGISTRY_KEY);
-  $effect(() => {
-    registry?.register(tracker);
-    return () => registry?.unregister(tracker);
+    held: () => note !== null || !!form.error,
+    clearErrors: () => { form.error = null; },
   });
-  // A failed move's sentence is the newest: it replaces the step's own error.
-  $effect(() => {
-    if (moveError !== null) untrack(() => { form.error = null; });
-  });
-  // Told once, when the step opens; the page reads it at each re-read (D3a).
-  untrack(() => onHold(() => note !== null || !!form.error || tracker.isDirty));
-  // D3a: typed values keep the link alive while the step is open.
-  onDestroy(untrack(() => setup.keepAlive(() => tracker.isDirty)));
 
   /** "Step 3 saved": its answer, or null. A failure shows in the card and
    *  re-reads the state, so the marks follow the course (D13). */

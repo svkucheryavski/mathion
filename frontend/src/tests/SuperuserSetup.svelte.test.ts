@@ -76,7 +76,16 @@ let setup: SetupStore;
 let registry: DirtyRegistry;
 let onAuth: ReturnType<typeof vi.fn>;
 // img.decode() calls, in order, each answered by the test (jsdom has none).
+// Installed by the tests that choose a file (choose, chooseNow).
 let decodes: { resolve: () => void; reject: () => void }[];
+let decodeStubbed = false;
+function stubDecode() {
+  if (decodeStubbed) return;
+  decodeStubbed = true;
+  (HTMLImageElement.prototype as { decode?: () => Promise<void> }).decode = function () {
+    return new Promise<void>((resolve, reject) => decodes.push({ resolve, reject: () => reject(new Error('EncodingError')) }));
+  };
+}
 
 beforeEach(() => {
   calls = [];
@@ -96,9 +105,6 @@ beforeEach(() => {
     const [status, answer] = await h(body);
     return jsonResponse(status, answer);
   }));
-  (HTMLImageElement.prototype as { decode?: () => Promise<void> }).decode = function () {
-    return new Promise<void>((resolve, reject) => decodes.push({ resolve, reject: () => reject(new Error('EncodingError')) }));
-  };
   target = document.createElement('div');
   document.body.appendChild(target);
   onAuth = vi.fn();
@@ -110,7 +116,8 @@ afterEach(() => {
   cmp = null;
   setup.dispose();
   target.remove();
-  delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
+  if (decodeStubbed) delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
+  decodeStubbed = false;
   document.head.querySelectorAll('[data-branding]').forEach((e) => e.remove());
   setBranding(DEFAULT_BRANDING);
   session.user = null;
@@ -141,15 +148,21 @@ function type(el: HTMLInputElement, v: string) { el.value = v; el.dispatchEvent(
 const writes = () => calls.filter((c) => /^(POST \/setup|POST \/branding|POST \/courses|PATCH|PUT)/.test(c.key));
 const blocked = () => foot('save')!.getAttribute('aria-disabled') === 'true';
 const mark = (n: number) => items()[n - 1].querySelector('.sl-mark')!;
-/** Choose a file in the step's logo picker, as the browser's picker would. */
+/** Wait, a task at a time, until `done()` holds (at most 20 tasks). */
+async function until(done: () => boolean) {
+  for (let i = 0; i < 20 && !done(); i++) await tick();
+}
+/** Choose a file in the step's logo picker, as the browser's picker would, and
+ *  wait until it is read: its decode starts, or its refusal shows. */
 async function choose(bytes: Uint8Array, name = 'school.png') {
-  const el = card()!.querySelector<HTMLInputElement>('input[type="file"]')!;
-  Object.defineProperty(el, 'files', { value: [new File([new Uint8Array(bytes)], name, { type: 'image/png' })], configurable: true });
-  el.dispatchEvent(new Event('change', { bubbles: true }));
-  for (let i = 0; i < 3; i++) await tick();
+  const before = decodes.length;
+  chooseNow(bytes, name);
+  const was = err();
+  await until(() => decodes.length > before || (err() !== null && err() !== was));
 }
 /** The same, without waiting for the file to be read. */
 function chooseNow(bytes: Uint8Array, name = 'school.png') {
+  stubDecode();
   const el = card()!.querySelector<HTMLInputElement>('input[type="file"]')!;
   Object.defineProperty(el, 'files', { value: [new File([new Uint8Array(bytes)], name, { type: 'image/png' })], configurable: true });
   el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -826,7 +839,7 @@ it("a failed move's sentence replaces the step's older error (r1 M2)", async () 
   expect(err()).toBe('Skip failed.');
 });
 
-it('a half-save re-reads the state, so the reason and the marks follow the saved email (r1 M3)', async () => {
+it('a half-save re-reads the state, so the marks follow the saved email (r1 M3)', async () => {
   routes['PATCH /settings/email'] = () => [200, settings({ host: 'smtp.other.dk' })];
   routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
   routes['GET /setup'] = () => [200, state({ step: 2 }, [true, false, false, false])];
@@ -840,6 +853,66 @@ it('a half-save re-reads the state, so the reason and the marks follow the saved
   expect(items()[0].querySelector('.sl-mark')!.classList.contains('done')).toBe(true);
 });
 
+// --- Step 1, the minors round ---
+
+const emailSwitch = () => target.querySelector<HTMLButtonElement>('.ee-switch button')!;
+
+it('after a half-save, a changed form that is not ready blocks Save and continue (Task 7 r2 M1)', async () => {
+  routes['PATCH /settings/email'] = (b) => [200, settings((b as { on: boolean }).on ? {} : { on: false })];
+  routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
+  routes['GET /setup'] = () => [200, state()];
+  await render();
+  emailSwitch().click();                         // Send email off
+  flushSync();
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Boom.');                   // saved off; "step 1 saved" is due
+  expect(blocked()).toBe(false);
+  emailSwitch().click();                         // on again, a new server, off again
+  flushSync();
+  type(input('Mail server'), 'smtp.other.dk');
+  emailSwitch().click();
+  flushSync();
+  expect(registry.isAnyDirty()).toBe(true);
+  expect(blocked()).toBe(true);
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['PATCH /settings/email', 'POST /setup/saved']);
+});
+
+it("a passed test's answer stays after the save, also when step saved then fails (whole-branch Fable M3)", async () => {
+  routes['POST /settings/email/test'] = () => [200, { ok: true, message: 'Sent.' }];
+  routes['GET /setup'] = () => [200, state()];
+  routes['PATCH /settings/email'] = () => [200, settings({ host: 'smtp.other.dk' })];
+  routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
+  await render();
+  type(input('Mail server'), 'smtp.other.dk');
+  [...card()!.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Send test email')!.click();
+  await settle();
+  expect(target.querySelector('.se-result')?.textContent).toBe('Sent.');
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Boom.');
+  expect(target.querySelector('.se-result')?.textContent).toBe('Sent.');
+});
+
+it('the not-done reason stays hidden while "step 1 saved" is due (Task 8 M2)', async () => {
+  const saved = deferred();
+  routes['PATCH /settings/email'] = () => [200, settings({ host: 'smtp.other.dk' })];
+  routes['POST /setup/saved'] = () => saved.promise;
+  routes['GET /setup'] = () => [200, state()];
+  await render();
+  type(input('Mail server'), 'smtp.other.dk');
+  foot('save')!.click();
+  await settle();
+  expect(registry.isAnyDirty()).toBe(false);     // the email saved; "step 1 saved" runs
+  expect(target.querySelector('.se-reason')).toBeNull();
+  saved.resolve([500, { detail: 'Boom.' }]);
+  await settle();
+  expect(err()).toBe('Boom.');
+  expect(target.querySelector('.se-reason')).toBeNull();
+});
+
 // --- Step 2: Site name and logo (D7) ---
 
 it('Save and continue waits while a chosen logo is still being read (Task 8 M3)', async () => {
@@ -851,7 +924,7 @@ it('Save and continue waits while a chosen logo is still being read (Task 8 M3)'
   foot('save')!.click();
   await settle();
   expect(writes()).toEqual([]);
-  for (let i = 0; i < 3; i++) await tick();
+  await until(() => decodes.length > 0);
   expect(blocked()).toBe(true);                   // read; the decode is still to come
   decodes[0].resolve();
   await settle();
@@ -983,6 +1056,262 @@ it('a done step 2 shows Continue, which sends only step saved', async () => {
   expect(writes()).toEqual([{ key: 'POST /setup/saved', body: { step: 2 } }]);
 });
 
+// --- Step 2, the minors round ---
+
+const removeLogo = () => card()!.querySelector<HTMLButtonElement>('[data-action="remove"]');
+const fileLine = () => card()!.querySelector('.im-file')?.textContent ?? null;
+
+it('Remove drops a chosen logo and keeps the saved one; it shows only while a new logo is chosen (U4)', async () => {
+  routes['GET /branding'] = () => [200, brandingOf('Riverside', true)];
+  await render(state({ step: 2 }, [false, true, false, false]));
+  expect(removeLogo()).toBeNull();
+  const savedSrc = card()!.querySelector('.im-box img')!.getAttribute('src');
+  await choose(pngOf(400, 80), 'new.png');
+  decodes[0].resolve();
+  await settle();
+  expect(fileLine()).toContain('new.png');
+  expect(removeLogo()!.textContent!.trim()).toBe('Remove');
+  expect(removeLogo()!.getAttribute('aria-label')).toBe('Remove new.png');
+  expect(card()!.querySelector('.im-box img')!.getAttribute('src')).not.toBe(savedSrc);
+  expect(foot('save')!.textContent!.trim()).toBe('Save and continue');
+  removeLogo()!.click();
+  flushSync();
+  expect(fileLine()).toBeNull();
+  expect(removeLogo()).toBeNull();
+  expect(card()!.querySelector('.im-box img')!.getAttribute('src')).toBe(savedSrc);
+  expect(registry.isAnyDirty()).toBe(false);
+  expect(foot('save')!.textContent!.trim()).toBe('Continue');
+  expect(document.activeElement?.textContent?.trim()).toBe('Choose a PNG…');
+  expect(writes()).toEqual([]);
+});
+
+it('after a refused logo, Remove clears its sentence and Save and continue sends only "step 2 saved"; a new choice first waits for its decode (U4)', async () => {
+  routes['PUT /branding/name'] = (b) => [200, brandingOf((b as { name: string }).name)];
+  routes['POST /branding/logo'] = () => [413, {}];
+  routes['GET /setup'] = () => [200, state({ step: 2 }, [false, true, false, false])];
+  routes['POST /setup/saved'] = () => [200, state({ step: 3 }, [false, true, false, false])];
+  await render(state({ step: 2 }));
+  type(input('Site name'), 'Riverside');
+  await choose(pngOf(400, 80));
+  decodes[0].resolve();
+  await settle();
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe("This file is over the server's upload limit.");
+  expect(foot('skip')).toBeNull();               // the re-read ticked step 2
+  removeLogo()!.click();
+  flushSync();
+  expect(err()).toBeNull();
+  expect(blocked()).toBe(false);
+  const before = decodes.length;
+  chooseNow(pngOf(400, 80), 'other.png');        // a new choice after the half-save waits for its decode
+  await until(() => decodes.length > before);
+  expect(blocked()).toBe(true);
+  removeLogo()!.click();
+  flushSync();
+  expect(blocked()).toBe(false);
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['PUT /branding/name', 'POST /branding/logo', 'POST /setup/saved']);
+  expect(title()).toBe('First course and its admin');
+});
+
+it("Remove waits while the step's saves run", async () => {
+  const logoAnswer = deferred();
+  routes['POST /branding/logo'] = () => logoAnswer.promise;
+  await render(state({ step: 2 }));
+  await choose(pngOf(400, 80));
+  decodes[0].resolve();
+  await settle();
+  foot('save')!.click();
+  await settle();
+  expect(removeLogo()!.disabled).toBe(true);
+  logoAnswer.resolve([500, { detail: 'Boom.' }]);
+  await settle();
+  expect(removeLogo()!.disabled).toBe(false);
+});
+
+it('"The site is still called Mathion." stays hidden after a rename while "step 2 saved" is due (Task 8 M2)', async () => {
+  const saved = deferred();
+  routes['PUT /branding/name'] = (b) => [200, brandingOf((b as { name: string }).name)];
+  routes['POST /setup/saved'] = () => saved.promise;
+  routes['GET /setup'] = () => [200, state({ step: 2 })];
+  await render(state({ step: 2 }));
+  type(input('Site name'), 'Riverside');
+  foot('save')!.click();
+  await settle();
+  expect(registry.isAnyDirty()).toBe(false);     // the name saved; "step 2 saved" runs
+  expect(card()!.textContent).not.toContain('The site is still called Mathion.');
+  saved.resolve([500, { detail: 'Boom.' }]);
+  await settle();
+  expect(err()).toBe('Boom.');
+  expect(card()!.textContent).not.toContain('The site is still called Mathion.');
+});
+
+it('a newer "step 2 saved" failure replaces an older logo sentence; the retry sends only it (Task 8 M1)', async () => {
+  routes['PUT /branding/name'] = (b) => [200, brandingOf((b as { name: string }).name)];
+  let saves = 0;
+  routes['POST /setup/saved'] = () => [500, { detail: ++saves === 1 ? 'Boom.' : 'Again.' }];
+  routes['GET /setup'] = () => [200, state({ step: 2 })];
+  await render(state({ step: 2 }));
+  type(input('Site name'), 'Riverside');
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Boom.');
+  await choose(new Uint8Array([1, 2, 3]), 'notes.txt');
+  expect(err()).toBe('The logo must be a PNG file.');
+  expect(registry.isAnyDirty()).toBe(false);     // a refusal drops the choice
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Again.');
+  expect(writes().map((c) => c.key)).toEqual(['PUT /branding/name', 'POST /setup/saved', 'POST /setup/saved']);
+});
+
+it("a failed step 2 saved holds the card by its error alone, against a re-read that moves it (D3a)", async () => {
+  routes['PUT /branding/name'] = (b) => [200, brandingOf((b as { name: string }).name)];
+  routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
+  routes['GET /setup'] = () => [200, state({ step: 3 }, [false, true, false, false])];
+  await render(state({ step: 2 }));
+  type(input('Site name'), 'Riverside');
+  foot('save')!.click();
+  await settle();
+  await settle();
+  expect(registry.isAnyDirty()).toBe(false);
+  expect(calls.filter((c) => c.key === 'GET /setup')).toHaveLength(1);
+  expect(title()).toBe('Site name and logo');
+  expect(err()).toBe('Boom.');
+});
+
+it('a failed name save re-reads nothing; the retry sends the name, then the logo', async () => {
+  routes['PUT /branding/name'] = () => [500, { detail: 'Name failed.' }];
+  routes['POST /branding/logo'] = () => [200, brandingOf('Riverside', true)];
+  routes['POST /setup/saved'] = () => [200, state({ step: 3 }, [false, true, false, false])];
+  await render(state({ step: 2 }));
+  type(input('Site name'), 'Riverside');
+  await choose(pngOf(400, 80));
+  decodes[0].resolve();
+  await settle();
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Name failed.');
+  expect(writes().map((c) => c.key)).toEqual(['PUT /branding/name']);
+  expect(calls.filter((c) => c.key === 'GET /setup')).toHaveLength(0);
+  routes['PUT /branding/name'] = (b) => [200, brandingOf((b as { name: string }).name)];
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['PUT /branding/name', 'PUT /branding/name', 'POST /branding/logo', 'POST /setup/saved']);
+  expect(title()).toBe('First course and its admin');
+});
+
+it('a done step 2 with a changed name shows Save and continue, which saves the name first', async () => {
+  routes['GET /branding'] = () => [200, brandingOf('Riverside')];
+  routes['PUT /branding/name'] = (b) => [200, brandingOf((b as { name: string }).name)];
+  routes['POST /setup/saved'] = () => [200, state({ step: 3 }, [false, true, false, false])];
+  await render(state({ step: 2 }, [false, true, false, false]));
+  type(input('Site name'), 'Lund');
+  expect(foot('save')!.textContent!.trim()).toBe('Save and continue');
+  foot('save')!.click();
+  await settle();
+  expect(writes()).toEqual([{ key: 'PUT /branding/name', body: { name: 'Lund' } }, { key: 'POST /setup/saved', body: { step: 2 } }]);
+});
+
+it("a logo the browser can't decode shows its sentence, and the choice goes", async () => {
+  await render(state({ step: 2 }));
+  await choose(pngOf(400, 80));
+  decodes[0].reject();
+  await settle();
+  expect(err()).toBe("This PNG can't be shown by a browser.");
+  expect(fileLine()).toBeNull();
+  expect(blocked()).toBe(true);
+});
+
+it("a failed move's sentence replaces the logo's", async () => {
+  routes['POST /setup/skip'] = () => [500, { detail: 'Skip failed.' }];
+  await render(state({ step: 2 }));
+  await choose(new Uint8Array([1, 2, 3]), 'notes.txt');
+  expect(err()).toBe('The logo must be a PNG file.');
+  foot('skip')!.click();
+  await settle();
+  expect(err()).toBe('Skip failed.');
+});
+
+it('Discard resets a chosen logo with the name', async () => {
+  routes['POST /setup/go'] = () => [500, { detail: 'Go failed.' }];
+  await render(state({ step: 2 }));
+  type(input('Site name'), 'Riverside');
+  await choose(pngOf(400, 80));
+  decodes[0].resolve();
+  await settle();
+  foot('back')!.click();
+  await settle();
+  confirmDiscard()!.click();
+  await settle();
+  expect(err()).toBe('Go failed.');
+  expect(input('Site name').value).toBe('Mathion');
+  expect(fileLine()).toBeNull();
+  expect(registry.isAnyDirty()).toBe(false);
+});
+
+it('the Choose click notes an edit for the keep-alive', async () => {
+  await render(state({ step: 2 }));
+  const note = vi.spyOn(setup, 'noteEdit');
+  [...card()!.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Choose a PNG…')!.click();
+  expect(note).toHaveBeenCalled();
+});
+
+it("step 2's values load fresh; a failed load shows the error state with Try again", async () => {
+  routes['GET /branding'] = () => [500, { detail: 'Boom.' }];
+  await render(state({ step: 2 }));
+  expect(card()!.querySelector('.error-state')?.textContent).toContain('Boom.');
+  routes['GET /branding'] = () => [200, brandingOf('Riverside')];
+  [...card()!.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Try again')!.click();
+  await settle();
+  expect(input('Site name').value).toBe('Riverside');
+  foot('skip')!.click();                         // away and back: read again
+  await settle();
+  foot('back')!.click();
+  await settle();
+  expect(title()).toBe('Site name and logo');
+  expect(calls.filter((c) => c.key === 'GET /branding')).toHaveLength(3);
+});
+
+it('a 401 or 404 on a step 2 save goes to the shell, with no sentence and no re-read', async () => {
+  routes['PUT /branding/name'] = () => [401, { detail: 'Not signed in' }];
+  await render(state({ step: 2 }));
+  type(input('Site name'), 'Riverside');
+  foot('save')!.click();
+  await settle();
+  expect(onAuth).toHaveBeenCalledWith('signin');
+  routes['PUT /branding/name'] = (b) => [200, brandingOf((b as { name: string }).name)];
+  routes['POST /branding/logo'] = () => [404, { detail: 'Not Found' }];
+  await choose(pngOf(400, 80));
+  decodes[0].resolve();
+  await settle();
+  foot('save')!.click();
+  await settle();
+  expect(onAuth).toHaveBeenCalledWith('expired');
+  expect(err()).toBeNull();
+  expect(calls.filter((c) => c.key === 'GET /setup')).toHaveLength(0);
+});
+
+it("while step 2's saves run, the skip button, Back and the list wait (setup.saving)", async () => {
+  const nameAnswer = deferred();
+  routes['PUT /branding/name'] = () => nameAnswer.promise;
+  routes['POST /setup/saved'] = () => [200, state({ step: 3 }, [false, true, false, false])];
+  await render(state({ step: 2 }));
+  type(input('Site name'), 'Riverside');
+  foot('save')!.click();
+  await settle();
+  expect(setup.saving).toBe(true);
+  expect(foot('skip')!.getAttribute('aria-disabled')).toBe('true');
+  expect(foot('back')!.getAttribute('aria-disabled')).toBe('true');
+  expect(items()[0].getAttribute('aria-disabled')).toBe('true');
+  nameAnswer.resolve([200, brandingOf('Riverside')]);
+  await settle();
+  expect(setup.saving).toBe(false);
+  expect(title()).toBe('First course and its admin');
+});
+
 // --- Step 4: Sign-in rules and limits (D9) ---
 
 it("step 4's title and note, filled with the saved values; Save and continue usable with nothing changed", async () => {
@@ -1081,6 +1410,189 @@ it('skip on step 4 reads Keep these values, sends the skip (never keep-sign-in),
   await settle();
   expect(writes()).toEqual([{ key: 'POST /setup/skip', body: { step: 4 } }]);
   expect(mark(4).classList.contains('done')).toBe(true);
+  expect(title()).toBe('Email');
+});
+
+// --- Step 4, the minors round ---
+
+const radio = (value: string) => card()!.querySelector<HTMLInputElement>(`input[type="radio"][value="${value}"]`)!;
+
+it('a half-save in step 4 re-reads the state: the list ticks the step, the typed limits and the error hold the card', async () => {
+  routes['PATCH /settings/sign-in'] = () => [200, settings()];
+  routes['PATCH /settings/limits'] = () => [422, { detail: 'The largest file is at most 1024 MB.' }];
+  routes['GET /setup'] = () => [200, state({ step: 1 }, [false, false, false, true])];
+  await render(state({ step: 4 }));
+  type(input('A PIN lasts (minutes)'), '15');
+  type(input('Largest file (MB)'), '5000');
+  foot('save')!.click();
+  await settle();
+  expect(calls.filter((c) => c.key === 'GET /setup')).toHaveLength(1);
+  expect(mark(4).classList.contains('done')).toBe(true);
+  expect(title()).toBe('Sign-in rules and limits');
+  expect(err()).toBe('The largest file is at most 1024 MB.');
+});
+
+it('a failed step 4 saved holds the card by its error alone, against a re-read that says over (D3a)', async () => {
+  routes['POST /setup/keep-sign-in'] = () => [200, state({ step: 4 }, [true, true, true, true])];
+  routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
+  routes['GET /setup'] = () => [200, state({ step: 1, wizard_on: false }, [true, true, true, true])];
+  await render(state({ step: 4 }, [true, true, true, false]));
+  foot('save')!.click();
+  await settle();
+  await settle();
+  expect(registry.isAnyDirty()).toBe(false);
+  expect(calls.filter((c) => c.key === 'GET /setup')).toHaveLength(1);
+  expect(title()).toBe('Sign-in rules and limits');
+  expect(target.querySelector('.as-card')).toBeNull();
+  expect(err()).toBe('Boom.');
+});
+
+it('"step 4 saved" failing: the retry sends only it, never a second keep-sign-in', async () => {
+  routes['POST /setup/keep-sign-in'] = () => [200, state({ step: 4 }, [false, false, false, true])];
+  let saves = 0;
+  routes['POST /setup/saved'] = () => (++saves === 1 ? [500, { detail: 'Boom.' }] : [200, state({ step: 1 }, [false, false, false, true])]);
+  routes['GET /setup'] = () => [200, state({ step: 4 }, [false, false, false, true])];
+  await render(state({ step: 4 }));
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Boom.');
+  expect(title()).toBe('Sign-in rules and limits');
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['POST /setup/keep-sign-in', 'POST /setup/saved', 'POST /setup/saved']);
+  expect(title()).toBe('Email');
+});
+
+it('a failed keep-sign-in shows its sentence, re-reads nothing, and the retry sends it again', async () => {
+  routes['POST /setup/keep-sign-in'] = () => [500, { detail: 'Keep failed.' }];
+  routes['POST /setup/saved'] = () => [200, state({ step: 1 }, [false, false, false, true])];
+  await render(state({ step: 4 }));
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Keep failed.');
+  expect(calls.filter((c) => c.key === 'GET /setup')).toHaveLength(0);
+  routes['POST /setup/keep-sign-in'] = () => [200, state({ step: 4 }, [false, false, false, true])];
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['POST /setup/keep-sign-in', 'POST /setup/keep-sign-in', 'POST /setup/saved']);
+});
+
+it('a valid sign-in change with invalid limits sends nothing', async () => {
+  await render(state({ step: 4 }));
+  type(input('A PIN lasts (minutes)'), '15');
+  type(input('Largest file (MB)'), '1.5');
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Type a whole number of MB.');
+  expect(writes()).toEqual([]);
+});
+
+it('a limits-only change sends only the limits, then step saved', async () => {
+  routes['PATCH /settings/limits'] = () => [200, settings()];
+  routes['POST /setup/saved'] = () => [200, state({ step: 1 }, [false, false, false, true])];
+  await render(state({ step: 4 }));
+  type(input('Largest file (MB)'), '50');
+  foot('save')!.click();
+  await settle();
+  expect(writes()).toEqual([
+    { key: 'PATCH /settings/limits', body: { max_file_mb: 50, max_total_mb: 500 } },
+    { key: 'POST /setup/saved', body: { step: 4 } },
+  ]);
+});
+
+it('a Longest sign-in change notes an edit and goes in the sign-in body', async () => {
+  routes['PATCH /settings/sign-in'] = () => [200, settings()];
+  routes['POST /setup/saved'] = () => [200, state({ step: 1 }, [false, false, false, true])];
+  await render(state({ step: 4 }));
+  const note = vi.spyOn(setup, 'noteEdit');
+  radio('7').click();
+  flushSync();
+  expect(note).toHaveBeenCalled();
+  expect(registry.isAnyDirty()).toBe(true);
+  foot('save')!.click();
+  await settle();
+  expect(writes()[0]).toEqual({ key: 'PATCH /settings/sign-in', body: { pin_minutes: 10, pin_requests_per_hour: 5, pin_failures_per_hour: 10, longest_sign_in_days: 7 } });
+});
+
+// A limits error always comes with typed limits, so a move asks first and its
+// Discard rebuilds the forms; the error a move can meet is "step 4 saved"'s.
+it("a failed move's sentence replaces a failed step saved's", async () => {
+  routes['POST /setup/keep-sign-in'] = () => [200, state({ step: 4 }, [false, false, false, true])];
+  routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
+  routes['GET /setup'] = () => [200, state({ step: 4 }, [false, false, false, true])];
+  routes['POST /setup/go'] = () => [500, { detail: 'Go failed.' }];
+  await render(state({ step: 4 }));
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Boom.');
+  foot('back')!.click();
+  await settle();
+  expect(err()).toBe('Go failed.');
+});
+
+it('Discard resets both step 4 forms', async () => {
+  routes['POST /setup/go'] = () => [500, { detail: 'Go failed.' }];
+  await render(state({ step: 4 }));
+  type(input('A PIN lasts (minutes)'), '15');
+  type(input('Largest file (MB)'), '50');
+  foot('back')!.click();
+  await settle();
+  confirmDiscard()!.click();
+  await settle();
+  expect(err()).toBe('Go failed.');
+  expect(input('A PIN lasts (minutes)').value).toBe('10');
+  expect(input('Largest file (MB)').value).toBe('20');
+  expect(registry.isAnyDirty()).toBe(false);
+});
+
+it("step 4's values load fresh; a failed load shows the error state with Try again", async () => {
+  routes['GET /settings'] = () => [500, { detail: 'Boom.' }];
+  await render(state({ step: 4 }));
+  expect(card()!.querySelector('.error-state')?.textContent).toContain('Boom.');
+  routes['GET /settings'] = () => [200, settings()];
+  [...card()!.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Try again')!.click();
+  await settle();
+  expect(input('A PIN lasts (minutes)').value).toBe('10');
+  foot('back')!.click();                         // away and back: read again
+  await settle();
+  items()[3].click();
+  await settle();
+  expect(title()).toBe('Sign-in rules and limits');
+  expect(calls.filter((c) => c.key === 'GET /settings')).toHaveLength(3);
+});
+
+it('a 404 on a step 4 save goes to the shell, with no sentence and no re-read', async () => {
+  routes['PATCH /settings/sign-in'] = () => [404, { detail: 'Not Found' }];
+  await render(state({ step: 4 }));
+  type(input('A PIN lasts (minutes)'), '15');
+  foot('save')!.click();
+  await settle();
+  expect(onAuth).toHaveBeenCalledWith('expired');
+  expect(err()).toBeNull();
+  expect(calls.filter((c) => c.key === 'GET /setup')).toHaveLength(0);
+  expect(setup.saving).toBe(false);
+});
+
+it("while step 4's sequence runs, the skip button, Back and the list wait (setup.saving)", async () => {
+  const signInAnswer = deferred();
+  const saved = deferred();
+  routes['PATCH /settings/sign-in'] = () => signInAnswer.promise;
+  routes['POST /setup/saved'] = () => saved.promise;
+  await render(state({ step: 4 }));
+  type(input('A PIN lasts (minutes)'), '15');
+  foot('save')!.click();
+  await settle();
+  const waiting = () => setup.saving
+    && foot('skip')!.getAttribute('aria-disabled') === 'true'
+    && foot('back')!.getAttribute('aria-disabled') === 'true'
+    && items()[0].getAttribute('aria-disabled') === 'true';
+  expect(waiting()).toBe(true);                  // no wizard write yet: only setup.saving
+  signInAnswer.resolve([200, settings()]);
+  await settle();
+  expect(waiting()).toBe(true);                  // "step 4 saved" runs
+  saved.resolve([200, state({ step: 1 }, [false, false, false, true])]);
+  await settle();
+  expect(setup.saving).toBe(false);
   expect(title()).toBe('Email');
 });
 

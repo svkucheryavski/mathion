@@ -672,6 +672,30 @@ it("while a step's own save runs, the pills wait too (setup.saving)", async () =
   expect(pills().some((a) => a.hasAttribute('aria-disabled'))).toBe(false);
 });
 
+it("while step 4's own save runs, before any wizard write, the pills wait (setup.saving)", async () => {
+  setupState = { ...setupOf(true), step: 4 };
+  let answer!: (r: Response) => void;
+  const routed = dispatchFetch();
+  vi.stubGlobal('fetch', vi.fn((url: string) => (String(url).endsWith('/settings/sign-in')
+    ? new Promise<Response>((r) => { answer = r; })
+    : routed(url))));
+  router.currentRoute.path = '/superuser/T/setup';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  await settle();
+  const pin = [...target.querySelectorAll<HTMLInputElement>('input')].find((i) => i.labels?.[0]?.textContent?.trim() === 'A PIN lasts (minutes)')!;
+  pin.value = '15';
+  pin.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  buttonByText(target, 'Save and continue')!.click();
+  await settle();
+  expect(pills().every((a) => a.getAttribute('aria-disabled') === 'true')).toBe(true);   // no wizard write yet
+  answer(jsonResponse(200, SETTINGS));
+  await settle();
+  await settle();
+  expect(pills().some((a) => a.hasAttribute('aria-disabled'))).toBe(false);   // "step 4 saved" answered
+});
+
 it("while a wizard write runs, the pills wait; they come back after", async () => {
   setupState = setupOf(true);
   let answer!: (r: Response) => void;
