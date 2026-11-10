@@ -81,6 +81,26 @@ def test_email_failed_test_after_send():
     assert _email(view) == StepDone(False, TEST_FAILED)
 
 
+def test_email_off_ahead_of_a_passed_test_and_a_send():
+    view = replace(ON, email_on=False, card_test_ok=True, card_test_at=T0, last_sent_at=T0)
+    assert _email(view) == StepDone(False, OFF)
+
+
+def test_email_failing_ahead_of_a_passed_test_and_a_send():
+    view = replace(ON, send_failure_message="x", card_test_ok=True, card_test_at=T0, last_sent_at=T0)
+    assert _email(view) == StepDone(False, FAILING)
+
+
+def test_email_send_at_the_failed_tests_moment_is_done():
+    view = replace(ON, card_test_ok=False, card_test_at=T0, last_sent_at=T0)
+    assert _email(view) == StepDone(True, None)
+
+
+def test_email_failed_test_without_its_time_says_failed():
+    # The reason follows the test's answer, not its time.
+    assert _email(replace(ON, card_test_ok=False, card_test_at=None)) == StepDone(False, TEST_FAILED)
+
+
 @pytest.mark.parametrize("mode", ["file", "memory"])
 def test_email_dev_mode_is_done(mode):
     assert _email(DEFAULTS, mode) == StepDone(True, None)

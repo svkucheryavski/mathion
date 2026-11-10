@@ -3,6 +3,7 @@ from typing import Optional, Callable
 
 from email.message import EmailMessage
 
+from mathion.course_links import course_sign_in_url
 from mathion.models import Course, Run, MiniProject, Submission
 from mathion.models_auth import User
 
@@ -93,7 +94,7 @@ def _course_admin_assigned(ctx):
         f"Hi {_name(ctx.user)},\n\n"
         f'You are now the admin of "{ctx.course.name}" on {ctx.site_name}. '
         "You can work on it in the course editor.\n\n"
-        f"Open it: {ctx.base_url}/courses/{ctx.course_slug}/edit\n\n"
+        f"Open it: {course_sign_in_url(ctx.course_slug, ctx.base_url)}\n\n"
         f"— {ctx.site_name}\n")
     return subject, body
 

@@ -12,7 +12,7 @@ from mathion.branding import short_hash
 from mathion.database import SessionLocal
 from mathion.main import app
 from mathion.models_auth import SiteBranding, SiteBrandingImage
-from mathion.site_settings import MB
+from mathion.site_settings import MB, load as load_site
 from mathion.superuser import service as panel_service
 from mathion.theme_vars import THEME_VARS
 from tests.test_png_check import chunk, idat, ihdr, png
@@ -454,9 +454,8 @@ def test_guard_and_csrf(panel, auth_client, db):
 # --- Set up D7: a save of the name or the logo marks the site name kept ---
 
 def _site_kept(db) -> bool:
-    from mathion.site_settings import load
     db.expire_all()
-    return load(db).site_name_kept
+    return load_site(db).site_name_kept
 
 
 def test_name_save_marks_site_kept(panel, db):

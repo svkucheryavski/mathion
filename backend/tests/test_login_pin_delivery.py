@@ -315,6 +315,43 @@ def test_sent_pin_email_records_last_sent(client, db, monkeypatch):
     assert sent is not None and sent >= before
 
 
+def test_pin_to_a_developer_outbox_records_no_send(client, db, monkeypatch):
+    # Set up D6: a developer outbox is no mail server; like the queue's dev
+    # path, it leaves the send record alone.
+    _make_user(db)
+    _smtp_on(monkeypatch, MemoryMailer())
+    monkeypatch.setattr(settings, "email_mode", "file")
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    db.expire_all()
+    assert load(db).last_sent_at is None
+
+
+def test_sent_pin_after_recovery_clears_the_message(client, db, monkeypatch):
+    # Review Focus 1: the PIN path stores only the message; a send already
+    # recorded must not stop the next good send from clearing it.
+    set_site(db, last_sent_at=datetime.now(timezone.utc) - timedelta(days=1),
+             send_failure_message="The mail server refused the login.")
+    _make_user(db)
+    _smtp_on(monkeypatch, MemoryMailer())
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db)[0] is None
+
+
+def test_failed_pin_to_a_developer_outbox_leaves_the_card(client, db, monkeypatch):
+    # A developer outbox is no mail server: neither outcome reaches the card.
+    class OutboxGone(MemoryMailer):
+        @contextmanager
+        def session(self):
+            raise OSError("no outbox")
+            yield
+
+    _make_user(db)
+    _smtp_on(monkeypatch, OutboxGone())
+    monkeypatch.setattr(settings, "email_mode", "file")
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db) == (None, None, 0)
+
+
 def test_failed_pin_email_records_no_send(client, db, monkeypatch):
     class LoginRefused(MemoryMailer):
         @contextmanager

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, JSON, LargeBinary, String, Text, ForeignKey, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, JSON, LargeBinary, String, Text, ForeignKey, UniqueConstraint, false, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -164,9 +164,9 @@ class SiteSettings(Base):
     send_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     send_backoff_step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # Set up D7, D9: the site's name and the sign-in values were kept on purpose.
-    site_name_kept: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-    sign_in_kept: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-    # Set up D6: the last time a message went out.
+    site_name_kept: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    sign_in_kept: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    # Set up D6: a send went out with the saved settings since they were saved.
     last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 

@@ -15,6 +15,7 @@ from mathion.api.assets import _asset_dir
 from mathion.api.lookups import get_or_create_user
 from mathion.api.superuser import require_superuser_panel, require_superuser_panel_write
 from mathion.config import settings
+from mathion.course_links import course_sign_in_url
 from mathion.database import get_db
 from mathion.models import Block, Course, CourseAdmin, CourseVersion, Item, Run, RunStudent, Sequence
 from mathion.models_auth import NotificationLogEntry, User, UserItemState
@@ -24,7 +25,7 @@ from mathion.schemas import (
     AccountLookup, AdminAssignResult, CourseDeleteImpact, PanelAdmin, PanelCourse,
     PanelCourseCreate, PanelCourseUpdate, PanelEmail,
 )
-from mathion.site_settings import load as load_site
+from mathion.site_settings import SiteSettingsView, load as load_site
 
 router = APIRouter(tags=["superuser"])
 
@@ -34,12 +35,16 @@ _HAS_RUNS = "This course has runs and can't be deleted"
 _ACCOUNT_GONE = "This account was deleted"
 
 
-def email_is_set_up(db: Session) -> bool:
+def email_set_up_in(view: SiteSettingsView) -> bool:
     # D5a: "set up" means the queue has a mailer: a developer outbox (D2c; the
     # `memory` test sink counts on purpose) or the panel's email switch on
     # (superuser Settings D10b). Not send_pin_enabled: that is also true in
     # debug with email off.
-    return settings.email_mode in DEV_MODES or load_site(db).email_on
+    return settings.email_mode in DEV_MODES or view.email_on
+
+
+def email_is_set_up(db: Session) -> bool:
+    return email_set_up_in(load_site(db))
 
 
 def _admin_email_outcome(db: Session, target: User, changed: bool) -> str:
@@ -120,7 +125,7 @@ def _assigned(db: Session, course: Course, target: User, changed: bool) -> Admin
         admin=_panel_admin(target),
         admin_email=outcome,
         pin_minutes=load_site(db).pin_minutes,
-        sign_in_url=f"{settings.base_url}/courses/{course.slug}/edit",
+        sign_in_url=course_sign_in_url(course.slug),
     )
 
 

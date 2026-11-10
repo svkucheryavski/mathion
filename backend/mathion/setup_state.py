@@ -8,9 +8,10 @@ from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from mathion import branding
-from mathion.api.superuser_courses import _panel_admin, email_is_set_up
+from mathion.api.superuser_courses import _panel_admin, email_set_up_in
 from mathion.branding import NAME_DEFAULT
 from mathion.config import settings
+from mathion.course_links import course_sign_in_url
 from mathion.models import Course, CourseAdmin
 from mathion.models_auth import SiteSetup, User
 from mathion.notifications.mailer import DEV_MODES
@@ -57,7 +58,7 @@ def email_done(view: SiteSettingsView, secret: str, email_mode: str) -> StepDone
     failed_at = view.card_test_at if view.card_test_ok is False else None
     if view.last_sent_at is not None and (failed_at is None or failed_at <= view.last_sent_at):
         return DONE
-    return StepDone(False, EMAIL_TEST_FAILED if failed_at is not None else EMAIL_NOT_TESTED)
+    return StepDone(False, EMAIL_TEST_FAILED if view.card_test_ok is False else EMAIL_NOT_TESTED)
 
 
 def site_done(name: str, kept: bool) -> StepDone:
@@ -129,7 +130,7 @@ def _panel_course(facts: CourseFacts) -> PanelSetupCourse | None:
     if facts.first is None:
         return None
     course, admin = facts.first
-    return PanelSetupCourse(name=course.name, sign_in_url=f"{settings.base_url}/courses/{course.slug}/edit",
+    return PanelSetupCourse(name=course.name, sign_in_url=course_sign_in_url(course.slug),
                             admin=_panel_admin(admin))
 
 
@@ -150,7 +151,7 @@ def read(db: Session) -> PanelSetup:
         steps=[PanelSetupStep(passed=p, done=d.done, reason=d.reason) for p, d in zip(passed, done)],
         course=_panel_course(facts),
         course_without_admin=facts.without_admin,
-        email_set_up=email_is_set_up(db),
+        email_set_up=email_set_up_in(view),
         pin_minutes=view.pin_minutes,
         defaults_in_use=defaults_in_use(view),
     )

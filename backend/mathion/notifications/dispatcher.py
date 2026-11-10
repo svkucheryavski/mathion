@@ -396,7 +396,15 @@ def _record(db, view, result: TickResult, now: datetime) -> None:
 def _record_sent(db, view, now: datetime) -> None:
     """A message went out, so the server works: note when (Set up D6), and
     drop the stored failure and the back-off. Skipped when a save changed
-    the settings since `view` was read: the send says nothing about them."""
+    the settings since `view` was read: the send says nothing about them.
+    Nothing to write (a send already recorded, no failure stored, no failed
+    test newer than that send) touches nothing, so a burst of sends never
+    queues on the row."""
+    failed_test_after = (view.card_test_ok is False and view.card_test_at is not None
+                         and view.last_sent_at is not None and view.card_test_at > view.last_sent_at)
+    if (view.last_sent_at is not None and view.send_failure_message is None and view.send_retry_at is None
+            and not view.send_backoff_step and not failed_test_after):
+        return
     row = _fresh_row(db, view)
     if row is None:
         return

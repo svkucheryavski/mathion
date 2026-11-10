@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from mathion import setup_state
 from mathion.config import settings
+from mathion.course_links import course_sign_in_url
 from mathion.main import app
 from mathion.models import Course, CourseAdmin
 from mathion.models_auth import SiteBranding, SiteSetup, User
@@ -89,6 +90,18 @@ def test_read_fresh_site(panel, db):
     assert (state["email_set_up"], state["pin_minutes"], state["defaults_in_use"]) == (False, 10, True)
 
 
+def test_read_loads_the_settings_once(db, monkeypatch):
+    # Whole-branch M3: "email set up" comes from the view the done rules loaded.
+    from mathion.api import superuser_courses
+    calls = []
+    real = setup_state.load_site
+    for module in (setup_state, superuser_courses):
+        monkeypatch.setattr(module, "load_site", lambda d: calls.append(1) or real(d))
+    set_site(db, email_on=True)
+    assert setup_state.read(db).email_set_up is True
+    assert len(calls) == 1
+
+
 def test_done_step_counts_as_passed(panel, db):
     _on(db)
     db.add(SiteBranding(id=1, site_name="Lund", theme_changes={}))
@@ -128,7 +141,7 @@ def test_course_facts_in_answer(panel, db, monkeypatch):
     db.commit()
     state = _get(panel)
     course = state["course"]
-    assert (course["name"], course["sign_in_url"]) == ("Algebra", f"{settings.base_url}/courses/algebra/edit")
+    assert (course["name"], course["sign_in_url"]) == ("Algebra", course_sign_in_url("algebra"))
     assert (course["admin"]["email"], course["admin"]["full_name"], course["admin"]["is_disabled"]) == (
         "ann@uni.dk", "Ann", True)
     assert _marks(state)[2] == (True, True)

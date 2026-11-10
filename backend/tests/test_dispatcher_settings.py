@@ -351,6 +351,44 @@ def test_sent_tick_records_last_sent_on_healthy_server(db, seeded_run, mailer):
     assert _fresh_view(db).last_sent_at == now
 
 
+def test_sent_tick_on_a_recorded_healthy_server_writes_nothing(db, seeded_run, mailer, monkeypatch):
+    # Whole-branch M1: a send already recorded and nothing to clear leaves the
+    # row alone, so a class signing in at once doesn't queue writes on it.
+    set_site(db, **ON, email_off_at=None, last_sent_at=T0)
+    r = _row(db, seeded_run, T0)
+
+    def no_lock(*a):
+        raise AssertionError("the settings row was locked")
+    monkeypatch.setattr(dispatcher, "_fresh_row", no_lock)
+    _tick_once(_state(), T0 + H)
+    assert _sent(db, r) == [True]
+    assert _fresh_view(db).last_sent_at == T0
+
+
+def test_sent_tick_after_recovery_clears_the_failure(db, seeded_run, mailer):
+    # Review Focus 1: a send already recorded, then a failure with its back-off:
+    # the next send must still clear it, or the card stays red for ever.
+    set_site(db, **ON, email_off_at=None, last_sent_at=T0, send_failure_message="x", send_failure_at=T0,
+             send_retry_at=T0, send_backoff_step=2)
+    r = _row(db, seeded_run, T0)
+    now = T0 + H
+    _tick_once(_state(), now)
+    assert _sent(db, r) == [True]
+    v = _fresh_view(db)
+    assert (v.send_failure_message, v.send_retry_at, v.send_backoff_step, v.last_sent_at) == (None, None, 0, now)
+
+
+def test_sent_tick_after_a_newer_failed_test_records(db, seeded_run, mailer):
+    # A failed card test newer than the last send: this send makes Email done again.
+    set_site(db, **ON, email_off_at=None, last_sent_at=T0, card_test_ok=False,
+             card_test_at=T0 + timedelta(minutes=1), card_test_message="x")
+    r = _row(db, seeded_run, T0)
+    now = T0 + H
+    _tick_once(_state(), now)
+    assert _sent(db, r) == [True]
+    assert _fresh_view(db).last_sent_at == now
+
+
 def test_sent_tick_skips_record_when_settings_changed(db, seeded_run, mailer):
     class _SavedWhileSending(_Mailer):
         def send(self, msg):
