@@ -111,7 +111,7 @@
 <div class="sp-page" bind:this={pageEl}>
   <PanelHead title="Set up your site" />
   {#if setup.failed}
-    <ErrorState title="Could not load set up." message={setup.error ?? undefined}
+    <ErrorState title="Could not load set up." message={setup.error ?? undefined} retrying={setup.reading}
       onretry={() => void setup.read()} retryLabel="Try again" />
   {:else if setup.state && card !== null}
     <div class="sp-grid">

@@ -13,6 +13,7 @@
     message = undefined,
     onretry = undefined,
     retryLabel = 'Retry',
+    retrying = false,
     action = undefined,
   }: {
     variant?: 'inline' | 'page';
@@ -20,6 +21,8 @@
     message?: string;
     onretry?: () => void;
     retryLabel?: string;
+    /** The retry is running: the button shows it, keeps focus and ignores presses. */
+    retrying?: boolean;
     action?: Snippet;
   } = $props();
 </script>
@@ -29,7 +32,7 @@
     {#if variant === 'page'}<h1 class="title">{title}</h1>{:else}<p class="title">{title}</p>{/if}
     {#if message}<p class="message">{message}</p>{/if}
   </div>
-  {#if variant === 'inline' && onretry}<Button variant="secondary" onclick={onretry}>{retryLabel}</Button>{/if}
+  {#if variant === 'inline' && onretry}<Button variant="secondary" loading={retrying} aria-disabled={retrying} onclick={() => { if (!retrying) onretry?.(); }}>{retryLabel}</Button>{/if}
   {#if variant === 'page' && action}<div class="action">{@render action()}</div>{/if}
 </div>
 

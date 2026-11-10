@@ -417,6 +417,10 @@ it('pill first while on, gone after over once you leave Set up', async () => {
   router.currentRoute.path = '/superuser/T';
   await settle();
   expect(pillTexts()).toEqual(['Dashboard', 'Users', 'Courses', 'Settings', 'Branding']);
+  // Re-entering Set up now that the shell holds "over" leaves for the Dashboard.
+  router.currentRoute.path = '/superuser/T/setup';
+  await settle();
+  expect(navSpy).toHaveBeenCalledWith('/superuser/T', { replace: true });
 });
 
 it("setup over on entry replaces the address with the panel's own", async () => {

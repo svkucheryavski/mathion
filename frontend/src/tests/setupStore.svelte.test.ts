@@ -1,7 +1,9 @@
 import { it, expect, beforeEach, afterEach, describe, vi } from 'vitest';
 import { api, ApiError } from '../lib/api';
 import { SetupStore } from '../lib/setupStore.svelte';
-import { entryMove, markFor, setMark, clearMark, SETUP_MARK, type PanelSetup } from '../lib/setup';
+import {
+  entryMove, markFor, setMark, clearMark, keepSignIn, setupGo, setupSaved, setupSkip, SETUP_MARK, type PanelSetup,
+} from '../lib/setup';
 
 // Set up D2, D3a, D13: the shell's one copy of the wizard's state.
 
@@ -126,6 +128,61 @@ describe('SetupStore', () => {
     expect(onAuth).toHaveBeenCalledWith('signin');
   });
 
+  it('a write queued while a read waits runs before that read', async () => {
+    const a = deferred();
+    const b = deferred();
+    const one = store.write(() => a.promise);
+    const read = store.read();
+    const two = store.write(() => b.promise);
+    a.resolve(state({ step: 2 }));
+    await one;
+    await settle();
+    expect(gets).toHaveLength(0);   // the second write is still queued
+    b.resolve(state({ step: 3 }));
+    await two;
+    await settle();
+    expect(gets).toHaveLength(1);
+    gets[0].resolve(state({ step: 4 }));
+    expect((await read)?.step).toBe(4);
+  });
+
+  it('a 404 goes to onAuth once, as an expired link', async () => {
+    const a = store.read();
+    const b = store.read();
+    gets[0].reject(new ApiError(404, 'Not Found'));
+    gets[1].reject(new ApiError(404, 'Not Found'));
+    await Promise.all([a, b]);
+    expect(onAuth).toHaveBeenCalledTimes(1);
+    expect(onAuth).toHaveBeenCalledWith('expired');
+    expect(store.failed).toBe(false);
+  });
+
+  it('reading is true while a read runs, waiting on a write included, and false after a failure', async () => {
+    expect(store.reading).toBe(false);
+    const w = deferred();
+    const written = store.write(() => w.promise);
+    const read = store.read();
+    expect(store.reading).toBe(true);
+    w.resolve(state());
+    await written;
+    await settle();
+    expect(store.reading).toBe(true);
+    gets[0].reject(new ApiError(500, 'Boom.'));
+    await read;
+    expect(store.reading).toBe(false);
+  });
+
+  it('reading stays true while any of two reads runs', async () => {
+    const a = store.read();
+    const b = store.read();
+    gets[0].resolve(state());
+    await a;
+    expect(store.reading).toBe(true);
+    gets[1].resolve(state());
+    await b;
+    expect(store.reading).toBe(false);
+  });
+
   it('keepAlive reads every 4 minutes while dirty', async () => {
     vi.useFakeTimers();
     let dirty = false;
@@ -189,6 +246,24 @@ describe('SetupStore', () => {
     expect(store.state).toBeNull();
     vi.advanceTimersByTime(480_000);
     expect(gets).toHaveLength(1);
+  });
+});
+
+describe('the four wizard writes (D13)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('post to their own URLs, the step in the body, without the sign-in redirect', async () => {
+    const post = vi.spyOn(api, 'post').mockResolvedValue(state() as never);
+    await setupGo('T', 3);
+    await setupSkip('T', 2);
+    await setupSaved('T', 4);
+    await keepSignIn('T');
+    expect(post.mock.calls).toEqual([
+      ['/api/superuser/T/setup/go', { step: 3 }, { skipAuthRedirect: true }],
+      ['/api/superuser/T/setup/skip', { step: 2 }, { skipAuthRedirect: true }],
+      ['/api/superuser/T/setup/saved', { step: 4 }, { skipAuthRedirect: true }],
+      ['/api/superuser/T/setup/keep-sign-in', undefined, { skipAuthRedirect: true }],
+    ]);
   });
 });
 

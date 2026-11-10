@@ -36,7 +36,7 @@
 <PanelHead title="Dashboard" />
 <div class="dashboard">
   {#if setup.failed}
-    <ErrorState title="Could not load set up." message={setup.error ?? undefined}
+    <ErrorState title="Could not load set up." message={setup.error ?? undefined} retrying={setup.reading}
       onretry={() => void setup.read()} retryLabel="Try again" />
   {:else}
     <FinishCard {setup} {token} {onAuth} />

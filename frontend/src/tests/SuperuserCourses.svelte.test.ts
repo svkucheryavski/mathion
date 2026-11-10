@@ -219,6 +219,7 @@ it('the same admin in another case says only that nothing changed', async () => 
   type(panelInput("Admin's email"), 'AHO@uni.dk');
   footButton('Save').click(); await settle();
   expect(note()?.textContent?.trim()).toBe('They are already the admin; nothing changed.');
+  expect(calls).not.toContain('GET /setup');      // no state, and no place for Email's reason
 });
 
 it('clearing the email removes the admin and reloads (D9)', async () => {
@@ -251,8 +252,9 @@ it('name and admin in one Save: the PATCH goes first, then the PUT, then one not
   act(row('Chemometrics'), 'edit').click(); await settle();
   type(panelInput('Course name'), 'Chemo');
   type(panelInput("Admin's email"), 'aho@uni.dk');
-  footButton('Save').click(); await settle();
-  expect(calls.filter((c) => c !== 'GET /courses' && c !== 'POST /accounts/lookup')).toEqual(['PATCH /courses/2', 'PUT /courses/2/admin']);
+  footButton('Save').click(); await settle(); await settle();
+  // No state in this test, so the note reads it first (whole-branch M1).
+  expect(calls.filter((c) => c !== 'GET /courses' && c !== 'POST /accounts/lookup')).toEqual(['PATCH /courses/2', 'PUT /courses/2/admin', 'GET /setup']);
   expect(note()?.textContent?.trim()).toBe('Anna Holm is now the admin of Chemo. An email with a sign-in link is on its way to aho@uni.dk.');
 });
 
@@ -329,9 +331,9 @@ function signIn(email: string) {
     photo_url: null, has_course_admin: false, has_run_teacher: false,
   };
 }
-async function createVia(outcome: AdminAssignResult['admin_email']) {
-  routes['POST /courses'] = () => [201, assigned(courses()[0], outcome)];
-  routes['POST /accounts/lookup'] = () => [200, { status: 'existing', full_name: 'Anna Holm' }];
+async function createVia(outcome: AdminAssignResult['admin_email'], admin = ANNA) {
+  routes['POST /courses'] = () => [201, assigned(courses()[0], outcome, admin)];
+  routes['POST /accounts/lookup'] = () => [200, { status: admin.is_disabled ? 'disabled' : 'existing', full_name: admin.full_name }];
   await render();
   target.querySelector<HTMLButtonElement>('.panel-head button')!.click(); await settle();
   type(panelInput('Course name'), 'Statistics 101');
@@ -355,9 +357,96 @@ it("a queued note adds Email's reason while the Email step isn't done", async ()
     + 'Not tested yet: send a test email.');
 });
 
+it('the Edit dialog assigning yourself: "You are now the admin", no command', async () => {
+  signIn('AHO@uni.dk');
+  routes['POST /accounts/lookup'] = () => [200, { status: 'existing', full_name: 'Anna Holm' }];
+  routes['PUT /courses/2/admin'] = () => [200, assigned(courses()[1], 'email_off')];
+  await render();
+  act(row('Chemometrics'), 'edit').click(); await settle();
+  type(panelInput("Admin's email"), 'aho@uni.dk');
+  footButton('Save').click(); await settle();
+  expect(note()?.textContent?.trim()).toBe(
+    "You are now the admin of Chemometrics. You'll find it on the Courses page of the main site.");
+  expect(note()?.querySelector('code')).toBeNull();
+});
+
+it("with no state yet, the note reads it first and adds Email's reason (whole-branch M1)", async () => {
+  routes['GET /setup'] = () => [200, stateWithEmail(false)];
+  await createVia('queued');
+  expect(calls.filter((c) => c === 'GET /setup')).toHaveLength(1);
+  expect(note()?.textContent?.trim()).toBe(
+    'Statistics 101 is created; Anna Holm is its admin. An email with a sign-in link is on its way to aho@uni.dk. '
+    + 'Not tested yet: send a test email.');
+});
+
+it('a note still waiting on that read never lands over a later action', async () => {
+  routes['GET /setup'] = () => [200, stateWithEmail(false)];
+  routes['PATCH /courses/2'] = () => [200, { ...courses()[1], name: 'Chemo' }];
+  const routed = globalThis.fetch;
+  let release!: () => void;
+  const held = new Promise<void>((r) => { release = r; });
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (String(url).endsWith('/setup')) await held;
+    return routed(url, init);
+  }));
+  await createVia('queued');
+  expect(note()).toBeNull();                       // waiting on the state read
+  act(row('Chemometrics'), 'edit').click(); await settle();
+  type(panelInput('Course name'), 'Chemo');
+  footButton('Save').click(); await settle();     // a rename clears the note
+  release(); await settle(); await settle();
+  expect(note()).toBeNull();
+});
+
+it('with no state and a failed read, the note still shows, without a reason', async () => {
+  routes['GET /setup'] = () => [500, { detail: 'Boom.' }];
+  await createVia('queued');
+  expect(note()?.textContent?.trim()).toBe(
+    'Statistics 101 is created; Anna Holm is its admin. An email with a sign-in link is on its way to aho@uni.dk.');
+});
+
 it('no reason once the Email step is done', async () => {
   setupState = stateWithEmail(true);
   await createVia('queued');
   expect(note()?.textContent?.trim()).toBe(
     'Statistics 101 is created; Anna Holm is its admin. An email with a sign-in link is on its way to aho@uni.dk.');
+  expect(calls).not.toContain('GET /setup');
+});
+
+it.each([['email_off', ANNA], ['disabled', { ...ANNA, is_disabled: true }]] as const)(
+  'with no state, the %s note has no place for the reason: it shows at once, with no read', async (outcome, admin) => {
+    await createVia(outcome, admin);
+    expect(note()).not.toBeNull();
+    expect(calls).not.toContain('GET /setup');
+  });
+
+it('with no state, a queued note naming yourself shows at once, with no read', async () => {
+  signIn('AHO@uni.dk');
+  await createVia('queued');
+  expect(note()?.textContent?.trim()).toBe(
+    "Statistics 101 is created; you are its admin. You'll find it on the Courses page of the main site.");
+  expect(calls).not.toContain('GET /setup');
+});
+
+it('closing the last note does not cancel a newer one still waiting on the read', async () => {
+  routes['GET /setup'] = () => [200, stateWithEmail(false)];
+  routes['PUT /courses/2/admin'] = () => [200, assigned(courses()[1], 'queued')];
+  const routed = globalThis.fetch;
+  let release!: () => void;
+  const held = new Promise<void>((r) => { release = r; });
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (String(url).endsWith('/setup')) await held;
+    return routed(url, init);
+  }));
+  await createVia('email_off');                    // shows at once: no reason to wait for
+  expect(note()).not.toBeNull();
+  act(row('Chemometrics'), 'edit').click(); await settle();
+  type(panelInput("Admin's email"), 'aho@uni.dk');
+  footButton('Save').click(); await settle();     // queued: waits on the read
+  note()!.querySelector<HTMLButtonElement>('button[data-glyph="close"]')!.click(); await settle();
+  expect(note()).toBeNull();
+  release(); await settle(); await settle();
+  expect(note()?.textContent?.trim()).toBe(
+    'Anna Holm is now the admin of Chemometrics. An email with a sign-in link is on its way to aho@uni.dk. '
+    + 'Not tested yet: send a test email.');
 });

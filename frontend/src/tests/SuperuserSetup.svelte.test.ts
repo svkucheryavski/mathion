@@ -329,6 +329,31 @@ it('a failed first read shows the error state with Try again in place of the car
   expect(read).toHaveBeenCalledTimes(1);
 });
 
+it('Try again shows that it is reading and ignores presses until the read answers', async () => {
+  let answer!: (r: Response) => void;
+  vi.stubGlobal('fetch', vi.fn(async () => new Promise<Response>((r) => { answer = r; })));
+  setup.failed = true;
+  setup.error = 'Boom.';
+  cmp = mount(SuperuserSetup, {
+    target, props: { setup, token: 'T', onAuth }, context: new Map([[DIRTY_REGISTRY_KEY, registry]]),
+  });
+  await settle();
+  const again = () => [...target.querySelectorAll<HTMLButtonElement>('.error-state button')].find((b) => b.textContent?.trim() === 'Try again')!;
+  const read = vi.spyOn(setup, 'read');
+  again().click();
+  await settle();
+  expect(again().getAttribute('aria-busy')).toBe('true');
+  expect(again().getAttribute('aria-disabled')).toBe('true');
+  again().click();
+  expect(read).toHaveBeenCalledTimes(1);
+  answer(new Response(JSON.stringify({ detail: 'Boom.' }), { status: 500, headers: { 'content-type': 'application/json' } }));
+  await settle();
+  expect(again().getAttribute('aria-busy')).toBeNull();
+  expect(again().getAttribute('aria-disabled')).toBeNull();
+  again().click();
+  expect(read).toHaveBeenCalledTimes(2);
+});
+
 // --- All set (D5) ---
 
 it('All set lists the steps left and its list cannot be clicked', async () => {

@@ -7,7 +7,8 @@
 </script>
 
 <div class="panel-head">
-  <h1>{title}</h1>
+  <!-- tabindex -1: focus lands here when a control on the page goes away. -->
+  <h1 tabindex="-1">{title}</h1>
   {#if actions}{@render actions()}{/if}
 </div>
 

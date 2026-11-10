@@ -8,18 +8,6 @@ Minors from the per-task reviews and the whole-branch review, by task.
 - **`saved` is fixed for a form's life** (Opus r1 M3). After a half-save the step builds a new form for the part that saved, which resets `edits` and normalises " 15" to "15". Accepted; Task 8 knows.
 - **LogoPick has no "checking" state** (Opus r1 M5). Between `choose()` and the file read's answer, `changed` and `ready` still describe the previous choice. The old dialog had the same milliseconds-long window.
 
-## Task 5 (the setup store, the route, the pill and the redirect)
-
-- **Test gaps** (Opus r1 M5, Fable r1 note). Not pinned: a write queued while a read waits; a 404 to `onAuth` once; the four write calls' URLs; re-entering `/setup` after it held "open" through an over answer, which should then leave.
-
-## Task 6 (the Finish setting up card and the Courses note)
-
-- **A failed Keep's sentence outlives its line** (Opus r1 M1). If a later read takes the Sign-in line away, the card's error stays under the other lines. Fix: clear `error` when the Sign-in line goes.
-- **A successful Keep drops focus to the page** (Opus r1 M2): it removes its own button. Fix: move focus to the card's heading (tabindex -1) or the next line's link.
-- **Try again on the Dashboard gives no sign of a press** (Opus r1 M4, Fable r1 M3). It isn't blocked while its read runs, and a failure with the same sentence leaves the screen unchanged. Fix if wanted: a `reading` flag on the store, bound to the button's loading state.
-- **Test gaps** (Opus r1 M5, Fable r1 M1, M2, M5). Not pinned: Keep's double click and its `aria-disabled` while running; the Edit dialog's assign when the admin is you, at page level; "every step skipped (D4a)" in `setup.test.ts` only repeats "done steps are left out" (D4a is the server's): rename it.
-- **Where the "no `mathion pin` command when it's you" rule lives** (Fable r1 M2). The Courses page decides it, `adminNote` writes the sentence; Task 9's step note needs the same. Fix in Task 9: a helper beside `adminNote` that returns `{ text, command? }`, used by both.
-
 ## Task 7 (the Set up page, All set and step 1)
 
 - **Discard, then a failed move, leaves focus on the page** (Opus r1 M4, Fable r1 M5). The question's Cancel had focus and unmounts; nothing refocuses. Fix: `focusAfter` the asking control in `move`'s catch.
@@ -54,5 +42,4 @@ Minors from the per-task reviews and the whole-branch review, by task.
 
 ## Whole-branch review (003df4f..c6bfd2b; Opus + Fable both 0 Critical / 0 Important)
 
-- **The Courses / step 3 note leaves out D6's reason when the setup state is unknown** (Fable M1). The first read failed (not 401/404), the superuser opens Courses and creates a course: a "queued" note says the email is on its way without "Not tested yet…". Fix: re-read before showing the note when `setup.state` is null.
 - **Step 1 drops a passed test's answer on save** (Fable M3). `StepEmail.svelte` rebuilds the form after the save, so a green "test passed" goes; seen only when "step 1 saved" then fails. Fix: carry `result` over to the new form.
