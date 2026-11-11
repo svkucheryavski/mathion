@@ -1868,3 +1868,308 @@ it('typed values after a 409 done view gave way are never swapped out by a later
   await settle();
   expect(input('Course name').value).toBe('Chemometrics');
 });
+
+// --- Step 3, the minors round ---
+
+/** Enter in a field, with focus in it, as the browser would. */
+function enterIn(el: HTMLInputElement) {
+  el.focus();
+  el.form!.requestSubmit();
+}
+
+it('Enter in a field: when the note replaces the fields, focus goes to Continue (Task 9 M2)', async () => {
+  routes['POST /courses'] = () => [200, created()];
+  routes['POST /setup/saved'] = () => [200, state({ step: 4 }, [false, false, true, false])];
+  await render(state({ step: 3 }));
+  fillCourse();
+  enterIn(input("Admin's email"));
+  await settle();
+  await settle();
+  expect(strip()).not.toBeNull();
+  expect(document.activeElement).toBe(foot('save'));
+});
+
+it("Enter in a field: when a 409's done view replaces the fields, focus goes to Continue (Task 9 M2)", async () => {
+  routes['POST /courses'] = () => [409, { detail: 'The address statistics-101 is taken.' }];
+  routes['GET /setup'] = () => [200, withCourse()];
+  await render(state({ step: 3 }));
+  fillCourse();
+  enterIn(input("Admin's email"));
+  await settle();
+  await settle();
+  expect(card()!.querySelector('.sc-done')).not.toBeNull();
+  expect(document.activeElement).toBe(foot('save'));
+});
+
+it('a step 3 that turned done: emptying the fields shows the done view, focus to Continue, the address follows the name again (Task 9 M2, Fable r3 M3)', async () => {
+  await render(state({ step: 3 }));
+  type(input('Course name'), 'Statistics 101');
+  type(input('Address'), 'stat');                 // the address no longer follows the name
+  routes['GET /setup'] = () => [200, withCourse()];
+  await setup.read();                              // another tab made the course; typed values hold the form
+  await settle();
+  expect(input('Course name').value).toBe('Statistics 101');
+  input('Course name').focus();
+  type(input('Address'), '');
+  type(input('Course name'), '');
+  await settle();
+  expect(card()!.querySelector('.sc-done')).not.toBeNull();
+  expect(registry.isAnyDirty()).toBe(false);
+  expect(document.activeElement).toBe(foot('save'));
+  routes['GET /setup'] = () => [200, state({ step: 3 })];
+  await setup.read();                              // the course went again
+  await settle();
+  type(input('Course name'), 'Algebra');
+  expect(input('Address').value).toBe('algebra');
+});
+
+it('a failed Continue on the done view, then the course goes: the form comes back empty, with no old sentence (Fable r3 M2)', async () => {
+  routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
+  routes['GET /setup'] = () => [200, withCourse()];
+  await render(withCourse());
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Boom.');
+  routes['GET /setup'] = () => [200, state({ step: 3 })];
+  await setup.read();
+  await settle();
+  expect(input('Course name').value).toBe('');
+  expect(err()).toBeNull();
+});
+
+it('Continue on the note sends "step 3 saved" again when the newest state names step 3 (Task 9 M3)', async () => {
+  let saves = 0;
+  await render(state({ step: 3 }));
+  await create(() => (++saves, [200, state({ step: 4 }, [false, false, true, false])]));
+  routes['GET /setup'] = () => [200, state({ step: 3 }, [false, false, true, false])];
+  await setup.read();                              // another tab went back to step 3
+  await settle();
+  expect(strip()).not.toBeNull();
+  foot('save')!.click();
+  await settle();
+  expect(saves).toBe(2);
+  expect(writes().map((c) => c.key)).toEqual(['POST /courses', 'POST /setup/saved', 'POST /setup/saved']);
+  expect(title()).toBe('Sign-in rules and limits');
+});
+
+it("a failed Continue on the done view holds the card by its error alone, against a re-read that moves it (D3a)", async () => {
+  routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
+  routes['GET /setup'] = () => [200, withCourse({ step: 4 })];
+  await render(withCourse());
+  foot('save')!.click();
+  await settle();
+  await settle();
+  expect(registry.isAnyDirty()).toBe(false);
+  expect(calls.filter((c) => c.key === 'GET /setup')).toHaveLength(1);
+  expect(setup.state!.step).toBe(4);               // the re-read applied; the card held anyway
+  expect(title()).toBe('First course and its admin');
+  expect(err()).toBe('Boom.');
+});
+
+it('while the course is created, the skip button, Back and the list wait, and a re-read holds the card (setup.saving)', async () => {
+  const d = deferred();
+  routes['POST /courses'] = () => d.promise;
+  routes['POST /setup/saved'] = () => [200, state({ step: 4 }, [false, false, true, false])];
+  await render(state({ step: 3 }));
+  fillCourse();
+  foot('save')!.click();
+  await settle();
+  expect(setup.saving).toBe(true);
+  expect(foot('skip')!.getAttribute('aria-disabled')).toBe('true');
+  expect(foot('back')!.getAttribute('aria-disabled')).toBe('true');
+  expect(items()[0].getAttribute('aria-disabled')).toBe('true');
+  routes['GET /setup'] = () => [200, state({ step: 4 })];
+  await setup.read();                              // a re-read during the create: the card holds (D3a)
+  await settle();
+  expect(title()).toBe('First course and its admin');
+  d.resolve([200, created()]);
+  await settle();
+  expect(setup.saving).toBe(false);
+  expect(strip()).not.toBeNull();
+});
+
+it("a 409 whose re-read fails keeps the form, the typed values and the 409's sentence", async () => {
+  routes['GET /setup'] = () => [500, { detail: 'Read failed.' }];
+  await render(state({ step: 3 }));
+  await create(() => [200, state()], [409, { detail: 'The address statistics-101 is taken.' }]);
+  await settle();
+  expect(err()).toBe('The address statistics-101 is taken.');
+  expect(input('Course name').value).toBe('Statistics 101');
+});
+
+it("a 409 whose re-read lands stale (a newer read applied first) keeps the form and the typed values", async () => {
+  const first = deferred();
+  let reads = 0;
+  routes['GET /setup'] = () => (++reads === 1 ? first.promise : [200, state({ step: 3 })]);
+  await render(state({ step: 3 }));
+  await create(() => [200, state()], [409, { detail: 'The address statistics-101 is taken.' }]);
+  await setup.read();                              // a keep-alive read, sent later, answers first
+  await settle();
+  first.resolve([200, withCourse()]);              // the 409's read: older, so dropped
+  await settle();
+  expect(err()).toBe('The address statistics-101 is taken.');
+  expect(input('Course name').value).toBe('Statistics 101');
+  expect(card()!.querySelector('.sc-done')).toBeNull();
+});
+
+it('a 401 or 404 on the create goes to the shell, with no sentence and no re-read', async () => {
+  await render(state({ step: 3 }));
+  await create(() => [200, state()], [401, { detail: 'Not signed in' }]);
+  expect(onAuth).toHaveBeenCalledWith('signin');
+  routes['POST /courses'] = () => [404, { detail: 'Not Found' }];
+  foot('save')!.click();
+  await settle();
+  expect(onAuth).toHaveBeenCalledWith('expired');
+  expect(err()).toBeNull();
+  expect(calls.filter((c) => c.key === 'GET /setup')).toHaveLength(0);
+  expect(setup.saving).toBe(false);
+});
+
+it('a failed "step 3 saved" re-reads the state, so the list ticks step 3; a list click then goes', async () => {
+  routes['GET /setup'] = () => [200, state({ step: 3 }, [false, false, true, false])];
+  await render(state({ step: 3 }));
+  await create(() => [500, { detail: 'Boom.' }]);
+  expect(calls.filter((c) => c.key === 'GET /setup')).toHaveLength(1);
+  expect(mark(3).classList.contains('done')).toBe(true);
+  routes['POST /setup/go'] = () => [200, state({ step: 4 }, [false, false, true, false])];
+  items()[3].click();
+  await settle();
+  expect(writes()[2]).toEqual({ key: 'POST /setup/go', body: { step: 4 } });
+  expect(title()).toBe('Sign-in rules and limits');
+});
+
+it('Discard on step 3 empties the fields, and the address follows the name again', async () => {
+  routes['POST /setup/go'] = () => [500, { detail: 'Go failed.' }];
+  await render(state({ step: 3 }));
+  type(input('Course name'), 'Statistics 101');
+  type(input('Address'), 'stat');
+  foot('back')!.click();
+  await settle();
+  confirmDiscard()!.click();
+  await settle();
+  expect(err()).toBe('Go failed.');
+  expect(input('Course name').value).toBe('');
+  expect(registry.isAnyDirty()).toBe(false);
+  type(input('Course name'), 'Algebra');
+  expect(input('Address').value).toBe('algebra');
+});
+
+it('Discard on a done step with typed values brings the done view back, focus on the control that asked', async () => {
+  routes['POST /setup/go'] = () => [500, { detail: 'Go failed.' }];
+  await render(state({ step: 3 }));
+  type(input('Course name'), 'Statistics 101');
+  routes['GET /setup'] = () => [200, withCourse()];
+  await setup.read();
+  await settle();
+  foot('back')!.focus();
+  foot('back')!.click();
+  await settle();
+  confirmDiscard()!.click();
+  await settle();
+  await settle();
+  expect(err()).toBe('Go failed.');
+  expect(card()!.querySelector('.sc-done')).not.toBeNull();
+  expect(document.activeElement).toBe(foot('back'));   // the failed move's control, not Continue
+});
+
+it('a step 3 field edit notes the time for the keep-alive', async () => {
+  await render(state({ step: 3 }));
+  const note = vi.spyOn(setup, 'noteEdit');
+  type(input('Course name'), 'S');
+  expect(note).toHaveBeenCalled();
+});
+
+it('the no-admin line is not on a done step', async () => {
+  await render(withCourse({ course_without_admin: 'Chemometrics' }));
+  expect(card()!.textContent).not.toContain('has no admin');
+});
+
+it('a failed Back or list click on the done view keeps it, with the move sentence', async () => {
+  routes['POST /setup/go'] = () => [500, { detail: 'Go failed.' }];
+  await render(withCourse());
+  foot('back')!.click();
+  await settle();
+  expect(err()).toBe('Go failed.');
+  expect(card()!.querySelector('.sc-done')).not.toBeNull();
+  routes['POST /setup/go'] = () => [500, { detail: 'Go failed again.' }];
+  items()[0].click();
+  await settle();
+  expect(err()).toBe('Go failed again.');
+  expect(card()!.querySelector('.sc-done')).not.toBeNull();
+});
+
+it("Continue on a 409's done view sends step saved and moves on", async () => {
+  routes['GET /setup'] = () => [200, withCourse()];
+  await render(state({ step: 3 }));
+  await create(() => [200, state({ step: 4 }, [false, false, true, false])], [409, { detail: 'The address statistics-101 is taken.' }]);
+  await settle();
+  expect(card()!.querySelector('.sc-done')).not.toBeNull();
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['POST /courses', 'POST /setup/saved']);
+  expect(title()).toBe('Sign-in rules and limits');
+});
+
+it('the done view when the admin is you, and when the admin is disabled', async () => {
+  session.user = { id: 1, email: 'aho@uni.dk', full_name: 'Anna Holm', is_superuser: true, is_disabled: false, photo_url: null, has_course_admin: false, has_run_teacher: false };
+  await render(withCourse({ email_set_up: false }));
+  expect(card()!.querySelector('.sc-done')!.textContent).toBe('A course exists: Statistics 101. You are its admin.');
+  expect(card()!.querySelector('code')).toBeNull();
+  unmount(cmp!);
+  cmp = null;
+  session.user = null;
+  await render(withCourse({ course: { name: 'Statistics 101', sign_in_url: SIGN_IN, admin: { ...ADMIN, is_disabled: true } } }));
+  expect(card()!.querySelector('.sc-done')!.textContent).toBe(
+    'A course exists: Statistics 101. Anna Holm is its admin. This account is disabled. Enable it on the Users page so they can sign in.');
+});
+
+it('Discard on a step that is not done, a failed move, then Enter: the note still sends focus to Continue', async () => {
+  routes['POST /setup/go'] = () => [500, { detail: 'Go failed.' }];
+  routes['POST /courses'] = () => [200, created()];
+  routes['POST /setup/saved'] = () => [200, state({ step: 4 }, [false, false, true, false])];
+  await render(state({ step: 3 }));
+  type(input('Course name'), 'Statistics 101');
+  foot('back')!.click();
+  await settle();
+  confirmDiscard()!.click();
+  await settle();
+  await settle();
+  expect(err()).toBe('Go failed.');
+  fillCourse();
+  enterIn(input("Admin's email"));
+  await settle();
+  await settle();
+  expect(strip()).not.toBeNull();
+  expect(document.activeElement).toBe(foot('save'));
+});
+
+it("the note's failed Continue keeps its sentence when its re-read finds the course gone", async () => {
+  let reads = 0;
+  routes['GET /setup'] = () => (++reads === 1 ? [200, withCourse()] : [200, state({ step: 3 })]);
+  await render(state({ step: 3 }));
+  await create(() => [500, { detail: 'Boom.' }]);
+  await settle();
+  expect(strip()).not.toBeNull();
+  expect(err()).toBe('Boom.');
+  routes['POST /setup/saved'] = () => [500, { detail: 'Boom again.' }];
+  foot('save')!.click();
+  await settle();
+  await settle();
+  expect(reads).toBe(2);
+  expect(strip()).not.toBeNull();
+  expect(err()).toBe('Boom again.');
+});
+
+it('a failed "step 3 saved" under the note: Continue retries it even when the newest state names another step', async () => {
+  routes['GET /setup'] = () => [200, state({ step: 4 }, [false, false, true, false])];
+  await render(state({ step: 3 }));
+  await create(() => [500, { detail: 'Boom.' }]);
+  await settle();
+  expect(setup.state!.step).toBe(4);               // the failure's re-read
+  expect(strip()).not.toBeNull();
+  routes['POST /setup/saved'] = () => [200, state({ step: 4 }, [false, false, true, false])];
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['POST /courses', 'POST /setup/saved', 'POST /setup/saved']);
+  expect(title()).toBe('Sign-in rules and limits');
+});

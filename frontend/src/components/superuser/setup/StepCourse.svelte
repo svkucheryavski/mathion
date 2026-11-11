@@ -9,15 +9,19 @@
   // and the sign-in sentence a reload must not lose) and Continue, unless the
   // form holds typed values (D3a). A 409 re-reads the state: if step 3 is now
   // done, the done view replaces the form and its values, or All set shows
-  // when the wizard is now over.
+  // when the wizard is now over. When the note or the done view takes the
+  // fields' place and focus was left on the page, it goes to Continue; Discard
+  // leaves focus to the move that asked.
+  import { untrack } from 'svelte';
   import StepCard from './StepCard.svelte';
   import CourseFields from '../fields/CourseFields.svelte';
   import NoteStrip from '../NoteStrip.svelte';
   import CommandText from '../CommandText.svelte';
   import { CourseForm } from '../../../lib/panelForms/courseForm.svelte';
   import { ApiError } from '../../../lib/api';
+  import { repairFocus } from '../../../lib/askInPlace.svelte';
   import { adminNoteParts, createCourse, panelError } from '../../../lib/superuser';
-  import { doneViewNote, setupSaved, type PanelSetup, type StepProps } from '../../../lib/setup';
+  import { cardAfterOwn, doneViewNote, setupSaved, type PanelSetup, type StepProps } from '../../../lib/setup';
   import { useStepGuards } from '../../../lib/stepGuards.svelte';
 
   let { token, setup, onAuth, me, onDone, back, skip, moveError, onHold }: StepProps = $props();
@@ -26,15 +30,18 @@
   let form = $state.raw(new CourseForm());
   /** The note after Save (D8); it holds the card until the person moves on. */
   let note = $state<{ text: string; command?: string } | null>(null);
-  /** "Step 3 saved" answered for the note, so Continue sends nothing (D8). */
-  let savedOk = $state(false);
+  /** "Step 3 saved" answered for the note: Continue shows the newest state's
+   *  step, unless that is step 3 again (D8). */
+  let savedOk = false;
+  /** The fields are shown, and Discard has not swapped them for the done view. */
+  let fieldsShown = false;
 
   const busy = $derived(setup.busy || setup.saving);
   const done = $derived(setup.state?.steps[2]?.done ?? false);
   // D8, D3a: the done view follows the state while the form holds nothing
-  // typed, so a re-read never swaps out typed values; its own errors (a failed
-  // Continue, a 409's sentence) show in it.
-  const doneText = $derived(setup.state && done && !form.changed ? doneViewNote(setup.state, me) : null);
+  // typed and no note shows, so a re-read never swaps out typed values; its
+  // own errors (a failed Continue, a 409's sentence) show in it.
+  const doneText = $derived(setup.state && done && !note && !form.changed ? doneViewNote(setup.state, me) : null);
   const doneView = $derived(doneText !== null);
   const noAdmin = $derived(setup.state?.course_without_admin ?? null);
   const mode = $derived(note || doneView ? 'continue' : 'save');
@@ -43,10 +50,33 @@
   useStepGuards({
     setup: () => setup, onHold: (h) => onHold(h), moveError: () => moveError,
     dirty: () => form.changed,
-    discard: () => { form = new CourseForm(); },
+    discard: () => {
+      if (done) fieldsShown = false;   // the done view comes back: no focus move
+      form = new CourseForm();
+    },
     held: () => note !== null || !!form.error,
     clearErrors: () => { form.error = null; },
   });
+
+  // D8: when the course goes while the done view shows, the fields come back
+  // as new: no old sentence, and the address follows the name again.
+  let wasDone = false;
+  $effect(() => {
+    const d = doneView;
+    untrack(() => {
+      if (wasDone && !d) form = new CourseForm();
+      wasDone = d;
+    });
+  });
+
+  // §Focus: only focus left on the page moves (repairFocus); never focus the
+  // person put somewhere else.
+  function fieldsMark(): void { fieldsShown = true; }
+  function continueFocus(el: HTMLElement): void {
+    if (!fieldsShown) return;
+    fieldsShown = false;
+    void repairFocus(el.closest('.st-card')?.querySelector('.st-foot [data-action="save"]'));
+  }
 
   /** "Step 3 saved": its answer, or null. A failure shows in the card and
    *  re-reads the state, so the marks follow the course (D13). */
@@ -94,8 +124,9 @@
   }
 
   async function onContinue(): Promise<void> {
-    // D3a: the note's Continue shows the newest state's step, or retries.
-    if (note && savedOk && setup.state) { onDone(setup.state); return; }
+    // D3a: the note's Continue shows the newest state's step, or retries; a
+    // state that names step 3 again sends "step 3 saved" again.
+    if (note && savedOk && setup.state && cardAfterOwn(setup.state) !== 3) { onDone(setup.state); return; }
     const s = await sendSaved();
     if (s) onDone(s);
   }
@@ -107,17 +138,17 @@
 </script>
 
 <StepCard n={3} title="First course and its admin" note="A course and the person who will build it."
-  error={form.error ?? moveError} {busy} {mode} canSave={form.ready}
+  error={form.error ?? moveError} {busy} {mode} canSave={mode === 'save' ? form.ready : true}
   onBack={note ? undefined : back} onSkip={note || done ? undefined : skip} {onSave}>
   {#if note}
-    <NoteStrip tone="info"><CommandText text={note.text} command={note.command} /></NoteStrip>
+    <div {@attach continueFocus}><NoteStrip tone="info"><CommandText text={note.text} command={note.command} /></NoteStrip></div>
   {:else if doneText}
-    <p class="sc-done"><CommandText text={doneText.text} command={doneText.command} /></p>
+    <p class="sc-done" {@attach continueFocus}><CommandText text={doneText.text} command={doneText.command} /></p>
   {:else}
     {#if noAdmin}<p class="sc-line">{noAdmin} has no admin: give it one on the Courses page, or create another course here.</p>{/if}
     <!-- D3a: every edit notes the time for the keep-alive. The lead-in stays
          outside the fields' parent (their labels' :not(:first-child) margins). -->
-    <div class="sc-fields" oninput={() => setup.noteEdit()} onchange={() => setup.noteEdit()} role="presentation">
+    <div class="sc-fields" oninput={() => setup.noteEdit()} onchange={() => setup.noteEdit()} role="presentation" {@attach fieldsMark}>
       <CourseFields {form} {uid} {busy} {token} {onAuth} />
     </div>
   {/if}

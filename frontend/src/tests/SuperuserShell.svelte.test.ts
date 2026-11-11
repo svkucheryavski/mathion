@@ -696,6 +696,36 @@ it("while step 4's own save runs, before any wizard write, the pills wait (setup
   expect(pills().some((a) => a.hasAttribute('aria-disabled'))).toBe(false);   // "step 4 saved" answered
 });
 
+it("while step 3 creates its course, before any wizard write, the pills wait (setup.saving)", async () => {
+  setupState = { ...setupOf(true), step: 3 };
+  let answer!: (r: Response) => void;
+  const routed = dispatchFetch();
+  vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => (String(url).endsWith('/courses') && init?.method === 'POST'
+    ? new Promise<Response>((r) => { answer = r; })
+    : routed(url))));
+  router.currentRoute.path = '/superuser/T/setup';
+  component = mount(SuperuserShell, { target, props: { token: 'T' } });
+  await settle();
+  await settle();
+  const field = (label: string) => [...target.querySelectorAll<HTMLInputElement>('input')].find((i) => i.labels?.[0]?.textContent?.trim() === label)!;
+  for (const [label, value] of [['Course name', 'Statistics 101'], ["Admin's email", 'aho@uni.dk']]) {
+    field(label).value = value;
+    field(label).dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  flushSync();
+  buttonByText(target, 'Save and continue')!.click();
+  await settle();
+  expect(pills().every((a) => a.getAttribute('aria-disabled') === 'true')).toBe(true);   // no wizard write yet
+  const admin = { id: 9, email: 'aho@uni.dk', full_name: 'Anna Holm', is_disabled: false };
+  answer(jsonResponse(200, {
+    course: { id: 1, name: 'Statistics 101', slug: 'statistics-101', admin, version_count: 1, run_count: 0, student_count: 0 },
+    admin, admin_email: 'email_off', pin_minutes: 10, sign_in_url: 'https://m.example/courses/stat/edit',
+  }));
+  await settle();
+  await settle();
+  expect(pills().some((a) => a.hasAttribute('aria-disabled'))).toBe(false);   // "step 3 saved" answered
+});
+
 it("while a wizard write runs, the pills wait; they come back after", async () => {
   setupState = setupOf(true);
   let answer!: (r: Response) => void;

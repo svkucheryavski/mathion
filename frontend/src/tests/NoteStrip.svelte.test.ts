@@ -38,3 +38,13 @@ it('× closes it', () => {
   x.click();
   expect(onClose).toHaveBeenCalledTimes(1);
 });
+
+it('with no onClose there is no close button (Set up D8)', () => {
+  target = document.createElement('div');
+  document.body.appendChild(target);
+  const children = createRawSnippet(() => ({ render: () => '<span>Statistics 101 is created.</span>' }));
+  cmp = mount(NoteStrip, { target, props: { tone: 'info', children } });
+  flushSync();
+  expect(target.querySelector('.note-strip')!.textContent).toContain('Statistics 101 is created.');
+  expect(target.querySelector('button')).toBeNull();
+});
