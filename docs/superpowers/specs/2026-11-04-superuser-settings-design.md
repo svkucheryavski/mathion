@@ -1,6 +1,6 @@
 # Superuser panel: Settings — design
 
-**Status:** rev 6, 2026-11-05.
+**Status:** rev 7, 2026-11-10.
 - Rev 2 folded in the builder check: D2a, D7a, D8a, D11b, the lower file ceiling in D11, and the user's D10a.
 - Rev 3 folds in spec review round 1, three lanes (`.superpowers/sdd/2026-11-04-superuser-settings/spec-r1-*.md`), and the user's answer on the upload ceiling (D11c). New or changed:
   - **D10b:** every email reader is listed;
@@ -35,6 +35,7 @@
   - **D9d:** the card's line for refusals after the body, and the PIN email reaches the card;
   - **D11a:** a proxy's 413 shows its sentence on every upload screen;
   - **D11c:** the bundled proxy's two timeouts, and what a proxy refusal shows (Safari pass).
+- Rev 7 (the Set up minors round, 2026-11-10): **D9d:** a PIN email to a developer outbox (D2c) records nothing on the card (Set up spec D6, rev 18); **D10b:** the email-set-up rule is `email_set_up_in`, in `panel_people.py`; code is named, not line numbers.
 
 **Builds on:** `docs/superpowers/specs/2026-11-03-superuser-users-courses-design.md` (panel pages, dialogs, D25 errors) and `docs/superpowers/specs/2026-07-11-superuser-panel-slice-1-design.md` (panel access and shell).
 
@@ -230,7 +231,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   **The queue backs off after a D9c failure** (mine, from review). The next try waits 5 minutes, then doubles each time up to 1 hour, instead of every 30 s. A login refused every 30 s could trip a provider's lockout (Office 365, Google). A save of the email settings, a successful send, or a passing test of the saved settings (D9a) resets the wait.
 - **D9d. The card shows a stuck queue** (mine, from review). When a D9c failure stops a batch, the queue stores its sentence and time with the settings. The Email card then shows a red line under Last test: "Sending is failing since <time>: <sentence>". A successful send clears it, and so do a save of the email settings and a passing test of the saved settings (D9a). It's logged once per change of sentence, not every tick.
   - **Refusals after the body** (user's ruling, rev 6). When a tick has at least one 5xx refusal after the body, no D9c failure, and nothing in it got through, the card shows the same red line with "The mail server refused a message: check that the login may send as <From>." (the saved From, never the server's text, D9b). Other per-message failures in the tick don't hide it. It starts no wait. The next message that gets through clears it, as do an email save and a passing test of the saved settings. A D9c failure in the same tick wins, with its own sentence and the wait.
-  - **The PIN email reaches the card** (rev 6). A PIN email that fails on the server's side (D9c) or is refused after the body shows its sentence there too, and a PIN email that gets through clears the line. A refused recipient doesn't reach the card. A failing PIN email starts no wait (only the queue's own tick backs off), and one that gets through also resets the queue's wait. The PIN email still doesn't wait for the queue's back-off.
+  - **The PIN email reaches the card** (rev 6). A PIN email that fails on the server's side (D9c) or is refused after the body shows its sentence there too, and a PIN email that gets through clears the line. A developer outbox (D2c) records neither, since the card then shows only D2c's sentence (Set up D6, rev 18). A refused recipient doesn't reach the card. A failing PIN email starts no wait (only the queue's own tick backs off), and one that gets through also resets the queue's wait. The PIN email still doesn't wait for the queue's back-off.
 - **D10. When a change takes effect** (mine). At once:
   - the PIN email and the notification queue use the saved email settings from their next send;
   - a file limit applies from the next upload;
@@ -249,12 +250,12 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - **The copy (D2)** of an "on" leaves both times NULL. Both NULL means "no off interval", so a running install keeps sending its whole queue, retries in backoff included.
   - Rows are still queued as today (`submissions.py:181` and the other four places). The queue is the one place that decides.
 - **D10b. Every email reader follows the panel** (mine, from review). These read the saved settings (the dev modes of D2c still win):
-  - **`GET /api/auth/config`** (`api/auth.py:47-54`): `send_pin_enabled` is true when email is on with a readable password or no login (or in debug or the `file` mode, as today), so turning email on gives the login page its "Send PIN" step. It also returns D12's `longest_sign_in_days` and D11b's `max_file_mb`. It's public, so it carries nothing else.
-  - **`_send_login_pin`** (`api/auth.py:56-69`). It runs as a background task, so it opens its own database session to read the settings.
-  - **`email_is_set_up()`** (`superuser_courses.py:35-39`), which decides the Courses page's admin note (D5a of the Users/Courses spec).
-  - **The PIN email's minutes** (`templates.py:142`) and the admin note's `pin_minutes` (`superuser_courses.py:117`).
-  - **The From** in `templates.py:118, 136`.
-  - **The login page's email-off sentence** (`Login.svelte:92`) becomes "Email isn't set up on this server, so PINs aren't emailed. Ask the person who runs this Mathion for one." (mine). That matches D6: the PIN comes from `mathion pin`, not from a terminal the person can see.
+  - **`GET /api/auth/config`** (`api_auth_config` in `api/auth.py`): `send_pin_enabled` is true when email is on with a readable password or no login (or in debug or the `file` mode, as today), so turning email on gives the login page its "Send PIN" step. It also returns D12's `longest_sign_in_days` and D11b's `max_file_mb`. It's public, so it carries nothing else.
+  - **`_send_login_pin`** (in `api/auth.py`). It runs as a background task, so it opens its own database session to read the settings.
+  - **`email_is_set_up()`** (`panel_people.py`, shared with Set up; the rule itself is `email_set_up_in`, which Set up reads with its own view), which decides the Courses page's admin note (D5a of the Users/Courses spec).
+  - **The PIN email's minutes** (`build_login_pin_message` in `templates.py`) and the admin note's `pin_minutes` (`superuser_courses.py`).
+  - **The From** in `templates.py` (`_build_email_message`, `build_login_pin_message`).
+  - **The login page's email-off sentence** (`pages/Login.svelte`, the `sendPinEnabled === false` branch) becomes "Email isn't set up on this server, so PINs aren't emailed. Ask the person who runs this site for one." (mine; "this site" since Branding names the site). That matches D6: the PIN comes from `mathion pin`, not from a terminal the person can see.
 
 - **D10c. The developer modes win everywhere** (mine, from review). In `file` and `memory` mode (D2c), the loop passes no off interval, so the queue sends every row as today. It ignores D10a's times and the panel's switch, because the switch can't be used in those modes. The dev outbox keeps working unchanged; the direct `tick()` tests are covered by D10's seam.
 

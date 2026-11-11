@@ -47,6 +47,16 @@ describe('ErrorState (Slice-4 §1.3)', () => {
     expect(el.querySelector('.title')!.textContent).toBe('Sequence not found');
   });
 
+  it('while retrying, the button is busy and aria-disabled and a press does not call onretry', () => {
+    const onretry = vi.fn();
+    const el = render({ title: 'x', onretry, retrying: true });
+    const btn = el.querySelector<HTMLButtonElement>('.error-state.inline .btn')!;
+    expect(btn.getAttribute('aria-busy')).toBe('true');
+    expect(btn.getAttribute('aria-disabled')).toBe('true');
+    btn.click();
+    expect(onretry).not.toHaveBeenCalled();
+  });
+
   it('inline + onretry renders a secondary Retry button that calls it', () => {
     const onretry = vi.fn();
     const el = render({ title: 'x', onretry });

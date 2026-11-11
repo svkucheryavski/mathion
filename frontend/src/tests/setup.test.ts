@@ -22,7 +22,7 @@ it('a fresh state: four lines in step order, with the reasons', () => {
   ]);
 });
 
-it('every step skipped: only the Email and First course lines (D4a)', () => {
+it('steps 2 and 4 done, all passed: only the Email and First course lines', () => {
   const s = state({ wizard_on: false }, [false, true, false, true]);
   s.steps.forEach((st) => { st.passed = true; });
   expect(finishLines(s).map((l) => l.title)).toEqual(['Email', 'First course and its admin']);

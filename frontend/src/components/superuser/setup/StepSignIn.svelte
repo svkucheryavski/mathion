@@ -9,7 +9,6 @@
   // `setup.saving` stays set across the whole sequence: keep-sign-in is a
   // wizard write whose answer may say over (D5a), and the card must wait for
   // "step 4 saved" (D3a).
-  import { getContext, onDestroy, untrack } from 'svelte';
   import StepCard from './StepCard.svelte';
   import SignInFields from '../fields/SignInFields.svelte';
   import LimitsFields from '../fields/LimitsFields.svelte';
@@ -19,7 +18,7 @@
   import { LimitsForm } from '../../../lib/panelForms/limitsForm.svelte';
   import { getSettings, panelError, saveLimits, saveSignIn, type PanelLimits, type PanelSignIn } from '../../../lib/superuser';
   import { keepSignIn, setupSaved, type StepProps } from '../../../lib/setup';
-  import { DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../../../lib/dirtyRegistry.svelte';
+  import { useStepGuards } from '../../../lib/stepGuards.svelte';
 
   let { token, setup, onAuth, onDone, back, skip, moveError, onHold }: StepProps = $props();
 
@@ -51,26 +50,16 @@
   });
 
   // D3: unsaved changes ask before leaving; Discard puts the loaded values back.
-  const tracker = {
-    get isDirty() { return changed; },
+  useStepGuards({
+    setup: () => setup, onHold: (h) => onHold(h), moveError: () => moveError,
+    dirty: () => changed,
     discard: () => {
       if (signIn) signIn = new SignInForm(signIn.saved);
       if (limits) limits = new LimitsForm(limits.saved);
     },
-  };
-  const registry = getContext<DirtyRegistry | undefined>(DIRTY_REGISTRY_KEY);
-  $effect(() => {
-    registry?.register(tracker);
-    return () => registry?.unregister(tracker);
+    held: () => !!signIn?.error || !!limits?.error,
+    clearErrors: () => { if (signIn) signIn.error = null; if (limits) limits.error = null; },
   });
-  // A failed move's sentence is the newest: it replaces the step's own errors.
-  $effect(() => {
-    if (moveError !== null) untrack(() => { if (signIn) signIn.error = null; if (limits) limits.error = null; });
-  });
-  // Told once, when the step opens; the page reads it at each re-read (D3a).
-  untrack(() => onHold(() => !!signIn?.error || !!limits?.error || tracker.isDirty));
-  // D3a: typed values keep the link alive while the step is open.
-  onDestroy(untrack(() => setup.keepAlive(() => tracker.isDirty)));
 
   /** "Step 4 saved". A failure shows on the sign-in form. */
   async function sendSaved(): Promise<void> {
@@ -151,7 +140,7 @@
     <Skeleton rows={4} label="Loading…" />
   {:else}
     <!-- D3a: every edit notes the time for the keep-alive; a Segmented
-         option is a button, so its click counts too. Each fields component
+         option is a radio, so its change counts. Each fields component
          keeps its own parent (its labels' :not(:first-child) margins). -->
     <p class="si-sub">Sign-in</p>
     <div class="si-fields" oninput={() => setup.noteEdit()} onchange={() => setup.noteEdit()}

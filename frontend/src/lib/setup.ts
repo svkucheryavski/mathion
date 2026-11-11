@@ -195,6 +195,9 @@ export type StepProps = {
    *  sentence shows: a new one clears the step's own error. */
   moveError: string | null;
   /** D3a: the step tells the page whether its card is held (an error, unsaved
-   *  changes, a note). The page itself holds while a write or `setup.saving` runs. */
+   *  changes, a note). The page itself holds while `setup.saving` is set, and
+   *  against reads while a write runs; a wizard write's own answer applies at
+   *  once. So a step whose sequence has a wizard write in the middle keeps
+   *  `setup.saving` set across the whole sequence. */
   onHold: (held: () => boolean) => void;
 };

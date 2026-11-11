@@ -8,6 +8,8 @@ from sqlalchemy import text
 
 from mathion import setup_state
 from mathion.config import settings
+from mathion.course_links import course_sign_in_url
+from mathion.database import SessionLocal
 from mathion.main import app
 from mathion.models import Course, CourseAdmin
 from mathion.models_auth import SiteBranding, SiteSetup, User
@@ -89,6 +91,18 @@ def test_read_fresh_site(panel, db):
     assert (state["email_set_up"], state["pin_minutes"], state["defaults_in_use"]) == (False, 10, True)
 
 
+def test_read_loads_the_settings_once(db, monkeypatch):
+    # D13: "email set up" comes from the view the done rules loaded.
+    from mathion import panel_people
+    calls = []
+    real = setup_state.load_site
+    for module in (setup_state, panel_people):   # the two that read() can reach
+        monkeypatch.setattr(module, "load_site", lambda d: calls.append(1) or real(d))
+    set_site(db, email_on=True)
+    assert setup_state.read(db).email_set_up is True
+    assert len(calls) == 1
+
+
 def test_done_step_counts_as_passed(panel, db):
     _on(db)
     db.add(SiteBranding(id=1, site_name="Lund", theme_changes={}))
@@ -117,6 +131,35 @@ def test_read_with_all_done_ends_it(panel, db):
     assert _stored(db)[0] is False
 
 
+def test_read_that_ends_it_answers_from_before_its_commit(panel, db, monkeypatch):
+    # D5a: the answer is built before its commit, so a course or
+    # admin deleted in that gap can't turn the read into a 500.
+    set_site(db, email_on=True, smtp_host="mail.uni.dk", email_from="noreply@uni.dk", card_test_ok=True,
+             card_test_at=datetime.now(timezone.utc), site_name_kept=True, sign_in_kept=True)
+    ann = User(email="ann@uni.dk")
+    db.add(ann)
+    db.flush()
+    db.add(Course(id=1, slug="algebra", name="Algebra"))
+    db.flush()
+    db.add(CourseAdmin(course_id=1, user_id=ann.id))
+    db.commit()
+    _on(db, step=2)
+    real_commit = db.commit
+
+    def commit_after_a_delete():
+        with SessionLocal() as other:
+            other.execute(text("DELETE FROM course_admins"))
+            other.execute(text("DELETE FROM courses"))
+            other.commit()
+        real_commit()
+
+    monkeypatch.setattr(db, "commit", commit_after_a_delete)
+    state = setup_state.read(db)
+    monkeypatch.setattr(db, "commit", real_commit)
+    assert (state.wizard_on, state.course.name) == (False, "Algebra")
+    assert _stored(db)[0] is False
+
+
 def test_course_facts_in_answer(panel, db, monkeypatch):
     set_site(db, pin_minutes=15)
     ann = User(email="ann@uni.dk", full_name="Ann", is_disabled=True)
@@ -128,7 +171,7 @@ def test_course_facts_in_answer(panel, db, monkeypatch):
     db.commit()
     state = _get(panel)
     course = state["course"]
-    assert (course["name"], course["sign_in_url"]) == ("Algebra", f"{settings.base_url}/courses/algebra/edit")
+    assert (course["name"], course["sign_in_url"]) == ("Algebra", course_sign_in_url("algebra"))
     assert (course["admin"]["email"], course["admin"]["full_name"], course["admin"]["is_disabled"]) == (
         "ann@uni.dk", "Ann", True)
     assert _marks(state)[2] == (True, True)
@@ -209,6 +252,14 @@ def test_saved_wraps_to_first_not_passed(panel, db):
     assert _stored(db) == (True, 1, 0b1110)
 
 
+def test_skip_wraps_from_after_this_step(panel, db):
+    # D4: the first not passed AFTER this step, wrapping round, not the first from step 1.
+    _on(db, step=3, mask=0b0010)
+    state = _ok(_write(panel, "skip", 3))
+    assert state["step"] == 4
+    assert _stored(db) == (True, 4, 0b0110)
+
+
 def test_next_skips_steps_done_elsewhere(panel, db):
     _on(db)
     db.add(SiteBranding(id=1, site_name="Lund", theme_changes={}))
@@ -244,6 +295,22 @@ def test_writes_with_no_row_change_nothing(panel, db):
     assert _kept(db) == (False, False)
 
 
+def test_writes_with_a_missing_table_answer_over(db):
+    # Like the read: before the migration, every write answers "over", never a 500.
+    db.execute(text("ALTER TABLE site_setup RENAME TO site_setup_gone"))
+    db.commit()
+    try:
+        for state in (setup_state.go_to(db, 3), setup_state.skip(db, 2), setup_state.saved(db, 2)):
+            assert (state.wizard_on, state.step) == (False, 1)
+        state = setup_state.keep_sign_in(db)
+        assert (state.wizard_on, state.steps[3].done) == (False, True)
+    finally:
+        db.rollback()
+        db.execute(text("ALTER TABLE site_setup_gone RENAME TO site_setup"))
+        db.commit()
+    assert _kept(db) == (False, True)
+
+
 def test_keep_sign_in_any_state(panel, db):
     # D12: not a wizard write; it marks D9 whether the wizard is on or over.
     state = _ok(_write(panel, "keep-sign-in"))
@@ -274,9 +341,27 @@ def test_bad_step_is_422(panel, db, what, step):
     assert _stored(db) == (True, 1, 0)
 
 
-def test_missing_step_is_422(panel, db):
+@pytest.mark.parametrize("body", [{}, {"step": True}, {"step": "2"}, {"step": 2.0}, {"step": None}])
+def test_loose_or_missing_step_is_422_with_the_sentence(panel, db, body):
+    # D13: only a whole number 1-4 is a step; anything else gets the sentence.
+    _on(db)
     client, base = panel
-    assert client.post(f"{base}/setup/go", json={}).status_code == 422
+    for what in ("go", "skip", "saved"):
+        r = client.post(f"{base}/setup/{what}", json=body)
+        assert (r.status_code, r.json()["detail"]) == (422, BAD_STEP), (what, body)
+    assert _stored(db) == (True, 1, 0)
+
+
+@pytest.mark.parametrize("body", [[], [2], "2", 2, None])
+def test_a_body_that_is_not_an_object_is_422_with_the_sentence(panel, db, body):
+    # No body, or JSON that isn't an object: the one sentence, never the list.
+    _on(db)
+    client, base = panel
+    for what in ("go", "skip", "saved"):
+        r = (client.post(f"{base}/setup/{what}") if body is None
+             else client.post(f"{base}/setup/{what}", json=body))
+        assert (r.status_code, r.json()["detail"]) == (422, BAD_STEP), (what, body)
+    assert _stored(db) == (True, 1, 0)
 
 
 def test_writes_need_csrf(panel, db):
@@ -291,7 +376,29 @@ def test_writes_need_csrf(panel, db):
     assert _kept(db) == (False, False)
 
 
+def test_live_token_reaches_the_router(panel, db):
+    # Beside the 404 below: the same paths with a live token are the router's.
+    client, base = panel
+    assert client.get(f"{base}/setup").status_code == 200
+    assert client.post(f"{base}/setup/go", json={"step": 2}).status_code == 200
+    assert client.post(f"{base}/setup/keep-sign-in").status_code == 200
+
+
 def test_expired_token_404(admin_client):
     assert admin_client.get("/api/superuser/not-a-token/setup").status_code == 404
     assert admin_client.post("/api/superuser/not-a-token/setup/go", json={"step": 2}).status_code == 404
     assert admin_client.post("/api/superuser/not-a-token/setup/keep-sign-in").status_code == 404
+
+
+def test_openapi_still_documents_the_step(client):
+    # The router checks the step itself (D13), so the schema says what it accepts.
+    schema = client.get("/openapi.json").json()["components"]["schemas"]["SetupStepIn"]
+    step = schema["properties"]["step"]
+    assert (step["type"], step["minimum"], step["maximum"]) == ("integer", 1, 4)
+    assert schema["required"] == ["step"]
+    assert "default" not in step
+    paths = client.get("/openapi.json").json()["paths"]
+    for what in ("go", "skip", "saved"):
+        body = paths[f"/api/superuser/{{token}}/setup/{what}"]["post"]["requestBody"]
+        assert body["required"] is True, what
+        assert body["content"]["application/json"]["schema"] == {"$ref": "#/components/schemas/SetupStepIn"}, what

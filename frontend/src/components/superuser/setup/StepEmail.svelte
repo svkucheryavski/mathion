@@ -5,7 +5,6 @@
   // email stays saved and Save and continue retries only it (D3). A test's
   // answer re-reads the state, even after the step is left, so the tick and
   // the reason follow it. A developer mode shows only the outbox line.
-  import { getContext, onDestroy, untrack } from 'svelte';
   import StepCard from './StepCard.svelte';
   import EmailFields from '../fields/EmailFields.svelte';
   import Button from '../../ui/Button.svelte';
@@ -14,7 +13,7 @@
   import { EmailForm } from '../../../lib/panelForms/emailForm.svelte';
   import { getSettings, panelError, saveEmail, testEmail } from '../../../lib/superuser';
   import { setupSaved, type StepProps } from '../../../lib/setup';
-  import { DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../../../lib/dirtyRegistry.svelte';
+  import { useStepGuards } from '../../../lib/stepGuards.svelte';
 
   // Step 1 has no Back (D3), so `back` goes unused.
   let { token, setup, onAuth, onDone, skip, moveError, onHold }: StepProps = $props();
@@ -48,27 +47,22 @@
     if (devMode || (done && !changed && !due)) return 'continue';
     return 'save';
   });
-  // D6: the reason speaks of the saved settings, so it hides while the form differs.
-  const reason = $derived(!done && !changed && !devMode ? step?.reason ?? null : null);
+  // D6: the reason speaks of the saved settings, so it hides while the form
+  // differs, and while "step 1 saved" is still to send.
+  const reason = $derived(!done && !changed && !due && !devMode ? step?.reason ?? null : null);
+  // D3: after a half-save only "step 1 saved" is retried, unless the form
+  // changed since: then the email is saved again first, once it is ready.
+  const onlySaved = $derived(mode === 'continue' || (due && !changed));
+  const canSave = $derived(onlySaved || (form?.ready ?? false));
 
   // D3: unsaved changes ask before leaving; Discard puts the loaded values back.
-  const tracker = {
-    get isDirty() { return form?.changed ?? false; },
+  useStepGuards({
+    setup: () => setup, onHold: (h) => onHold(h), moveError: () => moveError,
+    dirty: () => form?.changed ?? false,
     discard: () => { if (form) form = new EmailForm(form.saved); },
-  };
-  const registry = getContext<DirtyRegistry | undefined>(DIRTY_REGISTRY_KEY);
-  $effect(() => {
-    registry?.register(tracker);
-    return () => registry?.unregister(tracker);
+    held: () => !!form?.error,
+    clearErrors: () => { if (form) form.error = null; },
   });
-  // A failed move's sentence is the newest: it replaces the step's own error.
-  $effect(() => {
-    if (moveError !== null) untrack(() => { if (form) form.error = null; });
-  });
-  // Told once, when the step opens; the page reads it at each re-read (D3a).
-  untrack(() => onHold(() => !!form?.error || tracker.isDirty));
-  // D3a: typed values keep the link alive while the step is open.
-  onDestroy(untrack(() => setup.keepAlive(() => tracker.isDirty)));
 
   async function sendSaved(): Promise<void> {
     if (form) form.error = null;
@@ -79,26 +73,27 @@
     } catch (e) {
       const message = panelError(e, onAuth);
       if (form) form.error = message;
-      // D13: the email may have saved; a re-read updates the reason and the
-      // list's marks. The error holds the card, so the read can't move it.
+      // D13: the email may have saved; a re-read updates the list's marks
+      // (the reason waits for "step 1 saved"). The error holds the card, so
+      // the read can't move it.
       if (message !== null) void setup.read();
     }
   }
 
   async function onSave(): Promise<void> {
-    if (busy || !form) return;
-    // D3: after a half-save only "step 1 saved" is retried, unless the form
-    // changed since: then the email is saved again first.
-    if (mode === 'continue' || (due && !changed)) { await sendSaved(); return; }
-    if (!form.ready) return;
+    if (busy || !form || !canSave) return;
+    if (onlySaved) { await sendSaved(); return; }
     const body = form.saveBody();
     if (typeof body === 'string') { form.error = body; return; }
     form.error = null;
     setup.saving = true;
     try {
       const s = await saveEmail(token, body);
-      // What saved is the new starting point (Users/Courses D24).
+      // What saved is the new starting point (Users/Courses D24); a test's
+      // answer was about these values, so it stays.
+      const result = form.result;
       form = new EmailForm(s.email);
+      form.result = result;
       due = true;
     } catch (e) {
       form.error = panelError(e, onAuth);
@@ -133,7 +128,7 @@
 </script>
 
 <StepCard n={1} title="Email" note="Sign-in links, PINs and notifications go out by email."
-  error={form?.error ?? moveError} {busy} {mode} canSave={due || (form?.ready ?? false)}
+  error={form?.error ?? moveError} {busy} {mode} {canSave}
   onSkip={done ? undefined : skip} onBack={undefined} onSave={() => void onSave()}>
   {#if loadError !== null}
     <ErrorState title="Could not load settings." message={loadError} onretry={() => void load()} retryLabel="Try again" />

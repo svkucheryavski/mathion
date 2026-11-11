@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { ApiError } from '../lib/api';
+import { ApiError, OFFLINE_MESSAGE, SERVER_ERROR_MESSAGE } from '../lib/api';
 import * as events from '../lib/events';
 import { uploadAsset, listAssets, deleteAsset, formatRef, type AssetResponse } from '../lib/assets';
 
@@ -116,9 +116,18 @@ describe('lib/assets', () => {
     });
 
     it('a non-JSON error with no status text (HTTP/2) still has a detail, never a blank one', async () => {
-      fetchSpy.mockResolvedValueOnce(new Response('<html>Bad gateway</html>', { status: 502, statusText: '' }));
+      fetchSpy.mockResolvedValueOnce(new Response('<html>Not allowed</html>', { status: 405, statusText: '' }));
       const err = await uploadAsset(42, new File(['x'], 'a.png', { type: 'image/png' })).catch((e) => e);
-      expect(err).toMatchObject({ status: 502, detail: 'Upload failed' });
+      expect(err).toMatchObject({ status: 405, detail: 'Upload failed' });
+    });
+
+    it.each([
+      [502, ''],
+      [500, 'Internal Server Error'],
+    ])('a %i with no sentence of its own says the server sentence, not the status text', async (status, statusText) => {
+      fetchSpy.mockResolvedValueOnce(new Response('<html>error</html>', { status, statusText }));
+      const err = await uploadAsset(42, new File(['x'], 'a.png', { type: 'image/png' })).catch((e) => e);
+      expect(err).toMatchObject({ status, detail: SERVER_ERROR_MESSAGE });
     });
 
     it('wraps network failure in ApiError with status 0', async () => {
@@ -126,7 +135,7 @@ describe('lib/assets', () => {
       const file = new File(['x'], 'foo.png', { type: 'image/png' });
       const err = await uploadAsset(42, file).catch((e) => e);
       expect(err).toBeInstanceOf(ApiError);
-      expect(err).toMatchObject({ status: 0 });
+      expect(err).toMatchObject({ status: 0, detail: OFFLINE_MESSAGE });
     });
 
     it('preserves AbortError (does NOT wrap user-cancellation as ApiError(0))', async () => {

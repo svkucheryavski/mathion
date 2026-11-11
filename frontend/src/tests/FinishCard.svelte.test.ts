@@ -132,6 +132,115 @@ it("a keep's 404 goes to the shell", async () => {
   expect(onAuth).toHaveBeenCalledWith('expired');
 });
 
+it('a double click on Keep sends one write; the link is aria-disabled while it runs', async () => {
+  let release!: () => void;
+  const held = new Promise<void>((r) => { release = r; });
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    calls.push(`${init?.method ?? 'GET'} ${url}`);
+    await held;
+    return jsonResponse(200, state([false, true, false, true]));
+  }));
+  render(state([false, true, false, false]));
+  keep()!.click();
+  keep()!.click();
+  await settle();
+  expect(keep()?.getAttribute('aria-disabled')).toBe('true');
+  expect(calls).toEqual(['POST /api/superuser/T/setup/keep-sign-in']);
+  release();
+  await settle();
+  expect(calls).toHaveLength(1);
+});
+
+it("a failed Keep's sentence goes when a later read takes the Sign-in line away", async () => {
+  keepAnswer = [500, { detail: 'Boom.' }];
+  render(state([false, true, true, false]));
+  keep()!.click();
+  await settle();
+  expect(target.querySelector('.fc-err')?.textContent).toBe('Boom.');
+  render2(state([false, true, true, true]));
+  expect(target.querySelector('.fc-err')).toBeNull();
+  render2(state([false, true, true, false]));   // the line back (another tab undid it): no old sentence
+  expect(target.querySelector('.fc-err')).toBeNull();
+});
+
+it("after a successful Keep, focus moves to the card's heading", async () => {
+  render(state([false, true, false, false]));
+  keep()!.focus();
+  keep()!.click();
+  await settle();
+  const title = target.querySelector<HTMLElement>('.fc-title')!;
+  expect(title.getAttribute('tabindex')).toBe('-1');
+  expect(document.activeElement).toBe(title);
+});
+
+it("after a Keep that ends the card, focus moves to the page's heading", async () => {
+  const head = document.createElement('div');
+  head.className = 'panel-head';
+  head.innerHTML = '<h1 tabindex="-1">Dashboard</h1>';
+  document.body.insertBefore(head, target);
+  keepAnswer = [200, state([true, true, true, true])];
+  try {
+    render(state([true, true, true, false]));
+    keep()!.focus();
+    keep()!.click();
+    await settle();
+    expect(target.querySelector('.fc-card')).toBeNull();
+    expect(document.activeElement).toBe(head.querySelector('h1'));
+  } finally {
+    head.remove();
+  }
+});
+
+it("a Keep answered after the page's heading changed leaves the new heading alone", async () => {
+  const head = document.createElement('div');
+  head.className = 'panel-head';
+  head.innerHTML = '<h1 tabindex="-1">Dashboard</h1>';
+  document.body.insertBefore(head, target);
+  const later = document.createElement('div');
+  try {
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal('fetch', vi.fn(async () => { await held; return jsonResponse(200, state([true, true, true, true])); }));
+    render(state([true, true, true, false]));
+    keep()!.focus();
+    keep()!.click();
+    await settle();
+    head.remove();                                  // another page's heading now
+    later.className = 'panel-head';
+    later.innerHTML = '<h1 tabindex="-1">Users</h1>';
+    document.body.insertBefore(later, target);
+    release();
+    await settle();
+    expect(document.activeElement).not.toBe(later.querySelector('h1'));
+  } finally {
+    head.remove();
+    later.remove();
+  }
+});
+
+it("a failed Keep's sentence stays through a state change that keeps the Sign-in line", async () => {
+  keepAnswer = [500, { detail: 'Boom.' }];
+  render(state([false, true, true, false]));
+  keep()!.click();
+  await settle();
+  render2(state([true, true, true, false]));
+  expect(target.querySelector('.fc-err')?.textContent).toBe('Boom.');
+});
+
+it('a Keep that fails after its line went shows no sentence', async () => {
+  let release!: () => void;
+  const held = new Promise<void>((r) => { release = r; });
+  vi.stubGlobal('fetch', vi.fn(async () => { await held; return jsonResponse(500, { detail: 'Boom.' }); }));
+  render(state([false, true, true, false]));
+  keep()!.click();
+  await settle();
+  render2(state([false, true, true, true]));       // another tab kept the values
+  release();
+  await settle();
+  expect(lines()).toHaveLength(1);
+  expect(target.querySelector('.fc-err')).toBeNull();
+});
+
 it('no card when every step is done, or before the state is known', () => {
   render(state([true, true, true, true]));
   expect(target.querySelector('.fc-card')).toBeNull();

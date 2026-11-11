@@ -6,7 +6,7 @@
   // action replaces it (D5a).
   import { ApiError } from '../../lib/api';
   import {
-    adminNoteParts, assignAdmin, createCourse, deleteCourse, listCourses, panelError, removeAdmin, updateCourse,
+    adminIsMe, adminNoteParts, assignAdmin, createCourse, deleteCourse, listCourses, panelError, removeAdmin, updateCourse,
     type AdminAssignResult, type PanelCourse, type PanelOnAuth,
   } from '../../lib/superuser';
   import PanelHead from '../../components/superuser/PanelHead.svelte';
@@ -33,6 +33,14 @@
   let loadError = $state('');
   let note = $state<Note | null>(null);
   let noteSeq = 0;
+  // Every action's change of the note takes a turn, so a note that waited on a
+  // state read never lands over a later action's note (or its clearing).
+  // Closing the strip isn't an action: it takes no turn.
+  let noteTurn = 0;
+  function clearNote(): void {
+    noteTurn++;
+    note = null;
+  }
   let dialog = $state<Dialog | null>(null);
 
   // `quiet` reloads behind what is on screen (after a save, or a 409 that says
@@ -57,9 +65,15 @@
 
   // D5a: the superuser always learns whether the colleague was told. Set up
   // D8: "you are its admin" when it's the signed-in superuser, and Email's
-  // not-done reason after a queued email.
-  function showResult(result: AdminAssignResult, kind: 'create' | 'assign'): void {
+  // not-done reason after a queued email. With no state yet (the first read
+  // failed), a note that can carry the reason reads it first, so it isn't
+  // left out.
+  async function showResult(result: AdminAssignResult, kind: 'create' | 'assign'): Promise<void> {
+    const turn = ++noteTurn;
     const me = session.user?.email ?? null;
+    const wantsReason = result.admin_email === 'queued' && !adminIsMe(result.admin.email, me);
+    if (wantsReason && setup.state === null) await setup.read();
+    if (turn !== noteTurn) return;
     const emailReason = setup.state?.steps[0].reason ?? null;   // null once Email is done
     note = { id: ++noteSeq, ...adminNoteParts(result, kind, { me, emailReason }) };
   }
@@ -84,13 +98,13 @@
   async function saveNew(body: { name: string; slug: string; admin_email: string }): Promise<void> {
     const result = await guarded(() => createCourse(token, body));
     dialog = null;
-    showResult(result, 'create');
+    void showResult(result, 'create');
     void load(true);
   }
 
   async function saveFields(course: PanelCourse, body: { name?: string; slug?: string }): Promise<void> {
     await guarded(() => updateCourse(token, course.id, body));
-    note = null;
+    clearNote();
     void load(true);
   }
 
@@ -98,9 +112,9 @@
   async function saveAdmin(course: PanelCourse, email: string | null): Promise<void> {
     if (email === null) {
       await guarded(() => removeAdmin(token, course.id));
-      note = null;
+      clearNote();
     } else {
-      showResult(await guarded(() => assignAdmin(token, course.id, email)), 'assign');
+      void showResult(await guarded(() => assignAdmin(token, course.id, email)), 'assign');
     }
     void load(true);
   }
@@ -108,7 +122,7 @@
   async function removeCourse(course: PanelCourse): Promise<void> {
     await guarded(() => deleteCourse(token, course.id));
     dialog = null;
-    note = null;
+    clearNote();
     void load(true);
   }
 

@@ -1,4 +1,4 @@
-import { api, ApiError, OFFLINE_MESSAGE } from './api';
+import { api, ApiError, OFFLINE_MESSAGE, REQUEST_ERROR_MESSAGE } from './api';
 import type { BrandingPublic } from './branding.svelte';
 
 // Every panel call passes skipAuthRedirect: the panel's shell handles 401 and
@@ -430,5 +430,5 @@ export function panelError(err: unknown, onAuth: PanelOnAuth): string | null {
     return err.displayMessage;
   }
   if (err instanceof TypeError) return OFFLINE_MESSAGE;
-  return 'Something went wrong. Try again.';
+  return REQUEST_ERROR_MESSAGE;
 }

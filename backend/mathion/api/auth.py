@@ -111,7 +111,11 @@ def _send_login_pin(email: str, raw_pin: str, minutes: int) -> None:
 
 
 def _record_on_card(site, failure) -> None:
-    """Best-effort: a failure to record never reaches the caller."""
+    """Best-effort: a failure to record never reaches the caller. A developer
+    outbox is no mail server, so (as on the queue's dev path) neither a send
+    nor a failure is recorded (Set up D6)."""
+    if settings.email_mode in DEV_MODES:
+        return
     try:
         with SessionLocal() as db:
             record_send_outcome(db, site, failure, datetime.now(timezone.utc))

@@ -438,6 +438,26 @@ def test_email_save_unchanged_keeps_last_sent(panel, db):
     assert _view(db).last_sent_at == SENT_AT
 
 
+def test_failed_test_then_save_clears_last_sent(panel, db, smtp):
+    # Set up D6, §5: a new provider whose test failed, saved anyway, is not done
+    # because the old server sent mail: the latest test becomes the card's, and
+    # the old send is dropped.
+    set_site(db, **SAVED_ON, last_sent_at=SENT_AT)
+    smtp.fail_send = smtplib.SMTPSenderRefused(553, b"no", FROM)
+    assert _test(panel, host="mail2.uni.dk").json()["ok"] is False
+    assert _email(panel, host="mail2.uni.dk").status_code == 200
+    v = _view(db)
+    assert (v.card_test_ok, v.last_sent_at) == (False, None)
+
+
+def test_save_over_an_unreadable_password_clears_last_sent(panel, db):
+    # The old settings' fingerprint can't be worked out, so they count as changed.
+    set_site(db, **SAVED_LOGIN, smtp_password_sealed=seal("pw", "another-secret"), email_off_at=None,
+             last_sent_at=SENT_AT)
+    assert _email(panel, username="u@uni.dk", password="pw").status_code == 200
+    assert _view(db).last_sent_at is None
+
+
 def test_off_save_keeps_last_sent(panel, db):
     set_site(db, **SAVED_ON, last_sent_at=SENT_AT)
     assert _email(panel, on=False).status_code == 200

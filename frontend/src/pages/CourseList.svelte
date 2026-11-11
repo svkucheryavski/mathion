@@ -8,8 +8,8 @@
 
   let loading = $state(true);
   let courses = $state<CourseListItem[]>([]);
-  // An object, not a string: an empty message still shows the error. The shape
-  // mirrors CourseView's; nothing here branches on `status` yet.
+  // An object, not a string: the shape mirrors CourseView's; nothing here
+  // branches on `status` yet.
   let error = $state<{ status: number; message: string } | null>(null);
   // Retry counter (Slice-4 enumerated (A)2): the load effect reads it at its
   // top, so incrementing it re-runs the fetch. Retry is reachable only from
@@ -30,7 +30,7 @@
       .then((cs) => { courses = cs; })
       .catch((e: unknown) => {
         error = e instanceof ApiError
-          ? { status: e.status, message: e.displayMessage || 'Something went wrong on the server. Try again.' }
+          ? { status: e.status, message: e.displayMessage }
           : { status: 0, message: 'Check your connection and try again.' };   // a network failure
       })
       .finally(() => { loading = false; });

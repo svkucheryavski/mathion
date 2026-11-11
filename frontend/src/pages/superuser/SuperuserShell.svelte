@@ -8,7 +8,9 @@
   import { SetupStore } from '../../lib/setupStore.svelte';
   import { clearMark, entryMove, markFor, setMark } from '../../lib/setup';
   import { createDirtyRegistry, DIRTY_REGISTRY_KEY } from '../../lib/dirtyRegistry.svelte';
-  import { DISCARD_NAV_ASK, focusAfter, InPlaceAsk, refused, type GuardAsk } from '../../lib/askInPlace.svelte';
+  import {
+    DISCARD_NAV_ASK, focusAfter, InPlaceAsk, NAV_ASK_KEY, refused, type AskView, type GuardAsk, type NavAskView,
+  } from '../../lib/askInPlace.svelte';
   import AskSlot from '../../components/ui/AskSlot.svelte';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
   import SiteLogo from '../../components/chrome/SiteLogo.svelte';
@@ -42,6 +44,11 @@
     seg === 'setup' || seg === 'users' || seg === 'courses' || seg === 'settings' || seg === 'branding' ? seg : 'dashboard');
   const current = $derived(PAGES.find((p) => p.page === page)!);
 
+  // Cancel puts focus back on the control that asked: Sign out, or what had focus.
+  // Set up D3: one question at a time. A page's own question waits while this
+  // one is open, and this one while the page's (claimed below) is open.
+  const navAsk = new InPlaceAsk();
+
   // D25: the guard's answers, handled once for every page. 404 means only that
   // the link expired; a 401 goes to sign in and comes back here after.
   let expired = $state(false);
@@ -49,6 +56,7 @@
     if (kind === 'expired') {
       expired = true;
       clearMark();   // Set up D2: a new link opened in this tab lands on Set up
+      navAsk.dismiss();   // its slot goes with the page; a pending guard must not stay pending
       return;
     }
     sessionStorage.setItem('superuser_return_path', currentRoute.path);
@@ -132,10 +140,24 @@
   // D3: leaving with unsaved changes asks first, in place, at the top of the page.
   const registry = createDirtyRegistry();
   setContext(DIRTY_REGISTRY_KEY, registry);
-  // Cancel puts focus back on the control that asked: Sign out, or what had focus.
-  const navAsk = new InPlaceAsk();
+  let pageAsk: AskView | null = null;
+  setContext<NavAskView>(NAV_ASK_KEY, {
+    get open() { return navAsk.open; },
+    focusCancel: () => navAsk.focusCancel(),
+    claim: (page) => {
+      pageAsk = page;
+      return () => { if (pageAsk === page) pageAsk = null; };
+    },
+  });
+  // While a save runs the pills wait, so this question goes when one starts:
+  // its Discard can't leave mid-save, and the save may move the card on.
+  $effect(() => {
+    if (waiting) untrack(() => navAsk.dismiss());
+  });
   let signOutButton = $state<HTMLButtonElement | undefined>();
   function askNav(from: Element | null = document.activeElement): GuardAsk {
+    if (waiting) return refused();   // D3: while a save runs, leaving waits (the browser's Back too, when something is unsaved)
+    if (pageAsk?.open) { pageAsk.focusCancel(); return refused(); }
     if (navAsk.open) { navAsk.focusCancel(); return refused(); }
     const promise = navAsk.ask(DISCARD_NAV_ASK).then((a) => {
       if (a === 'cancel') void focusAfter(() => from);
@@ -147,7 +169,9 @@
   }
 
   async function onSignOut(): Promise<void> {
-    // D3: Sign out navigates past the guard, so it asks itself.
+    // D3: Sign out navigates past the guard, so it asks itself, and waits
+    // while a save runs, as the pills do.
+    if (waiting) return;
     if (registry.isAnyDirty()) {
       if (!(await askNav(signOutButton ?? null).promise)) return;
       registry.discardAll();
@@ -187,7 +211,7 @@
       {#if session.user}
         <div class="right">
           <span class="name">{displayName}</span>
-          <Button variant="ghost" bind:element={signOutButton} onclick={onSignOut}>Sign out</Button>
+          <Button variant="ghost" bind:element={signOutButton} aria-disabled={waiting} onclick={onSignOut}>Sign out</Button>
         </div>
       {/if}
     </div>

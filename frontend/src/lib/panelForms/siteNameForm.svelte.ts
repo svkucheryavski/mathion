@@ -15,9 +15,9 @@ export class SiteNameForm extends PanelForm<string> {
   }
 
   resetToDefault(): void {
+    this.edited();
     this.value = PRODUCT_NAME;
     this.resetting = true;
-    this.error = null;
   }
 
   body(): { name: string } | { reset: true } {

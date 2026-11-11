@@ -1,4 +1,4 @@
-import { api, ApiError } from './api';
+import { api, ApiError, OFFLINE_MESSAGE, errorDetail } from './api';
 import { emitUnauthorized } from './events';
 
 export type EvaluationResult = 'rejected' | 'major_revision' | 'minor_revision' | 'accepted';
@@ -55,7 +55,7 @@ export async function createEvaluation(
   } catch (e: unknown) {
     // jsdom's DOMException doesn't extend Error, so duck-type on .name.
     if (typeof e === 'object' && e !== null && (e as { name?: string }).name === 'AbortError') throw e;
-    throw new ApiError(0, 'Could not reach server. Check your connection.');
+    throw new ApiError(0, OFFLINE_MESSAGE);
   }
   if (r.status === 401) {
     emitUnauthorized(location.pathname + location.search + location.hash);
@@ -69,7 +69,7 @@ export async function createEvaluation(
       // Non-JSON response (HTML error page, truncated payload) — body stays
       // undefined. Mirrors lib/api.ts non-2xx handling.
     }
-    const detail = (parsedBody as { detail?: string } | undefined)?.detail ?? 'Upload failed';
+    const detail = errorDetail(r, parsedBody, 'Upload failed');
     const errorCode = (parsedBody as { error_code?: string } | undefined)?.error_code;
     throw new ApiError(r.status, detail, errorCode, parsedBody);
   }

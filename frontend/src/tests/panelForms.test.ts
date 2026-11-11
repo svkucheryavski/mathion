@@ -1,4 +1,4 @@
-import { it, expect, beforeEach, afterEach, describe } from 'vitest';
+import { it, expect, beforeEach, afterEach, describe, vi } from 'vitest';
 import { crc32 } from '../lib/pngCheck';
 import { EmailForm } from '../lib/panelForms/emailForm.svelte';
 import { SiteNameForm } from '../lib/panelForms/siteNameForm.svelte';
@@ -76,6 +76,14 @@ describe('SiteNameForm (Branding D2, D3)', () => {
     f.edited();
     expect(f.body()).toEqual({ name: 'Mathion' });
   });
+
+  it('Reset to default is an edit: it counts and clears the error', () => {
+    const f = new SiteNameForm('Riverside');
+    f.error = 'x';
+    const before = f.edits;
+    f.resetToDefault();
+    expect([f.error, f.edits, f.body()]).toEqual([null, before + 1, { reset: true }]);
+  });
 });
 
 describe('SignInForm and LimitsForm (Settings D11, D12)', () => {
@@ -123,13 +131,15 @@ function chunk(kind: string, data: number[]) {
   return [...u32(data.length), ...k, ...data, ...u32(crc32(new Uint8Array([...k, ...data])))];
 }
 function pngFile(width: number, height: number, name: string): File {
-  const bytes = new Uint8Array([
+  return new File([pngBytes(width, height)], name, { type: 'image/png' });
+}
+function pngBytes(width: number, height: number): Uint8Array<ArrayBuffer> {
+  return new Uint8Array([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
     ...chunk('IHDR', [...u32(width), ...u32(height), 8, 6, 0, 0, 0]),
     ...chunk('IDAT', [0x78, 0x9c, 0x63, 0, 0, 0, 1, 0, 1]),
     ...chunk('IEND', []),
   ]);
-  return new File([bytes], name, { type: 'image/png' });
 }
 
 describe('LogoPick (Branding D4-D6)', () => {
@@ -155,6 +165,80 @@ describe('LogoPick (Branding D4-D6)', () => {
     expect(p.pending?.kind === 'file' && p.pending.file.name).toBe('second.png');
     expect(p.shown).toMatchObject({ width: 400, height: 100 });
     expect(p.error).toBeNull();
+  });
+
+  it('a choice and Reset are edits: each counts and clears the error at once', async () => {
+    const p = new LogoPick('logo');
+    p.error = 'x';
+    const before = p.edits;
+    const read = p.choose(pngFile(400, 100, 'a.png'));
+    expect([p.error, p.edits]).toEqual([null, before + 1]);
+    await read;
+    p.error = 'y';
+    p.reset();
+    expect([p.error, p.edits]).toEqual([null, before + 2]);
+  });
+
+  it('while the file is read it is checking: changed, not ready, until the answer', async () => {
+    const p = new LogoPick('logo', { width: 400, height: 80, version: 'v' });
+    p.reset();
+    expect(p.ready).toBe(true);
+    const read = p.choose(pngFile(400, 100, 'a.png'));
+    expect([p.checking, p.changed, p.ready]).toEqual([true, true, false]);
+    await read;
+    expect(p.checking).toBe(false);
+    expect([p.changed, p.ready]).toEqual([true, false]);   // read; the decode is still to come
+    const refused = p.choose(new File([new TextEncoder().encode('<svg/>')], 'x.svg'));
+    expect(p.checking).toBe(true);
+    await refused;
+    expect([p.checking, p.changed, p.ready]).toEqual([false, false, false]);
+  });
+
+  it('Reset while a file is read ends the checking; the late read is dropped', async () => {
+    const p = new LogoPick('logo');
+    const read = p.choose(pngFile(400, 100, 'a.png'));
+    p.reset();
+    expect([p.checking, p.changed, p.ready]).toEqual([false, true, true]);
+    await read;
+    expect(p.pending).toEqual({ kind: 'reset' });
+    expect(p.checking).toBe(false);
+  });
+
+  describe('with a FileReader the test answers', () => {
+    class FakeReader {
+      static all: FakeReader[] = [];
+      file: File | null = null;
+      result: ArrayBuffer | null = null;
+      error = new Error('x');
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      readAsArrayBuffer(f: File) { this.file = f; FakeReader.all.push(this); }
+      load(bytes: Uint8Array<ArrayBuffer>) { this.result = bytes.buffer; this.onload?.(); }
+    }
+    beforeEach(() => { FakeReader.all = []; vi.stubGlobal('FileReader', FakeReader); });
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    it("a read that fails ends the checking and says the file can't be read", async () => {
+      const p = new LogoPick('logo');
+      const read = p.choose(pngFile(400, 100, 'a.png'));
+      FakeReader.all[0].onerror!();
+      await read;
+      expect([p.checking, p.changed, p.ready, p.error]).toEqual([false, false, false, "This file can't be read."]);
+    });
+
+    it("an earlier choice's late read leaves the newer one checking", async () => {
+      const p = new LogoPick('logo');
+      p.reset();
+      const a = p.choose(pngFile(400, 100, 'a.png'));
+      const b = p.choose(pngFile(400, 100, 'b.png'));
+      FakeReader.all[0].load(pngBytes(400, 100));
+      await a;
+      expect([p.checking, p.ready]).toEqual([true, false]);
+      FakeReader.all[1].load(pngBytes(400, 100));
+      await b;
+      expect(p.checking).toBe(false);
+      expect(p.pending?.kind === 'file' && p.pending.file.name).toBe('b.png');
+    });
   });
 
   it('a refused file drops the choice and says why; Reset is a pending change', async () => {

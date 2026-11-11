@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from mathion.config import settings
+from mathion.course_links import course_sign_in_url
 from mathion.main import app
 from mathion.models import (
     Block, Course, CourseAdmin, CourseVersion, Item, Run, RunStudent, Sequence,
@@ -215,7 +216,7 @@ def test_result_carries_pin_minutes_and_sign_in_url(panel, db):
     set_site(db, pin_minutes=25)  # superuser Settings D10b: the saved minutes
     body = client.put(f"{base}/courses/{course.id}/admin", json={"email": "anna@x"}).json()
     assert body["pin_minutes"] == 25
-    assert body["sign_in_url"] == f"{settings.base_url}/courses/stat/edit"
+    assert body["sign_in_url"] == course_sign_in_url("stat")
 
 
 # --- assign / remove ---------------------------------------------------------

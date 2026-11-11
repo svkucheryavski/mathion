@@ -3,7 +3,7 @@
 The read sits behind the panel token; the wizard's writes also need the CSRF
 header. A write after the wizard is over answers 200 with the state, never
 404 or 409 (D5a): the panel's 404 means only "link expired"."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from mathion import setup_state
@@ -18,10 +18,17 @@ _BASE = "/api/superuser/{token}/setup"
 _BAD_STEP = "The step must be from 1 to 4."
 
 
-def _step(data: SetupStepIn) -> int:
-    if not 1 <= data.step <= 4:
+# No body at all reaches the router too, so it gets the one sentence; the
+# schema still says a body is required.
+_BODY_REQUIRED = {"requestBody": {"required": True}}
+
+
+def _step(data: SetupStepIn | None) -> int:
+    # A whole number only: bool is an int in Python, so the type is compared.
+    step = data.step if data is not None else None
+    if type(step) is not int or not 1 <= step <= 4:
         raise HTTPException(status_code=422, detail=_BAD_STEP)
-    return data.step
+    return step
 
 
 @router.get(_BASE, response_model=PanelSetup)
@@ -29,19 +36,20 @@ def get_setup(_user: User = Depends(require_superuser_panel), db: Session = Depe
     return setup_state.read(db)
 
 
-@router.post(f"{_BASE}/go", response_model=PanelSetup)
-def go(data: SetupStepIn, _user: User = Depends(require_superuser_panel_write), db: Session = Depends(get_db)):
+@router.post(f"{_BASE}/go", response_model=PanelSetup, openapi_extra=_BODY_REQUIRED)
+def go(data: SetupStepIn = Body(None), _user: User = Depends(require_superuser_panel_write),
+       db: Session = Depends(get_db)):
     return setup_state.go_to(db, _step(data))
 
 
-@router.post(f"{_BASE}/skip", response_model=PanelSetup)
-def skip(data: SetupStepIn, _user: User = Depends(require_superuser_panel_write),
+@router.post(f"{_BASE}/skip", response_model=PanelSetup, openapi_extra=_BODY_REQUIRED)
+def skip(data: SetupStepIn = Body(None), _user: User = Depends(require_superuser_panel_write),
          db: Session = Depends(get_db)):
     return setup_state.skip(db, _step(data))
 
 
-@router.post(f"{_BASE}/saved", response_model=PanelSetup)
-def saved(data: SetupStepIn, _user: User = Depends(require_superuser_panel_write),
+@router.post(f"{_BASE}/saved", response_model=PanelSetup, openapi_extra=_BODY_REQUIRED)
+def saved(data: SetupStepIn = Body(None), _user: User = Depends(require_superuser_panel_write),
           db: Session = Depends(get_db)):
     return setup_state.saved(db, _step(data))
 

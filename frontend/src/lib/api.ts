@@ -34,6 +34,21 @@ export class ApiError extends Error {
 /** Polish 3: what a write that never reached the server (a fetch TypeError) says. */
 export const OFFLINE_MESSAGE = 'Could not reach server. Check your connection.';
 
+/** What a 5xx with no sentence of its own (a crash's plain-text page, a
+ *  proxy's 502) says, never the raw status text. */
+export const SERVER_ERROR_MESSAGE = 'Something went wrong on the server. Try again.';
+
+/** What a 4xx with no sentence and no status text (HTTP/2 has none) says,
+ *  never a blank line. */
+export const REQUEST_ERROR_MESSAGE = 'Something went wrong. Try again.';
+
+/** A non-2xx answer's detail: the server's own (an empty one is none), else
+ *  the server sentence for a 5xx, else `fallback`. */
+export function errorDetail(res: Response, body: unknown, fallback: string): string | ValidationErrorDetail[] {
+  return (body as { detail?: string | ValidationErrorDetail[] | null } | undefined)?.detail
+    || (res.status >= 500 ? SERVER_ERROR_MESSAGE : fallback);
+}
+
 export type RequestOpts = RequestInit & { skipAuthRedirect?: boolean };
 
 async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
@@ -60,7 +75,7 @@ async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
       // undefined so callers can branch on presence without distinguishing
       // parse-failure from empty-body.
     }
-    const detail = (parsedBody as { detail?: string } | undefined)?.detail ?? res.statusText;
+    const detail = errorDetail(res, parsedBody, res.statusText || REQUEST_ERROR_MESSAGE);
     const errorCode = (parsedBody as { error_code?: string } | undefined)?.error_code;
     throw new ApiError(res.status, detail, errorCode, parsedBody);
   }

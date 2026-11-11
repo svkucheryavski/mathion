@@ -3,6 +3,7 @@
   // done, each with a Do it now link to the regular page, followed in the same
   // tab. The Sign-in and limits line also has Keep these values, the keep
   // write, which answers the whole state (D13), so no second read is needed.
+  import { repairFocus } from '../../lib/askInPlace.svelte';
   import { routeClick } from '../../lib/routeClick';
   import { finishLines, keepSignIn } from '../../lib/setup';
   import type { SetupStore } from '../../lib/setupStore.svelte';
@@ -17,7 +18,15 @@
   const done = $derived(setup.state ? setup.state.steps.filter((s) => s.done).length : 0);
 
   let keeping = $state(false);
-  let error = $state<string | null>(null);
+  let titleEl = $state<HTMLElement | null>(null);
+
+  // A failed Keep's sentence belongs to the Sign-in line: a writable derived,
+  // set by onKeep and back to null whenever the line comes or goes.
+  const hasKeep = $derived(lines.some((l) => l.keep));
+  let error = $derived.by<string | null>(() => {
+    void hasKeep;
+    return null;
+  });
 
   // A reason in brackets reads as part of the title; any other follows a dash.
   const joint = (reason: string) => (reason.startsWith('(') ? ' ' : ' — ');
@@ -26,10 +35,16 @@
     if (keeping) return;
     keeping = true;
     error = null;
+    // Found now, so an answer that lands after the page changed moves nothing.
+    const pageTitle = document.querySelector('.panel-head h1');
     try {
       await setup.write(() => keepSignIn(token));
+      // The answer took the line, and its button, away: focus goes to the
+      // card's heading, or the page's when the card went too.
+      void repairFocus(titleEl, pageTitle);
     } catch (e) {
-      error = panelError(e, onAuth);
+      const msg = panelError(e, onAuth);
+      if (hasKeep) error = msg;   // the line went meanwhile: no sentence for it
     } finally {
       keeping = false;
     }
@@ -39,7 +54,7 @@
 {#if lines.length > 0}
   <section class="fc-card" aria-labelledby={titleId}>
     <div class="fc-head">
-      <h2 id={titleId} class="fc-title">Finish setting up</h2>
+      <h2 id={titleId} class="fc-title" tabindex="-1" bind:this={titleEl}>Finish setting up</h2>
       <span class="fc-count">{done} of 4 done</span>
     </div>
     <ul class="fc-lines">

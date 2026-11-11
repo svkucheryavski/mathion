@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createEvaluation, patchEvaluation } from '../lib/evaluations';
 import * as events from '../lib/events';
+import { OFFLINE_MESSAGE, SERVER_ERROR_MESSAGE } from '../lib/api';
 
 function jsonResp(status: number, body: unknown, statusText = ''): Response {
   return new Response(JSON.stringify(body), {
@@ -73,6 +74,14 @@ describe('createEvaluation (multipart POST)', () => {
     ).rejects.toBe(abortErr);
   });
 
+  it('WT3b: a lost connection throws ApiError(0) with the offline sentence', async () => {
+    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+    await expect(createEvaluation({ submission_id: 7, result: 'accepted' })).rejects.toMatchObject({
+      status: 0,
+      detail: OFFLINE_MESSAGE,
+    });
+  });
+
   it('WT4a: throws ApiError(422) with JSON detail', async () => {
     fetchMock.mockResolvedValue(jsonResp(422, { detail: 'feedback_file required for non-accepted result' }));
     await expect(createEvaluation({ submission_id: 7, result: 'major_revision' })).rejects.toMatchObject({
@@ -81,10 +90,18 @@ describe('createEvaluation (multipart POST)', () => {
     });
   });
 
-  it('WT4b: throws ApiError(500) with "Upload failed" fallback on non-JSON body', async () => {
+  it('WT4b: throws ApiError(500) with the server sentence on non-JSON body', async () => {
     fetchMock.mockResolvedValue(nonJsonResp(500, 'Internal Server Error'));
     await expect(createEvaluation({ submission_id: 7, result: 'accepted' })).rejects.toMatchObject({
       status: 500,
+      detail: SERVER_ERROR_MESSAGE,
+    });
+  });
+
+  it('WT4c: throws ApiError(4xx) with "Upload failed" fallback on non-JSON body', async () => {
+    fetchMock.mockResolvedValue(nonJsonResp(405, 'Method Not Allowed'));
+    await expect(createEvaluation({ submission_id: 7, result: 'accepted' })).rejects.toMatchObject({
+      status: 405,
       detail: 'Upload failed',
     });
   });

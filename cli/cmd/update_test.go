@@ -849,7 +849,7 @@ func TestApplyAndGateRestoreAlsoFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := &compose.FakeRunner{RunFunc: func(args []string) error {
-		if joinHas("up")(args) {
+		if hasBareArg([][]string{args}, "up") {
 			return errors.New("every up fails") // both apply and restore up fail
 		}
 		return nil
@@ -876,7 +876,7 @@ func TestApplyAndGateWriteMarkerFailIsIntact(t *testing.T) {
 	if err == nil || !restored { // nothing was applied → prior state intact
 		t.Fatalf("marker-write fail → (true, err); got (%v, %v)", restored, err)
 	}
-	if hasCall(f.Calls, joinHas("up")) {
+	if hasBareArg(f.Calls, "up") {
 		t.Fatalf("a marker-write failure must touch no container; calls=%v", f.Calls)
 	}
 }
@@ -915,7 +915,7 @@ func TestRestorePrevComposeEmptyPrevGuard(t *testing.T) {
 	if restorePrevCompose(context.Background(), app, nil) {
 		t.Fatal("empty prev must not claim a restore")
 	}
-	if hasCall(f.Calls, joinHas("up")) {
+	if hasBareArg(f.Calls, "up") {
 		t.Fatalf("empty prev must issue no up; calls=%v", f.Calls)
 	}
 }
@@ -954,7 +954,7 @@ func TestUpdateNoReconcileDriftPrintsReminderEvenWhenComposeAbsent(t *testing.T)
 	if !strings.Contains(out.String(), wantLine) {
 		t.Fatalf("want the exact deferred-apply reminder line; got %q", out.String())
 	}
-	if hasCall(f.Calls, joinHas("up")) {
+	if hasBareArg(f.Calls, "up") {
 		t.Fatalf("--no-reconcile must NOT apply; got %v", f.Calls)
 	}
 }
@@ -1054,7 +1054,7 @@ func TestUpdateSameTagDriftAppNotRunningRefuses(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not running") {
 		t.Fatalf("a drifted same-tag with the stack down must refuse; got %v", err)
 	}
-	if hasCall(f.Calls, joinHas("up")) {
+	if hasBareArg(f.Calls, "up") {
 		t.Fatalf("a refusal must apply nothing; got %v", f.Calls)
 	}
 }
@@ -1073,7 +1073,7 @@ func TestUpdateSameTagNoDriftUnchanged(t *testing.T) {
 	if !strings.Contains(out.String(), "already at v0.1.1") {
 		t.Fatalf("want the unchanged same-tag message; got %q", out.String())
 	}
-	if hasCall(f.Calls, joinHas("up")) {
+	if hasBareArg(f.Calls, "up") {
 		t.Fatalf("no-drift same-tag must apply nothing; got %v", f.Calls)
 	}
 }

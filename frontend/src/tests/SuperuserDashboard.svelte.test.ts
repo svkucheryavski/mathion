@@ -119,6 +119,31 @@ it('a failed first state read: the error state with Try again where the card goe
   expect(read).toHaveBeenCalledTimes(1);
 });
 
+it('Try again shows that it is reading and ignores presses until the read answers', async () => {
+  let answer!: (r: Response) => void;
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => (String(url).endsWith('/setup')
+    ? new Promise<Response>((r) => { answer = r; })
+    : jsonResponse(200, ZEROS))));
+  setup.failed = true;
+  setup.error = 'Boom.';
+  component = mount(SuperuserDashboard, { target, props: { token: 'tok', onAuth: vi.fn(), setup } });
+  await settle();
+  const again = () => [...target.querySelectorAll('.error-state button')].find((b) => b.textContent?.trim() === 'Try again') as HTMLButtonElement;
+  const read = vi.spyOn(setup, 'read');
+  again().click();
+  await settle();
+  expect(again().getAttribute('aria-busy')).toBe('true');
+  expect(again().getAttribute('aria-disabled')).toBe('true');
+  again().click();
+  expect(read).toHaveBeenCalledTimes(1);
+  answer(jsonResponse(500, { detail: 'Boom.' }));
+  await settle();
+  expect(again().getAttribute('aria-busy')).toBeNull();
+  expect(again().getAttribute('aria-disabled')).toBeNull();
+  again().click();
+  expect(read).toHaveBeenCalledTimes(2);
+});
+
 it('no card and no error while every step is done', async () => {
   vi.stubGlobal('fetch', mockFetch(200, ZEROS));
   setup.state = setupState([true, true, true, true]);

@@ -43,6 +43,18 @@ def upgrade() -> None:
         "INSERT INTO site_setup (id, wizard_on, step, passed_mask)"
         " SELECT 1, true, 1, 0 WHERE NOT EXISTS (SELECT 1 FROM courses)"
     )
+    # The settings migration always inserts the row; should it be gone, a site
+    # with a course gets the defaults row (the defaults as of this revision,
+    # email off since the epoch) so the kept marks below land on it.
+    op.execute(
+        "INSERT INTO site_settings (id, email_on, smtp_host, smtp_port, smtp_encryption,"
+        " smtp_skip_cert_check, smtp_username, email_from, max_file_mb, max_total_mb,"
+        " pin_minutes, pin_requests_per_hour, pin_failures_per_hour, longest_sign_in_days,"
+        " email_off_at, send_backoff_step)"
+        " SELECT 1, false, '', 587, 'starttls', false, '', '', 20, 500, 10, 3, 5, 30,"
+        " '1970-01-01T00:00:00+00:00', 0"
+        " WHERE EXISTS (SELECT 1 FROM courses) AND NOT EXISTS (SELECT 1 FROM site_settings)"
+    )
     op.execute(
         "UPDATE site_settings SET site_name_kept = true, sign_in_kept = true"
         " WHERE EXISTS (SELECT 1 FROM courses)"

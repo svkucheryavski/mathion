@@ -20,6 +20,8 @@ export class SetupStore {
   busy = $state(false);
   /** Set by a step around its own saves; the pills wait while it or `busy` is set (D3). */
   saving = $state(false);
+  /** A read is running or waiting for a write (Try again shows it, on the Dashboard and on /setup). */
+  reading = $state(false);
 
   readonly #token: string;
   readonly #onAuth: PanelOnAuth;
@@ -27,6 +29,7 @@ export class SetupStore {
   #applied = 0;
   #writes: Promise<unknown> = Promise.resolve();
   #queued = 0;
+  #reads = 0;
   #gone = false;       // a 401 or 404 went to onAuth, or the shell unmounted
   #timer: ReturnType<typeof setInterval> | null = null;
   #lastEdit = 0;
@@ -48,15 +51,21 @@ export class SetupStore {
   /** The answer applied, or null when it failed or was dropped. After a good
    *  read a failure changes nothing (D2); a 401 or 404 goes to onAuth once. */
   async read(): Promise<PanelSetup | null> {
-    while (this.#queued > 0) await this.#writes;
-    if (this.#gone) return null;
-    const n = ++this.#sent;
+    this.#reads++;
+    this.reading = true;
     try {
-      const s = await getSetup(this.#token);
-      return this.#apply(n, s) ? s : null;
-    } catch (e) {
-      this.#failedRead(e);
-      return null;
+      while (this.#queued > 0) await this.#writes;
+      if (this.#gone) return null;
+      const n = ++this.#sent;
+      try {
+        const s = await getSetup(this.#token);
+        return this.#apply(n, s) ? s : null;
+      } catch (e) {
+        this.#failedRead(e);
+        return null;
+      }
+    } finally {
+      if (--this.#reads === 0) this.reading = false;
     }
   }
 

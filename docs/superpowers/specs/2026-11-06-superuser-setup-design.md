@@ -1,6 +1,6 @@
 # Superuser panel: Set up — design
 
-**Status:** rev 17, 2026-11-09 (rev 12 APPROVED by the user; rev 13 adds the user's skip rule; revs 14–16 its review; rev 17 the whole-branch review's tab mark).
+**Status:** rev 18, 2026-11-10 (rev 12 APPROVED by the user; rev 13 adds the user's skip rule; revs 14–16 its review; rev 17 the whole-branch review's tab mark; rev 18 the minors round).
 - Rev 1 came from the brainstorm.
 - Rev 2 folds in the builder check: step 3 shows New course's own admin note (D8, mine); a course needs an admin to count (D8, mine); the wizard ends by itself once every step is done (D5a, user's).
 - Rev 3 folds in spec review round 1, three lanes (`.superpowers/sdd/2026-11-06-superuser-setup/spec-r1-opus-backend.md`, `spec-r1-opus-frontend.md`, `spec-r1-fable.md`), and two user decisions:
@@ -85,6 +85,7 @@
 - Rev 16 folds in the narrow round 13 (`spec-r13-opus.md`, `spec-r13-fable.md`), both 0 Critical and 0 Important. Mine, from the reviews: D3 and D4 name the skip button by its role; the D13 write behind the Dashboard's "Keep these values" is called the keep-sign-in write, apart from step 4's skip button of the same label, which sends the skip write.
 - Rev 16 also folds in the narrow rounds 14 and 15 (`spec-r14-*`, `spec-r15-*`, all 0 Critical and 0 Important): §6 names the keep-sign-in write and D9's mark; D3 and D3a say "the skip button".
 - Rev 17 (whole-branch review, Fable M2, from the user's "yes" to fixing it): D2's mark is also written by any later answer that says the wizard is on, once the mount's read has decided (Try again, a page change), so a tab whose first read failed is redirected to Set up once at most; nothing writes it once the expired-link view shows, even a read still in flight.
+- Rev 18 (the minors round, 2026-11-10): D6's send record is written once per run of healthy sends, not on every send, and never for a developer outbox; D13's read loads the settings once and builds its answer before the D5a commit; every bad step number gets D13's sentence; the installer's fourth next step names the panel's Set up page; D2's Try again shows its read, D12's Keep moves focus, and the Courses note reads a missing state first; D7's chosen logo has Remove; a step's not-done reason hides while its "step saved" is due; D3's list says "(not done)" for a step passed but not done, and the leave questions are one at a time: the page's goes with its card or the page, both go when a save starts, and the shell's also when the link expires; Sign out, and the browser's Back when something is unsaved, wait during a save; and focus comes back after a failed move.
 
 **Builds on:**
 - `docs/superpowers/specs/2026-11-04-superuser-settings-design.md` (the Email, File limits and Sign-in cards and their Edit dialogs; D5, Save blocked until something changes; D8, the stored password; D9a, the card's test; D9d, the stuck queue; D2, the copy from `.env`; D2c, the developer modes);
@@ -118,7 +119,7 @@ The Set up page walks that person through the four things a site needs, once, an
 - new settings of any kind: every step saves through an existing endpoint. The only new stored facts are the wizard's own state, D6's record of a real send, and the "kept" marks of D7 and D9;
 - any new email to the new course's admin: New course already queues its "you are an admin" email when email is set up, and step 3 uses exactly that (D8);
 - a wizard for upgraded sites that already have a course (user's);
-- changes to the `mathion` CLI or its install messages. The install text calls the panel link "optional" (`cli/cmd/install.go:242`), though a site can't get a course without it; that line goes to the backlog. Whenever the panel is first opened, the wizard is there (§5).
+- changes to the `mathion` CLI or its install messages. The install text called the panel link "optional", though a site can't get a course without it; the minors round (rev 18, the user's wording) changed its fourth next step to "Open the superuser panel; its Set up page walks you through email, the site name, the first course and sign-in rules: docker compose ... exec -T app python -m mathion.superuser activate" (`nextSteps` in `cli/cmd/install.go`), shipped with the next CLI release. Whenever the panel is first opened, the wizard is there (§5).
 
 **Anti-goals** (a failure even if it works):
 - a second form for the same setting that behaves differently from the one on Settings, Branding or Courses. The one deliberate difference is D9's unchanged save (user's);
@@ -141,7 +142,7 @@ The Set up page walks that person through the four things a site needs, once, an
   - **This happens once per browser tab and link** (mine, from review). Only the read the shell starts when it mounts can redirect, and only if the address is still the panel's own when it answers. A `sessionStorage` mark is written whenever the mount's read, or any later answer, says that the wizard is on, whether or not it redirects (a read that fails, answers 401 or 404, or answers over writes nothing; a later answer is one after the mount's read has decided, such as Try again or a page change's read, rev 17; once the expired-link view shows, nothing writes it), so reloading the Dashboard in the same tab stays on the Dashboard, even in a tab first opened on another panel page, while a new tab or the next day's open lands on Set up again. Sign out and the expired-link view clear the mark, so a new link opened in the same tab lands on Set up. The mark holds the link's token, and a mark for another token counts as none, so a new link from `activate` pasted into an idle old tab (which never saw the old link expire) lands on Set up too.
     - A fresh install's first open goes through sign-in and comes back by an in-app navigation, which mounts the shell, so it counts.
     - A pill click never redirects, and neither does a pill clicked while the read is still running.
-  - **If the state read fails before any read has succeeded,** the shell shows the Dashboard with no pill and no redirect. Where the Finish setting up card goes, the Dashboard shows the panel's error state with "Try again", so a fresh site never looks finished; the stat cards show as usual. On `/setup` the same error state takes the step card's place.
+  - **If the state read fails before any read has succeeded,** the shell shows the Dashboard with no pill and no redirect. Where the Finish setting up card goes, the Dashboard shows the panel's error state with "Try again", so a fresh site never looks finished; the stat cards show as usual. On `/setup` the same error state takes the step card's place. On both, while its read runs, Try again shows that it is loading and ignores presses (rev 18).
   - **After a good read,** a failed read (a network drop, a server restart during an update) keeps the last good state and changes nothing on screen; the next read or write catches up. A 401 or 404 still goes to the shell's handler.
 - **D3. The layout** (user's, as drawn).
   - **On the page:** the heading "Set up your site"; on the left, the four steps as a list; on the right, the current step's card. The card holds:
@@ -151,15 +152,15 @@ The Set up page walks that person through the four things a site needs, once, an
   - **Marks in the list** (mine):
     - a tick when done;
     - the current step;
-    - a dashed circle when passed but not done (skipped, or saved without getting done);
+    - a dashed circle when passed but not done (skipped, or saved without getting done); a screen reader hears "(not done)" (rev 18, user's);
     - a plain number when not reached yet.
 
     Any step in the list can be clicked to go to it.
   - **Unsaved changes** (mine; anti-goal). Leaving a step whose fields differ from what was loaded asks first:
     - a pill click, a reload or a closed tab: through the app's existing guard (`DirtyGuard` and the dirty registry, `frontend/src/lib/dirtyRegistry.svelte.ts`), which also makes the browser ask on reload;
-    - Back, the skip button or a click in the list (the address stays `/setup`, so the guard doesn't see them): the page asks itself, with the same confirm;
+    - Back, the skip button or a click in the list (the address stays `/setup`, so the guard doesn't see them): the page asks itself, with the same confirm. One question at a time: while the shell's question is open (a pill, Sign out), these bring that one back instead, and while the page's is open, a pill or Sign out brings the page's back. The page's question goes when the card changes, when a save starts (the moves wait then) or when the page goes; the shell's goes when a save starts too, and when the link expires; and a move that fails after Discard puts focus back on the control that asked (rev 18);
     - Sign out, which navigates past the guard today: it asks first too.
-  - **While a save runs,** Back, the skip button, the list and the pills wait, as the dialogs' Cancel does (mine).
+  - **While a save runs,** Back, the skip button, the list, the pills and Sign out wait, as the dialogs' Cancel does (mine; Sign out, and the browser's Back when something is unsaved, rev 18).
   - **Keys and focus** (mine). Enter in a field is Save and continue when that is usable, as in the dialogs. Esc does nothing on the page. When the page first shows a step, and whenever the step changes, focus moves to the step card's heading.
   - **Nothing changed** (mine). A step that isn't done, with nothing changed, has Save and continue blocked (`aria-disabled`, as the dialogs' Save is). The skip button stays usable. Two exceptions: step 4 (D9), and a step whose own save succeeded but whose "step saved" write failed (the error shows, and Save and continue retries only that write).
 - **D3a. The card the person is working on stays** (mine, from review). An answer from the server never takes away something the person is looking at or typing:
@@ -194,7 +195,7 @@ The Set up page walks that person through the four things a site needs, once, an
   - by an email test or a real send recorded in the background (D6).
 
   "Over" is stored by the first read or wizard write that finds it so. A step that later becomes undone (say, the only course is deleted) brings back its Dashboard line, never the wizard (D10).
-  - **How it's stored** (mine, from review). The state read and every wizard write (D13) check the done rules and the passed marks. When they find the wizard on and all four steps done, or all four passed (D4), they store "over" with one conditional update, and only then answer. So the next panel open lands on the Dashboard.
+  - **How it's stored** (mine, from review). The state read and every wizard write (D13) check the done rules and the passed marks. When they find the wizard on and all four steps done, or all four passed (D4), they store "over" with one conditional update, and only then answer. So the next panel open lands on the Dashboard. The read builds its answer before its own update commits, so a course deleted in the gap can't fail it (rev 18).
   - **Late writes:** a "go to step n", "skip", "step n saved" or Continue write that arrives after the wizard is over (a second tab, a held step-3 form, a retried step-4 limits save) changes nothing, the kept marks included. It answers 200 with the current state, never 404 or 409: the panel reads a 404 as an expired link (Users/Courses D25), and a 409 would make D8's Continue retry for ever.
   - **The page finding it over:** if the Set up page re-reads and finds the wizard over (ended by D5a or by another tab), it shows the All set card with D5's matching text. Two exceptions:
     - step 3's admin note is shown first (D8), and its Continue, or a list click, leads to All set;
@@ -218,11 +219,12 @@ A step that is already done shows its form filled with the saved values. When no
     - the card's test of the saved settings passed (Settings D9a, `card_test_ok`); or
     - a real message has gone out with the saved settings since they were saved, and the card's test isn't a failure newer than that send (mine, from review: a password the provider rotated fails its test at once, while the queue may not notice for a while).
 
-    For the second case, the settings row stores the time of the last successful send (mine, from review):
-    - **Written** in the queue's sent branch (`_record` in `notifications/dispatcher.py`) and in the PIN email's success outcome (`record_send_outcome`), on the fresh locked row, whether or not a failure was stored. It is not written inside `_clear_failure`, which returns at once on a healthy server.
-    - **Skipped** only when the settings changed since the tick read them (`_fresh_row`); that is what "since they were saved" means. A tick that sends some messages and then meets a Settings D9c failure records the failure, not the send.
+    For the second case, the settings row stores the time of a successful send with the saved settings (mine, from review):
+    - **Written** in the queue's sent branch (`_record` in `notifications/dispatcher.py`) and in the PIN email's success outcome (`record_send_outcome`), on the fresh locked row: the first time, and again whenever there is something to clear (a stored failure, or a failed card test newer than the last recorded send). A developer outbox is no mail server, so neither its sends nor its failures are recorded (rev 18).
+    - **Left alone, with no lock,** when a send is already recorded, no failure is stored and no failed card test is newer than it: a burst of sends writes nothing. The card test is read again from the row for that check, since a test can fail after the row was read: the PIN email records the time after its send, so it then counts; the queue records the batch's start, so a test that failed during the batch stays newer and wins (rev 18).
+    - **Skipped** when the settings changed since the tick read them (`_fresh_row`); that is what "since they were saved" means. A tick that sends some messages and then meets a Settings D9c failure records the failure, not the send.
     - **Cleared** on every email save whose fingerprint changed (`new_fp != old_fp` in `save_email`), whether the card's test is then cleared or replaced by the latest test. An off save, or an on save with nothing changed, leaves it. So a move to a new provider whose test failed is not done.
-  - **Not done says why** (user's), in the step card and on the Dashboard line. The reason speaks only of the saved settings, so the step hides it while its form differs from them; a test of typed values then shows only its own answer. The reasons, first match wins:
+  - **Not done says why** (user's), in the step card and on the Dashboard line. The reason speaks only of the saved settings, so the step hides it while its form differs from them, and while "step 1 saved" is still to send after a save (rev 18); a test of typed values then shows only its own answer. The reasons, first match wins:
     - "Email is off.";
     - "The saved password can't be read on this server.";
     - "Sending is failing: see Settings." (Settings D9d's stuck queue; mine, from review: a red Email card and a done step would contradict);
@@ -233,16 +235,17 @@ A step that is already done shows its form filled with the saved values. When no
   - **Leaving email off** is allowed for now: skip the step (on a new install, email is already off, so there's nothing to save). The step is then passed but not done.
   - **Email off is never a final state** (user's): a site can't run on a PIN from the console for every student. So the Dashboard's Email line stays until email works, and there is no way to dismiss it. That line is honest, not nagging: the step really isn't done.
 - **D7. Site name and logo** (user's: colours stay on Branding). The Edit site name dialog's field and hint (Branding D3) and the logo upload of the Logo dialog (Branding D4–D5), with all its checks. The logo is optional.
-  - **Done** when the saved site name isn't the default "Mathion", or once the step is marked **kept** (D4a, user's). Not done says "The site is still called Mathion." in the step and on the Dashboard line. These all mark it kept:
+  - **Done** when the saved site name isn't the default "Mathion", or once the step is marked **kept** (D4a, user's). Not done says "The site is still called Mathion." in the step and on the Dashboard line; as in D6, the step hides it while its fields differ from what saved, and while "step 2 saved" is still to send (rev 18). These all mark it kept:
     - this step's skip button (Keep the defaults), or its save (the "step 2 saved" write, so a save of the logo alone counts too);
     - any save of the site name or the logo on the Branding page, Reset to default included (its endpoints set the mark themselves, as D9's do). A save of the tab icon or the colours doesn't set it;
     - the migration, on a site that already has a course, or whose saved name already isn't "Mathion" (D10).
   - **Save and continue** waits for a chosen logo's checks and decode, as the dialog's Save does. Then it saves the name first and the logo second, through the existing Branding endpoints, each only when it changed. Two saves, so the half-save rule above applies; a refused logo (a 422 or a proxy 413) leaves the name saved.
+  - **A chosen logo can be removed** (user's, rev 18): while a new file is chosen, a **Remove** link sits beside its name. It drops the choice and keeps the saved logo, so after a refused logo the step goes on with what saved: when the name saved first, Save and continue then sends only "step 2 saved"; otherwise the step is as it was before the choice. Focus goes to the Choose a PNG… button. Remove waits while a save runs, as the step's other controls do. The Branding dialog has Cancel for this, so it shows no Remove.
   - **After a save,** the header shows the new name and logo at once, as the Branding page does.
 - **D8. First course and its admin** (user's). New course's three fields: Course name, Address (filled from the name, Users/Courses D13), Admin's email (required). The person installing is often the admin and types their own email (user's).
   - **Done** when a course with at least one admin exists. A disabled admin counts (mine): the Courses page already shows that case.
   - **After Save** (mine), the step doesn't move on at once. It shows the same note the Courses page shows after New course (Users/Courses D5a, `adminNote()` in `frontend/src/lib/superuser.ts`):
-    - the email is on its way (when the Email step isn't done, the note adds D6's reason after it, for example "Not tested yet: send a test email.", so the superuser doesn't assume the admin was told; mine, from review, and the same on Courses); or
+    - the email is on its way (when the Email step isn't done, the note adds D6's reason after it, for example "Not tested yet: send a test email.", so the superuser doesn't assume the admin was told; mine, from review, and the same on Courses. With no state yet, because the first read failed, the Courses page reads it before it shows the note; if that read fails too, the note shows without the reason, rev 18); or
     - the account is disabled; or
     - email isn't set up, and how the admin signs in (the sign-in address, the `mathion pin` command, how long the PIN lasts).
 
@@ -251,7 +254,7 @@ A step that is already done shows its form filled with the saved values. When no
   - **A 409** (the address is taken, say by a colleague in another tab) shows the server's sentence and re-reads the state, as the Courses page reloads its list. If step 3 is now done, the done view replaces the form, so no second course gets made by mistake.
   - **When the admin is you** (mine, from review). The page knows it by comparing the admin's email with the signed-in superuser's, lower-cased. The note is then, in full, with no email, PIN or disabled sentence: "<course> is created; you are its admin. You'll find it on the Courses page of the main site." `adminNote()` changes, so the Courses page gets the same note, for an assign: "You are now the admin of <course>. You'll find it on the Courses page of the main site."; and for an assign that changes nothing: "You are already its admin; nothing changed." When the signed-in user isn't known to the page, the usual note shows.
 
-  - **When it's already done,** the step shows "A course exists: <name>." and **Continue**, not the form. The name is the course with an admin that has the lowest id; the state read supplies it. The done view names that course's admin ("<who> is its admin.", or "You are its admin." when the admin is you, compared as above). When email isn't set up (the Courses page's rule, `email_is_set_up`: a developer outbox counts as set up), or that admin's account is disabled, it adds the Courses note's matching sentence for that admin, disabled first as `_admin_email_outcome` orders them (a disabled account can't take a PIN): that the account is disabled ("This account is disabled. Enable it on the Users page so they can sign in.", without the note's "No email sent:" opening, which is true only when the admin is assigned); or else where they sign in, the `mathion pin` command and how long the PIN lasts. So a reload after the note doesn't lose the sign-in instructions. The state read supplies what that needs (D13). When the admin is you, no sentence is added. More courses are made on the Courses page. A step-3 form held by D3a (typed values, while another tab made a course with a different address, so no 409) still creates what was typed when Save and continue is pressed: that is what the person asked for. The note then shows as usual.
+  - **When it's already done,** the step shows "A course exists: <name>." and **Continue**, not the form. The name is the course with an admin that has the lowest id; the state read supplies it. The done view names that course's admin ("<who> is its admin.", or "You are its admin." when the admin is you, compared as above). When email isn't set up (the Courses page's rule, `email_set_up_in`: a developer outbox counts as set up), or that admin's account is disabled, it adds the Courses note's matching sentence for that admin, disabled first as `_admin_email_outcome` orders them (a disabled account can't take a PIN): that the account is disabled ("This account is disabled. Enable it on the Users page so they can sign in.", without the note's "No email sent:" opening, which is true only when the admin is assigned); or else where they sign in, the `mathion pin` command and how long the PIN lasts. So a reload after the note doesn't lose the sign-in instructions. The state read supplies what that needs (D13). When the admin is you, no sentence is added. More courses are made on the Courses page. A step-3 form held by D3a (typed values, while another tab made a course with a different address, so no 409) still creates what was typed when Save and continue is pressed: that is what the person asked for. The note then shows as usual.
   - **A course with no admin** doesn't count. If courses exist but none has an admin, the form opens with "<name> has no admin: give it one on the Courses page, or create another course here." (<name> is the one with the lowest id), so the person doesn't type the same name into a 409.
 - **D9. Sign-in rules and limits** (user's). The Edit sign-in dialog's four values and the Edit file limits dialog's two values in one card, filled with the saved values (Mathion's defaults on a new install).
   - **Save and continue works with nothing changed** (user's), unlike the two dialogs, whose Save stays blocked until something changes (Settings D5, unchanged).
@@ -281,7 +284,7 @@ A step that is already done shows its form filled with the saved values. When no
   - the Email line adds D6's reason;
   - the First course line adds "<name> has no admin" when courses exist but none has an admin;
   - the Site name line adds D7's reason;
-  - the Sign-in and limits line adds "(Mathion's defaults are in use)" when all six values (the four sign-in values and the two limits) are still the defaults (mine). Whenever the line shows, it has a second action, **Keep these values** (user's), which marks the step kept (D9) whatever the wizard's state: it isn't one of the wizard's writes. The line then goes away.
+  - the Sign-in and limits line adds "(Mathion's defaults are in use)" when all six values (the four sign-in values and the two limits) are still the defaults (mine). Whenever the line shows, it has a second action, **Keep these values** (user's), which marks the step kept (D9) whatever the wizard's state: it isn't one of the wizard's writes. The line then goes away, and focus moves to the card's heading, or the page's when the card goes too (rev 18). A failed Keep's sentence goes with the line, and a Keep that fails after the line has gone shows none.
 
   A passed step 2 is always done (D4a), so the Site name line can only show while the wizard is on; the wizard's Keep the defaults or the Branding page clears it, and it needs no keep action of its own. The card is gone when every step is done. "Done" is worked out by the server at each read from the rules in D6–D9, so a step done on another page is never listed (anti-goal).
 - **D13. One read, one copy** (mine).
@@ -290,7 +293,7 @@ A step that is already done shows its form filled with the saved values. When no
     - each step's passed and done state;
     - D6's and D7's reasons;
     - D8's course (the first with an admin): its name and its sign-in address (built from its slug and the site address, as Courses builds `sign_in_url`), its admin's name and email, and whether that account is disabled; and, separately, the name of the first course without an admin;
-    - whether email is set up (`email_is_set_up`) and the saved PIN minutes, for D8's done view;
+    - whether email is set up (the Courses rule, `email_set_up_in`, on the read's one settings view) and the saved PIN minutes, for D8's done view;
     - whether all six sign-in and limit values are the defaults.
   - **One copy, in the shell:** the shell holds the state and passes it down; the Dashboard and the Set up page don't keep copies of their own. The Set up page keeps only which step it shows (D3a) and the form's values. Every panel page is the same shell, so a pill click doesn't remount it. So the shell reads the state on mount and again on every panel page change; D2's redirect still happens only once. It also re-reads after each step save, test answer and keep-sign-in write.
   - **The All set card stays on screen** after the state says over. The shell drops the pill only once the person leaves the Set up page.
@@ -301,6 +304,8 @@ A step that is already done shows its form filled with the saved values. When no
     - "step n saved" (after a step's saves succeed, or Continue; for step 2, it also sets the kept mark, D7).
 
     Each is a conditional update that applies only while the wizard is on, and each answers the whole state, as the read does, so no second read is needed. The keep-sign-in write, behind the Dashboard's "Keep these values", is a separate write that sets D9's mark whatever the wizard's state. Step 4's skip button, labelled the same, sends the skip write instead, which moves the wizard on (D4a).
+
+    A step that isn't a whole number from 1 to 4 (missing, `true`, `"2"`, `2.0`, out of range, no body, or a body that isn't a JSON object) answers 422 with "The step must be from 1 to 4." (mine, rev 18).
 
 ## 4. Constraints
 
@@ -363,7 +368,7 @@ A step that is already done shows its form filled with the saved values. When no
 
 - **The storage.** My suggestion:
   - a one-row table (`site_setup`, id 1) holding whether the wizard is on, the step it's on, and which steps are passed;
-  - the "kept" marks of D7 and D9 and D6's last successful send on `site_settings`, beside the other email and sign-in values. The keep-sign-in write (the Dashboard's Keep these values, and step 4's unchanged save; D9, D13) writes D9's mark through the settings row (`get_row`), whatever the wizard's state.
+  - the "kept" marks of D7 and D9 and D6's send record on `site_settings`, beside the other email and sign-in values. The keep-sign-in write (the Dashboard's Keep these values, and step 4's unchanged save; D9, D13) writes D9's mark through the settings row (`get_row`), whatever the wizard's state.
 
   Whatever the shape:
   - the model's default is "over";

@@ -13,7 +13,7 @@
 // `listAssets` and `deleteAsset` delegate to api.get / api.delete since
 // they don't carry multipart concerns.
 
-import { api, ApiError } from './api';
+import { api, ApiError, OFFLINE_MESSAGE, errorDetail } from './api';
 import { emitUnauthorized } from './events';
 
 export type AssetResponse = {
@@ -54,7 +54,7 @@ export async function uploadAsset(
     if (typeof e === 'object' && e !== null && (e as { name?: string }).name === 'AbortError') throw e;
     // Network failure (DNS, offline, CORS). Surface a uniform ApiError so
     // the UI maps it through the same channel as server errors.
-    throw new ApiError(0, 'Could not reach server. Check your connection.');
+    throw new ApiError(0, OFFLINE_MESSAGE);
   }
 
   if (res.status === 401) {
@@ -70,7 +70,7 @@ export async function uploadAsset(
       // undefined. Mirrors lib/api.ts non-2xx handling.
     }
     // statusText is empty over HTTP/2, so it can't be the only fallback.
-    const detail = (parsedBody as { detail?: string } | undefined)?.detail ?? (res.statusText || 'Upload failed');
+    const detail = errorDetail(res, parsedBody, res.statusText || 'Upload failed');
     const errorCode = (parsedBody as { error_code?: string } | undefined)?.error_code;
     throw new ApiError(res.status, detail, errorCode, parsedBody);
   }
@@ -97,7 +97,7 @@ export async function fetchAssetSource(
     res = await fetch(`/assets/${versionId}/${encodeURIComponent(filename)}`, { credentials: 'include', signal });
   } catch (e: unknown) {
     if (typeof e === 'object' && e !== null && (e as { name?: string }).name === 'AbortError') throw e;
-    throw new ApiError(0, 'Could not reach server. Check your connection.');
+    throw new ApiError(0, OFFLINE_MESSAGE);
   }
   if (res.status === 401) {
     emitUnauthorized(location.pathname + location.search + location.hash);
