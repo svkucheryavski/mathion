@@ -202,9 +202,10 @@ describe('CourseList 9d states (Slice-4 T2)', () => {
     expect(target.querySelectorAll('.grid a').length).toBeGreaterThan(0);
   });
 
-  // Polish 3 (§Behaviour "Course list error"): the error is
-  // an object, so an empty message still shows the error with Retry.
-  it("an ApiError with detail '' shows the server message with Retry, not the empty state", async () => {
+  // Polish 3 (§Behaviour "Course list error"): the error is an object, so it
+  // shows with Retry; a 500's empty detail is no sentence, so lib/api's server
+  // sentence shows.
+  it("a 500 with detail '' shows the server sentence with Retry, not the empty state", async () => {
     fetchSpy.mockResolvedValueOnce({
       ok: false, status: 500, statusText: '',
       json: () => Promise.resolve({ detail: '' }),

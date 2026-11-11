@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { ApiError, api } from '../lib/api';
+import { ApiError, REQUEST_ERROR_MESSAGE, SERVER_ERROR_MESSAGE, api } from '../lib/api';
 import * as events from '../lib/events';
 
 describe('lib/api', () => {
@@ -165,6 +165,76 @@ describe('lib/api', () => {
       expect(thrown).toBeInstanceOf(ApiError);
       expect((thrown as ApiError).body).toBeUndefined();
       expect((thrown as ApiError).status).toBe(500);
+    });
+  });
+
+  describe("an error's detail with no sentence of its own", () => {
+    // A 5xx with no sentence of its own (a crash's plain-text page, a proxy's
+    // empty 502) says a plain sentence, never the raw status text.
+    it.each([
+      [500, 'Internal Server Error', 'Internal Server Error'],
+      [502, 'Bad Gateway', ''],
+      [503, '', '<html>503</html>'],
+      [504, '', ''],
+    ])('a %i with no sentence of its own says the server sentence', async (status, statusText, text) => {
+      fetchSpy.mockResolvedValueOnce(new Response(text, { status, statusText, headers: { 'content-type': 'text/plain' } }));
+      const err = await api.get('/api/foo').catch((e) => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({ status, detail: SERVER_ERROR_MESSAGE });
+      expect((err as ApiError).displayMessage).toBe('Something went wrong on the server. Try again.');
+    });
+
+    // An empty or null detail is no sentence either.
+    it.each([
+      ['no detail', { error: 'x' }],
+      ['a null detail', { detail: null }],
+      ['an empty detail', { detail: '' }],
+    ])('a 5xx JSON answer with %s says the server sentence too', async (_what, body) => {
+      fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify(body), {
+        status: 500, statusText: 'Internal Server Error', headers: { 'content-type': 'application/json' },
+      }));
+      const err = await api.get('/api/foo').catch((e) => e);
+      expect(err).toMatchObject({ status: 500, detail: SERVER_ERROR_MESSAGE });
+    });
+
+    it("a 5xx with the server's own sentence keeps it", async () => {
+      fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Email is not set up.' }), {
+        status: 503, statusText: 'Service Unavailable', headers: { 'content-type': 'application/json' },
+      }));
+      const err = await api.get('/api/foo').catch((e) => e);
+      expect(err).toMatchObject({ status: 503, detail: 'Email is not set up.' });
+    });
+
+    it.each([
+      [413, 'Payload Too Large'],
+      [429, 'Too Many Requests'],
+      [431, 'Request Header Fields Too Large'],
+    ])('a %i with no sentence of its own still carries the status text', async (status, statusText) => {
+      fetchSpy.mockResolvedValueOnce(new Response('<html>error</html>', {
+        status, statusText, headers: { 'content-type': 'text/html' },
+      }));
+      const err = await api.get('/api/foo').catch((e) => e);
+      expect(err).toMatchObject({ status, detail: statusText });
+    });
+
+    // Over HTTP/2 there is no status text: never a blank line.
+    it.each([
+      ['no body', ''],
+      ['an empty detail', JSON.stringify({ detail: '' })],
+    ])('a 4xx with no status text and %s says the general sentence', async (_what, text) => {
+      fetchSpy.mockResolvedValueOnce(new Response(text, { status: 403, statusText: '', headers: { 'content-type': 'application/json' } }));
+      const err = await api.get('/api/foo').catch((e) => e);
+      expect(err).toMatchObject({ status: 403, detail: REQUEST_ERROR_MESSAGE });
+      expect((err as ApiError).displayMessage).toBe('Something went wrong. Try again.');
+    });
+
+    it("a 422's list of field errors still comes through", async () => {
+      const detail = [{ loc: ['body', 'name'], msg: 'Field required', type: 'missing' }];
+      fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({ detail }), {
+        status: 422, headers: { 'content-type': 'application/json' },
+      }));
+      const err = await api.post('/api/foo', {}).catch((e) => e);
+      expect((err as ApiError).validationErrors()).toEqual(detail);
     });
   });
 });

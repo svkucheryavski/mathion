@@ -7,6 +7,7 @@ import {
   ALLOWED_EXTENSIONS,
 } from '../lib/runAssets';
 import * as events from '../lib/events';
+import { OFFLINE_MESSAGE, SERVER_ERROR_MESSAGE } from '../lib/api';
 
 const fetchSpy = vi.fn();
 
@@ -83,7 +84,7 @@ describe('runAssets wrappers', () => {
     const { ApiError } = await import('../lib/api');
     const err = await uploadRunAsset(10, file).catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
-    expect(err).toMatchObject({ status: 0 });
+    expect(err).toMatchObject({ status: 0, detail: OFFLINE_MESSAGE });
   });
 
   it('uploadRunAsset on 401 calls emitUnauthorized before throwing ApiError(401)', async () => {
@@ -109,6 +110,26 @@ describe('runAssets wrappers', () => {
     expect(err).toBeInstanceOf(ApiError);
     expect((err as InstanceType<typeof ApiError>).status).toBe(409);
     expect((err as InstanceType<typeof ApiError>).errorCode).toBe('asset_exists');
+  });
+
+  // A 5xx with no sentence of its own says the server sentence; a 4xx keeps
+  // the plain fallback.
+  it.each([
+    [502, SERVER_ERROR_MESSAGE],
+    [405, 'Upload failed'],
+  ])('uploadRunAsset on a %i with no detail says %s', async (status, detail) => {
+    fetchSpy.mockImplementation(() => jres({}, status));
+    const err = await uploadRunAsset(10, new File(['x'], 'x.png', { type: 'image/png' })).catch((e) => e);
+    expect(err).toMatchObject({ status, detail });
+  });
+
+  it.each([
+    [500, SERVER_ERROR_MESSAGE],
+    [405, 'Replace failed'],
+  ])('replaceRunAsset on a %i with no detail says %s', async (status, detail) => {
+    fetchSpy.mockImplementation(() => jres({}, status));
+    const err = await replaceRunAsset(10, 42, new File(['x'], 'x.png', { type: 'image/png' })).catch((e) => e);
+    expect(err).toMatchObject({ status, detail });
   });
 
   it('deleteRunAsset DELETEs /api/runs/{rid}/assets/{assetId}', async () => {
@@ -170,7 +191,7 @@ describe('runAssets wrappers', () => {
     const { ApiError } = await import('../lib/api');
     const err = await replaceRunAsset(10, 42, file).catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
-    expect(err).toMatchObject({ status: 0 });
+    expect(err).toMatchObject({ status: 0, detail: OFFLINE_MESSAGE });
   });
 
   it('replaceRunAsset on 401 calls emitUnauthorized before throwing ApiError(401)', async () => {

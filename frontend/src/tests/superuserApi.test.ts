@@ -1,5 +1,5 @@
 import { it, expect, vi, afterEach } from 'vitest';
-import { ApiError, OFFLINE_MESSAGE } from '../lib/api';
+import { ApiError, OFFLINE_MESSAGE, REQUEST_ERROR_MESSAGE } from '../lib/api';
 import * as events from '../lib/events';
 import {
   panelError, listUsers, assignAdmin, updateUser, deleteCourse, lookupAccount, adminNote, adminNoteParts,
@@ -9,6 +9,11 @@ import {
 } from '../lib/superuser';
 
 afterEach(() => vi.restoreAllMocks());
+
+it("panelError: anything that is not an ApiError or a lost connection says the general sentence", () => {
+  expect(panelError(new SyntaxError('Unexpected token'), vi.fn())).toBe(REQUEST_ERROR_MESSAGE);
+  expect(REQUEST_ERROR_MESSAGE).toBe('Something went wrong. Try again.');
+});
 
 function jsonResponse(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });

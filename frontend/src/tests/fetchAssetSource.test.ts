@@ -1,6 +1,6 @@
 import { it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fetchAssetSource } from '../lib/assets';
-import { ApiError } from '../lib/api';
+import { ApiError, OFFLINE_MESSAGE } from '../lib/api';
 import * as events from '../lib/events';
 
 const fetchSpy = vi.fn();
@@ -38,4 +38,9 @@ it('throws ApiError on other non-2xx', async () => {
 it('rethrows AbortError untouched', async () => {
   fetchSpy.mockImplementation(() => Promise.reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
   await expect(fetchAssetSource(5, 'app.js')).rejects.toMatchObject({ name: 'AbortError' });
+});
+
+it('a lost connection throws ApiError(0) with the offline sentence', async () => {
+  fetchSpy.mockImplementation(() => Promise.reject(new TypeError('Failed to fetch')));
+  await expect(fetchAssetSource(5, 'app.js')).rejects.toMatchObject({ status: 0, detail: OFFLINE_MESSAGE });
 });
