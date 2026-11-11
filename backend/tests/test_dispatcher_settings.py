@@ -352,7 +352,7 @@ def test_sent_tick_records_last_sent_on_healthy_server(db, seeded_run, mailer):
 
 
 def test_sent_tick_on_a_recorded_healthy_server_writes_nothing(db, seeded_run, mailer, monkeypatch):
-    # Whole-branch M1: a send already recorded and nothing to clear leaves the
+    # D6: a send already recorded and nothing to clear leaves the
     # row alone, so a class signing in at once doesn't queue writes on it.
     set_site(db, **ON, email_off_at=None, last_sent_at=T0)
     r = _row(db, seeded_run, T0)
@@ -366,7 +366,7 @@ def test_sent_tick_on_a_recorded_healthy_server_writes_nothing(db, seeded_run, m
 
 
 def test_sent_tick_after_recovery_clears_the_failure(db, seeded_run, mailer):
-    # Review Focus 1: a send already recorded, then a failure with its back-off:
+    # D6: a send already recorded, then a failure with its back-off:
     # the next send must still clear it, or the card stays red for ever.
     set_site(db, **ON, email_off_at=None, last_sent_at=T0, send_failure_message="x", send_failure_at=T0,
              send_retry_at=T0, send_backoff_step=2)
@@ -387,6 +387,41 @@ def test_sent_tick_after_a_newer_failed_test_records(db, seeded_run, mailer):
     _tick_once(_state(), now)
     assert _sent(db, r) == [True]
     assert _fresh_view(db).last_sent_at == now
+
+
+def _fail_card_test(at):
+    with SessionLocal() as other:
+        row = other.get(SiteSettings, 1)
+        row.card_test_ok, row.card_test_at, row.card_test_message = False, at, "x"
+        other.commit()
+
+
+def test_pin_send_after_a_test_that_failed_while_it_went_out_records(db):
+    # D6: the PIN email records the time after its send. A card test that
+    # failed after the caller read the row is read again, so the send counts.
+    set_site(db, **ON, email_off_at=None, last_sent_at=T0)
+    view = load(db)
+    _fail_card_test(T0 + timedelta(minutes=30))
+    dispatcher.record_send_outcome(db, view, None, T0 + H)
+    assert _fresh_view(db).last_sent_at == T0 + H
+
+
+def test_a_test_that_fails_during_a_batch_stays_newer_than_the_batch(db, seeded_run, mailer):
+    # D6: the queue records its send at the batch's start, so a card test that
+    # fails during the batch is newer, and Email says the test failed.
+    from mathion.setup_state import EMAIL_TEST_FAILED, email_done
+    now = T0 + H
+
+    class _TestFailsWhileSending(_Mailer):
+        def send(self, msg):
+            super().send(msg)
+            _fail_card_test(now + timedelta(seconds=5))
+    mailer["m"] = _TestFailsWhileSending()
+    set_site(db, **ON, email_off_at=None, last_sent_at=T0)
+    r = _row(db, seeded_run, T0)
+    _tick_once(_state(), now)
+    assert _sent(db, r) == [True]
+    assert email_done(_fresh_view(db), "k", "smtp").reason == EMAIL_TEST_FAILED
 
 
 def test_sent_tick_skips_record_when_settings_changed(db, seeded_run, mailer):

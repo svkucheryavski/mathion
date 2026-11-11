@@ -220,8 +220,9 @@ A step that is already done shows its form filled with the saved values. When no
     - a real message has gone out with the saved settings since they were saved, and the card's test isn't a failure newer than that send (mine, from review: a password the provider rotated fails its test at once, while the queue may not notice for a while).
 
     For the second case, the settings row stores the time of a successful send with the saved settings (mine, from review):
-    - **Written** in the queue's sent branch (`_record` in `notifications/dispatcher.py`) and in the PIN email's success outcome (`record_send_outcome`), on the fresh locked row, whether or not a failure was stored. A developer outbox is no mail server, so neither its sends nor its failures are recorded (rev 18).
-    - **Skipped** when the settings changed since the tick read them (`_fresh_row`); that is what "since they were saved" means. Also not rewritten, and the row not locked, when a send is already recorded, no failure is stored and no failed test is newer than it: a burst of sends writes nothing (rev 18). A tick that sends some messages and then meets a Settings D9c failure records the failure, not the send.
+    - **Written** in the queue's sent branch (`_record` in `notifications/dispatcher.py`) and in the PIN email's success outcome (`record_send_outcome`), on the fresh locked row: the first time, and again whenever there is something to clear (a stored failure, or a failed card test newer than the last recorded send). A developer outbox is no mail server, so neither its sends nor its failures are recorded (rev 18).
+    - **Left alone, with no lock,** when a send is already recorded, no failure is stored and no failed card test is newer than it: a burst of sends writes nothing. The card test is read again from the row for that check, since a test can fail after the row was read: the PIN email records the time after its send, so it then counts; the queue records the batch's start, so a test that failed during the batch stays newer and wins (rev 18).
+    - **Skipped** when the settings changed since the tick read them (`_fresh_row`); that is what "since they were saved" means. A tick that sends some messages and then meets a Settings D9c failure records the failure, not the send.
     - **Cleared** on every email save whose fingerprint changed (`new_fp != old_fp` in `save_email`), whether the card's test is then cleared or replaced by the latest test. An off save, or an on save with nothing changed, leaves it. So a move to a new provider whose test failed is not done.
   - **Not done says why** (user's), in the step card and on the Dashboard line. The reason speaks only of the saved settings, so the step hides it while its form differs from them, and while "step 1 saved" is still to send after a save (rev 18); a test of typed values then shows only its own answer. The reasons, first match wins:
     - "Email is off.";
@@ -304,7 +305,7 @@ A step that is already done shows its form filled with the saved values. When no
 
     Each is a conditional update that applies only while the wizard is on, and each answers the whole state, as the read does, so no second read is needed. The keep-sign-in write, behind the Dashboard's "Keep these values", is a separate write that sets D9's mark whatever the wizard's state. Step 4's skip button, labelled the same, sends the skip write instead, which moves the wizard on (D4a).
 
-    A step that isn't a whole number from 1 to 4 (missing, `true`, `"2"`, `2.0`, out of range) answers 422 with "The step must be from 1 to 4." (mine, rev 18).
+    A step that isn't a whole number from 1 to 4 (missing, `true`, `"2"`, `2.0`, out of range, no body, or a body that isn't a JSON object) answers 422 with "The step must be from 1 to 4." (mine, rev 18).
 
 ## 4. Constraints
 

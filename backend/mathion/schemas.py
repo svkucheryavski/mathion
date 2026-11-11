@@ -1343,6 +1343,12 @@ class SetupStepIn(BaseModel):
 
     step: Any = Field(None, json_schema_extra=_step_schema)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _any_body(cls, data: Any) -> Any:
+        # JSON that isn't an object has no step: the router's sentence, not the list.
+        return data if isinstance(data, dict) else {}
+
 
 class EmailTestResult(BaseModel):
     ok: bool

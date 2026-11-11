@@ -3,7 +3,8 @@
   // hint, shared by the Edit logo / Edit tab icon dialogs and Set up's Site
   // name and logo step. The checks live in LogoPick. With `onRemove` (Set up
   // D7, U4), a chosen file's name has Remove beside it, which drops the choice;
-  // focus then goes to Choose.
+  // focus then goes to Choose. While another file is read, Remove waits: it
+  // would name and drop the earlier one.
   import Button from '../../ui/Button.svelte';
   import SiteLogo from '../../chrome/SiteLogo.svelte';
   import { IMAGE_TEXT, type LogoPick } from '../../../lib/panelForms/logoPick.svelte';
@@ -26,6 +27,16 @@
     onRemove?.();
     chooseButton?.focus();
   }
+  // Remove hides while another file is read; focus it held goes to Choose
+  // first (Safari leaves focus where it was when Choose is clicked).
+  let removeButton: HTMLElement | null = null;
+  function trackRemove(el: HTMLElement) {
+    removeButton = el;
+    return () => { if (removeButton === el) removeButton = null; };
+  }
+  $effect.pre(() => {
+    if (form.checking && removeButton && document.activeElement === removeButton) chooseButton?.focus();
+  });
 </script>
 
 {#if form.kind === 'logo'}
@@ -47,9 +58,9 @@
   <Button variant="secondary" disabled={busy} bind:element={chooseButton} onclick={() => picker?.click()}>Choose a PNG…</Button>
   {#if form.pending?.kind === 'file'}
     <span class="im-file">{form.pending.file.name}, {form.pending.file.width} × {form.pending.file.height} px</span>
-    {#if onRemove}
+    {#if onRemove && !form.checking}
       <button type="button" class="im-remove" data-action="remove" aria-label="Remove {form.pending.file.name}"
-        disabled={busy} onclick={remove}>Remove</button>
+        disabled={busy} onclick={remove} {@attach trackRemove}>Remove</button>
     {/if}
   {/if}
   <input bind:this={picker} type="file" accept="image/png" hidden onchange={onChoose} />

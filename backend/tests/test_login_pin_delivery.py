@@ -327,7 +327,7 @@ def test_pin_to_a_developer_outbox_records_no_send(client, db, monkeypatch):
 
 
 def test_sent_pin_after_recovery_clears_the_message(client, db, monkeypatch):
-    # Review Focus 1: the PIN path stores only the message; a send already
+    # D6: the PIN path stores only the message; a send already
     # recorded must not stop the next good send from clearing it.
     set_site(db, last_sent_at=datetime.now(timezone.utc) - timedelta(days=1),
              send_failure_message="The mail server refused the login.")

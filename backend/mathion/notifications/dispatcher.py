@@ -398,13 +398,17 @@ def _record_sent(db, view, now: datetime) -> None:
     drop the stored failure and the back-off. Skipped when a save changed
     the settings since `view` was read: the send says nothing about them.
     Nothing to write (a send already recorded, no failure stored, no failed
-    test newer than that send) touches nothing, so a burst of sends never
-    queues on the row."""
-    failed_test_after = (view.card_test_ok is False and view.card_test_at is not None
-                         and view.last_sent_at is not None and view.card_test_at > view.last_sent_at)
+    test newer than that send) takes no lock, so a burst of sends never
+    queues on the row. The card test is read again for that check: a test
+    can fail after `view` was read. The PIN email's time is taken after its
+    send, so it then counts; the queue's is the batch's start, so a test that
+    failed during the batch stays newer and wins (Set up D6)."""
     if (view.last_sent_at is not None and view.send_failure_message is None and view.send_retry_at is None
-            and not view.send_backoff_step and not failed_test_after):
-        return
+            and not view.send_backoff_step):
+        ok, at = db.execute(select(SiteSettings.card_test_ok, SiteSettings.card_test_at)
+                            .where(SiteSettings.id == 1)).one()
+        if not (ok is False and at is not None and at > view.last_sent_at):
+            return
     row = _fresh_row(db, view)
     if row is None:
         return

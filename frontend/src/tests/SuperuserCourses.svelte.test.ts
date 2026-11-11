@@ -253,7 +253,7 @@ it('name and admin in one Save: the PATCH goes first, then the PUT, then one not
   type(panelInput('Course name'), 'Chemo');
   type(panelInput("Admin's email"), 'aho@uni.dk');
   footButton('Save').click(); await settle(); await settle();
-  // No state in this test, so the note reads it first (whole-branch M1).
+  // No state in this test, so the note reads it first (Set up D8).
   expect(calls.filter((c) => c !== 'GET /courses' && c !== 'POST /accounts/lookup')).toEqual(['PATCH /courses/2', 'PUT /courses/2/admin', 'GET /setup']);
   expect(note()?.textContent?.trim()).toBe('Anna Holm is now the admin of Chemo. An email with a sign-in link is on its way to aho@uni.dk.');
 });
@@ -370,7 +370,7 @@ it('the Edit dialog assigning yourself: "You are now the admin", no command', as
   expect(note()?.querySelector('code')).toBeNull();
 });
 
-it("with no state yet, the note reads it first and adds Email's reason (whole-branch M1)", async () => {
+it("with no state yet, the note reads it first and adds Email's reason (Set up D8)", async () => {
   routes['GET /setup'] = () => [200, stateWithEmail(false)];
   await createVia('queued');
   expect(calls.filter((c) => c === 'GET /setup')).toHaveLength(1);

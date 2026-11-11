@@ -92,12 +92,11 @@ def test_read_fresh_site(panel, db):
 
 
 def test_read_loads_the_settings_once(db, monkeypatch):
-    # Whole-branch M3: "email set up" comes from the view the done rules loaded.
+    # D13: "email set up" comes from the view the done rules loaded.
     from mathion import panel_people
-    from mathion.api import superuser_courses
     calls = []
     real = setup_state.load_site
-    for module in (setup_state, superuser_courses, panel_people):
+    for module in (setup_state, panel_people):   # the two that read() can reach
         monkeypatch.setattr(module, "load_site", lambda d: calls.append(1) or real(d))
     set_site(db, email_on=True)
     assert setup_state.read(db).email_set_up is True
@@ -133,7 +132,7 @@ def test_read_with_all_done_ends_it(panel, db):
 
 
 def test_read_that_ends_it_answers_from_before_its_commit(panel, db, monkeypatch):
-    # Task 3 M2: the answer is built before the D5a commit, so a course or
+    # D5a: the answer is built before its commit, so a course or
     # admin deleted in that gap can't turn the read into a 500.
     set_site(db, email_on=True, smtp_host="mail.uni.dk", email_from="noreply@uni.dk", card_test_ok=True,
              card_test_at=datetime.now(timezone.utc), site_name_kept=True, sign_in_kept=True)
@@ -344,11 +343,23 @@ def test_bad_step_is_422(panel, db, what, step):
 
 @pytest.mark.parametrize("body", [{}, {"step": True}, {"step": "2"}, {"step": 2.0}, {"step": None}])
 def test_loose_or_missing_step_is_422_with_the_sentence(panel, db, body):
-    # Task 3 M5: only a whole number 1-4 is a step; anything else gets the sentence.
+    # D13: only a whole number 1-4 is a step; anything else gets the sentence.
     _on(db)
     client, base = panel
     for what in ("go", "skip", "saved"):
         r = client.post(f"{base}/setup/{what}", json=body)
+        assert (r.status_code, r.json()["detail"]) == (422, BAD_STEP), (what, body)
+    assert _stored(db) == (True, 1, 0)
+
+
+@pytest.mark.parametrize("body", [[], [2], "2", 2, None])
+def test_a_body_that_is_not_an_object_is_422_with_the_sentence(panel, db, body):
+    # No body, or JSON that isn't an object: the one sentence, never the list.
+    _on(db)
+    client, base = panel
+    for what in ("go", "skip", "saved"):
+        r = (client.post(f"{base}/setup/{what}") if body is None
+             else client.post(f"{base}/setup/{what}", json=body))
         assert (r.status_code, r.json()["detail"]) == (422, BAD_STEP), (what, body)
     assert _stored(db) == (True, 1, 0)
 
@@ -386,3 +397,8 @@ def test_openapi_still_documents_the_step(client):
     assert (step["type"], step["minimum"], step["maximum"]) == ("integer", 1, 4)
     assert schema["required"] == ["step"]
     assert "default" not in step
+    paths = client.get("/openapi.json").json()["paths"]
+    for what in ("go", "skip", "saved"):
+        body = paths[f"/api/superuser/{{token}}/setup/{what}"]["post"]["requestBody"]
+        assert body["required"] is True, what
+        assert body["content"]["application/json"]["schema"] == {"$ref": "#/components/schemas/SetupStepIn"}, what

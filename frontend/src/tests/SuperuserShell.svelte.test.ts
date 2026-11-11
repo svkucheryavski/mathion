@@ -755,7 +755,13 @@ it("a modifier click on a pill before the first answer doesn't cancel this tab's
   router.currentRoute.path = '/superuser/T';
   component = mount(SuperuserShell, { target, props: { token: 'T' } });
   await settle();
+  let prevented: boolean | null = null;
+  // Runs after the app's delegated handler; it records, then blocks jsdom's own navigation.
+  const probe = (e: Event) => { prevented = e.defaultPrevented; e.preventDefault(); };
+  window.addEventListener('click', probe);
   pills()[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, metaKey: true }));
+  window.removeEventListener('click', probe);
+  expect(prevented).toBe(false);                   // left to the browser
   answer(jsonResponse(200, setupOf(true)));
   await settle();
   expect(navSpy).toHaveBeenCalledWith('/superuser/T/setup', { replace: true });

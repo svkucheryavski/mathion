@@ -451,7 +451,7 @@ it('Try again shows that it is reading and ignores presses until the read answer
   expect(read).toHaveBeenCalledTimes(2);
 });
 
-// --- Task 7 test gaps (the minors round) ---
+// --- The page and its moves: more pins ---
 
 it('the keep-alive stops when the step closes', async () => {
   const stops: ReturnType<typeof vi.fn>[] = [];
@@ -853,11 +853,11 @@ it('a half-save re-reads the state, so the marks follow the saved email (r1 M3)'
   expect(items()[0].querySelector('.sl-mark')!.classList.contains('done')).toBe(true);
 });
 
-// --- Step 1, the minors round ---
+// --- Step 1: the save, the reason and Try again ---
 
 const emailSwitch = () => target.querySelector<HTMLButtonElement>('.ee-switch button')!;
 
-it('after a half-save, a changed form that is not ready blocks Save and continue (Task 7 r2 M1)', async () => {
+it('after a half-save, a changed form that is not ready blocks Save and continue (D6)', async () => {
   routes['PATCH /settings/email'] = (b) => [200, settings((b as { on: boolean }).on ? {} : { on: false })];
   routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
   routes['GET /setup'] = () => [200, state()];
@@ -880,7 +880,7 @@ it('after a half-save, a changed form that is not ready blocks Save and continue
   expect(writes().map((c) => c.key)).toEqual(['PATCH /settings/email', 'POST /setup/saved']);
 });
 
-it("a passed test's answer stays after the save, also when step saved then fails (whole-branch Fable M3)", async () => {
+it("a passed test's answer stays after the save, also when step saved then fails (D6)", async () => {
   routes['POST /settings/email/test'] = () => [200, { ok: true, message: 'Sent.' }];
   routes['GET /setup'] = () => [200, state()];
   routes['PATCH /settings/email'] = () => [200, settings({ host: 'smtp.other.dk' })];
@@ -896,7 +896,7 @@ it("a passed test's answer stays after the save, also when step saved then fails
   expect(target.querySelector('.se-result')?.textContent).toBe('Sent.');
 });
 
-it('the not-done reason stays hidden while "step 1 saved" is due (Task 8 M2)', async () => {
+it('the not-done reason stays hidden while "step 1 saved" is due (D6)', async () => {
   const saved = deferred();
   routes['PATCH /settings/email'] = () => [200, settings({ host: 'smtp.other.dk' })];
   routes['POST /setup/saved'] = () => saved.promise;
@@ -915,7 +915,7 @@ it('the not-done reason stays hidden while "step 1 saved" is due (Task 8 M2)', a
 
 // --- Step 2: Site name and logo (D7) ---
 
-it('Save and continue waits while a chosen logo is still being read (Task 8 M3)', async () => {
+it('Save and continue waits while a chosen logo is still being read (D7)', async () => {
   routes['GET /branding'] = () => [200, brandingOf('Riverside')];
   await render(state({ step: 2 }));
   type(input('Site name'), 'Lund');
@@ -1056,7 +1056,7 @@ it('a done step 2 shows Continue, which sends only step saved', async () => {
   expect(writes()).toEqual([{ key: 'POST /setup/saved', body: { step: 2 } }]);
 });
 
-// --- Step 2, the minors round ---
+// --- Step 2: Remove, the reason and the retries ---
 
 const removeLogo = () => card()!.querySelector<HTMLButtonElement>('[data-action="remove"]');
 const fileLine = () => card()!.querySelector('.im-file')?.textContent ?? null;
@@ -1083,6 +1083,20 @@ it('Remove drops a chosen logo and keeps the saved one; it shows only while a ne
   expect(foot('save')!.textContent!.trim()).toBe('Continue');
   expect(document.activeElement?.textContent?.trim()).toBe('Choose a PNG…');
   expect(writes()).toEqual([]);
+});
+
+it('while a second file is read, Remove waits: it never names the first file nor drops both, and its focus goes to Choose', async () => {
+  await render(state({ step: 2 }));
+  await choose(pngOf(400, 80), 'first.png');
+  decodes[0].resolve();
+  await settle();
+  expect(removeLogo()!.getAttribute('aria-label')).toBe('Remove first.png');
+  removeLogo()!.focus();                             // Safari: a mouse click on Choose leaves focus here
+  chooseNow(pngOf(400, 80), 'second.png');           // the read answers in a task
+  expect(removeLogo()).toBeNull();
+  expect(document.activeElement?.textContent?.trim()).toBe('Choose a PNG…');
+  await until(() => decodes.length > 1);
+  expect(removeLogo()!.getAttribute('aria-label')).toBe('Remove second.png');
 });
 
 it('after a refused logo, Remove clears its sentence and Save and continue sends only "step 2 saved"; a new choice first waits for its decode (U4)', async () => {
@@ -1131,7 +1145,7 @@ it("Remove waits while the step's saves run", async () => {
   expect(removeLogo()!.disabled).toBe(false);
 });
 
-it('"The site is still called Mathion." stays hidden after a rename while "step 2 saved" is due (Task 8 M2)', async () => {
+it('"The site is still called Mathion." stays hidden after a rename while "step 2 saved" is due (D7)', async () => {
   const saved = deferred();
   routes['PUT /branding/name'] = (b) => [200, brandingOf((b as { name: string }).name)];
   routes['POST /setup/saved'] = () => saved.promise;
@@ -1148,7 +1162,7 @@ it('"The site is still called Mathion." stays hidden after a rename while "step 
   expect(card()!.textContent).not.toContain('The site is still called Mathion.');
 });
 
-it('a newer "step 2 saved" failure replaces an older logo sentence; the retry sends only it (Task 8 M1)', async () => {
+it('a newer "step 2 saved" failure replaces an older logo sentence; the retry sends only it (D7)', async () => {
   routes['PUT /branding/name'] = (b) => [200, brandingOf((b as { name: string }).name)];
   let saves = 0;
   routes['POST /setup/saved'] = () => [500, { detail: ++saves === 1 ? 'Boom.' : 'Again.' }];
@@ -1413,7 +1427,7 @@ it('skip on step 4 reads Keep these values, sends the skip (never keep-sign-in),
   expect(title()).toBe('Email');
 });
 
-// --- Step 4, the minors round ---
+// --- Step 4: one error line, the holds and the moves ---
 
 const radio = (value: string) => card()!.querySelector<HTMLInputElement>(`input[type="radio"][value="${value}"]`)!;
 
@@ -1869,7 +1883,7 @@ it('typed values after a 409 done view gave way are never swapped out by a later
   expect(input('Course name').value).toBe('Chemometrics');
 });
 
-// --- Step 3, the minors round ---
+// --- Step 3: focus, Continue, the done view and the holds ---
 
 /** Enter in a field, with focus in it, as the browser would. */
 function enterIn(el: HTMLInputElement) {
@@ -1877,7 +1891,7 @@ function enterIn(el: HTMLInputElement) {
   el.form!.requestSubmit();
 }
 
-it('Enter in a field: when the note replaces the fields, focus goes to Continue (Task 9 M2)', async () => {
+it('Enter in a field: when the note replaces the fields, focus goes to Continue (D8)', async () => {
   routes['POST /courses'] = () => [200, created()];
   routes['POST /setup/saved'] = () => [200, state({ step: 4 }, [false, false, true, false])];
   await render(state({ step: 3 }));
@@ -1889,7 +1903,7 @@ it('Enter in a field: when the note replaces the fields, focus goes to Continue 
   expect(document.activeElement).toBe(foot('save'));
 });
 
-it("Enter in a field: when a 409's done view replaces the fields, focus goes to Continue (Task 9 M2)", async () => {
+it("Enter in a field: when a 409's done view replaces the fields, focus goes to Continue (D8)", async () => {
   routes['POST /courses'] = () => [409, { detail: 'The address statistics-101 is taken.' }];
   routes['GET /setup'] = () => [200, withCourse()];
   await render(state({ step: 3 }));
@@ -1901,7 +1915,7 @@ it("Enter in a field: when a 409's done view replaces the fields, focus goes to 
   expect(document.activeElement).toBe(foot('save'));
 });
 
-it('a step 3 that turned done: emptying the fields shows the done view, focus to Continue, the address follows the name again (Task 9 M2, Fable r3 M3)', async () => {
+it('a step 3 that turned done: emptying the fields shows the done view, focus to Continue, the address follows the name again (D8)', async () => {
   await render(state({ step: 3 }));
   type(input('Course name'), 'Statistics 101');
   type(input('Address'), 'stat');                 // the address no longer follows the name
@@ -1923,7 +1937,7 @@ it('a step 3 that turned done: emptying the fields shows the done view, focus to
   expect(input('Address').value).toBe('algebra');
 });
 
-it('a failed Continue on the done view, then the course goes: the form comes back empty, with no old sentence (Fable r3 M2)', async () => {
+it('a failed Continue on the done view, then the course goes: the form comes back empty, with no old sentence (D8)', async () => {
   routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
   routes['GET /setup'] = () => [200, withCourse()];
   await render(withCourse());
@@ -1937,7 +1951,7 @@ it('a failed Continue on the done view, then the course goes: the form comes bac
   expect(err()).toBeNull();
 });
 
-it('Continue on the note sends "step 3 saved" again when the newest state names step 3 (Task 9 M3)', async () => {
+it('Continue on the note sends "step 3 saved" again when the newest state names step 3 (D8)', async () => {
   let saves = 0;
   await render(state({ step: 3 }));
   await create(() => (++saves, [200, state({ step: 4 }, [false, false, true, false])]));

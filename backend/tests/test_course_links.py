@@ -1,4 +1,4 @@
-"""One place builds a course's sign-in address (whole-branch review M2):
+"""One place builds a course's sign-in address (D8):
 step 3's done view and the Courses note must never differ."""
 from mathion.config import settings
 from mathion.course_links import course_sign_in_url

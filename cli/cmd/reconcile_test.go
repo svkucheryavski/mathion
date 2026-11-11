@@ -273,7 +273,7 @@ func TestReconcileFailsClosedOnPoisonedEnv(t *testing.T) {
 	if err := app.reconcile(context.Background(), false); err == nil {
 		t.Fatal("reconcile must fail closed on a poisoned .env")
 	}
-	if idxOfCall(fr.Calls, joinHas("up")) >= 0 {
+	if hasBareArg(fr.Calls, "up") {
 		t.Error("no up over a poisoned .env")
 	}
 }
