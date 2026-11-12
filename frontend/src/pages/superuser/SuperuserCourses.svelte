@@ -6,7 +6,7 @@
   // action replaces it (D5a).
   import { ApiError } from '../../lib/api';
   import {
-    adminIsMe, adminNoteParts, assignAdmin, createCourse, deleteCourse, listCourses, panelError, removeAdmin, updateCourse,
+    adminIsMe, adminNoteParts, assignAdmin, createCourse, deleteCourse, formatCount, listCourses, panelError, removeAdmin, updateCourse,
     type AdminAssignResult, type PanelCourse, type PanelOnAuth,
   } from '../../lib/superuser';
   import PanelHead from '../../components/superuser/PanelHead.svelte';
@@ -44,18 +44,26 @@
   let dialog = $state<Dialog | null>(null);
 
   // `quiet` reloads behind what is on screen (after a save, or a 409 that says
-  // the list is stale) and keeps the table if it fails.
+  // the list is stale) and keeps the table if it fails. Only the newest
+  // request's reply counts (rev 11, as D15a on the Users page).
+  let latest = 0;
   async function load(quiet = false): Promise<void> {
     const t = token;
+    const mine = ++latest;
     if (!quiet) { loading = true; loadError = ''; }
     try {
-      courses = await listCourses(t);
+      const list = await listCourses(t);
+      if (mine !== latest) return;
+      courses = list;
       loadError = '';
     } catch (err) {
+      if (mine !== latest) return;
       const msg = panelError(err, onAuth);
+      // A quiet load needs the table (it follows a dialog or a strip), so it
+      // never stands in for a first load that failed.
       if (!quiet) loadError = msg ?? '';
     } finally {
-      loading = false;
+      if (mine === latest) loading = false;
     }
   }
 
@@ -126,7 +134,7 @@
     void load(true);
   }
 
-  const runsReason = (n: number) => `${n} ${n === 1 ? 'run' : 'runs'}: can't be deleted`;
+  const runsReason = (n: number) => `${formatCount(n)} ${n === 1 ? 'run' : 'runs'}: can't be deleted`;
 </script>
 
 {#snippet newButton()}
@@ -178,8 +186,8 @@
                 <span class="c-none">No admin</span>
               {/if}
             </td>
-            <td class="num r">{c.version_count}</td>
-            <td class="num r">{c.run_count}</td>
+            <td class="num r">{formatCount(c.version_count)}</td>
+            <td class="num r">{formatCount(c.run_count)}</td>
             <td class="r">
               <span class="row-icons">
                 <IconButton glyph="pencil" size="sm" title="Edit" aria-label="Edit {c.name}" data-action="edit"
@@ -207,7 +215,8 @@
     onDone={() => (dialog = null)} onClose={() => (dialog = null)} />
 {:else if dialog?.kind === 'delete'}
   {@const c = dialog.course}
-  <DeleteCourseDialog {token} course={c} {onAuth} onDelete={() => removeCourse(c)} onClose={() => (dialog = null)} />
+  <DeleteCourseDialog {token} course={c} {onAuth} onDelete={() => removeCourse(c)} onStale={() => void load(true)}
+    onClose={() => (dialog = null)} />
 {/if}
 
 <style>

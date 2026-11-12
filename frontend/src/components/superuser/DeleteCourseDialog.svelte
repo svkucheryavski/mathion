@@ -6,16 +6,19 @@
   import { onMount } from 'svelte';
   import Modal from '../ui/Modal.svelte';
   import Button from '../ui/Button.svelte';
-  import { getDeleteImpact, panelError, type PanelCourse, type PanelOnAuth } from '../../lib/superuser';
+  import { ApiError } from '../../lib/api';
+  import { formatCount, getDeleteImpact, panelError, type PanelCourse, type PanelOnAuth } from '../../lib/superuser';
 
   type Props = {
     token: string;
     course: PanelCourse;
     onDelete: () => Promise<void>;
+    /** D25: the lookup's 409 says the list on screen is stale. */
+    onStale: () => void;
     onClose: () => void;
     onAuth: PanelOnAuth;
   };
-  let { token, course, onDelete, onClose, onAuth }: Props = $props();
+  let { token, course, onDelete, onStale, onClose, onAuth }: Props = $props();
 
   const uid = $props.id();
   const titleId = `${uid}-title`;
@@ -33,7 +36,7 @@
   const versions = $derived(
     course.version_count === 0 ? ''
       : course.version_count === 1 ? 'Its 1 version and its files go too. '
-        : `Its ${course.version_count} versions and their files go too. `,
+        : `Its ${formatCount(course.version_count)} versions and their files go too. `,
   );
 
   onMount(async () => {
@@ -41,6 +44,7 @@
       progress = (await getDeleteImpact(token, course.id)).progress_students;
     } catch (e) {
       error = panelError(e, onAuth);
+      if (e instanceof ApiError && e.status === 409) onStale();
     } finally {
       impactDone = true;
     }
@@ -74,7 +78,7 @@
   <form class="dc-form" novalidate onsubmit={(e) => { e.preventDefault(); void remove(); }}>
     <p class="dc-text">Delete <strong>{course.name}</strong>? {versions}This can't be undone.</p>
     {#if progress !== null && progress > 0}
-      <p class="dc-text">Also deletes the progress of {progress} {progress === 1 ? 'student' : 'students'} (pages visited, quiz answers).</p>
+      <p class="dc-text">Also deletes the progress of {formatCount(progress)} {progress === 1 ? 'student' : 'students'} (pages visited, quiz answers).</p>
     {/if}
     <label class="dc-label" for="{uid}-name">Type the course name to confirm</label>
     <input id="{uid}-name" class="dc-input" data-autofocus bind:value={typed} readonly={busy} autocomplete="off" spellcheck="false"

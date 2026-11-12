@@ -25,7 +25,7 @@ function assigned(course: PanelCourse, admin_email: AdminAssignResult['admin_ema
   return { course, admin, admin_email, pin_minutes: 10, sign_in_url: `http://m.test/courses/${course.slug}/edit` };
 }
 
-type Handler = (body: unknown) => [number, unknown];
+type Handler = (body: unknown) => [number, unknown] | Promise<[number, unknown]>;
 let routes: Record<string, Handler>;
 let calls: string[];
 let target: HTMLDivElement;
@@ -42,7 +42,7 @@ beforeEach(() => {
     calls.push(key);
     const h = routes[key];
     if (!h) return jsonResponse(500, { detail: `no route ${key}` });
-    const [status, body] = h(init?.body ? JSON.parse(String(init.body)) : undefined);
+    const [status, body] = await h(init?.body ? JSON.parse(String(init.body)) : undefined);
     return jsonResponse(status, body);
   }));
 });
@@ -109,7 +109,7 @@ it('says so when there are no courses yet', async () => {
 });
 
 it.each([
-  ['queued', 'Statistics 101 is created; Anna Holm is its admin. An email with a sign-in link is on its way to aho@uni.dk.'],
+  ['queued', 'Statistics 101 is created; Anna Holm is its admin. An email with a link to the course is on its way to aho@uni.dk.'],
   ['email_off', "Statistics 101 is created; Anna Holm is its admin. Email isn't set up on this server, so tell them yourself. They sign in at http://m.test/courses/stat/edit with a PIN: run mathion pin aho@uni.dk on the server (the PIN lasts 10 minutes)."],
   ['disabled', 'Statistics 101 is created; Anna Holm is its admin. No email sent: this account is disabled. Enable it on the Users page so they can sign in.'],
   ['unchanged', 'They are already the admin; nothing changed.'],
@@ -208,18 +208,45 @@ it('a new email assigns the admin and the result note follows (D5a, D9)', async 
   expect(sent).toEqual({ email: 'new@x' });
   expect(panel()).toBeNull();
   expect(gets()).toBe(2);
-  expect(note()?.textContent?.trim()).toBe('new@x is now the admin of Chemometrics. An email with a sign-in link is on its way to new@x.');
+  expect(note()?.textContent?.trim()).toBe('new@x is now the admin of Chemometrics. An email with a link to the course is on its way to new@x.');
 });
 
-it('the same admin in another case says only that nothing changed', async () => {
+it('the same admin retyped in another case is no change: Save stays off and nothing is sent (rev 11)', async () => {
   routes['POST /accounts/lookup'] = () => [200, { status: 'existing', full_name: 'Anna Holm' }];
-  routes['PUT /courses/1/admin'] = () => [200, assigned(courses()[0], 'unchanged')];
   await render();
   act(row('Statistics 101'), 'edit').click(); await settle();
   type(panelInput("Admin's email"), 'AHO@uni.dk');
+  expect(footButton('Save').getAttribute('aria-disabled')).toBe('true');
+  expect(panel()!.textContent).not.toContain('will no longer be the admin');
   footButton('Save').click(); await settle();
-  expect(note()?.textContent?.trim()).toBe('They are already the admin; nothing changed.');
-  expect(calls).not.toContain('GET /setup');      // no state, and no place for Email's reason
+  expect(calls.some((c) => c.startsWith('PUT '))).toBe(false);
+});
+
+it('typing another admin says who stops being the admin (rev 11)', async () => {
+  routes['POST /accounts/lookup'] = () => [200, { status: 'new', full_name: null }];
+  await render();
+  act(row('Statistics 101'), 'edit').click(); await settle();
+  expect(panel()!.textContent).not.toContain('will no longer be the admin');
+  type(panelInput("Admin's email"), 'bo@school.dk');
+  expect(panel()!.textContent).toContain('Anna Holm will no longer be the admin.');
+  type(panelInput("Admin's email"), '');
+  expect(panel()!.textContent).not.toContain('will no longer be the admin');
+});
+
+it("an admin with no name is named by email in that line (rev 11)", async () => {
+  routes['POST /accounts/lookup'] = () => [200, { status: 'new', full_name: null }];
+  await render();
+  act(row('Algebra'), 'edit').click(); await settle();
+  type(panelInput("Admin's email"), 'bo@school.dk');
+  expect(panel()!.textContent).toContain('off@x will no longer be the admin.');
+});
+
+it('the no-admin line uses the name being typed (rev 11)', async () => {
+  await render();
+  act(row('Statistics 101'), 'edit').click(); await settle();
+  type(panelInput('Course name'), 'Statistics 102');
+  type(panelInput("Admin's email"), '');
+  expect(panel()!.textContent).toContain('Statistics 102 will have no admin.');
 });
 
 it('clearing the email removes the admin and reloads (D9)', async () => {
@@ -235,12 +262,12 @@ it('clearing the email removes the admin and reloads (D9)', async () => {
 });
 
 it('a refused removal keeps the dialog with the sentence and reloads the list', async () => {
-  routes['DELETE /courses/1/admin'] = () => [409, { detail: 'This course has no admin' }];
+  routes['DELETE /courses/1/admin'] = () => [409, { detail: 'This course was deleted' }];
   await render();
   act(row('Statistics 101'), 'edit').click(); await settle();
   type(panelInput("Admin's email"), '');
   footButton('Save').click(); await settle();
-  expect(panel()!.querySelector('[role="alert"]')?.textContent?.trim()).toBe('This course has no admin');
+  expect(panel()!.querySelector('[role="alert"]')?.textContent?.trim()).toBe('This course was deleted');
   expect(gets()).toBe(2);
 });
 
@@ -255,7 +282,7 @@ it('name and admin in one Save: the PATCH goes first, then the PUT, then one not
   footButton('Save').click(); await settle(); await settle();
   // No state in this test, so the note reads it first (Set up D8).
   expect(calls.filter((c) => c !== 'GET /courses' && c !== 'POST /accounts/lookup')).toEqual(['PATCH /courses/2', 'PUT /courses/2/admin', 'GET /setup']);
-  expect(note()?.textContent?.trim()).toBe('Anna Holm is now the admin of Chemo. An email with a sign-in link is on its way to aho@uni.dk.');
+  expect(note()?.textContent?.trim()).toBe('Anna Holm is now the admin of Chemo. An email with a link to the course is on its way to aho@uni.dk.');
 });
 
 it("with runs the trash is blocked and says why, and opens nothing (D12)", async () => {
@@ -307,9 +334,10 @@ it('the next note replaces the last one as a fresh element, so it is announced',
     type(panelInput("Admin's email"), email);
     footButton('Save').click(); await settle();
   }
-  await sameAdmin('AHO@uni.dk');
+  // Two different addresses, so each is a change (a case-only retype isn't, rev 11).
+  await sameAdmin('bo@uni.dk');
   const first = note();
-  await sameAdmin('Aho@uni.dk');
+  await sameAdmin('cy@uni.dk');
   expect(note()).not.toBe(first);
   expect(target.querySelectorAll('.note-strip')).toHaveLength(1);
   note()!.querySelector<HTMLButtonElement>('button[data-glyph="close"]')!.click(); await settle();
@@ -353,7 +381,7 @@ it("a queued note adds Email's reason while the Email step isn't done", async ()
   setupState = stateWithEmail(false);
   await createVia('queued');
   expect(note()?.textContent?.trim()).toBe(
-    'Statistics 101 is created; Anna Holm is its admin. An email with a sign-in link is on its way to aho@uni.dk. '
+    'Statistics 101 is created; Anna Holm is its admin. An email with a link to the course is on its way to aho@uni.dk. '
     + 'Not tested yet: send a test email.');
 });
 
@@ -375,7 +403,7 @@ it("with no state yet, the note reads it first and adds Email's reason (Set up D
   await createVia('queued');
   expect(calls.filter((c) => c === 'GET /setup')).toHaveLength(1);
   expect(note()?.textContent?.trim()).toBe(
-    'Statistics 101 is created; Anna Holm is its admin. An email with a sign-in link is on its way to aho@uni.dk. '
+    'Statistics 101 is created; Anna Holm is its admin. An email with a link to the course is on its way to aho@uni.dk. '
     + 'Not tested yet: send a test email.');
 });
 
@@ -402,14 +430,14 @@ it('with no state and a failed read, the note still shows, without a reason', as
   routes['GET /setup'] = () => [500, { detail: 'Boom.' }];
   await createVia('queued');
   expect(note()?.textContent?.trim()).toBe(
-    'Statistics 101 is created; Anna Holm is its admin. An email with a sign-in link is on its way to aho@uni.dk.');
+    'Statistics 101 is created; Anna Holm is its admin. An email with a link to the course is on its way to aho@uni.dk.');
 });
 
 it('no reason once the Email step is done', async () => {
   setupState = stateWithEmail(true);
   await createVia('queued');
   expect(note()?.textContent?.trim()).toBe(
-    'Statistics 101 is created; Anna Holm is its admin. An email with a sign-in link is on its way to aho@uni.dk.');
+    'Statistics 101 is created; Anna Holm is its admin. An email with a link to the course is on its way to aho@uni.dk.');
   expect(calls).not.toContain('GET /setup');
 });
 
@@ -447,6 +475,62 @@ it('closing the last note does not cancel a newer one still waiting on the read'
   expect(note()).toBeNull();
   release(); await settle(); await settle();
   expect(note()?.textContent?.trim()).toBe(
-    'Anna Holm is now the admin of Chemometrics. An email with a sign-in link is on its way to aho@uni.dk. '
+    'Anna Holm is now the admin of Chemometrics. An email with a link to the course is on its way to aho@uni.dk. '
     + 'Not tested yet: send a test email.');
 });
+
+it('quiet reloads keep only the newest reply (rev 11)', async () => {
+  await render();
+  let releaseOld!: () => void;
+  const old = courses();
+  routes['GET /courses'] = () => new Promise((r) => { releaseOld = () => r([200, old]); });
+  routes['PATCH /courses/1'] = () => [200, { ...courses()[0], name: 'Statistics 102' }];
+  act(row('Statistics 101'), 'edit').click(); await settle();
+  type(panelInput('Course name'), 'Statistics 102');
+  footButton('Save').click(); await settle();
+  const fresh = courses(); fresh[0] = { ...fresh[0], name: 'Statistics 102' };
+  routes['GET /courses'] = () => [200, fresh];
+  routes['PATCH /courses/2'] = () => [200, { ...courses()[1], name: 'Chemo' }];
+  act(row('Chemometrics'), 'edit').click(); await settle();
+  type(panelInput('Course name'), 'Chemo');
+  footButton('Save').click(); await settle();
+  expect(row('Statistics 102')).toBeTruthy();
+  releaseOld(); await settle();
+  expect(row('Statistics 102')).toBeTruthy();
+  expect(row('Statistics 101')).toBeUndefined();
+});
+
+it('a first load that fails after a newer reload came back keeps the newer list (rev 11)', async () => {
+  let failFirst!: () => void;
+  routes['GET /courses'] = () => new Promise((r) => { failFirst = () => r([500, { detail: 'Server error' }]); });
+  routes['POST /courses'] = () => [201, assigned(courses()[0], 'email_off')];
+  routes['POST /accounts/lookup'] = () => [200, { status: 'existing', full_name: 'Anna Holm' }];
+  await render();
+  routes['GET /courses'] = () => [200, courses()];
+  target.querySelector<HTMLButtonElement>('.panel-head button')!.click(); await settle();
+  type(panelInput('Course name'), 'Statistics 101');
+  type(panelInput("Admin's email"), 'aho@uni.dk');
+  footButton('Create').click(); await settle();
+  expect(row('Statistics 101')).toBeTruthy();
+  failFirst(); await settle();
+  expect(row('Statistics 101')).toBeTruthy();
+  expect(target.textContent).not.toContain('Could not load');
+});
+
+it('big counts are grouped in the table and in the trash tooltip (rev 11)', async () => {
+  const list = courses(); list[0] = { ...list[0], version_count: 1200, run_count: 4213 };
+  routes['GET /courses'] = () => [200, list];
+  await render();
+  const stat = row('Statistics 101');
+  expect([...stat.querySelectorAll('td.num')].map((t) => t.textContent?.trim())).toEqual(['1,200', '4,213']);
+  expect(act(stat, 'delete').getAttribute('title')).toBe("4,213 runs: can't be deleted");
+});
+
+it('a 409 from the delete-impact lookup reloads the list behind the dialog (rev 11)', async () => {
+  routes['GET /courses/2/delete-impact'] = () => [409, { detail: 'This course was deleted' }];
+  await render();
+  act(row('Chemometrics'), 'delete').click(); await settle();
+  expect(panel()!.textContent).toContain('This course was deleted');
+  expect(gets()).toBe(2);
+});
+

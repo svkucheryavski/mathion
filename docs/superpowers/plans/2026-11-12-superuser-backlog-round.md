@@ -74,7 +74,7 @@
 
 - **Real smtplib shapes.** The new sentences in T3.1–T3.3 key on how smtplib wraps a failure (`SMTPNotSupportedError`'s text, `SMTPServerDisconnected` wrapping a timeout). A test built from a hand-made exception passes even if a real server takes another path. T3 drives real `smtplib.SMTP` against a local socket stub for the no-AUTH and greeting-timeout cases.
 - **1024-based sizes reach student screens.** `formatFileSize` feeds submission, asset and evaluation lists. A test or gate line that pins a 1000-based string elsewhere has to change on purpose, not by accident. T4 greps for every caller and checks each screen's expected string.
-- **The remove-admin 204 has other callers.** Set up step 2 and the Courses page both call `removeAdmin`. Neither may still treat a 409 as "someone else removed it". T1 greps the callers and covers both.
+- **The remove-admin 204 has other callers.** The grep in T1 found the Courses page is the only caller of `removeAdmin` outside the tests (Set up step 2 doesn't call it). It may not still treat a 409 as "someone else removed it".
 - **Branding's last-good copy across threads.** `load_branding` runs in many request threads. The read counter has to be taken under `_lock` and compared under `_lock`. T2 tests two interleaved reads with a barrier, not by sleeping.
 - **Duplicate tooltip lines also go to the screen-reader list.** The hidden `items` list and the `tip` have to disambiguate the same way, or VoiceOver reads two identical lines. T1's test asserts both.
 

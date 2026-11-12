@@ -83,6 +83,12 @@ it('the address warning shows only while the address differs, singular for one (
   expect(panel().textContent).toContain('Links people saved or shared with the old address will stop working: 1 run, 1 student.');
 });
 
+it('the address warning groups big numbers (rev 11)', async () => {
+  render({ course: { ...STAT, run_count: 1200, student_count: 4213 } }); await settle();
+  type(field('Address'), 'stat-2');
+  expect(panel().textContent).toContain('Links people saved or shared with the old address will stop working: 1,200 runs, 4,213 students.');
+});
+
 it('a course with no runs and no students warns without counts (D11 rev 10: not "0 runs, 0 students")', async () => {
   render({ course: { ...ONE, run_count: 0, student_count: 0 } }); await settle();
   type(field('Address'), 'alg-2');

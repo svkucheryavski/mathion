@@ -1,6 +1,6 @@
 # Superuser panel: Users and Courses — design
 
-**Status:** rev 10, 2026-11-04.
+**Status:** rev 11, 2026-11-12.
 - Rev 2 folded in the builder check (D12a, D12b).
 - Rev 3 folded in spec review round 1, three lanes (`.superpowers/sdd/2026-11-03-superuser-users-courses/spec-r1-*.md`), and the user's answers on mockup 2.
 - Rev 4 folded in spec review round 2 (`spec-r2-*.md`) and the user's answer on confirms (D24).
@@ -10,6 +10,7 @@
 - Rev 8 gives D14 short role chips with hover lists and greyed disabled rows (Safari pass).
 - Rev 9 caps the D14 hover list (Safari pass, user's: "looks very busy").
 - Rev 10 words the course-delete confirm for a course with no versions (D12) and the address warning for one with no runs or students (D11), both from the Safari pass.
+- Rev 11 is the backlog round (2026-11-12, the user's calls): the Disable warning's commas and student runs (D18), English number grouping (D15), the admin email's "a link to the course" and "Hi," with no name (D5, D5a), the Edit course lines (D9), same-named lines in a tooltip (D14), and removing an admin that is already gone counts as done (D9); an admin email still waiting in the queue isn't queued twice (D5).
 
 **Branch:** `feat/superuser-users-courses` (local).
 
@@ -66,7 +67,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - An existing account is used; a missing one is created on the spot with `get_or_create_user` (`backend/mathion/api/lookups.py:22`).
   - That function does no normalising, so the panel's request schemas normalise with `_normalize_email` (`schemas.py:10-21`), as `RunTeacherCreate` does (`schemas.py:491-496`).
   - They also reject an empty value after normalising, and anything without a minimal `local@domain` shape.
-- D5 (user's): the new admin gets **a short email**, "You are now the admin of <course>", with a sign-in link to the course in the editor (`/courses/<slug>/edit`, `frontend/src/routes.ts:10`). This needs work in the email queue:
+- D5 (user's): the new admin gets **a short email**, "You are now the admin of <course>", with a sign-in link to the course in the editor (`/courses/<slug>/edit`, `frontend/src/routes.ts:10`). Every email greets "Hi <name>," or, with no name yet, "Hi," (rev 11, the user's; never the address). Assigning the same person again while their email about this course is still waiting (A → B → A) adds no second one (rev 11, mine). The queue then checks a skip again under the course's lock, which the assign holds, so the person put back still gets that email (rev 11, mine). This needs work in the email queue:
   - Today it can only render run emails. `_build_render_context` requires `run_id` and loads a `Run` (`notifications/dispatcher.py:55-65`), and `RenderContext.run` is mandatory (`templates.py:11-21`). A course-level row would fail on its first tick as a permanent error and never be sent.
   - So the dispatcher gains a course-scoped context: `run` becomes optional, and a `course` is added.
   - The new kind, `course_admin_assigned`, reads the course's **current** slug at send time.
@@ -76,7 +77,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - "Email is set up" means **a mailer exists**: `email_mode != "disabled"`. That is the same condition that starts the email queue (`main.py:84-88`, `mailer.py:86-88`). It is **not** `send_pin_enabled`, which is also true in debug with email off (`api/auth.py:53`), when nothing would ever be sent. The `memory` test sink counts as set up on purpose, so the `tick()` test sees the row; don't narrow this to `in ("smtp", "file")`.
   - The create and assign answers say what happened to the email: queued, email off, not sent because the account is disabled, or not sent because nothing changed (the same admin again). When more than one applies, the first in this order wins: unchanged, disabled, email off, queued (a disabled account can't use `mathion pin`).
   - The panel shows one note per case. Each opens with the result: "Anna Holm is now the admin of Statistics 101." after an assign, "Statistics 101 is created; Anna Holm is its admin." after New course. Then:
-    - queued: "An email with a sign-in link is on its way to <email>."
+    - queued: "An email with a link to the course is on its way to <email>." (rev 11, the user's; the colleague still signs in with a PIN)
     - email off: "Email isn't set up on this server, so tell them yourself. They sign in at <base_url>/courses/<slug>/edit with a PIN: run `mathion pin <email>` on the server (the PIN lasts <pin_expiry_minutes> minutes)." The number comes from `settings.pin_expiry_minutes` (`auth.py:70`). (`cli/cmd/pin.go`; in dev the same is `python -m mathion.superuser pin <email>`.)
     - disabled: "No email sent: this account is disabled. Enable it on the Users page so they can sign in."
     - unchanged: "They are already the admin; nothing changed." (With no change, there is no result sentence before it.)
@@ -95,7 +96,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - Everything happens in one transaction: insert the course, flush, then `get_or_create_user`, the admin row, the notification (D5) and the commit.
   - A taken address gives a 409, "This address is already used by another course".
   - Use a SAVEPOINT or a pre-check so a slug conflict isn't confused with the user-insert recovery.
-- D9 (user's, rev 6): the admin is changed, assigned or removed in the course's **Edit** dialog (D24), in its admin's-email field with the same hint. The old admin keeps their account and loses only this course. **Clearing the email** removes the admin: the dialog then says "<course> will have no admin." before Save, and Save leaves the course with none.
+- D9 (user's, rev 6): the admin is changed, assigned or removed in the course's **Edit** dialog (D24), in its admin's-email field with the same hint. The old admin keeps their account and loses only this course. **Clearing the email** removes the admin: the dialog then says "<course> will have no admin." before Save (the name as typed, rev 11), and Save leaves the course with none. Rev 11: **another address** in the field says "<old admin> will no longer be the admin." (their name, else their email); a case-only retype of the same address is no change. Removing an admin that is already gone (another tab) answers 204, so Save just finishes.
 - D10 (user's): **Rename** a course (its name).
 - D11 (user's): **Change the address** (slug). The dialog warns that links people saved or shared with the old address will stop working, with the counts: "2 runs, 37 students". A course with no runs and no students, such as one just created, gives no counts: "Links people saved or shared with the old address will stop working." (rev 10, user's; the Safari pass would have shown "0 runs, 0 students"). The students are the distinct accounts on the rosters (`run_students`) of the course's runs (mine). That includes links in emails Mathion already sent and links inside the course's own pages. Old addresses are not remembered or forwarded.
 - D12 (user's): **Delete** a course only when it has **no runs**. With runs, the trash button is greyed and says why ("2 runs: can't be deleted"). It uses `aria-disabled` with a `title`, as `IconButton` supports (`IconButton.svelte:37,164`), not a native `disabled`, so the reason can still be focused and read. The confirm is a dialog in which the course name must be typed (D24). The typed name is trimmed and must match exactly, case included; Delete stays off until it does. The dialog is built on `Modal`, not on the tick-box `DangerConfirm` the run screens use. Deleting also removes the course's files from disk (`<asset_path>/courses/<version_id>/` for each version, `api/assets.py:27`). The confirm reads "Delete <name>? Its N versions and their files go too. This can't be undone.", singular for one ("Its 1 version and its files go too."). A course with no versions, such as one just created, leaves that sentence out: "Delete <name>? This can't be undone." (rev 10, mine; the Safari pass showed "Its 0 versions").
@@ -141,12 +142,14 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - at most ten items; a longer list shows the first ten, then one more line "… and N more", with no bullet;
   - a course name is cut to at most 24 characters and a run title to at most 20, the "…" included (so a cut name keeps up to 23 or 19 characters, a trailing space dropped, then "…"); Admin's course names are cut the same way to 30 (the numbers are mine; the user asked for 20-30). Cutting the two parts apart keeps the run title, which tells two runs of one course apart, in view.
 
+  Rev 11 (mine): two lines that would read the same get what tells them apart, in the tooltip and the hidden list alike: a course its address ("Algebra (algebra-2)"), a run its id ("Algebra · Spring (run 14)"). Cuts go by visible character, so a flag or a letter with its accent is never split.
+
   The same list, complete and uncut, is in visually hidden text inside the chip, so a screen reader reads it (mine). The users list therefore sends the teacher and student runs as lists of `{id, title, course_name}`, not counts.
 
   A **disabled account's row is greyed** (user's; a Disabled column with a disc was tried in the Safari pass and dropped): the row's cells take the `--disabled-bg` fill (#FBFBFC, the theme's disabled-control fill; user asked for "#fafafa or similar", and #F5F6F9 was too dark), the name turns the muted grey and loses its weight, and the role chips take the disabled-state grey; email and last active are muted already. The icons stay as they are, since Enable and Edit are what a superuser needs there. A screen reader hears "Disabled" after the name (visually hidden). There is no "Disabled" chip and no Disabled column. The Disable warning (D18) still names the courses and says "teaches N runs".
 - D15 (user's): **no pages.** The list shows the **20 most recently created** accounts, newest first. Typing in the search box filters on the server and shows up to 20 matches. Filter pills (All, Admins, Teachers, Students, Disabled) combine with the search.
 
-  A line under the table always says how many are shown (exact copy mine, rev 4). The noun follows the pill: "accounts", "admins", "teachers", "students", "disabled accounts", and is singular for one ("1 account").
+  A line under the table always says how many are shown (exact copy mine, rev 4). Numbers use English grouping, "4,213" (rev 11, the user's), here and wherever these pages print a count (the Courses table, the warnings, the delete dialog). The noun follows the pill: "accounts", "admins", "teachers", "students", "disabled accounts", and is singular for one ("1 account").
   - no search, more than 20: "Showing the 20 newest of 42 accounts. Search to find others."
   - no search, 20 or fewer: "12 accounts".
   - searching, more than 20 matches: "20 of 57 match. Keep typing to narrow."
@@ -161,7 +164,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
     - Search terms escape `%` and `_` (`ilike(…, escape='\\')`).
 - D16 (mine): the search matches the email **or** the name, as a case-insensitive substring. The user asked for email; matching the name as well costs nothing.
 - D17 (user's): **New account** takes an email and an optional name. Creating it sends no email; the account isn't tied to anything yet. An email that already has an account gets a 409, "An account with this email already exists".
-- D18 (user's): **Disable / Enable**, with a confirm strip under the row (D24) that names what the person loses: "Disable Anna Holm? Anna Holm is the admin of Statistics 101 and teaches 2 runs. They'll be signed out and can't sign in until enabled; tell them yourself." Mathion stores no gender, so the text never says she or he.
+- D18 (user's): **Disable / Enable**, with a confirm strip under the row (D24) that names what the person loses: "Disable Anna Holm? Anna Holm is the admin of Statistics 101 and teaches 2 runs. They'll be signed out and can't sign in until enabled; tell them yourself." Rev 11 (the user's): student runs are named too, and the parts take commas: "Anna Holm is the admin of Algebra and Geometry, teaches 2 runs and is a student in 1 run."; when the part before the last joiner itself holds an "and" (a two-course admin part), that joiner is ", and": "…of Algebra and Geometry, and teaches 2 runs." Mathion stores no gender, so the text never says she or he.
   - Disabling also **deletes the person's sessions**, in the same transaction as the flag (lane A M9: `invalidate_all_sessions` commits on its own, `auth.py:162-167`, so don't call it mid-handler).
   - `validate_session` already rejects a disabled user (`auth.py:143`), so an open tab stops working at its next request, and unsaved editor work in that tab is lost. That is accepted.
   - The login page keeps its usual answer ("PIN sent", no reason given); that is accepted.
@@ -200,7 +203,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
 - D23 (user's, from the mockup): the panel bar's gold "Superuser" label becomes three nav pills, **Dashboard, Users and Courses**, with the active pill in the gold look. Routes: `/superuser/{token}`, `/superuser/{token}/users`, `/superuser/{token}/courses`. The bar still has no links that leave the panel.
 - D25 (mine, rev 3; lane B I3): **the token's 404 keeps one meaning.** A 404 from the panel guard means the link has expired or is invalid (`superuser.py:25-35`).
   - Every new endpoint answers "the course or account is gone" with **409** and a message ("This course was deleted"), never 404.
-  - 409 therefore means several things: gone, has runs (D12c), address taken (D8), email taken (D17, D19). The frontend shows the server's `detail` text as it is, never a sentence picked by status. On any 409 a dialog stays open with the input kept and shows the message, and the list reloads in the background, so a row that is gone disappears once the dialog is cancelled. A confirm strip that gets a 409 (an account that gained data, an admin already removed, a row gone) closes; the server's message shows in the note strip (D5a), and the list reloads.
+  - 409 therefore means several things: gone, has runs (D12c), address taken (D8), email taken (D17, D19). The frontend shows the server's `detail` text as it is, never a sentence picked by status. On any 409 a dialog stays open with the input kept and shows the message, and the list reloads in the background, so a row that is gone disappears once the dialog is cancelled. A confirm strip that gets a 409 (an account that gained data, a row gone) closes; the server's message shows in the note strip (D5a), and the list reloads.
   - The shell handles the guard's 401 (go and sign in) and 404 (the expired-link page) once, for every panel page.
   - An expired link loses an open dialog's input. That is accepted: the inactivity window is 30 minutes, and every save resets it.
 

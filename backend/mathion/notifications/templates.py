@@ -31,8 +31,11 @@ class RenderContext:
         return self.course.slug
 
 
-def _name(u) -> str:
-    return u.full_name or u.email
+def _greeting(u) -> str:
+    """The email's first line: "Hi <name>," or, with no name, "Hi," (the
+    user's call 2026-11-12: never the address)."""
+    name = (u.full_name or "").strip()
+    return f"Hi {name}," if name else "Hi,"
 
 
 def _student_url(ctx) -> str:
@@ -50,7 +53,7 @@ def _evaluation_received(ctx):
     from mathion.api.mini_projects import mini_project_title
     subject = f"New evaluation in {ctx.run.title}"
     body = (
-        f"Hi {_name(ctx.user)},\n\n"
+        f"{_greeting(ctx.user)}\n\n"
         f'Your submission to "{mini_project_title(ctx.mp.block)}" has been evaluated.\n\n'
         f"View it: {_student_url(ctx)}\n\n"
         f"— {ctx.site_name}\n")
@@ -60,7 +63,7 @@ def _evaluation_received(ctx):
 def _run_enrolled(ctx):
     subject = f"You've been enrolled in {ctx.run.title}"
     body = (
-        f"Hi {_name(ctx.user)},\n\n"
+        f"{_greeting(ctx.user)}\n\n"
         f'You\'ve been enrolled in "{ctx.run.title}".\n\n'
         f"Open it: {_student_url(ctx)}\n\n"
         f"— {ctx.site_name}\n")
@@ -70,7 +73,7 @@ def _run_enrolled(ctx):
 def _run_teacher_assigned(ctx):
     subject = f"You're teaching {ctx.run.title}"
     body = (
-        f"Hi {_name(ctx.user)},\n\n"
+        f"{_greeting(ctx.user)}\n\n"
         f'You\'ve been assigned as a teacher on "{ctx.run.title}".\n\n'
         f"Open it: {_staff_url(ctx)}\n\n"
         f"— {ctx.site_name}\n")
@@ -81,7 +84,7 @@ def _mini_project_published(ctx):
     from mathion.api.mini_projects import mini_project_title
     subject = f"New mini-project in {ctx.run.title}"
     body = (
-        f"Hi {_name(ctx.user)},\n\n"
+        f"{_greeting(ctx.user)}\n\n"
         f'A new mini-project "{mini_project_title(ctx.mp.block)}" is available in "{ctx.run.title}".\n\n'
         f"Open it: {_student_url(ctx)}\n\n"
         f"— {ctx.site_name}\n")
@@ -91,7 +94,7 @@ def _mini_project_published(ctx):
 def _course_admin_assigned(ctx):
     subject = f"You are now the admin of {ctx.course.name}"
     body = (
-        f"Hi {_name(ctx.user)},\n\n"
+        f"{_greeting(ctx.user)}\n\n"
         f'You are now the admin of "{ctx.course.name}" on {ctx.site_name}. '
         "You can work on it in the course editor.\n\n"
         f"Open it: {course_sign_in_url(ctx.course_slug, ctx.base_url)}\n\n"

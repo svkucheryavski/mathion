@@ -88,13 +88,28 @@ def _rows(db: Session, courses: list[Course]) -> list[PanelCourse]:
     ]
 
 
+def _admin_email_pending(db: Session, user_id: int, course_id: int) -> bool:
+    """Rev 11: this person's email about this course is still to go (A -> B ->
+    A before the queue drains), so no second one is added. Pending is a row
+    not sent and not closed with an error. The row is never touched, since the
+    dispatcher may be sending it right now; one that failed for good or was
+    skipped keeps its record and a new one is queued. The course lock this runs
+    under is the one a skip is checked again under (`skip_reason`)."""
+    rows = db.execute(select(NotificationLogEntry.payload).where(
+        NotificationLogEntry.user_id == user_id,
+        NotificationLogEntry.kind == COURSE_ADMIN_ASSIGNED,
+        NotificationLogEntry.sent_at.is_(None),
+        NotificationLogEntry.error.is_(None))).scalars()
+    return any((p or {}).get("course_id") == course_id for p in rows)
+
+
 def _assigned(db: Session, course: Course, target: User, changed: bool) -> AdminAssignResult:
     """Queue the admin email when it should go, commit, and say what happened (D5, D5a)."""
     try:
         # Reading the saved switch opens a savepoint, which flushes the admin
         # row first, so the outcome sits inside the try too.
         outcome = _admin_email_outcome(db, target, changed)
-        if outcome == "queued":
+        if outcome == "queued" and not _admin_email_pending(db, target.id, course.id):
             db.add(NotificationLogEntry(user_id=target.id, kind=COURSE_ADMIN_ASSIGNED,
                                         payload={"course_id": course.id}))
         db.commit()
@@ -186,10 +201,10 @@ def remove_admin(course_id: int, _user: User = Depends(require_superuser_panel_w
                  db: Session = Depends(get_db)):
     course = _locked_course(db, course_id)
     row = db.execute(select(CourseAdmin).where(CourseAdmin.course_id == course.id)).scalar_one_or_none()
-    if row is None:
-        raise HTTPException(status_code=409, detail="This course has no admin")
-    db.delete(row)
-    db.commit()
+    # Rev 11: already without an admin (removed in another tab) is done.
+    if row is not None:
+        db.delete(row)
+        db.commit()
 
 
 @router.get("/api/superuser/{token}/courses/{course_id}/delete-impact", response_model=CourseDeleteImpact)

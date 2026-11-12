@@ -6,6 +6,7 @@ from pathlib import Path
 from sqlalchemy import and_, not_, select
 from sqlalchemy.exc import SQLAlchemyError, PendingRollbackError, NoResultFound
 from sqlalchemy.orm import joinedload
+from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
 
 from mathion.branding import load_branding
 from mathion.config import settings
@@ -61,13 +62,39 @@ def skip_reason(db, row: NotificationLogEntry) -> str | None:
 
     Only the course-admin email is checked: it reads the course's current state
     at send time, so a replaced admin, a disabled account or a deleted course
-    gets no mail."""
+    gets no mail.
+
+    Rev 11: a reason is checked again under the course's row lock, which the
+    panel's assign holds while it looks for a pending email
+    (`_admin_email_pending`), so a skip can't cross a re-assign: the person put
+    back gets this email. A row still to send holds no lock while it is sent:
+    the first look takes none, and a second look that clears the row ends its
+    transaction, so a slow mail server never holds up the panel. Enabling an
+    account takes no course lock, so an enable just after the second look
+    still loses that email, as D5's skip at send time says."""
     if row.kind != COURSE_ADMIN_ASSIGNED:
         return None
-    course = db.get(Course, (row.payload or {}).get("course_id"))
+    reason = _skip_check(db, row, fresh=False)
+    if reason is None or reason == "course gone":
+        return reason
+    _lock_course(db, row.payload["course_id"])
+    reason = _skip_check(db, row, fresh=True)
+    if reason is None:
+        db.commit()  # nothing to write: only lets go of the course lock
+    return reason
+
+
+def _lock_course(db, course_id: int) -> None:
+    db.execute(select(Course.id).where(Course.id == course_id).with_for_update())
+
+
+def _skip_check(db, row: NotificationLogEntry, *, fresh: bool) -> str | None:
+    # `fresh` reloads what the first look cached, since the lock may have
+    # waited out a commit that changed it.
+    course = db.get(Course, (row.payload or {}).get("course_id"), populate_existing=fresh)
     if course is None:
         return "course gone"
-    user = db.get(User, row.user_id)
+    user = db.get(User, row.user_id, populate_existing=fresh)
     if user is None or user.is_disabled:
         return "recipient disabled"
     is_admin = db.execute(
@@ -154,6 +181,14 @@ def _where(mailer, view=None) -> dict:
                 timeout=getattr(mailer, "timeout", 20))
 
 
+def _passed_over(row_id: int) -> None:
+    """A row deleted while it was handled (its account deleted, which cascades)
+    has nothing left to send or retry: one info line, whichever step found it.
+    With no version counter on any model, a StaleDataError at a commit means
+    exactly this: the UPDATE found the row gone."""
+    logger.info("notification id=%s is gone; passed over", row_id)
+
+
 def _charge(db, row_id: int, send_exc: BaseException, failure: SmtpFailure | None,
             now: datetime) -> None:
     """Charge one failed message: a retry with its back-off, or a permanent
@@ -163,7 +198,8 @@ def _charge(db, row_id: int, send_exc: BaseException, failure: SmtpFailure | Non
     db.rollback()                       # clear any partial in-memory state
     row_db = db.get(NotificationLogEntry, row_id)
     if row_db is None:
-        return                          # row was deleted; skip
+        _passed_over(row_id)
+        return
     row_db.retry_count = (row_db.retry_count or 0) + 1
 
     kind = classify(send_exc)
@@ -176,17 +212,21 @@ def _charge(db, row_id: int, send_exc: BaseException, failure: SmtpFailure | Non
             row_db.error = error_msg
         row_db.next_attempt_at = None
         logger.warning("notification id=%s flagged permanently: %s",
-                       row_db.id, row_db.error)
+                       row_id, row_db.error)
         if failure is None:
             # Full exception for operator (logs only, never DB).
-            logger.exception("notification id=%s permanent-error detail", row_db.id, exc_info=send_exc)
+            logger.exception("notification id=%s permanent-error detail", row_id, exc_info=send_exc)
     else:
         idx = min(row_db.retry_count - 1, len(BACKOFF_SECONDS) - 1)
         row_db.next_attempt_at = now + timedelta(seconds=BACKOFF_SECONDS[idx])
     try:
         db.commit()
+    except StaleDataError:
+        db.rollback()
+        _passed_over(row_id)
     except SQLAlchemyError:
-        logger.exception("commit failed updating retry state: id=%s", row_db.id)
+        # The id comes from the caller: after a failed flush the row can't be read.
+        logger.exception("commit failed updating retry state: id=%s", row_id)
         db.rollback()
 
 
@@ -267,24 +307,34 @@ def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = T
                            len(rows), result.failure.text())
         return result
 
+    # The ids are taken while the rows are loaded: a commit expires them, and
+    # a row deleted meanwhile can't be read again to name it.
+    batch = [(r.id, r) for r in rows]
     try:
-        for row in rows:
+        for row_id, row in batch:
             result.processed += 1
             # D5: a row that should no longer be sent is closed here, not via
             # the error path (no retry count, no "flagged permanently" warning).
             try:
                 reason = skip_reason(db, row)
+            except ObjectDeletedError:
+                db.rollback()
+                _passed_over(row_id)
+                continue
             except SQLAlchemyError:
-                logger.exception("skip check failed (will retry): id=%s", row.id)
+                logger.exception("skip check failed (will retry): id=%s", row_id)
                 db.rollback()
                 continue
             if reason is not None:
                 row.error = f"skipped: {reason}"
                 try:
                     db.commit()
-                    logger.info("notification id=%s skipped: %s", row.id, reason)
+                    logger.info("notification id=%s skipped: %s", row_id, reason)
+                except StaleDataError:
+                    db.rollback()
+                    _passed_over(row_id)
                 except SQLAlchemyError:
-                    logger.exception("commit failed marking skip (will retry): id=%s", row.id)
+                    logger.exception("commit failed marking skip (will retry): id=%s", row_id)
                     db.rollback()
                 continue
             send_exc: BaseException | None = None
@@ -305,8 +355,14 @@ def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = T
                 try:
                     db.commit()
                     result.sent += 1
+                except StaleDataError:
+                    # Sent, then deleted before its commit: nothing to send
+                    # again, and it went, so the server works (Set up D6).
+                    db.rollback()
+                    result.sent += 1
+                    _passed_over(row_id)
                 except SQLAlchemyError as cexc:
-                    logger.exception("commit failed after successful send (will retry): id=%s", row.id)
+                    logger.exception("commit failed after successful send (will retry): id=%s", row_id)
                     db.rollback()
                     # We can't un-send the email; on next tick we re-claim and re-send (at-least-once).
                     # Leave row's in-memory state to be expired by the rollback.
@@ -321,12 +377,12 @@ def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = T
                 result.processed -= 1
                 result.failure = failure
                 if log_failures:
-                    logger.warning("notifications: sending stopped (%s): %s", row.id, failure.text())
+                    logger.warning("notifications: sending stopped (%s): %s", row_id, failure.text())
                 break
 
             # Error branch — failure path.
             result.refused = refusal_on_card(send_exc, failure, _where(mailer, view)["sender"]) or result.refused
-            _charge(db, row.id, send_exc, failure, now)
+            _charge(db, row_id, send_exc, failure, now)
             if isinstance(send_exc, smtplib.SMTPServerDisconnected):
                 # D9c: a disconnect mid-batch is charged to the message being
                 # sent and ends the batch, so the ones after it aren't charged.

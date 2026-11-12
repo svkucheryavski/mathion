@@ -1136,6 +1136,7 @@ PanelUserRole = Literal["all", "admins", "teachers", "students", "disabled"]
 class PanelCourseRef(BaseModel):
     id: int
     name: str
+    slug: str  # D14 rev 11: tells same-named courses apart in a tooltip
 
 
 class PanelRunRef(BaseModel):

@@ -25,3 +25,9 @@ it('cuts a long name to 80 and re-trims the hyphen the cut leaves', () => {
   expect(slug).toBe('a'.repeat(79));
   expect(slugFromName('x'.repeat(120))).toBe('x'.repeat(80));
 });
+
+it('spells out ß, ł and đ, which have no accent to drop', () => {
+  expect(slugFromName('Straße')).toBe('strasse');
+  expect(slugFromName('Łódź')).toBe('lodz');
+  expect(slugFromName('Đorđe')).toBe('dorde');
+});
