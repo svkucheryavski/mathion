@@ -42,6 +42,7 @@
   const done = $derived(step?.done ?? false);
   const busy = $derived(setup.busy || setup.saving);
   const changed = $derived(form?.changed ?? false);
+  const ready = $derived(form?.ready ?? false);
   const mode = $derived.by((): 'save' | 'continue' | 'none' => {
     if (!form) return 'none';
     if (devMode || (done && !changed && !due)) return 'continue';
@@ -51,9 +52,11 @@
   // differs, and while "step 1 saved" is still to send.
   const reason = $derived(!done && !changed && !due && !devMode ? step?.reason ?? null : null);
   // D3: after a half-save only "step 1 saved" is retried, unless the form
-  // changed since: then the email is saved again first, once it is ready.
-  const onlySaved = $derived(mode === 'continue' || (due && !changed));
-  const canSave = $derived(onlySaved || (form?.ready ?? false));
+  // holds something a save would write: then the email is saved again first.
+  // D6 (rev 19): with email off a save writes only the switch, so edits in
+  // the greyed fields don't count here (the leave questions still ask).
+  const onlySaved = $derived(mode === 'continue' || (due && !ready));
+  const canSave = $derived(onlySaved || ready);
 
   // D3: unsaved changes ask before leaving; Discard puts the loaded values back.
   useStepGuards({

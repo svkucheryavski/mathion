@@ -857,7 +857,10 @@ it('a half-save re-reads the state, so the marks follow the saved email (r1 M3)'
 
 const emailSwitch = () => target.querySelector<HTMLButtonElement>('.ee-switch button')!;
 
-it('after a half-save, a changed form that is not ready blocks Save and continue (D6)', async () => {
+// D6 (rev 19, user's): with email off a save writes only the switch, so
+// edits in the greyed fields are no change: the retry sends "step 1 saved"
+// alone and the step moves on without them.
+it('after a half-save, edits only in greyed fields retry "step 1 saved" alone (D6)', async () => {
   routes['PATCH /settings/email'] = (b) => [200, settings((b as { on: boolean }).on ? {} : { on: false })];
   routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
   routes['GET /setup'] = () => [200, state()];
@@ -874,10 +877,95 @@ it('after a half-save, a changed form that is not ready blocks Save and continue
   emailSwitch().click();
   flushSync();
   expect(registry.isAnyDirty()).toBe(true);
-  expect(blocked()).toBe(true);
+  expect(blocked()).toBe(false);
+  routes['POST /setup/saved'] = () => [200, state({ step: 2 })];
   foot('save')!.click();
   await settle();
-  expect(writes().map((c) => c.key)).toEqual(['PATCH /settings/email', 'POST /setup/saved']);
+  expect(writes().map((c) => c.key)).toEqual(['PATCH /settings/email', 'POST /setup/saved', 'POST /setup/saved']);
+  expect(title()).toBe('Site name and logo');
+  expect(registry.isAnyDirty()).toBe(false);     // the greyed edits left with the step
+});
+
+it('after a half-save, greyed edits still count as unsaved for the leave questions (D6)', async () => {
+  routes['PATCH /settings/email'] = (b) => [200, settings((b as { on: boolean }).on ? {} : { on: false })];
+  routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
+  routes['GET /setup'] = () => [200, state()];
+  await render();
+  emailSwitch().click();
+  flushSync();
+  foot('save')!.click();
+  await settle();
+  emailSwitch().click();
+  flushSync();
+  type(input('Mail server'), 'smtp.other.dk');
+  emailSwitch().click();
+  flushSync();
+  foot('skip')!.click();
+  await settle();
+  expect(confirmDiscard()).not.toBeNull();
+  expect(writes().map((c) => c.key)).toEqual(['PATCH /settings/email', 'POST /setup/saved']);   // no skip yet
+  expect(title()).toBe('Email');
+});
+
+// D6: the switch is something a save writes, so after a half-save changing
+// only the switch saves the email again before "step 1 saved".
+it('after a half-save, turning email off saves the switch again first (D6)', async () => {
+  routes['PATCH /settings/email'] = (b) => [200, settings((b as { on: boolean }).on ? { host: 'smtp.other.dk' } : { on: false, host: 'smtp.other.dk' })];
+  routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
+  routes['GET /setup'] = () => [200, state()];
+  await render();
+  type(input('Mail server'), 'smtp.other.dk');
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Boom.');                   // saved on; "step 1 saved" is due
+  emailSwitch().click();                         // Send email off: a save writes it
+  flushSync();
+  expect(blocked()).toBe(false);
+  routes['POST /setup/saved'] = () => [200, state({ step: 2 })];
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['PATCH /settings/email', 'POST /setup/saved', 'PATCH /settings/email', 'POST /setup/saved']);
+  expect(writes()[2].body).toEqual({ on: false });
+  expect(title()).toBe('Site name and logo');
+});
+
+it('after a half-save, turning email on saves the email again first (D6)', async () => {
+  routes['PATCH /settings/email'] = (b) => [200, settings((b as { on: boolean }).on ? {} : { on: false })];
+  routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
+  routes['GET /setup'] = () => [200, state()];
+  await render();
+  emailSwitch().click();                         // Send email off
+  flushSync();
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Boom.');                   // saved off; "step 1 saved" is due
+  emailSwitch().click();                         // on again: a save writes it
+  flushSync();
+  expect(blocked()).toBe(false);
+  routes['POST /setup/saved'] = () => [200, state({ step: 2 })];
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toEqual(['PATCH /settings/email', 'POST /setup/saved', 'PATCH /settings/email', 'POST /setup/saved']);
+  expect(writes()[2].body).toMatchObject({ on: true });
+  expect(title()).toBe('Site name and logo');
+});
+
+it('with no save due, edits only in greyed fields still block Save and continue (D6)', async () => {
+  routes['GET /settings'] = () => [200, settings({ on: false })];
+  await render();
+  expect(blocked()).toBe(true);                  // saved off, nothing changed
+  expect(target.querySelector('.se-reason')?.textContent).toBe(EMAIL_REASON);
+  emailSwitch().click();                         // on, a new server, off again
+  flushSync();
+  type(input('Mail server'), 'smtp.other.dk');
+  emailSwitch().click();
+  flushSync();
+  expect(registry.isAnyDirty()).toBe(true);
+  expect(blocked()).toBe(true);                  // nothing a save would write
+  expect(target.querySelector('.se-reason')).toBeNull();   // the edits still hide the reason
+  foot('save')!.click();
+  await settle();
+  expect(writes()).toEqual([]);
 });
 
 it("a passed test's answer stays after the save, also when step saved then fails (D6)", async () => {
