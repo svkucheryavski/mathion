@@ -7,7 +7,7 @@
 // Reset to default is a pending change like a chosen file; the last one wins.
 // A refusal drops every pending change, so the preview is the saved item.
 import { PanelForm } from './formBase.svelte';
-import { checkPngBytes } from '../pngCheck';
+import { checkPngBytes, PNG_MAX_BYTES, pngTooBig } from '../pngCheck';
 import type { PanelImageSize } from '../superuser';
 
 export const IMAGE_TEXT = {
@@ -81,6 +81,9 @@ export class LogoPick extends PanelForm<SavedImage> {
   async choose(file: File): Promise<void> {
     const mine = ++this.turn;
     this.edited();
+    // Rev 15: "All files" lets any file be picked; one over the cap is
+    // refused before it is read, with the sentence the byte check gives.
+    if (file.size > PNG_MAX_BYTES) { this.checking = false; this.refuse(pngTooBig(this.kind)); return; }
     this.checking = true;
     let bytes: Uint8Array<ArrayBuffer>;
     try {

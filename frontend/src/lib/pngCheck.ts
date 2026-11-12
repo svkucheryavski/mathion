@@ -81,6 +81,11 @@ function pngSize(data: Uint8Array): { width: number; height: number } | null {
   }
 }
 
+/** The 1 MB refusal, also given before a file is read (Branding rev 15). */
+export function pngTooBig(kind: 'logo' | 'icon'): string {
+  return `The ${ITEMS[kind].item} can be at most 1 MB.`;
+}
+
 /**
  * The dialog's whole check of a chosen file's bytes, in the server's order:
  * the 1 MB cap, D5's PNG check, the pixel caps; then D4's or D6's advice.
@@ -89,7 +94,7 @@ export function checkPngBytes(
   bytes: Uint8Array, kind: 'logo' | 'icon',
 ): { width: number; height: number; advice: string[] } | { refused: string } {
   const it = ITEMS[kind];
-  if (bytes.length > PNG_MAX_BYTES) return { refused: `The ${it.item} can be at most 1 MB.` };
+  if (bytes.length > PNG_MAX_BYTES) return { refused: pngTooBig(kind) };
   const size = pngSize(bytes);
   if (!size) return { refused: `The ${it.item} must be a PNG file.` };
   const { width, height } = size;

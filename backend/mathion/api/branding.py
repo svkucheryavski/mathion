@@ -2,7 +2,9 @@
 versioned by a hash of the bytes served, and safe during a database outage."""
 from fastapi import APIRouter, HTTPException, Request, Response
 
-from mathion.branding import BrandingUnavailable, last_good, load_branding, read_image, short_hash
+from mathion.branding import (
+    BrandingUnavailable, ImageMeta, kept_copy, last_good, load_branding, read_image, short_hash,
+)
 from mathion.branding_defaults import ICON_32_PNG, ICON_180_PNG, ICON_SVG
 
 # Files, not JSON: kept out of the OpenAPI schema.
@@ -32,10 +34,10 @@ def _answer(request: Request, data: bytes, media_type: str) -> Response:
     return Response(data, media_type=media_type, headers=headers)
 
 
-def _unavailable(request: Request, kind: str) -> Response:
-    """The bytes can't be read: a browser that has the last image read keeps
-    it (304); anything else is told to ask again (503), never 404 or cached."""
-    kept = getattr(last_good(), kind)
+def _unavailable(request: Request, kept: ImageMeta | None) -> Response:
+    """The bytes can't be read: a browser that has the last image read (`kept`)
+    keeps it (304); anything else is told to ask again (503), never 404 or
+    cached."""
     if kept is not None and _matches(request, f'"{kept.hash}"'):
         return Response(status_code=304, headers={**_SAFE, "ETag": f'"{kept.hash}"', "Cache-Control": "no-cache"})
     return Response(status_code=503, headers={"Cache-Control": "no-store"})
@@ -45,7 +47,7 @@ def _upload(request: Request, kind: str) -> Response:
     try:
         data = read_image(kind)
     except BrandingUnavailable:
-        return _unavailable(request, kind)
+        return _unavailable(request, getattr(last_good(), kind))
     if data is None:
         raise HTTPException(status_code=404, detail="Not Found")
     return _answer(request, data, "image/png")
@@ -83,11 +85,18 @@ def theme_css(request: Request) -> Response:
 
 
 def favicon_ico(request: Request) -> Response:
-    """`/favicon.ico`: the uploaded icon, else the 32 px default."""
+    """`/favicon.ico`: the uploaded icon, else the 32 px default.
+
+    During an outage with nothing read since startup, the address can't tell
+    "no upload" from "not read yet": a browser holding another icon is told
+    to ask again (503) rather than handed Mathion's (rev 15)."""
     try:
         data = read_image("icon")
     except BrandingUnavailable:
-        if last_good().icon is not None:
-            return _unavailable(request, "icon")
+        default = f'"{short_hash(ICON_32_PNG)}"'
+        kept, read = kept_copy()
+        if kept.icon is not None or (
+                not read and request.headers.get("if-none-match") and not _matches(request, default)):
+            return _unavailable(request, kept.icon)
         data = None
     return _answer(request, data if data is not None else ICON_32_PNG, "image/png")

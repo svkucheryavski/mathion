@@ -7,6 +7,7 @@ The writers (D12) lock the one row and change only their own item; the caller
 commits.
 """
 import hashlib
+import itertools
 import logging
 import threading
 import unicodedata
@@ -80,9 +81,31 @@ class BrandingUnavailable(Exception):
 
 
 # D13: the last branding read successfully, and whether an outage is logged.
+# Rev 15: each read takes a ticket once it holds its connection, just before
+# its query, and only a read newer than the kept one replaces it, so a slow
+# read that finishes last can't put back older branding. Ticket 0 means
+# nothing has been read since startup.
 _lock = threading.Lock()
 _last_good: Branding = DEFAULT_BRANDING
+_kept_ticket = 0
+_tickets = itertools.count(1)
 _failing = False
+
+
+def _ticket() -> int:
+    # Close to query order, not exact: a read can be paused between its
+    # ticket and its query; the next read puts that right.
+    with _lock:
+        return next(_tickets)
+
+
+def _keep(ticket: int, branding: Branding) -> None:
+    global _last_good, _kept_ticket, _failing
+    with _lock:
+        # Only a read newer than the kept one ends an outage: an older one
+        # finishing says nothing about now.
+        if ticket > _kept_ticket:
+            _last_good, _kept_ticket, _failing = branding, ticket, False
 
 
 def _image(width: int | None, height: int | None, hash_: str | None) -> ImageMeta | None:
@@ -104,9 +127,12 @@ def _from_row(db: Session) -> Branding:
     )
 
 
-def _read() -> Branding:
+def _read() -> tuple[int, Branding]:
     with SessionLocal() as db:
-        return _from_row(db)
+        # A pool wait can take seconds, so the ticket comes after it.
+        db.connection()
+        ticket = _ticket()
+        return ticket, _from_row(db)
 
 
 def _with_theme(branding: Branding) -> Branding:
@@ -135,9 +161,9 @@ def load_branding() -> Branding:
 
     It takes a second pool connection while a request holds its own, so a
     request should call it before its first query of its own."""
-    global _last_good, _failing
+    global _failing
     try:
-        branding = _read()
+        ticket, branding = _read()
     except Exception as e:
         with _lock:
             if not _failing:
@@ -148,20 +174,35 @@ def load_branding() -> Branding:
                 _failing = True
             return _copy(_last_good)
     branding = _with_theme(branding)
-    with _lock:
-        _last_good, _failing = branding, False
+    _keep(ticket, branding)
     return _copy(branding)
 
 
 def read_in(db: Session) -> Branding:
     """The branding through the caller's session: the panel's read after its
-    own save, which must see what it just committed (D14). Errors propagate."""
-    return _with_theme(_from_row(db))
+    own save, which must see what it just committed (D14). Errors propagate.
+
+    Rev 15: it is kept as the last good copy too, so an outage that starts
+    right after a save serves the saved branding. Callers read after their
+    own branding commit (or write no branding), so what is kept is committed."""
+    db.connection()  # after a commit the session waits for the pool again
+    ticket = _ticket()
+    branding = _with_theme(_from_row(db))
+    _keep(ticket, branding)
+    return _copy(branding)
 
 
 def last_good() -> Branding:
     with _lock:
         return _copy(_last_good)
+
+
+def kept_copy() -> tuple[Branding, bool]:
+    """The last good copy and whether a read has been kept since startup, in
+    one look (rev 15: before a read, the copy is only the defaults, not what
+    the database holds)."""
+    with _lock:
+        return _copy(_last_good), _kept_ticket > 0
 
 
 def read_image(kind: str) -> bytes | None:
@@ -175,9 +216,9 @@ def read_image(kind: str) -> bytes | None:
 
 def reset_cache() -> None:
     """Tests only: forget the last good copy and the outage."""
-    global _last_good, _failing
+    global _last_good, _kept_ticket, _failing
     with _lock:
-        _last_good, _failing = DEFAULT_BRANDING, False
+        _last_good, _kept_ticket, _failing = DEFAULT_BRANDING, 0, False
 
 
 # --- the writers (D12) ---

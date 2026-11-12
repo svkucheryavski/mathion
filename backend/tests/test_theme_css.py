@@ -49,7 +49,7 @@ def test_accepted_and_canonical(raw, stored):
     "rgb(50%, 0, 0)", "hsl(210, 30, 36)", "hsl(210 30 36)", "hsl(30% 40% 50%)", "rgb(1, 2 3)",
     "rgba(1 2 3 / .5)", "rgb(1, 2, 3 / .5)", "rgb(1 2)", "#12", "#12345", "1.", "rgb(1. 2 3)",
     "oklch(0.5 0.1 200)", "lab(50% 40 59)", "hwb(194 0% 0%)", "color(srgb 1 0 0)",
-    "none", "currentcolor", "inherit", "initial", "unset", "revert", "Canvas", "", "var(--danger, #fff)",
+    "none", "currentcolor", "inherit", "initial", "unset", "revert", "Canvas", "var(--danger, #fff)",
     "rgb(1 2 3 4)", "rgb(63 92 119 .5)", "hsl(210 30% 36% 50%)", "rgb(1% 2% 3% 4%)", "rgb(1 2 3 4 / .5)",
     "hsl(1e999 50% 50%)", "rgb(1e999 0 0)", "rgb(0 0 0 / 1e999)",
 ])
@@ -100,6 +100,35 @@ def test_other_rules_are_structure():
     assert problems("color: red;") == [STRUCTURE.format(n=2)]
     assert parse_theme(b":root {\n  --text: #000;\n  a { --bg: #fff }\n}\n").problems == [STRUCTURE.format(n=3)]
     assert parse_theme(b":root {\n  --text: #000;\n").problems == [STRUCTURE.format(n=1)]
+
+
+@pytest.mark.parametrize("head", ['@CHARSET "UTF-8";', '@charset\t"utf-8";'])
+def test_charset_is_ascii_case_blind(head):
+    assert parse_theme(f"{head}\n:root {{ --text: #000 }}".encode()).problems == []
+
+
+@pytest.mark.parametrize("head", ['@char\u017fet "utf-8";', '@charset\u00a0"utf-8";', '@charset "utf-8"\u00a0;'])
+def test_charset_refuses_non_ascii(head):
+    # The long s (U+017F) folds to s under Unicode case-blind matching.
+    assert parse_theme(f"{head}\n:root {{ --text: #000 }}".encode()).problems == [STRUCTURE.format(n=1)]
+
+
+@pytest.mark.parametrize("text", [":root{\u00a0\n--bg: #000;}", ":root{--bg:\u00a0\n#000;}"])
+def test_a_no_break_space_is_reported_on_its_own_line(text):
+    assert [p[:7] for p in parse_theme(text.encode()).problems] == ["Line 1:"]
+
+
+def test_numbers_are_ascii_digits_only(monkeypatch):
+    # Python's \d and float() take other scripts' digits; a stored value
+    # with them would be written out and dropped by the browser.
+    monkeypatch.setattr(theme_css, "_logged", set())
+    assert parse_colour("rgb(\u0661\u0662 0 0)") is None
+    assert changes_in_use({"--bg": "rgb(\u0661\u0662 0 0)"}) == {}
+
+
+def test_canonical_keeps_a_no_break_space():
+    # Only CSS whitespace is folded, so canonical() can't hide one either.
+    assert canonical("#FFF\u00a0") == "#fff\u00a0"
 
 
 def test_charset_first_only():
@@ -249,3 +278,69 @@ def test_write_stylesheet():
     assert write_stylesheet({}) == ""
     assert write_stylesheet({"--text": "rgb(1 2 3 / .5)", "--bg": "#fff"}) == (
         ":root:root {\n  --bg: #fff;\n  --text: rgb(1 2 3 / .5);\n}\n")
+
+
+# --- the echo (backlog round, Branding spec rev 15) ---
+
+def test_empty_value_says_it_is_empty():
+    help_ = NOT_A_COLOUR.format(n=2, v="x").split("isn't a colour. ", 1)[1]
+    assert problems("--bg: ;") == [f"Line 2: the value is empty. {help_}"]
+    assert problems("--bg:;") == [f"Line 2: the value is empty. {help_}"]
+
+
+def test_echo_cuts_before_escaping():
+    # The cut counts characters, so a code is never split, and the … stays one character.
+    value = "x" * 39 + "\u00a0" + "yyy"
+    assert problems(f"--text: {value};") == [NOT_A_COLOUR.format(n=2, v="x" * 39 + "\\u00a0\u2026")]
+    assert problems("--text: rgb(\U0001f642);") == [NOT_A_COLOUR.format(n=2, v="rgb(\\U0001f642)")]
+
+
+def test_a_cut_drops_the_space_before_the_ellipsis():
+    assert problems(f"--text: {'x' * 39} yyy;") == [NOT_A_COLOUR.format(n=2, v="x" * 39 + "…")]
+
+
+@pytest.mark.parametrize("decls, problem", [
+    # D10: only CSS whitespace (space, tab, line break, form feed) separates;
+    # a no-break space is a non-ASCII character and refused with its code.
+    (["--bg: #fff ;"], NOT_A_COLOUR.format(n=2, v="#fff\\u00a0")),
+    (["--bg: #fff;"], NOT_A_COLOUR.format(n=2, v="\\u00a0#fff")),
+    (["--bg: #fff　;"], NOT_A_COLOUR.format(n=2, v="#fff\\u3000")),
+    (["--bg : #000;"], "Line 2: `--bg\\u00a0` isn't a theme variable."),
+    ([" --bg: #000;"], STRUCTURE.format(n=2)),
+    (["--bg: #fff\v;"], NOT_A_COLOUR.format(n=2, v="#fff\\u000b")),
+])
+def test_only_css_whitespace_separates(decls, problem):
+    assert problems(*decls) == [problem]
+
+
+def test_a_no_break_space_before_root_is_refused():
+    assert parse_theme(b"\xc2\xa0:root { --bg: #fff; }").problems == [STRUCTURE.format(n=1)]
+
+
+def test_backtick_in_an_echo_is_escaped():
+    assert problems("--text: re`d;") == [NOT_A_COLOUR.format(n=2, v="re\\u0060d")]
+    assert problems("--b`g: #fff;") == ["Line 2: `--b\\u0060g` isn't a theme variable."]
+
+
+def test_names_are_echoed_like_values():
+    assert problems("--bg\u200b: #fff;") == ["Line 2: `--bg\\u200b` isn't a theme variable."]
+    long = "--" + "n" * 60
+    assert problems(f"{long}: #fff;") == [f"Line 2: `{long[:40]}\u2026` isn't a theme variable."]
+
+
+def test_changes_in_use_keeps_theme_order():
+    order = [v.name for v in THEME_VARS]
+    stored = {"--primary": "#111111", "--bg": "#222222", "--muted": "#333333"}
+    assert list(changes_in_use(stored)) == sorted(stored, key=order.index)
+
+
+def test_changes_in_use_drops_values_equal_to_the_default(monkeypatch, caplog):
+    # A release can make a stored colour equal Mathion's own: it is no change.
+    monkeypatch.setattr(theme_css, "_logged", set())
+    with caplog.at_level("WARNING", logger="mathion.theme_css"):
+        assert changes_in_use({"--bg": "#f2f3f6", "--text": "#000"}) == {"--text": "#000"}
+        assert changes_in_use({"--bg": "#f2f3f6", "--text": "#000"}) == {"--text": "#000"}
+    # A warning, since Mathion's logging hides anything below a warning; the line says why.
+    assert len(caplog.records) == 1 and caplog.records[0].getMessage() == (
+        "branding: the stored colour --bg: #f2f3f6 is left out "
+        "(the same as Mathion's colour now, expected after a release)")

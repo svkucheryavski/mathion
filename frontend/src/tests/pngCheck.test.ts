@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkPngBytes, crc32, PNG_MAX_BYTES } from '../lib/pngCheck';
+import { checkPngBytes, crc32, PNG_MAX_BYTES, pngTooBig } from '../lib/pngCheck';
 
 // Branding D4-D6: the dialog's PNG check mirrors the server's check_png
 // (backend/tests/test_png_check.py) case for case, so the dialog never
@@ -91,6 +91,11 @@ describe('checkPngBytes: what a browser can show (D5)', () => {
 });
 
 describe('checkPngBytes: the caps (D4, D6)', () => {
+  it('pngTooBig is the sentence the byte check gives (Branding rev 15)', () => {
+    expect(pngTooBig('logo')).toBe('The logo can be at most 1 MB.');
+    expect(pngTooBig('icon')).toBe('The tab icon can be at most 1 MB.');
+  });
+
   it('1 MB is 1,048,576 bytes; one byte more is refused first', () => {
     expect(PNG_MAX_BYTES).toBe(1_048_576);
     const pad = (n: number) => { const b = new Uint8Array(n); b.set(VALID); return b; };
