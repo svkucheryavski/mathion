@@ -26,7 +26,7 @@
     LATEST_STATUS_META,
     REASON_LABELS,
   } from '../lib/studentMiniProjects';
-  import { uploadLimit, overUploadLimit, tooLargeSentence } from '../lib/uploadLimit.svelte';
+  import { overUploadLimit, overLimitSentence, tooLargeSentence } from '../lib/uploadLimit.svelte';
   import { externalLinks } from '../lib/externalLinks';
   import type { StudentMiniProjectDetail } from '../lib/types';
   import StatusPill from '../components/course/StatusPill.svelte';
@@ -351,7 +351,7 @@
       return;
     }
     if (overUploadLimit(file.size)) {
-      submitErrorMessage = `File too large — ${uploadLimit.mb} MB maximum.`;
+      submitErrorMessage = overLimitSentence(file.name);
       submitErrorIsNetwork = false;
       submitState = 'error';
       return;

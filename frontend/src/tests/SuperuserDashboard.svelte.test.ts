@@ -46,6 +46,16 @@ it('fetches and renders five stat cards with formatted storage', async () => {
   expect(text).toContain('1.5 kB');   // formatFileSize(1500)
 });
 
+// The user's call (2026-11-13): 3.5 GB no longer reads "3584.0 MB".
+it('shows a storage of several GB in GB', async () => {
+  vi.stubGlobal('fetch', mockFetch(200, {
+    total_users: 3, total_courses: 2, storage_bytes: 3.5 * 1024 ** 3, active_users_24h: 1, active_users_7d: 2,
+  }));
+  component = mount(SuperuserDashboard, { target, props: { token: 'tok', onAuth: vi.fn(), setup } });
+  await settle();
+  expect(target.textContent).toContain('3.5 GB');
+});
+
 it('threads the token into the stats URL and skips the global auth redirect', async () => {
   const f = mockFetch(200, ZEROS);
   vi.stubGlobal('fetch', f);

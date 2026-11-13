@@ -10,6 +10,7 @@ import { crc32 } from '../lib/pngCheck';
 import { createDirtyRegistry, DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../lib/dirtyRegistry.svelte';
 import { InPlaceAsk, NAV_ASK_KEY, type NavAskView } from '../lib/askInPlace.svelte';
 import * as router from '../lib/router.svelte';
+import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
 
 // Set up D3-D9: the page frame, its moves, All set, and the four steps: Email,
 // Site name and logo, First course and its admin, Sign-in rules and limits.
@@ -115,6 +116,7 @@ afterEach(() => {
   if (cmp) unmount(cmp);
   cmp = null;
   setup.dispose();
+  resetUploadLimit();   // step 4's limits save sets the tab's upload limit
   target.remove();
   if (decodeStubbed) delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
   decodeStubbed = false;
@@ -647,6 +649,25 @@ it('a step not done with nothing changed has Save and continue blocked; the skip
   expect(foot('skip')!.getAttribute('aria-disabled')).toBeNull();
 });
 
+// Review t4-r13: with no username the server ignores a typed password, so
+// in Set up too it is no change (the note says it isn't used).
+it('a password typed with no username: a done step keeps Continue, and leaving does not ask', async () => {
+  await render(state({}, [true, false, false, false]));
+  type(input('Password'), 'secret');
+  expect(target.textContent).toContain("Without a username, the password isn't used.");
+  expect(foot('save')!.textContent!.trim()).toBe('Continue');
+  expect(registry.isAnyDirty()).toBe(false);
+});
+
+it('a password typed with no username keeps Save and continue blocked on a step not done', async () => {
+  await render();
+  type(input('Password'), 'secret');
+  expect(blocked()).toBe(true);
+  foot('save')!.click();
+  await settle();
+  expect(writes()).toEqual([]);
+});
+
 it('done step shows Continue when unchanged, and Continue sends step saved', async () => {
   routes['POST /setup/saved'] = () => [200, state({ step: 2 }, [true, false, false, false])];
   await render(state({}, [true, false, false, false]));
@@ -717,6 +738,9 @@ it('while the email save runs, the step waits (setup.saving)', async () => {
 });
 
 it('a test answer triggers a store re-read, even after leaving step 1', async () => {
+  // The answer lands after the step is gone: it must not read the step's
+  // derived state then (Svelte's derived_inert warning, round 6).
+  const warn = vi.spyOn(console, 'warn');
   const d = deferred();
   routes['POST /settings/email/test'] = () => d.promise;
   routes['GET /setup'] = () => [200, state({ step: 2 }, [true, false, false, false], [true, false, false, false])];
@@ -731,6 +755,8 @@ it('a test answer triggers a store re-read, even after leaving step 1', async ()
   await settle();
   expect(calls.filter((c) => c.key === 'GET /setup')).toHaveLength(1);
   expect(setup.state?.steps[0].done).toBe(true);
+  expect(warn.mock.calls.flat().join(' ')).not.toContain('derived_inert');
+  warn.mockRestore();
 });
 
 it("a test's answer shows in the step", async () => {
@@ -982,6 +1008,180 @@ it("a passed test's answer stays after the save, also when step saved then fails
   await settle();
   expect(err()).toBe('Boom.');
   expect(target.querySelector('.se-result')?.textContent).toBe('Sent.');
+});
+
+const testButton = () => [...card()!.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Send test email')!;
+
+// Settings Task 5 backlog, Set up's copy of the Email form.
+it('Send test does nothing while the step-1 save runs', async () => {
+  const d = deferred();
+  routes['PATCH /settings/email'] = () => d.promise;
+  routes['POST /setup/saved'] = () => [200, state({ step: 2 })];
+  await render();
+  type(input('Mail server'), 'smtp.other.dk');
+  foot('save')!.click();
+  await settle();
+  expect(testButton().getAttribute('aria-disabled')).toBe('true');
+  // The fields hold still with their look (D9): the choices are not disabled.
+  const choices = [...card()!.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+  expect(choices.length).toBeGreaterThan(0);
+  expect(choices.every((r) => r.getAttribute('aria-disabled') === 'true' && !r.disabled)).toBe(true);
+  testButton().click();
+  await settle();
+  expect(calls.filter((c) => c.key === 'POST /settings/email/test')).toHaveLength(0);
+  d.resolve([200, settings({ host: 'smtp.other.dk' })]);
+  await settle();
+});
+
+it('a refused step-1 email save replaces the test answer; a new test clears the save error', async () => {
+  routes['POST /settings/email/test'] = () => [200, { ok: false, message: 'Could not connect.' }];
+  routes['GET /setup'] = () => [200, state()];
+  routes['PATCH /settings/email'] = () => [422, { detail: 'Could not connect.' }];
+  await render();
+  type(input('Mail server'), 'smtp.other.dk');
+  testButton().click();
+  await settle();
+  expect(target.querySelector('.se-result')).not.toBeNull();
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Could not connect.');
+  expect(target.querySelector('.se-result')).toBeNull();
+  testButton().click();
+  await settle();
+  expect(target.querySelector('.se-result')?.textContent).toBe('Could not connect.');
+  expect(err()).toBeNull();
+});
+
+it('a test keeps a "step 1 saved" error: it holds the card (D13)', async () => {
+  routes['POST /settings/email/test'] = () => [200, { ok: true, message: 'Sent.' }];
+  routes['GET /setup'] = () => [200, state()];
+  routes['PATCH /settings/email'] = () => [200, settings({ host: 'smtp.other.dk' })];
+  routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
+  await render();
+  type(input('Mail server'), 'smtp.other.dk');
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Boom.');
+  testButton().click();
+  await settle();
+  expect(target.querySelector('.se-result')?.textContent).toBe('Sent.');
+  expect(err()).toBe('Boom.');
+  expect(title()).toBe('Email');
+});
+
+it('a test that fails keeps a "step 1 saved" error too (D13)', async () => {
+  routes['POST /settings/email/test'] = () => [409, { detail: 'The last test is still finishing. Try again in a minute.' }];
+  routes['GET /setup'] = () => [200, state()];
+  routes['PATCH /settings/email'] = () => [200, settings({ host: 'smtp.other.dk' })];
+  routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
+  await render();
+  type(input('Mail server'), 'smtp.other.dk');
+  foot('save')!.click();
+  await settle();
+  testButton().click();
+  await settle();
+  expect(target.querySelector('.se-result')?.textContent).toBe('The last test is still finishing. Try again in a minute.');
+  expect(err()).toBe('Boom.');
+});
+
+// Review t4-r2: "newer" goes by start in Set up too.
+it('a step-1 test sent before an email save that fails is dropped; the save error stays', async () => {
+  const d = deferred();
+  routes['POST /settings/email/test'] = () => d.promise;
+  routes['GET /setup'] = () => [200, state()];
+  routes['PATCH /settings/email'] = () => [422, { detail: 'Could not connect.' }];
+  await render();
+  type(input('Mail server'), 'smtp.other.dk');
+  testButton().click();
+  await settle();
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Could not connect.');
+  d.resolve([200, { ok: true, message: 'Sent.' }]);
+  await settle();
+  expect(target.querySelector('.se-result')).toBeNull();
+  expect(err()).toBe('Could not connect.');
+});
+
+it('step 1: the port sentence as a test answer, then as the save error: it shows once', async () => {
+  await render();
+  type(input('Port'), 'abc');
+  testButton().click();
+  await settle();
+  expect(target.querySelector('.se-result')?.textContent).toBe('The port must be from 1 to 65535.');
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('The port must be from 1 to 65535.');
+  expect(target.querySelector('.se-result')).toBeNull();
+  expect(writes()).toEqual([]);
+});
+
+it('step 1: the port sentence as a save error, then Send test: only the answer shows', async () => {
+  await render();
+  type(input('Port'), 'abc');
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('The port must be from 1 to 65535.');
+  testButton().click();
+  await settle();
+  expect(target.querySelector('.se-result')?.textContent).toBe('The port must be from 1 to 65535.');
+  expect(err()).toBeNull();
+  expect(writes()).toEqual([]);
+});
+
+it('a step-1 test start clears an email-save error at once', async () => {
+  const d = deferred();
+  routes['POST /settings/email/test'] = () => d.promise;
+  routes['GET /setup'] = () => [200, state()];
+  routes['PATCH /settings/email'] = () => [422, { detail: 'Could not connect.' }];
+  await render();
+  type(input('Mail server'), 'smtp.other.dk');
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Could not connect.');
+  testButton().click();
+  await settle();
+  expect(err()).toBeNull();
+  d.resolve([200, { ok: true, message: 'Sent.' }]);
+  await settle();
+});
+
+it("step 1's test answer scrolls into view", async () => {
+  const spy = vi.fn();
+  const had = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
+  Element.prototype.scrollIntoView = spy;
+  try {
+    routes['POST /settings/email/test'] = () => [200, { ok: true, message: 'Sent.' }];
+    routes['GET /setup'] = () => [200, state()];
+    await render();
+    testButton().click();
+    await settle();
+    expect(spy).toHaveBeenCalledWith({ block: 'nearest' });
+    expect(spy.mock.contexts).toContain(target.querySelector('.se-result'));
+  } finally {
+    if (had) Object.defineProperty(Element.prototype, 'scrollIntoView', had);
+    else delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  }
+});
+
+it("step 1's new answer in the same box scrolls into view again", async () => {
+  const spy = vi.fn();
+  const had = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
+  Element.prototype.scrollIntoView = spy;
+  try {
+    await render();
+    type(input('Port'), 'abc');
+    testButton().click();
+    await settle();
+    const result = target.querySelector('.se-result')!;
+    testButton().click();
+    await settle();
+    expect(target.querySelector('.se-result')).toBe(result);
+    expect(spy.mock.contexts.filter((c) => c === result)).toHaveLength(2);
+  } finally {
+    if (had) Object.defineProperty(Element.prototype, 'scrollIntoView', had);
+    else delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  }
 });
 
 it('the not-done reason stays hidden while "step 1 saved" is due (D6)', async () => {
@@ -1488,6 +1688,20 @@ it('limits refused after sign-in saved, when that completed the last step: error
   await settle();
   expect(writes().map((c) => c.key)).toEqual(['PATCH /settings/sign-in', 'PATCH /settings/limits', 'PATCH /settings/limits', 'POST /setup/saved']);
   expect(target.querySelector('.as-card')).not.toBeNull();
+});
+
+// Settings Task 6 backlog: the upload screens in this tab use the new limit
+// at once, without a reload.
+it("a step-4 limits save updates this tab's upload limit", async () => {
+  uploadLimit.mb = 20;                          // afterEach resets it
+  routes['PATCH /settings/limits'] = () => [200, { ...settings(), limits: { max_file_mb: 75, max_total_mb: 500 } }];
+  routes['POST /setup/saved'] = () => [200, state({ step: 1 }, [false, false, false, true])];
+  await render(state({ step: 4 }));
+  type(input('Largest file (MB)'), '75');
+  foot('save')!.click();
+  await settle();
+  expect(writes().map((c) => c.key)).toContain('PATCH /settings/limits');
+  expect(uploadLimit.mb).toBe(75);
 });
 
 it('"1.5" shows Type a whole number. (limits: Type a whole number of MB.) and sends nothing', async () => {
@@ -2274,4 +2488,55 @@ it('a failed "step 3 saved" under the note: Continue retries it even when the ne
   await settle();
   expect(writes().map((c) => c.key)).toEqual(['POST /courses', 'POST /setup/saved', 'POST /setup/saved']);
   expect(title()).toBe('Sign-in rules and limits');
+});
+
+// D13: a test never clears a "step 1 saved" error, also one raised while the
+// test runs, after a re-read made the step done (round 7).
+it('a "step 1 saved" error raised during a test stays after its answer', async () => {
+  let reads = 0;
+  const firstRead = deferred();
+  const second = deferred();
+  let tests = 0;
+  routes['POST /settings/email/test'] = () => (++tests === 1 ? [200, { ok: true, message: 'Sent.' }] : second.promise);
+  routes['GET /setup'] = () => (++reads === 1 ? firstRead.promise : [200, state({}, [true, false, false, false], [true, false, false, false])]);
+  routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
+  await render();
+  testButton().click();
+  await settle();
+  expect(target.querySelector('.se-result')?.textContent).toBe('Sent.');
+  testButton().click();
+  await settle();
+  firstRead.resolve([200, state({}, [true, false, false, false], [true, false, false, false])]);
+  await settle();
+  expect(foot('save')!.textContent!.trim()).toBe('Continue');
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Boom.');
+  second.resolve([200, { ok: true, message: 'Sent again.' }]);
+  await settle();
+  expect(target.querySelector('.se-result')?.textContent).toBe('Sent again.');
+  expect(err()).toBe('Boom.');
+});
+
+// D13: an email save's error with the same words as an earlier "step 1 saved"
+// error is still a save error: a new test clears it (round 7).
+it('a test clears an email save error worded like an earlier "step 1 saved" one', async () => {
+  let patches = 0;
+  routes['PATCH /settings/email'] = () => (++patches === 1 ? [200, settings({ host: 'smtp.other.dk' })] : [500, { detail: 'Boom.' }]);
+  routes['POST /setup/saved'] = () => [500, { detail: 'Boom.' }];
+  routes['GET /setup'] = () => [200, state()];
+  routes['POST /settings/email/test'] = () => new Promise(() => {});
+  await render();
+  type(input('Mail server'), 'smtp.other.dk');
+  foot('save')!.click();
+  await settle();
+  expect(err()).toBe('Boom.');                   // "step 1 saved" refused
+  type(input('Mail server'), 'smtp.third.dk');
+  foot('save')!.click();
+  await settle();
+  expect(patches).toBe(2);
+  expect(err()).toBe('Boom.');                   // now the email save's error
+  testButton().click();
+  await settle();
+  expect(err()).toBeNull();
 });

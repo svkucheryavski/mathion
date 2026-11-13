@@ -153,9 +153,9 @@ describe('RunAssetsTab — table rendering', () => {
     expect(linkTexts).toContain('doc.pdf');
     expect(linkTexts).toContain('fig.png');
 
-    // formatFileSize: 1234 -> "1.2 kB", 180000 -> "180.0 kB"
+    // formatFileSize (1024-based): 1234 -> "1.2 kB", 180000 -> "175.8 kB"
     expect(target.textContent).toContain('1.2 kB');
-    expect(target.textContent).toContain('180.0 kB');
+    expect(target.textContent).toContain('175.8 kB');
 
     // uploaded_by_email populated for doc.pdf
     expect(target.textContent).toContain('admin@example.com');
@@ -720,7 +720,7 @@ describe('RunAssetsTab — upload via file picker', () => {
     Object.defineProperty(hiddenInput, 'files', { value: [file], configurable: true });
     hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
-    expect(target.textContent).toContain('huge.pdf: file too large (the limit is 50 MB).');
+    expect(target.textContent).toContain('huge.pdf is over the 50 MB limit.');
     expect(uploadRunAsset).not.toHaveBeenCalled();
 
     uploadLimit.mb = null;
@@ -770,7 +770,7 @@ describe('RunAssetsTab — upload via file picker', () => {
     hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
 
-    expect(target.textContent).toMatch(/file too large/i);
+    expect(target.textContent).toContain('huge.pdf is over the 20 MB limit.');
     expect(uploadRunAsset).not.toHaveBeenCalled();
   });
 
@@ -838,7 +838,7 @@ describe('RunAssetsTab — upload via drop zone', () => {
     expect(onRefetchAssets).toHaveBeenCalled();
   });
 
-  it('drops an oversize file → inline "file too large" error, no upload', async () => {
+  it('drops an oversize file → inline over-the-limit error, no upload', async () => {
     component = mount(RunAssetsTab, { target, props: baseProps() });
     flushSync();
 
@@ -848,7 +848,8 @@ describe('RunAssetsTab — upload via drop zone', () => {
     dropZone.dispatchEvent(makeDropEvent([file]));
     await settle();
 
-    expect(target.textContent).toMatch(/file too large/i);
+    // One refused file: its sentence alone, no "Nothing was uploaded." line.
+    expect(target.querySelector('.banner-error')?.textContent).toBe('huge.pdf is over the 20 MB limit.');
     expect(uploadRunAsset).not.toHaveBeenCalled();
   });
 
@@ -883,7 +884,7 @@ describe('RunAssetsTab — upload via drop zone', () => {
     expect(dropZone.classList.contains('drag-over')).toBe(false);
   });
 
-  it('stop-on-first-invalid pre-pass: invalid file in batch blocks all uploads', async () => {
+  it('the pre-pass: an invalid file in a batch blocks all uploads', async () => {
     component = mount(RunAssetsTab, { target, props: baseProps() });
     flushSync();
 
@@ -893,7 +894,22 @@ describe('RunAssetsTab — upload via drop zone', () => {
     dropZone.dispatchEvent(makeDropEvent([good, bad]));
     await settle();
 
-    expect(target.textContent).toMatch(/extension not allowed/i);
+    expect(target.textContent).toContain('Nothing was uploaded. b.exe: extension not allowed.');
+    expect(uploadRunAsset).not.toHaveBeenCalled();
+  });
+
+  // Review t4-r3: like the course editor's file list, every refused file
+  // gets its sentence, after a line that says the drop stopped.
+  it('a drop of several files names every refused one', async () => {
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+    const dropZone = target.querySelector('.run-assets-tab') as HTMLElement;
+    const big = new File(['x'], 'huge.pdf', { type: 'application/pdf' });
+    Object.defineProperty(big, 'size', { value: 20 * 1024 * 1024 + 1 });
+    const bad = new File(['y'], 'b.exe', { type: 'application/octet-stream' });
+    dropZone.dispatchEvent(makeDropEvent([big, new File(['z'], 'ok.pdf', { type: 'application/pdf' }), bad]));
+    await settle();
+    expect(target.textContent).toContain('Nothing was uploaded. huge.pdf is over the 20 MB limit. b.exe: extension not allowed.');
     expect(uploadRunAsset).not.toHaveBeenCalled();
   });
 });
@@ -1041,7 +1057,7 @@ describe('RunAssetsTab — replace flow', () => {
     pickReplaceFile(big);
     await settle();
 
-    expect(target.textContent).toMatch(/file too large/i);
+    expect(target.textContent).toContain('big.pdf is over the 20 MB limit.');
     expect(findButton(target, /^(Delete|Replace)$/)).toBeNull();
   });
 

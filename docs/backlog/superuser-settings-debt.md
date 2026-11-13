@@ -24,41 +24,12 @@ Sorted 2026-11-12: only items a person using the site can meet, and open calls, 
 
 Minors from the review lanes, Task 5 (Opus + Fable, round 1).
 
-- **Edit email: the saved password's hint can mislead.** The placeholder
-  "Saved: type a new one to replace it" stays when the mail server or username
-  changes or the certificate box is newly ticked, though D8a then asks for the
-  password again; the server's sentence says so on Save or test. Clearing the
-  username drops the saved password with no hint, and a password typed with no
-  username is ignored. Fix: derive the placeholder from D8a's rule, and add a
-  note when the username is cleared.
-- **Edit email while busy:**
-  - Send test email stays usable while Save runs, so it can start a needless
-    20 s server-side test.
-  - While saving, the segmented choices and the checkbox go `disabled` (they
-    flash grey and drop focus), while the text fields only go read-only.
-  - A save error stays on screen next to a test result that says the same.
-- **Edit email layout:** on a short laptop screen the test answer can sit
-  below the fold of the scrolling body. Scroll it into view when it appears.
 - **Cancel mid-test** reloads the page before the test records, so in the
   failing-server case the card shows the test only on the next load (D9a
   accepts this).
-- **Greyed fields:** `.ee-input:disabled` keeps the strong border. Match the
-  project's disabled-field look (`--border-faint`) and pin it in the gate.
 
 ## Task 6: the login page and the upload screens
 
-- **A saved limit reaches other screens only on reload.** The upload limit is
-  read once per page load. A superuser who changes it in the panel and goes on
-  to the course editor in the same tab still meets the old number until a
-  reload. A failed read also stays failed until the next reload. Fix: after
-  the limits save, set `uploadLimit.mb` to the saved value.
-- **The interactive-app upload (AppBody) has no browser-side size check.** It
-  never had one; the server's 400 sentence covers it.
-- **"Over the limit" is worded five ways** across the four screens, plus the
-  server's own sentence. One shared sentence would read better.
-- **File sizes use 1000-based units, the limit 1024-based.** `formatFileSize`
-  shows a 20.5 MiB file as "21.0 MB" beside "max 20 MB", and the file is
-  accepted. Pre-existing.
 - **Check by hand in the Safari pass:** a proxy can drop the connection
   instead of sending its 413 (HTTP/1.1, nginx). Then the student sees the
   network copy with Retry, not the limit sentence. Note which one appears in
@@ -92,8 +63,6 @@ Minors from the review lanes, Task 5 (Opus + Fable, round 1).
 - **Restoring a pre-update backup with the old image** needs the old email
   keys still in `.env`: with `MATHION_EMAIL_MODE=smtp` and the keys removed,
   the old image refuses to boot. One sentence in the release note.
-- **The red "saved password can't be read" hint stays visible with the switch
-  off** in the Edit email dialog (D7c needs no password then).
 - **The Email-off card names only `mathion pin`**; the manual docker-compose
   path has no `mathion` binary.
 - **The PIN email ignores the queue's back-off**, so each "Send PIN" tries a

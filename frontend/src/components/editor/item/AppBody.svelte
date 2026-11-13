@@ -13,7 +13,7 @@
   import { fetchAssetSource, uploadAsset, deleteAsset, type AssetResponse } from '../../../lib/assets';
   import { scanAppSource } from '../../../lib/appSourceScan';
   import { api, ApiError } from '../../../lib/api';
-  import { tooLargeSentence } from '../../../lib/uploadLimit.svelte';
+  import { overUploadLimit, overLimitSentence, tooLargeSentence } from '../../../lib/uploadLimit.svelte';
   import { patchItem, reportSaveFailure, type SaveOutcome } from '../../../lib/itemBody';
   import { loadAdminTree } from '../../../stores/currentEditorVersion.svelte';
   import { pushToast } from '../../../stores/toasts.svelte';
@@ -111,6 +111,9 @@
     if (!file) return;
     uploadError = null;
     warnings = [];
+    // Settings D11b: the browser's check, before reading or sending the file;
+    // the server's sentence still covers a limit this tab doesn't know.
+    if (overUploadLimit(file.size)) { uploadError = overLimitSentence(); return; }
     uploadBusy = true;
     // uploadAsset commits the Asset independently of the PATCH that references
     // it, so a failed PATCH would strand an orphan that also blocks a retry

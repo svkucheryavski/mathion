@@ -7,8 +7,10 @@ import {
   getBranding, saveSiteName, saveImage, checkTheme, saveTheme,
   type AdminAssignResult, type PanelUser, type PanelUserList, type PanelUserRole,
 } from '../lib/superuser';
+import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
 
-afterEach(() => vi.restoreAllMocks());
+// A limits save sets the tab's upload limit; forget it, also after a failure.
+afterEach(() => { vi.restoreAllMocks(); resetUploadLimit(); });
 
 it("panelError: anything that is not an ApiError or a lost connection says the general sentence", () => {
   expect(panelError(new SyntaxError('Unexpected token'), vi.fn())).toBe(REQUEST_ERROR_MESSAGE);
@@ -337,9 +339,12 @@ it('the Settings calls: one GET, a PATCH per card, a POST for the test, all on t
   expect(f.mock.calls[1][1]?.method).toBe('PATCH');
   expect(f.mock.calls[1][1]?.body).toBe(JSON.stringify({ on: false }));
 
+  // Settings D11b: the saved limit reaches this tab's upload screens.
+  f.mockImplementationOnce(async () => jsonResponse(200, { limits: { max_file_mb: 50, max_total_mb: 500 } }));
   await saveLimits('T', { max_file_mb: 50, max_total_mb: 500 });
   expect(String(f.mock.calls[2][0])).toBe('/api/superuser/T/settings/limits');
   expect(f.mock.calls[2][1]?.method).toBe('PATCH');
+  expect(uploadLimit.mb).toBe(50);
 
   await saveSignIn('T', { pin_minutes: 10, pin_requests_per_hour: 3, pin_failures_per_hour: 5, longest_sign_in_days: 7 });
   expect(String(f.mock.calls[3][0])).toBe('/api/superuser/T/settings/sign-in');
@@ -355,6 +360,15 @@ it('the Settings calls: one GET, a PATCH per card, a POST for the test, all on t
   f.mockImplementation(async () => jsonResponse(401, { detail: 'Not authenticated' }));
   await expect(getSettings('T')).rejects.toBeInstanceOf(ApiError);
   expect(unauth).not.toHaveBeenCalled();
+});
+
+// Settings D11b: only a saved limit reaches the upload screens; a refused
+// save leaves the tab's limit as it was.
+it('a refused limits save leaves the upload limit alone', async () => {
+  uploadLimit.mb = 20;
+  vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(422, { detail: 'Nope.' })));
+  await expect(saveLimits('T', { max_file_mb: 50, max_total_mb: 500 })).rejects.toBeInstanceOf(ApiError);
+  expect(uploadLimit.mb).toBe(20);
 });
 
 // --- Branding (D2, D5, D10, D14) ---

@@ -10,12 +10,12 @@
   import { formatLocalWithTz } from '../../lib/datetime';
   import { extractAssetRefs } from '../../lib/extractAssetRefs';
   import {
-    ALLOWED_EXTENSIONS,
     uploadRunAsset,
     replaceRunAsset,
     deleteRunAsset,
   } from '../../lib/runAssets';
-  import { uploadLimit, overUploadLimit, tooLargeSentence } from '../../lib/uploadLimit.svelte';
+  import { overUploadLimit, overLimitSentence, tooLargeSentence } from '../../lib/uploadLimit.svelte';
+  import { assetDropRefusal } from '../../lib/assetDrop';
   import { blockPositions } from '../../lib/blockNumbers';
   import { focusFirst } from '../../lib/focusFirst';
   import { repairFocus } from '../../lib/askInPlace.svelte';
@@ -185,25 +185,12 @@
     mounted = false;
   });
 
-  function isExtensionAllowed(name: string): boolean {
-    const idx = name.lastIndexOf('.');
-    const ext = idx >= 0 ? name.slice(idx + 1).toLowerCase() : '';
-    return ALLOWED_EXTENSIONS.has(ext);
-  }
-
-  function validateFile(f: File): string | null {
-    if (overUploadLimit(f.size)) return `${f.name}: file too large (the limit is ${uploadLimit.mb} MB).`;
-    if (!isExtensionAllowed(f.name)) return `${f.name}: extension not allowed.`;
-    return null;
-  }
-
   async function performUpload(files: File[]): Promise<void> {
     if (versionIsDisabled) return;
     banner = null;
-    for (const f of files) {
-      const err = validateFile(f);
-      if (err) { banner = err; return; }
-    }
+    // The editor's check (lib/assetDrop): one refused file stops them all.
+    const refused = assetDropRefusal(files);
+    if (refused !== null) { banner = refused; return; }
     uploadProgress = { current: 0, total: files.length };
     const controller = new AbortController();
     activeUploadController = controller;
@@ -287,7 +274,7 @@
       return;
     }
     if (overUploadLimit(file.size)) {
-      banner = `${file.name}: file too large (the limit is ${uploadLimit.mb} MB).`;
+      banner = overLimitSentence(file.name);
       return;
     }
     // One panel under a row (R14): the replace confirm closes "used by".

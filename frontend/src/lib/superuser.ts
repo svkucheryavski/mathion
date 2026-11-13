@@ -1,5 +1,6 @@
 import { api, ApiError, OFFLINE_MESSAGE, REQUEST_ERROR_MESSAGE } from './api';
 import type { BrandingPublic } from './branding.svelte';
+import { setUploadLimit } from './uploadLimit.svelte';
 
 // Every panel call passes skipAuthRedirect: the panel's shell handles 401 and
 // 404 itself (panelError), instead of the app-wide onUnauthorized redirect.
@@ -377,8 +378,12 @@ export function saveEmail(token: string, body: EmailSaveBody): Promise<PanelSett
   return api.patch<PanelSettings>(`${base(token)}/settings/email`, body, opts);
 }
 
-export function saveLimits(token: string, body: PanelLimits): Promise<PanelSettings> {
-  return api.patch<PanelSettings>(`${base(token)}/settings/limits`, body, opts);
+/** Settings D11b: the saved limit also reaches this tab's upload screens at
+ *  once (the Settings page and Set up's step 4 both save through here). */
+export async function saveLimits(token: string, body: PanelLimits): Promise<PanelSettings> {
+  const s = await api.patch<PanelSettings>(`${base(token)}/settings/limits`, body, opts);
+  setUploadLimit(s.limits.max_file_mb);
+  return s;
 }
 
 export function saveSignIn(token: string, body: PanelSignIn): Promise<PanelSettings> {

@@ -38,7 +38,7 @@
   import { formatFileSize } from '../../lib/format';
   import { focusFirst } from '../../lib/focusFirst';
   import { type EvaluationResult, createEvaluation, patchEvaluation, type Evaluation } from '../../lib/evaluations';
-  import { uploadLimit, overUploadLimit, tooLargeSentence } from '../../lib/uploadLimit.svelte';
+  import { uploadLimit, overUploadLimit, overLimitSentence, tooLargeSentence } from '../../lib/uploadLimit.svelte';
   import { ApiError } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
   import { tick, untrack } from 'svelte';
@@ -602,7 +602,7 @@
       formFeedbackFile = null; return;
     }
     if (overUploadLimit(file.size)) {
-      fileError = `File exceeds ${uploadLimit.mb} MB limit.`;
+      fileError = overLimitSentence();
       formFeedbackFile = null; return;
     }
     formFeedbackFile = file;

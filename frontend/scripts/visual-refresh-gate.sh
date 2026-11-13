@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3028
+EXPECTED_CHECKS=3029
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -6194,7 +6194,8 @@ uniq1 ee-pair
 if [[ -n $REPLY ]]; then
   N=EmailFields; H=$REPLY
   d '\.ee-pair' '' 'display:grid' 'grid-template-columns:1fr 90px'
-  d '\.ee-input' ':disabled' 'background:var\(--surface-2\)' 'color:var\(--muted\)'
+  # Settings Task 5 backlog: the project's disabled-field border, not the strong one.
+  d '\.ee-input' ':disabled' 'background:var\(--surface-2\)' 'color:var\(--muted\)' 'border-color:var\(--border-faint\)'
   d '\.ee-hint' '' 'font-size:12px' 'color:var\(--muted\)'
 fi
 uniq1 ee-result

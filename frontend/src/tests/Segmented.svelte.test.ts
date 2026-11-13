@@ -64,3 +64,40 @@ it('onchange gets the picked value', () => {
   flushSync();
   expect(seen).toEqual([1]);
 });
+
+// Settings Task 5 backlog: while a save runs the choice holds still but keeps
+// its look and focus (Switch's `frozen`), instead of going grey.
+it('frozen keeps the radios enabled, marks them aria-disabled and ignores a click', async () => {
+  const seen: number[] = [];
+  const state = render({ frozen: true, onchange: (v: number) => seen.push(v) });
+  expect(radios().some((r) => r.disabled)).toBe(false);
+  expect(radios().every((r) => r.getAttribute('aria-disabled') === 'true')).toBe(true);
+  expect(target.querySelector('.segmented')!.classList.contains('disabled')).toBe(false);
+  radios()[0].click();
+  segments()[2].click();
+  await Promise.resolve();
+  flushSync();
+  expect(state.value).toBe(7);
+  expect(radios().map((r) => r.checked)).toEqual([false, true, false]);
+  expect(seen).toEqual([]);
+});
+
+it('frozen ignores the arrow keys', () => {
+  const state = render({ frozen: true });
+  const ev = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
+  radios()[1].dispatchEvent(ev);
+  expect(ev.defaultPrevented).toBe(true);
+  expect(state.value).toBe(7);
+  // Only the arrow keys: Tab still leaves the choices (no keyboard trap).
+  const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+  radios()[1].dispatchEvent(tab);
+  expect(tab.defaultPrevented).toBe(false);
+});
+
+it('not frozen: no aria-disabled on the radios, and the arrow keys work', () => {
+  render();
+  expect(radios().some((r) => r.hasAttribute('aria-disabled'))).toBe(false);
+  const ev = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
+  radios()[1].dispatchEvent(ev);
+  expect(ev.defaultPrevented).toBe(false);
+});
