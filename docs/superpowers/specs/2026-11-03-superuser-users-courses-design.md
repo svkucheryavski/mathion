@@ -1,6 +1,6 @@
 # Superuser panel: Users and Courses — design
 
-**Status:** rev 12, 2026-11-13.
+**Status:** rev 13, 2026-11-13.
 - Rev 2 folded in the builder check (D12a, D12b).
 - Rev 3 folded in spec review round 1, three lanes (`.superpowers/sdd/2026-11-03-superuser-users-courses/spec-r1-*.md`), and the user's answers on mockup 2.
 - Rev 4 folded in spec review round 2 (`spec-r2-*.md`) and the user's answer on confirms (D24).
@@ -12,6 +12,7 @@
 - Rev 10 words the course-delete confirm for a course with no versions (D12) and the address warning for one with no runs or students (D11), both from the Safari pass.
 - Rev 11 is the backlog round (2026-11-12, the user's calls): the Disable warning's commas and student runs (D18), English number grouping (D15), the admin email's "a link to the course" and "Hi," with no name (D5, D5a), the Edit course lines (D9), same-named lines in a tooltip (D14), and removing an admin that is already gone counts as done (D9); an admin email still waiting in the queue isn't queued twice (D5).
 - Rev 12 (the backlog round's whole-branch review, 2026-11-13, the user's call): **D15:** the grouping also reaches the pills, the role chips and the panel Dashboard's cards.
+- Rev 13 (the backlog round's Codex review, 2026-11-13; the user's calls on the Users delete and the extra letters, the rest mine): **D13:** now also lists ß, ł and đ, which rev 11 added in code; capital ẞ spells out like ß; ǽ, ǿ and ǻ spell out as æ, ø and å do; œ, ı, þ, ð and ħ spell out too; and the name is read in its composed form (NFC) first. **D25:** a background reload that fails keeps the rows on screen; with none on screen it shows the load error, and a deleted course or account leaves the table at once.
 
 **Branch:** `feat/superuser-users-courses` (local).
 
@@ -121,7 +122,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - Three tests call it (`tests/test_courses.py:79-85`, `tests/test_access_control.py:110-114` and `:148-152`). They are deleted or re-pointed to the panel endpoint. After the removal that path answers 404 (the `/api/{rest:path}` catch-all in `main.py`; Task 3 ruling), not 403.
   - The old `POST /api/courses` (`courses.py:28`) **stays** as it is. It makes only an empty course and is used about 160 times as test setup.
 - D13 (mine; transliteration is the user's, rev 3): address rules are the existing course slug rules, `CourseCreate.slug` in `backend/mathion/schemas.py:25`: `^[a-z0-9]+(?:-[a-z0-9]+)*$`, 1-80 characters, unique (`models.py:15`).
-  - Filling the address from the name first transliterates **æ→ae, ø→oe, å→aa** (and their capitals), then strips the accents from other letters (é→e, ü→u).
+  - Filling the address from the name first transliterates **æ→ae, ø→oe, å→aa**, and ß→ss, ł→l, đ→d (rev 11) and œ→oe, ı→i, þ→th, ð→d, ħ→h (rev 13, the user's), each with its capital (ẞ too, rev 13), then strips the accents from other letters (é→e, ü→u). The name is read in its composed form (NFC) first (rev 13), so a decomposed å or the Ångström sign spells out as å does, and ǽ, ǿ, ǻ spell out as æ, ø, å do.
   - Then it lower-cases, turns each run of other characters into one hyphen, and trims hyphens at the ends. For example, "Kemometri på dansk" becomes `kemometri-paa-dansk`.
   - A long result is cut to 80 characters and its end hyphens trimmed again, so a long name never gives a 422 with nothing marked wrong.
   - A name that gives an empty address leaves the field empty for the superuser to fill.
@@ -205,6 +206,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
 - D25 (mine, rev 3; lane B I3): **the token's 404 keeps one meaning.** A 404 from the panel guard means the link has expired or is invalid (`superuser.py:25-35`).
   - Every new endpoint answers "the course or account is gone" with **409** and a message ("This course was deleted"), never 404.
   - 409 therefore means several things: gone, has runs (D12c), address taken (D8), email taken (D17, D19). The frontend shows the server's `detail` text as it is, never a sentence picked by status. On any 409 a dialog stays open with the input kept and shows the message, and the list reloads in the background, so a row that is gone disappears once the dialog is cancelled. A confirm strip that gets a 409 (an account that gained data, a row gone) closes; the server's message shows in the note strip (D5a), and the list reloads.
+  - A background reload (after a save, a strip action or a 409) that fails keeps the rows on screen and says nothing. With no rows on screen (no list yet, or an empty one, such as an empty pill or a search with no match) there is nothing to keep, so it shows the load error with Try again instead of the empty or loading line (rev 13). A deleted course or account leaves the table as soon as the delete succeeds, so a failed reload can't keep it; on Users the count line goes down by one and the pill counts wait for the next load (rev 13, the user's).
   - The shell handles the guard's 401 (go and sign in) and 404 (the expired-link page) once, for every panel page.
   - An expired link loses an open dialog's input. That is accepted: the inactivity window is 30 minutes, and every save resets it.
 

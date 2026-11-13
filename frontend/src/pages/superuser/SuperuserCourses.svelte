@@ -59,9 +59,10 @@
     } catch (err) {
       if (mine !== latest) return;
       const msg = panelError(err, onAuth);
-      // A quiet load needs the table (it follows a dialog or a strip), so it
-      // never stands in for a first load that failed.
-      if (!quiet) loadError = msg ?? '';
+      // D25 (rev 13): a quiet load keeps the table on screen. With no rows
+      // on screen (no list yet, or an empty one) there is nothing to keep,
+      // so its failure shows like a first load's, not as "No courses yet".
+      if (!quiet || courses.length === 0) loadError = msg ?? '';
     } finally {
       if (mine === latest) loading = false;
     }
@@ -129,6 +130,8 @@
 
   async function removeCourse(course: PanelCourse): Promise<void> {
     await guarded(() => deleteCourse(token, course.id));
+    // D25 (rev 13): the row goes at once, so a failed reload can't keep it.
+    courses = courses.filter((c) => c.id !== course.id);
     dialog = null;
     clearNote();
     void load(true);

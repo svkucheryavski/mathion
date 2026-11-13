@@ -53,8 +53,9 @@
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   // D15a: only the newest request's reply counts. `quiet` reloads behind
-  // the table (after a save or a strip action) and keep it if they fail, as
-  // the Courses page does (rev 11).
+  // the table (after a save or a strip action) and keep it if they fail;
+  // with no rows on screen (no list yet, or an empty one) there is nothing
+  // to keep, so the failure shows (D25, rev 13, as on the Courses page).
   async function load(quiet = false): Promise<void> {
     const mine = ++latest;
     const q = query.trim();
@@ -67,7 +68,7 @@
     } catch (err) {
       if (mine !== latest) return;
       const msg = panelError(err, onAuth);
-      if (!quiet || shown === null) loadError = msg ?? '';
+      if (!quiet || shown === null || shown.list.users.length === 0) loadError = msg ?? '';
     }
   }
 
@@ -139,7 +140,16 @@
     try {
       if (kind === 'disable') await disableUser(token, u.id);
       else if (kind === 'enable') await enableUser(token, u.id);
-      else await deleteUser(token, u.id);
+      else {
+        await deleteUser(token, u.id);
+        // D25 (rev 13): the row goes at once, so a failed reload can't keep
+        // it; the pill counts wait for the next load. A list loaded during
+        // the delete may not hold the row, and then nothing changes.
+        if (shown?.list.users.some((x) => x.id === u.id)) {
+          const users = shown.list.users.filter((x) => x.id !== u.id);
+          shown = { ...shown, list: { ...shown.list, users, total: shown.list.total - 1 } };
+        }
+      }
       note = null;
     } catch (err) {
       const msg = panelError(err, onAuth);

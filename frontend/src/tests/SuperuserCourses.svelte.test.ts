@@ -517,6 +517,89 @@ it('a first load that fails after a newer reload came back keeps the newer list 
   expect(target.textContent).not.toContain('Could not load');
 });
 
+it('a failed quiet reload with no list on screen yet shows the error, not "No courses yet" (D25, rev 13)', async () => {
+  let first!: () => void;
+  const list = courses();
+  routes['GET /courses'] = () => new Promise((r) => { first = () => r([200, list]); });
+  routes['POST /courses'] = () => [201, assigned(courses()[0], 'email_off')];
+  routes['POST /accounts/lookup'] = () => [200, { status: 'existing', full_name: 'Anna Holm' }];
+  await render();
+  routes['GET /courses'] = () => [500, { detail: 'Internal Server Error' }];
+  target.querySelector<HTMLButtonElement>('.panel-head button')!.click(); await settle();
+  type(panelInput('Course name'), 'Statistics 101');
+  type(panelInput("Admin's email"), 'aho@uni.dk');
+  footButton('Create').click(); await settle();
+  first(); await settle();   // the older first load answers late; it is dropped
+  expect(target.textContent).toContain('Could not load courses.');
+  expect(target.textContent).not.toContain('No courses yet');
+});
+
+it('a failed quiet reload after Edit keeps the table on screen, even a one-row one (D25, rev 13)', async () => {
+  routes['GET /courses'] = () => [200, [courses()[0]]];
+  routes['PATCH /courses/1'] = () => [200, { ...courses()[0], name: 'Statistics 102' }];
+  await render();
+  routes['GET /courses'] = () => [500, { detail: 'Internal Server Error' }];
+  act(row('Statistics 101'), 'edit').click(); await settle();
+  type(panelInput('Course name'), 'Statistics 102');
+  footButton('Save').click(); await settle();
+  expect(rows()).toHaveLength(1);
+  expect(target.textContent).not.toContain('Could not load');
+});
+
+it('a deleted course leaves the table even when the reload after it fails (D25, rev 13)', async () => {
+  routes['GET /courses/2/delete-impact'] = () => [200, { progress_students: 0 }];
+  routes['DELETE /courses/2'] = () => [204, null];
+  await render();
+  routes['GET /courses'] = () => [500, { detail: 'Internal Server Error' }];
+  act(row('Chemometrics'), 'delete').click(); await settle();
+  type(panelInput(), 'Chemometrics');
+  footButton('Delete course').click(); await settle();
+  expect(row('Chemometrics')).toBeUndefined();
+  expect(rows()).toHaveLength(2);
+  expect(target.textContent).not.toContain('Could not load');
+});
+
+it('a failed delete keeps the course in the table (D25, rev 13)', async () => {
+  routes['GET /courses/2/delete-impact'] = () => [200, { progress_students: 0 }];
+  routes['DELETE /courses/2'] = () => [500, { detail: 'Internal Server Error' }];
+  await render();
+  act(row('Chemometrics'), 'delete').click(); await settle();
+  type(panelInput(), 'Chemometrics');
+  footButton('Delete course').click(); await settle();
+  expect(panel()).not.toBeNull();
+  footButton('Cancel').click(); await settle();
+  expect(row('Chemometrics')).toBeTruthy();
+  expect(rows()).toHaveLength(3);
+});
+
+it('deleting the last course, then a failed reload, shows the error (D25, rev 13)', async () => {
+  routes['GET /courses'] = () => [200, [courses()[1]]];
+  routes['GET /courses/2/delete-impact'] = () => [200, { progress_students: 0 }];
+  routes['DELETE /courses/2'] = () => [204, null];
+  await render();
+  routes['GET /courses'] = () => [500, { detail: 'Internal Server Error' }];
+  act(row('Chemometrics'), 'delete').click(); await settle();
+  type(panelInput(), 'Chemometrics');
+  footButton('Delete course').click(); await settle();
+  expect(target.querySelector('table')).toBeNull();
+  expect(target.textContent).toContain('Could not load courses.');
+});
+
+it('a failed quiet reload after the first course on an empty list shows the error, not "No courses yet" (D25, rev 13)', async () => {
+  routes['GET /courses'] = () => [200, []];
+  routes['POST /courses'] = () => [201, assigned(courses()[0], 'email_off')];
+  routes['POST /accounts/lookup'] = () => [200, { status: 'existing', full_name: 'Anna Holm' }];
+  await render();
+  expect(target.textContent).toContain('No courses yet.');
+  routes['GET /courses'] = () => [500, { detail: 'Internal Server Error' }];
+  target.querySelector<HTMLButtonElement>('.panel-head button')!.click(); await settle();
+  type(panelInput('Course name'), 'Statistics 101');
+  type(panelInput("Admin's email"), 'aho@uni.dk');
+  footButton('Create').click(); await settle();
+  expect(target.textContent).toContain('Could not load courses.');
+  expect(target.textContent).not.toContain('No courses yet');
+});
+
 it('big counts are grouped in the table and in the trash tooltip (rev 11)', async () => {
   const list = courses(); list[0] = { ...list[0], version_count: 1200, run_count: 4213 };
   routes['GET /courses'] = () => [200, list];
