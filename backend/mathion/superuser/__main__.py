@@ -36,11 +36,13 @@ def main(argv: list[str] | None = None) -> int:
             if isinstance(result, PinIssued):
                 print(f"PIN: {result.pin}")
                 print(f"It expires in {result.minutes} minutes.")
-            elif isinstance(result, UnknownUser):
+                return 0
+            # No PIN: a non-zero exit, so `mathion pin` adds no "Log in at…".
+            if isinstance(result, UnknownUser):
                 print("unknown email")
             elif isinstance(result, DisabledUser):
                 print("user is disabled")
-            return 0
+            return 1
 
         if args.command == "activate":
             result = activate_panel(db)

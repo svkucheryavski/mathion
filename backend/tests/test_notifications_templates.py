@@ -7,7 +7,7 @@ import pytest
 NAME_WITH_EMOJI = 'Riverside \U0001f3eb Sk\u00f8le'
 
 from mathion.notifications.templates import (
-    TEMPLATES, RenderContext, render, _name, _student_url, _staff_url, _build_email_message,
+    TEMPLATES, RenderContext, render, _greeting, _student_url, _staff_url, _build_email_message,
 )
 
 
@@ -23,14 +23,28 @@ def _ctx(**overrides):
     return RenderContext(**base)
 
 
-def test_name_uses_full_name():
+def test_greeting_uses_full_name():
     user = SimpleNamespace(full_name="Bob", email="b@x")
-    assert _name(user) == "Bob"
+    assert _greeting(user) == "Hi Bob,"
 
 
-def test_name_falls_back_to_email():
-    user = SimpleNamespace(full_name=None, email="b@x")
-    assert _name(user) == "b@x"
+def test_greeting_without_a_name_is_plain_hi():
+    # The user's call 2026-11-12: never "Hi b@x,".
+    assert _greeting(SimpleNamespace(full_name=None, email="b@x")) == "Hi,"
+    assert _greeting(SimpleNamespace(full_name="", email="b@x")) == "Hi,"
+    assert _greeting(SimpleNamespace(full_name="   ", email="b@x")) == "Hi,"
+    assert _greeting(SimpleNamespace(full_name=" Bob ", email="b@x")) == "Hi Bob,"
+
+
+@pytest.mark.parametrize("kind", sorted(TEMPLATES))
+def test_every_kind_greets_without_the_email(kind):
+    ctx = _ctx(user=SimpleNamespace(full_name=None, email="alice@example.com"),
+               course=SimpleNamespace(name="Statistics 101", slug="calc-101"))
+    with patch("mathion.api.mini_projects.mini_project_title", return_value="Block 3 Project"):
+        _subject, body = render(kind, ctx)
+        named = render(kind, replace(ctx, user=SimpleNamespace(full_name="Anna Berg", email="alice@example.com")))[1]
+    assert body.startswith("Hi,\n\n")
+    assert named.startswith("Hi Anna Berg,\n\n")
 
 
 def test_student_url_no_query():
@@ -98,7 +112,7 @@ def test_course_admin_assigned_renders():
     )
     subject, body = render("course_admin_assigned", ctx)
     assert subject == "You are now the admin of Statistics 101"
-    assert body.startswith("Hi a@x,")
+    assert body.startswith("Hi,\n\n")
     assert "https://m.x/courses/stat/edit" in body
 
 

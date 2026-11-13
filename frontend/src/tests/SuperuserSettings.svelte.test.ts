@@ -2,6 +2,7 @@ import { it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import SuperuserSettings from '../pages/superuser/SuperuserSettings.svelte';
 import type { PanelSettings } from '../lib/superuser';
+import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
 
 async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 function jsonResponse(status: number, body: unknown) {
@@ -47,6 +48,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   if (cmp) unmount(cmp); cmp = null; target?.remove();
+  resetUploadLimit();   // a limits save sets the tab's upload limit
   document.documentElement.style.overflow = '';
   vi.restoreAllMocks();
 });
@@ -207,6 +209,20 @@ it('a pencil opens its dialog; a save shows the saved values on the card and clo
   expect(calls).toContain('PATCH /settings/limits');
   expect(panel()).toBeNull();
   expect(rows(card('File limits'))['Largest file'].textContent).toBe('50 MB');
+});
+
+// Settings Task 6 backlog: the upload screens in this tab use the new limit
+// at once, without a reload.
+it('a limits save updates the upload limit in this tab', async () => {
+  uploadLimit.mb = 20;                          // afterEach resets it
+  await render();
+  routes['PATCH /settings/limits'] = (body) => {
+    const s = settings(); Object.assign(s.limits, body as object); return [200, s];
+  };
+  pencil(card('File limits'))!.click(); await settle();
+  type(panelInput('Largest file (MB)'), '50');
+  footButton('Save').click(); await settle();
+  expect(uploadLimit.mb).toBe(50);
 });
 
 it('the email dialog saves through the page; closing it reloads, so a test of the saved values reaches the card (D9a)', async () => {

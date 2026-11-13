@@ -1,5 +1,6 @@
 import { api, ApiError, OFFLINE_MESSAGE, REQUEST_ERROR_MESSAGE } from './api';
 import type { BrandingPublic } from './branding.svelte';
+import { setUploadLimit } from './uploadLimit.svelte';
 
 // Every panel call passes skipAuthRedirect: the panel's shell handles 401 and
 // 404 itself (panelError), instead of the app-wide onUnauthorized redirect.
@@ -121,7 +122,7 @@ export function adminNote(
     : `${who} is now the admin of ${course.name}.`;
   switch (result.admin_email) {
     case 'queued': {
-      const sent = `${opening} An email with a sign-in link is on its way to ${admin.email}.`;
+      const sent = `${opening} An email with a link to the course is on its way to ${admin.email}.`;
       return opts.emailReason ? `${sent} ${opts.emailReason}` : sent;
     }
     case 'disabled':
@@ -148,7 +149,8 @@ export function adminNoteParts(
 
 export type PanelUserRole = 'all' | 'admins' | 'teachers' | 'students' | 'disabled';
 
-export type PanelCourseRef = { id: number; name: string };
+/** D14 rev 11: the address tells same-named courses apart in a tooltip. */
+export type PanelCourseRef = { id: number; name: string; slug: string };
 /** A run as a Users row lists it on hover: "<course> · <run title>" (D14 rev 8). */
 export type PanelRunRef = { id: number; title: string; course_name: string };
 
@@ -205,7 +207,9 @@ const NOUNS: Record<PanelUserRole, [string, string]> = {
   disabled: ['disabled account', 'disabled accounts'],
 };
 const noun = (role: PanelUserRole, n: number) => NOUNS[role][n === 1 ? 0 : 1];
-const runs = (n: number) => `${n} ${n === 1 ? 'run' : 'runs'}`;
+/** D15 rev 11: English digit grouping, "4,213". */
+export const formatCount = (n: number): string => n.toLocaleString('en-US');
+const runs = (n: number) => `${formatCount(n)} ${n === 1 ? 'run' : 'runs'}`;
 
 /** D15: the line under the table, for the list as fetched with its pill and search. */
 export function countLine(list: PanelUserList, role: PanelUserRole, searching: boolean): string {
@@ -213,12 +217,14 @@ export function countLine(list: PanelUserList, role: PanelUserRole, searching: b
   const total = list.total;
   if (searching) {
     if (total === 0) return `No ${noun(role, 0)} match`;
-    return total > shown ? `${shown} of ${total} match. Keep typing to narrow.` : `${total} match`;
+    return total > shown
+      ? `${formatCount(shown)} of ${formatCount(total)} match. Keep typing to narrow.`
+      : `${formatCount(total)} match`;
   }
   if (total === 0) return `No ${noun(role, 0)}`;
   return total > shown
-    ? `Showing the ${shown} newest of ${total} ${noun(role, total)}. Search to find others.`
-    : `${total} ${noun(role, total)}`;
+    ? `Showing the ${formatCount(shown)} newest of ${formatCount(total)} ${noun(role, total)}. Search to find others.`
+    : `${formatCount(total)} ${noun(role, total)}`;
 }
 
 /** A role chip: short text, the full list for a screen reader (D14 rev 8),
@@ -227,16 +233,36 @@ export type RoleChip = { kind: 'su' | 'ad' | 'role'; text: string; items: string
 
 const TIP_LINES = 10;
 
-// Cut by characters, not UTF-16 units, so a cut never splits one in two.
+// Cut by visible characters (graphemes), so a cut never splits a flag, an
+// emoji sequence or a letter from its accent.
+// Firefox before 125 has no Segmenter: there a cut counts code points, which
+// can split a flag but never fails the panel's import.
+const graphemes = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
 function cut(s: string, max: number): string {
-  const chars = Array.from(s);
+  const chars = graphemes ? Array.from(graphemes.segment(s), (g) => g.segment) : Array.from(s);
   return chars.length <= max ? s : chars.slice(0, max - 1).join('').trimEnd() + '…';
+}
+
+// D14 rev 11: a line that would repeat another, in full or as cut for the
+// tooltip, says which one it is, in the hidden list and the tooltip alike.
+function told<T>(things: T[], full: (t: T) => string, short: (t: T) => string, which: (t: T) => string):
+  { items: string[]; tips: string[] } {
+  const repeats = (lines: string[]) => {
+    const seen = new Map<string, number>();
+    for (const l of lines) seen.set(l, (seen.get(l) ?? 0) + 1);
+    return lines.map((l) => seen.get(l)! > 1);
+  };
+  const fulls = things.map(full);
+  const shorts = things.map(short);
+  const [a, b] = [repeats(fulls), repeats(shorts)];
+  const tag = (l: string, i: number) => (a[i] || b[i] ? `${l} (${which(things[i])})` : l);
+  return { items: fulls.map(tag), tips: shorts.map(tag) };
 }
 
 // D14 rev 9: "- " lines, at most ten, then "… and N more" with no bullet.
 function tip(lines: string[]): string {
   const shown = lines.slice(0, TIP_LINES).map((l) => `- ${l}`);
-  if (lines.length > TIP_LINES) shown.push(`… and ${lines.length - TIP_LINES} more`);
+  if (lines.length > TIP_LINES) shown.push(`… and ${formatCount(lines.length - TIP_LINES)} more`);
   return shown.join('\n');
 }
 
@@ -246,13 +272,17 @@ export function roleChips(u: PanelUser): RoleChip[] {
   const chips: RoleChip[] = [];
   const named = (r: PanelRunRef) => `${r.course_name} · ${r.title}`;
   // Course and run are cut apart, so a long course never hides the run title.
+  // The run id that tells two equal lines apart is added after the cut.
   const short = (r: PanelRunRef) => `${cut(r.course_name, 24)} · ${cut(r.title, 20)}`;
-  const runChip = (role: string, runs: PanelRunRef[]): RoleChip =>
-    ({ kind: 'role', text: `${role} (${runs.length})`, items: runs.map(named), tip: tip(runs.map(short)) });
+  const runId = (r: PanelRunRef) => `run ${r.id}`;
+  const runChip = (role: string, runs: PanelRunRef[]): RoleChip => {
+    const { items, tips } = told(runs, named, short, runId);
+    return { kind: 'role', text: `${role} (${formatCount(runs.length)})`, items, tip: tip(tips) };
+  };
   if (u.is_superuser) chips.push({ kind: 'su', text: 'Superuser', items: [], tip: '' });
   if (u.admin_of.length) {
-    const names = u.admin_of.map((c) => c.name);
-    chips.push({ kind: 'ad', text: `Admin (${names.length})`, items: names, tip: tip(names.map((n) => cut(n, 30))) });
+    const { items, tips } = told(u.admin_of, (c) => c.name, (c) => cut(c.name, 30), (c) => c.slug);
+    chips.push({ kind: 'ad', text: `Admin (${formatCount(items.length)})`, items, tip: tip(tips) });
   }
   if (u.teacher_runs.length) chips.push(runChip('Teacher', u.teacher_runs));
   if (u.student_runs.length) chips.push(runChip('Student', u.student_runs));
@@ -262,15 +292,23 @@ export function roleChips(u: PanelUser): RoleChip[] {
 /** An account as the panel names it: the name, or the email when there is none. */
 export const personName = (u: PanelUser) => u.full_name ?? u.email;
 
-/** D18: what the person loses, without she or he (Mathion stores no gender). */
+/** D18 rev 11: what the person loses, without she or he (Mathion stores no
+ *  gender). Commas between the parts; the last joiner is " and ", or ", and "
+ *  when the part before it already has an "and" ("admin of A and B"). */
 export function disableWarning(u: PanelUser): string {
   const who = personName(u);
   const parts: string[] = [];
   const courses = u.admin_of.map((c) => c.name);
-  if (courses.length > 2) parts.push(`is the admin of ${courses.length} courses`);
+  if (courses.length > 2) parts.push(`is the admin of ${formatCount(courses.length)} courses`);
   else if (courses.length > 0) parts.push(`is the admin of ${courses.join(' and ')}`);
   if (u.teacher_runs.length) parts.push(`teaches ${runs(u.teacher_runs.length)}`);
-  const middle = parts.length ? `${who} ${parts.join(' and ')}. ` : '';
+  if (u.student_runs.length) parts.push(`is a student in ${runs(u.student_runs.length)}`);
+  const joined = parts.reduce((text, part, i) => {
+    if (i === 0) return part;
+    if (i < parts.length - 1) return `${text}, ${part}`;
+    return `${text}${parts[i - 1].includes(' and ') ? ', and' : ' and'} ${part}`;
+  }, '');
+  const middle = parts.length ? `${who} ${joined}. ` : '';
   return `Disable ${who}? ${middle}They'll be signed out and can't sign in until enabled; tell them yourself.`;
 }
 
@@ -340,8 +378,12 @@ export function saveEmail(token: string, body: EmailSaveBody): Promise<PanelSett
   return api.patch<PanelSettings>(`${base(token)}/settings/email`, body, opts);
 }
 
-export function saveLimits(token: string, body: PanelLimits): Promise<PanelSettings> {
-  return api.patch<PanelSettings>(`${base(token)}/settings/limits`, body, opts);
+/** Settings D11b: the saved limit also reaches this tab's upload screens at
+ *  once (the Settings page and Set up's step 4 both save through here). */
+export async function saveLimits(token: string, body: PanelLimits): Promise<PanelSettings> {
+  const s = await api.patch<PanelSettings>(`${base(token)}/settings/limits`, body, opts);
+  setUploadLimit(s.limits.max_file_mb);
+  return s;
 }
 
 export function saveSignIn(token: string, body: PanelSignIn): Promise<PanelSettings> {

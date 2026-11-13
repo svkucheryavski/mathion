@@ -37,12 +37,20 @@ def upgrade() -> None:
     """Keep each course's earliest admin, make course_id unique, add last_seen_at."""
     conn = op.get_bind()
     extra = conn.execute(sa.text(
-        "SELECT id, course_id, user_id FROM course_admins ca "
+        "SELECT ca.id, u.email, c.slug FROM course_admins ca "
+        "JOIN users u ON u.id = ca.user_id JOIN courses c ON c.id = ca.course_id "
         "WHERE ca.id > (SELECT min(id) FROM course_admins WHERE course_id = ca.course_id) "
-        "ORDER BY id"
+        "ORDER BY ca.id"
     )).all()
-    for row_id, course_id, user_id in extra:
-        print(f"one-admin-per-course: removed course_admins id={row_id} (course {course_id}, user {user_id})")
+    # Each line is the record of who lost admin rights. Flushed: `mathion
+    # update` reads this through a pipe, where an unflushed line lands late.
+    # Printable ASCII only (an email or course address with a letter like ø or
+    # a line break is escaped), so no locale can fail it and a row stays one line.
+    def shown(text: str) -> str:
+        return text if text.isascii() and text.isprintable() else ascii(text)
+    for row_id, email, slug in extra:
+        print(f"one-admin-per-course: removed {shown(email)} as admin of {shown(slug)} "
+              f"(course_admins id={row_id})", flush=True)
     if extra:
         conn.execute(sa.text("DELETE FROM course_admins WHERE id = ANY(:ids)"),
                      {"ids": [r[0] for r in extra]})

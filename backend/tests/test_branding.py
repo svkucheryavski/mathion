@@ -40,7 +40,7 @@ from sqlalchemy.pool import NullPool
 
 from mathion import branding
 from mathion.branding import (
-    DEFAULT_BRANDING, BrandingUnavailable, ImageMeta, load_branding, read_image, short_hash,
+    DEFAULT_BRANDING, Branding, BrandingUnavailable, ImageMeta, load_branding, read_image, short_hash,
 )
 from mathion.database import engine
 from mathion.models_auth import SiteBranding, SiteBrandingImage, User
@@ -221,3 +221,134 @@ def test_theme_bug_is_not_an_outage(db, monkeypatch, caplog):
     messages = [r.getMessage() for r in caplog.records]
     assert not any("database read failed" in m for m in messages)
     assert any("stored colours" in m for m in messages)
+
+
+# --- the last good copy (backlog round, Branding spec rev 15) ---
+
+def test_an_older_read_never_replaces_a_newer_copy(db, monkeypatch):
+    import threading
+    first_in, let_first_go = threading.Event(), threading.Event()
+    calls = []
+
+    def from_row(session):
+        calls.append(1)
+        if len(calls) == 1:
+            first_in.set()
+            assert let_first_go.wait(5)
+            return Branding(name="Older")
+        return Branding(name="Newer")
+
+    monkeypatch.setattr(branding, "_from_row", from_row)
+    older = threading.Thread(target=load_branding)
+    older.start()
+    assert first_in.wait(5)
+    assert load_branding().name == "Newer"
+    let_first_go.set()
+    older.join(5)
+    assert not older.is_alive()
+    assert branding.last_good().name == "Newer"
+
+
+def test_a_panel_save_refreshes_the_last_good_copy(db, monkeypatch):
+    assert load_branding().name == "Mathion"
+    _save(db, site_name="Riverside")
+    assert branding.read_in(db).name == "Riverside"
+    monkeypatch.setattr(branding, "SessionLocal", _session_refused())
+    assert load_branding().name == "Riverside"
+
+
+def test_a_read_waiting_for_a_connection_counts_from_when_it_gets_one(db, monkeypatch):
+    # A read held up by the pool takes its ticket once it has a connection,
+    # so a read that started later but queried earlier can't win.
+    import threading
+    a_waits, a_connects = threading.Event(), threading.Event()
+    b_read, b_goes = threading.Event(), threading.Event()
+
+    class Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def connection(self):
+            if threading.current_thread().name == "a":
+                a_waits.set()
+                assert a_connects.wait(5)
+
+    def from_row(session):
+        if threading.current_thread().name == "a":
+            return Branding(name="Saved")
+        b_read.set()
+        assert b_goes.wait(5)
+        return Branding(name="Before the save")
+
+    monkeypatch.setattr(branding, "SessionLocal", Session)
+    monkeypatch.setattr(branding, "_from_row", from_row)
+    a = threading.Thread(target=load_branding, name="a")
+    a.start()
+    assert a_waits.wait(5)
+    b = threading.Thread(target=load_branding, name="b")
+    b.start()
+    assert b_read.wait(5)
+    a_connects.set()
+    a.join(5)
+    b_goes.set()
+    b.join(5)
+    assert not a.is_alive() and not b.is_alive()
+    assert branding.last_good().name == "Saved"
+
+
+def test_an_older_read_finishing_mid_outage_logs_nothing_more(db, monkeypatch, caplog):
+    import threading
+    a_in, a_goes = threading.Event(), threading.Event()
+    real_from_row = branding._from_row
+
+    def from_row(session):
+        if threading.current_thread().name == "a":
+            a_in.set()
+            assert a_goes.wait(5)
+        return real_from_row(session)
+
+    monkeypatch.setattr(branding, "_from_row", from_row)
+    a = threading.Thread(target=load_branding, name="a")
+    a.start()
+    assert a_in.wait(5)
+    load_branding()
+    monkeypatch.setattr(branding, "SessionLocal", _session_refused())
+    with caplog.at_level(logging.WARNING, logger="mathion.branding"):
+        load_branding()
+        a_goes.set()
+        a.join(5)
+        load_branding()
+    assert not a.is_alive()
+    assert len([r for r in caplog.records if r.name == "mathion.branding"]) == 1
+
+
+def test_the_panel_read_takes_its_ticket_once_it_holds_a_connection(monkeypatch):
+    # After the panel's commit the session gives its connection back, so its
+    # read can wait for the pool like any other.
+    order = []
+
+    class Session:
+        def connection(self):
+            order.append("connection")
+
+    real_ticket = branding._ticket
+
+    def ticket():
+        order.append("ticket")
+        return real_ticket()
+
+    monkeypatch.setattr(branding, "_ticket", ticket)
+    monkeypatch.setattr(branding, "_from_row", lambda session: Branding(name="Saved"))
+    assert branding.read_in(Session()).name == "Saved"
+    assert order == ["connection", "ticket"]
+
+
+def test_the_kept_copy_says_whether_it_came_from_a_read(db):
+    assert branding.kept_copy() == (DEFAULT_BRANDING, False)
+    _save(db, site_name="Riverside")
+    load_branding()
+    kept, read = branding.kept_copy()
+    assert read and kept.name == "Riverside"

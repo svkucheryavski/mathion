@@ -3,13 +3,15 @@
   // is off (D7c), otherwise every field, with the password only when typed
   // (D8: an empty field keeps the saved one). `save` THROWS on failure and the
   // server's sentence shows here (D5). Send test email tests the form as it is
-  // now; its answer, a 409 included, shows above the buttons (D9). The form and
-  // its fields are shared with Set up's Email step.
+  // now; its answer, a 409 included, shows above the buttons (D9), scrolled
+  // into view. Only the newer of a save error and a test answer shows. The
+  // form and its fields are shared with Set up's Email step.
   import { untrack } from 'svelte';
   import Modal from '../ui/Modal.svelte';
   import Button from '../ui/Button.svelte';
   import EmailFields from './fields/EmailFields.svelte';
   import { EmailForm } from '../../lib/panelForms/emailForm.svelte';
+  import { scrollIntoSight } from '../../lib/panelForms/scrollIntoSight';
   import {
     panelError, type EmailSaveBody, type EmailTestBody, type EmailTestResult,
     type PanelEmailSettings, type PanelOnAuth,
@@ -38,32 +40,38 @@
     if (busy || !form.ready) return;
     form.error = null;
     const body = form.saveBody();
-    if (typeof body === 'string') { form.error = body; return; }
+    if (typeof body === 'string') { form.saveFailed(body); return; }
+    form.saves++;
     busy = true;
     try {
       await save(body);
       onDone();
     } catch (e) {
-      form.error = panelError(e, onAuth);
+      form.saveFailed(panelError(e, onAuth));
     } finally {
       busy = false;
     }
   }
 
-  // D9: one test at a time; Save and Cancel stay usable while it runs.
+  // D9: one test at a time; Save and Cancel stay usable while it runs. Send
+  // test does nothing while a save runs: it would only test what is being
+  // saved. An answer about older values, or older than a save, is dropped.
   async function onTest() {
-    if (testing) return;
+    if (testing || busy) return;
     const body = form.testBody();
-    if (typeof body === 'string') { form.result = { ok: false, message: body }; return; }
+    if (typeof body === 'string') { form.answered({ ok: false, message: body }); return; }
     form.result = null;
+    form.error = null;
     testing = true;
     const asked = form.edits;
+    const saves = form.saves;
+    const current = () => asked === form.edits && saves === form.saves;
     try {
       const answer = await test(body);
-      if (asked === form.edits) form.result = answer;
+      if (current()) form.answered(answer);
     } catch (e) {
       const message = panelError(e, onAuth);
-      if (asked === form.edits && message !== null) form.result = { ok: false, message };
+      if (current() && message !== null) form.answered({ ok: false, message });
     } finally {
       testing = false;
     }
@@ -76,7 +84,7 @@
 
 {#snippet foot()}
   {#if form.on}
-    <Button variant="secondary" loading={testing} aria-disabled={testing} onclick={() => void onTest()}>Send test email</Button>
+    <Button variant="secondary" loading={testing} aria-disabled={testing || busy} onclick={() => void onTest()}>Send test email</Button>
   {/if}
   <span class="spacer" aria-hidden="true"></span>
   <Button variant="ghost" disabled={busy} onclick={onClose}>Cancel</Button>
@@ -88,9 +96,9 @@
   <form class="ee-form" novalidate aria-describedby={form.error ? errId : undefined}
     onsubmit={(e) => { e.preventDefault(); void onSave(); }}>
     <EmailFields {form} {uid} {busy} />
-    {#if form.error}<p id={errId} class="ee-err" role="alert">{form.error}</p>{/if}
+    {#if form.error}<p id={errId} class="ee-err" role="alert" {@attach scrollIntoSight(form.error)}>{form.error}</p>{/if}
     {#if form.result}
-      <p class="ee-result" class:ok={form.result.ok} class:err={!form.result.ok} role="status">{form.result.message}</p>
+      <p class="ee-result" class:ok={form.result.ok} class:err={!form.result.ok} role="status" {@attach scrollIntoSight(form.result)}>{form.result.message}</p>
     {/if}
     <!-- Enter in a field submits. -->
     <button type="submit" hidden aria-hidden="true" tabindex="-1"></button>

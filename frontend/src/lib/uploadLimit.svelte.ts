@@ -10,12 +10,21 @@ import { getAuthConfig, type AuthConfig } from './auth.svelte';
 export const uploadLimit = $state<{ mb: number | null }>({ mb: null });
 
 let loading: Promise<void> | null = null;
+/** A limits save set the number: a late startup answer must not undo it. */
+let set = false;
 
 export function loadUploadLimit(config?: Promise<AuthConfig>): Promise<void> {
   loading ??= (config ?? getAuthConfig())
-    .then((c) => { uploadLimit.mb = c.max_file_mb; })
+    .then((c) => { if (!set) uploadLimit.mb = c.max_file_mb; })
     .catch(() => {});
   return loading;
+}
+
+/** Settings D11b: a limits save in the panel reaches this tab's upload
+ *  screens at once, also after a failed startup read. */
+export function setUploadLimit(mb: number): void {
+  set = true;
+  uploadLimit.mb = mb;
 }
 
 /** True only when the limit is known and the file is over it. */
@@ -23,10 +32,18 @@ export function overUploadLimit(bytes: number): boolean {
   return uploadLimit.mb !== null && bytes > uploadLimit.mb * 1024 * 1024;
 }
 
+/** The browser's over-the-limit sentence, in the server's words (the user's
+ *  call, 2026-11-12): the file's name where the screen knows it. Only for a
+ *  known limit (overUploadLimit). */
+export function overLimitSentence(name?: string): string {
+  return `${name || 'This file'} is over the ${uploadLimit.mb} MB limit.`;
+}
+
 /** Tests only: forget the loaded limit. */
 export function resetUploadLimit(): void {
   uploadLimit.mb = null;
   loading = null;
+  set = false;
 }
 
 /**

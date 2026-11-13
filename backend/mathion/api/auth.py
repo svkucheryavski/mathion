@@ -1,4 +1,5 @@
 import logging
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Request, Response
@@ -13,7 +14,7 @@ from mathion.dependencies import get_current_user
 from mathion.models import CourseAdmin, RunTeacher
 from mathion.models_auth import User
 from mathion.notifications.dispatcher import record_send_outcome, refusal_on_card
-from mathion.notifications.mailer import DEV_MODES, build_mailer
+from mathion.notifications.mailer import DEV_MODES, build_mailer, logs_in
 from mathion.notifications.smtp_errors import SMTP_FAILURES, describe, stops_the_batch
 from mathion.notifications.templates import build_login_pin_message
 from mathion.page_fill import branding_public
@@ -102,12 +103,19 @@ def _send_login_pin(email: str, raw_pin: str, minutes: int) -> None:
         # sender, no answer) and a refusal after the body, not about one
         # refused recipient.
         if site is not None:
-            card = (failure if not sending or stops_the_batch(exc)
-                    else refusal_on_card(exc, failure, site.email_from))
+            if not sending or stops_the_batch(exc, sender=site.email_from):
+                # The server's side, whatever describe() says, as in the queue
+                # (D9c): the card shows it and the queue's wait stays.
+                card = replace(failure, batch_level=True)
+            else:
+                card = refusal_on_card(exc, failure, site.email_from,
+                                       has_login=logs_in(site.smtp_username, site.smtp_encryption))
             if card is not None:
                 _record_on_card(site, card)
-    except Exception:
-        logger.exception("login PIN email send failed")  # static message; never the raw PIN
+    except Exception as exc:
+        # The class only: the text or traceback can quote the PIN or a
+        # character of a copied password.
+        logger.error("login PIN email send failed: %s", type(exc).__name__)
 
 
 def _record_on_card(site, failure) -> None:

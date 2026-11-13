@@ -20,7 +20,7 @@ function render(progress: number, over: Record<string, any> = {}) {
   vi.stubGlobal('fetch', f);
   target = document.createElement('div');
   document.body.appendChild(target);
-  const props = { token: 'T', course: COURSE, onDelete: vi.fn(() => Promise.resolve()), onClose: vi.fn(), onAuth: vi.fn(), ...over };
+  const props = { token: 'T', course: COURSE, onDelete: vi.fn(() => Promise.resolve()), onStale: vi.fn(), onClose: vi.fn(), onAuth: vi.fn(), ...over };
   cmp = mount(DeleteCourseDialog, { target, props });
   flushSync();
   return { props, f };
@@ -81,10 +81,27 @@ it('an impact 404 goes to onAuth; Cancel closes', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(404, { detail: 'Not Found' })));
   target = document.createElement('div');
   document.body.appendChild(target);
-  const props = { token: 'T', course: COURSE, onDelete: vi.fn(), onClose: vi.fn(), onAuth: vi.fn() };
+  const props = { token: 'T', course: COURSE, onDelete: vi.fn(), onStale: vi.fn(), onClose: vi.fn(), onAuth: vi.fn() };
   cmp = mount(DeleteCourseDialog, { target, props });
   await settle();
   expect(props.onAuth).toHaveBeenCalledWith('expired');
   [...panel().querySelectorAll<HTMLButtonElement>('footer.modal-foot button')].find((b) => b.textContent!.trim() === 'Cancel')!.click();
   expect(props.onClose).toHaveBeenCalled();
+});
+
+it('only a 409 from the impact check reloads the list; a 500 shows its error and asks nothing more (rev 11)', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(500, { detail: 'Server error' })));
+  target = document.createElement('div');
+  document.body.appendChild(target);
+  const props = { token: 'T', course: COURSE, onDelete: vi.fn(), onStale: vi.fn(), onClose: vi.fn(), onAuth: vi.fn() };
+  cmp = mount(DeleteCourseDialog, { target, props });
+  await settle();
+  expect(props.onStale).not.toHaveBeenCalled();
+  expect(props.onAuth).not.toHaveBeenCalled();
+});
+
+it('big numbers are grouped: versions and students (rev 11)', async () => {
+  render(1500, { course: { ...COURSE, version_count: 1200 } }); await settle();
+  expect(panel().textContent).toContain('Its 1,200 versions and their files go too.');
+  expect(panel().textContent).toContain('Also deletes the progress of 1,500 students (pages visited, quiz answers).');
 });

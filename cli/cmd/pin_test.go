@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -71,5 +72,34 @@ func TestPinTextQuotesNoFixedNumbers(t *testing.T) {
 	}
 	if !strings.Contains(cmd.Short, "Settings") {
 		t.Errorf("pin help should point to the panel's Settings, got %q", cmd.Short)
+	}
+}
+
+func TestPinSkipsAdviceOnFailure(t *testing.T) {
+	// The superuser subcommand exits 1 for an unknown or disabled email, after
+	// saying which. No PIN was issued, so: no "Log in at…" advisory, and an
+	// error line that says so rather than a bare "exit status 1".
+	// A real *exec.ExitError, as ExecRunner.Run returns it.
+	exitErr := exec.Command("sh", "-c", "exit 1").Run()
+	f := &compose.FakeRunner{RunFunc: func(args []string) error { return exitErr }}
+	app := newTestApp(f)
+	var out bytes.Buffer
+	app.Out = &out
+	cmd := newPinCmd(app)
+	cmd.SetArgs([]string{"ghost@example.edu"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("pin must fail when the subcommand exits non-zero")
+	}
+	if strings.Contains(out.String(), "Log in at") {
+		t.Fatalf("pin must not print the advisory when no PIN was issued, got %q", out.String())
+	}
+	if got := err.Error(); got != "no PIN was issued (exit status 1)" {
+		t.Fatalf("error = %q", got)
+	}
+	// The wrap keeps the real exit error inside, for anything that reads it.
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != 1 {
+		t.Fatalf("the error must wrap the exit error, got %v", err)
 	}
 }

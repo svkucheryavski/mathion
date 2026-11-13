@@ -4,7 +4,8 @@
   // a --border-strong ring. Counts are mono.
   let { label, options, value, onchange }: {
     label: string;
-    options: { key: string; label: string; count?: number }[];
+    // A count arrives formatted where the page groups big numbers ("4,213").
+    options: { key: string; label: string; count?: number | string }[];
     value: string;
     onchange: (key: string) => void;
   } = $props();

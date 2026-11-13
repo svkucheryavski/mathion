@@ -70,11 +70,11 @@ describe('SubmissionCards — submissionContent', () => {
     expect(rows(part('sub'))[0]).toEqual(['Submitted', '—']);
     expect(rows(part('sub'))[1]).toEqual(['By', '—']);
   });
-  it('the file card (D26): "Submission 3", "PDF · 2.4 MB" and a download link', () => {
+  it('the file card (D26): "Submission 3", "PDF · 2.3 MB" (1024-based) and a download link', () => {
     render({ sub: sub() });
     const card = part('sub').querySelector('.sc-file') as HTMLElement;
     expect(card.querySelector('.sc-file-name')!.textContent).toBe('Submission 3');
-    expect(card.querySelector('.sc-file-meta')!.textContent).toBe('PDF · 2.4 MB');
+    expect(card.querySelector('.sc-file-meta')!.textContent).toBe('PDF · 2.3 MB');
     const a = card.querySelector('a') as HTMLAnchorElement;
     expect(a.getAttribute('href')).toBe('/api/submissions/42/file');
     expect(a.hasAttribute('download')).toBe(true);

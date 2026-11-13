@@ -8,6 +8,7 @@ import { clearEditorVersion } from '../stores/currentEditorVersion.svelte';
 import { versionPermissions } from '../lib/versionPermissions';
 import type { AdminTreeItem, AdminTreeVersion } from '../lib/types';
 import type { DirtyRegistry } from '../lib/dirtyRegistry.svelte';
+import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
 
 // Real store, real bodies; only fetch is stubbed.
 const fetchSpy = vi.fn();
@@ -864,6 +865,29 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     expect(panel().querySelector('.warnings')!.textContent).toContain('ES module');
     expect(panel().querySelector('.warnings')!.textContent).toContain('Network');
     expect(uploadPosts().length).toBe(1);
+  });
+
+  // Settings Task 6 backlog: AppBody had no browser-side size check.
+  it('refuses a file over the saved limit before uploading, in the shared sentence', async () => {
+    serveUpload();
+    uploadLimit.mb = 1;
+    try {
+      await render({ item: { type: 'interactive_app', script_url: null } });
+      const big = jsFile("getElementById('app-root')", 'big.js');
+      Object.defineProperty(big, 'size', { value: 1024 * 1024 + 1 });
+      const read = vi.spyOn(FileReader.prototype, 'readAsText');
+      chooseFile(big);
+      await waitUntil(() => !!panel().querySelector('.field-err'));
+      expect(panel().querySelector('.field-err')!.textContent).toContain('This file is over the 1 MB limit.');
+      expect(uploadPosts().length).toBe(0);
+      expect(read).not.toHaveBeenCalled();
+      // The refusal leaves the upload usable: a file within the limit goes up.
+      chooseFile(jsFile("getElementById('app-root')", 'small.js'));
+      await waitUntil(() => uploadPosts().length > 0);
+      expect(uploadPosts().length).toBe(1);
+    } finally {
+      resetUploadLimit();
+    }
   });
 
   it('rejects an empty file before uploading', async () => {

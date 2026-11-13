@@ -177,11 +177,18 @@ def test_password_ascii_only(panel, password):
                                     "Ålborg\u2028Uni <noreply@uni.dk>", "Mathion\u2029 <noreply@uni.dk>",
                                     "Mathion\x85 <noreply@uni.dk>",
                                     # pass parseaddr, but a send reads another sender or breaks the header
-                                    "Ålborg Universitet:Institut for Matematik og Økonomi <noreply@math.aau.dk>",
                                     "Universität Ålborg <noreply@uni.dk.>", "noreply@uni.dk.", "noreply@uni..dk",
                                     "Matematik\\Fysik <noreply@uni.dk>", "(Mathé) noreply@uni.dk",
                                     # a pasted quote: receivers read an address with no domain
                                     '"noreply@uni.dk"', '"noreply@uni.dk', "'noreply@uni.dk'",
+                                    # two typed addresses: not a name to quote
+                                    "Mathion <m@uni.dk>, Other <o@uni.dk>", "a@uni.dk, B <b@uni.dk>",
+                                    "(a, b <m@uni.dk>",
+                                    # anything but a comment after the address
+                                    "Mathion <m@uni.dk>,", "m@uni.dk,", "m@uni.dk (x),",
+                                    # no name to quote: a pasted link or a group
+                                    "mailto:m@uni.dk", "Mathion: m@uni.dk", "Team: m@uni.dk;",
+                                    "Mathion <m@uni.dk", "Mathion m@uni.dk>",
                                     "\u180e\\Å <noreply@uni.dk>"])
 def test_from_checked(panel, sender):
     r = _email(panel, from_address=sender)
@@ -199,7 +206,16 @@ def test_from_address_must_be_plain(panel, sender):
 
 
 @pytest.mark.parametrize("sender", ["noreply@uni.dk", "Mathion <noreply@uni.dk>", '"Uni, Maths" <m@uni.dk>',
-                                    "Universität Ålborg <noreply@uni.dk>", "noreply@xn--universitt-y5a.de"])
+                                    '"Mathion, AAU" <m@uni.dk>', '"Aalborg Universitet: Institut" <m@aau.dk>',
+                                    "Mathion (AAU, DK) <m@uni.dk>", "Name (a \\) , b) <a@b.dk>", 'Name ("a, b) <m@uni.dk>',
+                                    '"Uni (Maths" <m@uni.dk>',
+                                    "Universität Ålborg <noreply@uni.dk>", "noreply@xn--universitt-y5a.de",
+                                    "Mathion <no_reply@uni.dk>", "Mathion <m@uni.dk> (AAU, DK)",
+                                    # a "<" or "\"" inside quotes or a comment is part of the name
+                                    '"Maths <-> Physics" <m@uni.dk>', "Mathion (AAU <x>) <m@uni.dk>",
+                                    '"Mathion \\"AAU, DK" <m@uni.dk>', "Mathion <m@uni.dk> (AAU (Maths) DK)",
+                                    "m@uni.dk (a, b)", '"Maths -> Physics" <m@uni.dk>', "Mathion (a < b) <m@uni.dk>",
+                                    "m@uni.dk (a > b)"])
 def test_good_from_accepted(panel, db, sender):
     assert _email(panel, from_address=sender).status_code == 200
     assert _view(db).email_from == sender
@@ -520,7 +536,7 @@ def test_second_test_while_running_409(panel, smtp):
     assert mod._TEST_LOCK.acquire(blocking=False)
     try:
         r = _test(panel)
-        assert (r.status_code, _msg(r)) == (409, "A test is already running.")
+        assert (r.status_code, _msg(r)) == (409, "The last test is still finishing. Try again in a minute.")
     finally:
         mod._TEST_LOCK.release()
 
@@ -729,3 +745,56 @@ def test_refused_sign_in_save_marks_nothing(panel, db):
     r = client.patch(f"{base}/settings/sign-in", json={**SIGN_IN, "pin_minutes": 4})
     assert r.status_code == 422
     assert _view(db).sign_in_kept is False
+
+
+# --- D7, D7b, D9, rev 8: clearer sentences ---
+
+QUOTES = "Put a name with a comma or colon in quotes."
+
+
+@pytest.mark.parametrize("sender", ["Mathion, AAU <m@uni.dk>", "Aalborg Universitet: Institut <m@aau.dk>",
+                                    "Ålborg Universitet:Institut for Matematik og Økonomi <noreply@math.aau.dk>",
+                                    '"Maths (AAU" , DK <m@uni.dk>',
+                                    "Mathion @ AAU, DK <m@uni.dk>", 'Name (a"b) , c <m@uni.dk>',
+                                    "Mathion@AAU, DK <m@uni.dk>", "Mathion @AAU, DK <m@uni.dk>",
+                                    "Mathion@ AAU, DK <m@uni.dk>", "Mathion ) , AAU <m@uni.dk>",
+                                    "Mathion @ Dept. of Maths, AAU <m@aau.dk>", "Mathion @aau.dk, AAU <m@aau.dk>",
+                                    "Mathion@ math.aau.dk, AAU <m@aau.dk>", "Mathion\\, AAU <m@uni.dk>",
+                                    # an address in a comment or quotes is part of the name
+                                    "Mathion (help@aau.dk), AAU <m@aau.dk>", 'Mathion "a@b.dk", DK <m@uni.dk>'])
+def test_from_with_a_comma_or_colon_needs_quotes(panel, sender):
+    for r in (_email(panel, from_address=sender), _test(panel, from_address=sender)):
+        assert (r.status_code, _msg(r)) == (422, QUOTES)
+
+
+@pytest.mark.parametrize("mark", ["\u200b", "\u200c", "\u200d", "\u2060", "\ufeff"])
+def test_an_invisible_character_at_either_end_is_dropped(panel, db, mark):
+    assert _email(panel, from_address=f"m@uni.dk{mark}").status_code == 200
+    assert _view(db).email_from == "m@uni.dk"
+    assert _email(panel, from_address=f"{mark} Mathion <m@uni.dk> ").status_code == 200
+    assert _view(db).email_from == "Mathion <m@uni.dk>"
+    # The mail server and the username are trimmed too, so a pasted one still reaches the server.
+    assert _email(panel, host=f"mail.uni.dk{mark}", username=f"{mark}u@uni.dk", password="pw").status_code == 200
+    assert (_view(db).smtp_host, _view(db).smtp_username) == ("mail.uni.dk", "u@uni.dk")
+
+
+def test_underscore_domain_says_why(panel):
+    r = _email(panel, from_address="m@my_school.dk")
+    assert (r.status_code, _msg(r)) == (422, "The From address's domain can't contain _.")
+
+
+def test_username_must_be_plain_ascii(panel, smtp):
+    for r in (_email(panel, username="jørgen@uni.dk", password="pw"),
+              _test(panel, username="jørgen@uni.dk", password="pw")):
+        assert (r.status_code, _msg(r)) == (422, "The username can't contain letters like æ, ø or å.")
+    assert smtp.sent == []
+
+
+def test_send_test_reuses_the_card_refusal(panel, smtp):
+    smtp.fail_send = smtplib.SMTPDataError(554, b"5.2.252 SendAsDenied")
+    assert _test(panel).json() == {"ok": False, "message": (
+        "The mail server refused a message: check that it accepts mail from "
+        "Mathion <noreply@uni.dk> without a login.")}
+    assert _test(panel, username="u@uni.dk", password="pw").json() == {"ok": False, "message": (
+        "The mail server refused a message: check that the login may send as "
+        "Mathion <noreply@uni.dk> and that it accepts Mathion's messages.")}

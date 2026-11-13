@@ -891,7 +891,40 @@ describe('AssetSidebar — the saved upload limit (Settings D11b)', () => {
     await Promise.resolve(); flushSync();
     await drop(target, sized(51));
     expect(onUploadFile).not.toHaveBeenCalled();
-    expect(target.textContent).toContain('Cannot upload: big.png (file exceeds 50 MB)');
+    expect(target.querySelector('[data-testid="upload-error"]')?.textContent?.trim()).toBe('big.png is over the 50 MB limit.');
+    expect(target.textContent).not.toContain('Cannot upload');
+  });
+
+  // The user's call (2026-11-12): the shared sentence, so several refused
+  // files read as sentences, one after another.
+  it('two refused files: nothing was uploaded, then one sentence each', async () => {
+    uploadLimit.mb = 50;
+    const onUploadFile = vi.fn().mockResolvedValue(mkAsset({ filename: 'big.png' }));
+    const { target } = mountSidebar({ onUploadFile });
+    await Promise.resolve(); flushSync();
+    const dropZone = target.querySelector<HTMLElement>('[data-testid="drop-zone"]')!;
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { files: [sized(51), new File(['x'], 'tool.exe')] } });
+    dropZone.dispatchEvent(ev);
+    for (let i = 0; i < 3; i++) { await Promise.resolve(); flushSync(); }
+    expect(onUploadFile).not.toHaveBeenCalled();
+    expect(target.textContent).toContain('Nothing was uploaded. big.png is over the 50 MB limit. tool.exe: extension not allowed.');
+  });
+
+  // Review t4-r1: one bad file stops the whole drop, so say so.
+  it('a drop of two files with one refused says nothing was uploaded', async () => {
+    uploadLimit.mb = 50;
+    const onUploadFile = vi.fn().mockResolvedValue(mkAsset({ filename: 'big.png' }));
+    const { target } = mountSidebar({ onUploadFile });
+    await Promise.resolve(); flushSync();
+    const dropZone = target.querySelector<HTMLElement>('[data-testid="drop-zone"]')!;
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(ev, 'dataTransfer', { value: { files: [sized(51), new File(['x'], 'ok.png')] } });
+    dropZone.dispatchEvent(ev);
+    for (let i = 0; i < 3; i++) { await Promise.resolve(); flushSync(); }
+    expect(onUploadFile).not.toHaveBeenCalled();
+    expect(target.querySelector('[data-testid="upload-error"]')?.textContent?.trim())
+      .toBe('Nothing was uploaded. big.png is over the 50 MB limit.');
   });
 
   it('while the limit is unknown nothing is checked; the server decides', async () => {

@@ -46,6 +46,28 @@ it('fetches and renders five stat cards with formatted storage', async () => {
   expect(text).toContain('1.5 kB');   // formatFileSize(1500)
 });
 
+// The user's call (2026-11-13): 3.5 GB no longer reads "3584.0 MB".
+it('shows a storage of several GB in GB', async () => {
+  vi.stubGlobal('fetch', mockFetch(200, {
+    total_users: 3, total_courses: 2, storage_bytes: 3.5 * 1024 ** 3, active_users_24h: 1, active_users_7d: 2,
+  }));
+  component = mount(SuperuserDashboard, { target, props: { token: 'tok', onAuth: vi.fn(), setup } });
+  await settle();
+  expect(target.textContent).toContain('3.5 GB');
+});
+
+// The user's call (2026-11-13): the cards group counts like the Users page.
+it('groups big counts on the cards: "4,213"', async () => {
+  vi.stubGlobal('fetch', mockFetch(200, {
+    total_users: 4213, total_courses: 1050, storage_bytes: 0, active_users_24h: 1234, active_users_7d: 2345,
+  }));
+  component = mount(SuperuserDashboard, { target, props: { token: 'tok', onAuth: vi.fn(), setup } });
+  await settle();
+  const value = (label: string) => [...target.querySelectorAll('.card')]
+    .find((c) => c.querySelector('.label')?.textContent === label)?.querySelector('.value')?.textContent;
+  expect(['Users', 'Courses', 'Active 24h', 'Active 7d'].map(value)).toEqual(['4,213', '1,050', '1,234', '2,345']);
+});
+
 it('threads the token into the stats URL and skips the global auth redirect', async () => {
   const f = mockFetch(200, ZEROS);
   vi.stubGlobal('fetch', f);

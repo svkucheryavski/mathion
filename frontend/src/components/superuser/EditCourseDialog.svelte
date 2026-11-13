@@ -9,7 +9,7 @@
   import Modal from '../ui/Modal.svelte';
   import Button from '../ui/Button.svelte';
   import AdminEmailField from './AdminEmailField.svelte';
-  import { panelError, type PanelCourse, type PanelOnAuth } from '../../lib/superuser';
+  import { formatCount, panelError, type PanelCourse, type PanelOnAuth } from '../../lib/superuser';
 
   type Props = {
     token: string;
@@ -27,7 +27,11 @@
   const errId = `${uid}-err`;
 
   // The saved values; a step that succeeds moves them on.
-  let saved = $state(untrack(() => ({ name: course.name, slug: course.slug, email: course.admin?.email ?? '' })));
+  // `admin` is how the saved admin is named: their name, else their email.
+  let saved = $state(untrack(() => ({
+    name: course.name, slug: course.slug, email: course.admin?.email ?? '',
+    admin: course.admin ? course.admin.full_name ?? course.admin.email : '',
+  })));
   let name = $state(untrack(() => saved.name));
   let slug = $state(untrack(() => saved.slug));
   let email = $state(untrack(() => saved.email));
@@ -36,11 +40,14 @@
 
   const nameChanged = $derived(name.trim() !== saved.name);
   const slugChanged = $derived(slug.trim() !== saved.slug);
-  const emailChanged = $derived(email.trim() !== saved.email);
+  // Emails are stored lower-cased, so a case-only retype is no change (rev 11).
+  const emailChanged = $derived(email.trim().toLowerCase() !== saved.email.toLowerCase());
   const ready = $derived((nameChanged || slugChanged || emailChanged) && name.trim() !== '' && slug.trim() !== '');
   const removing = $derived(saved.email !== '' && email.trim() === '');
+  // Rev 11: another address in the field says who stops being the admin.
+  const replacing = $derived(saved.email !== '' && email.trim() !== '' && emailChanged);
 
-  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const plural = (n: number, one: string, many: string) => `${formatCount(n)} ${n === 1 ? one : many}`;
   // D11 rev 10: a course with no runs and no students (one just created) gives no counts.
   const warning = $derived(
     course.run_count === 0 && course.student_count === 0
@@ -63,6 +70,8 @@
       if (emailChanged) {
         const next = email.trim();
         await saveAdmin(next === '' ? null : next);
+        // The admin step is the last and the dialog closes after it, so
+        // `admin` (only the replace note's name) isn't moved on.
         saved = { ...saved, email: next };
       }
       onDone();
@@ -99,7 +108,9 @@
     <label class="ec-label" for="{uid}-email">Admin's email</label>
     <AdminEmailField id="{uid}-email" {token} value={email} {onAuth} readonly={busy}
       oninput={(v) => { email = v; error = null; }} />
-    {#if removing}<p class="ec-note">{saved.name} will have no admin.</p>{/if}
+    <!-- Rev 11: the name as typed, so a rename in the same Save reads right. -->
+    {#if removing}<p class="ec-note">{name.trim() || saved.name} will have no admin.</p>{/if}
+    {#if replacing}<p class="ec-note">{saved.admin} will no longer be the admin.</p>{/if}
     {#if error}<p id={errId} class="ec-err" role="alert">{error}</p>{/if}
     <!-- Enter in a field submits. -->
     <button type="submit" hidden aria-hidden="true" tabindex="-1"></button>

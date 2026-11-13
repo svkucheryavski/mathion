@@ -4,6 +4,7 @@ import MarkdownEditor from '../components/editor/MarkdownEditor.svelte';
 import type { AssetResponse } from '../lib/assets';
 import type { AssetContext, AssetItem } from '../lib/assetContext';
 import { ApiError } from '../lib/api';
+import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
 
 const mkAsset = (overrides: Partial<AssetResponse> = {}): AssetResponse => ({
   id: 1,
@@ -429,7 +430,9 @@ describe('MarkdownEditor — 409 duplicate upload rename hint', () => {
     const { target } = mountEditor({ value: 'abc' });
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
-    const file = new File(['x'], 'bad.exe', { type: 'application/octet-stream' });
+    // An allowed name: the browser now refuses a .exe before the server sees
+    // it (review t4-r12), and this is the server's refusal.
+    const file = new File(['x'], 'bad.png', { type: 'image/png' });
     const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
     Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
     ev.preventDefault = vi.fn(); ev.stopPropagation = vi.fn();
@@ -453,6 +456,104 @@ describe('MarkdownEditor — 409 duplicate upload rename hint', () => {
     ta.dispatchEvent(ev);
     await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
     expect(target.querySelector('[data-testid="upload-error"]')?.textContent).toContain("This file is over the server's upload limit.");
+  });
+});
+
+// The user's call (2026-11-13): a drop onto the text area is checked against
+// the saved limit too, like the sidebar's (Settings D11b).
+describe('MarkdownEditor — the upload limit on a drop', () => {
+  afterEach(() => resetUploadLimit());
+
+  function sized(name: string, mb: number): File {
+    const f = new File(['x'], name, { type: 'image/png' });
+    Object.defineProperty(f, 'size', { value: mb * 1024 * 1024 });
+    return f;
+  }
+  function drop(on: HTMLElement, files: File[]): void {
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    // The real stopPropagation: a text-area drop must not reach the box's.
+    Object.defineProperty(ev, 'dataTransfer', { value: { files } });
+    on.dispatchEvent(ev);
+  }
+  async function settleDrop(): Promise<void> {
+    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+  }
+
+  it('a file over the limit dropped on the text area is not uploaded, and says so', async () => {
+    uploadLimit.mb = 50;
+    const uploadSpy = stubCtx.upload as ReturnType<typeof vi.fn>;
+    const { target, propsRef } = mountEditor({ value: 'abc' });
+    await settleDrop();
+    drop(target.querySelector<HTMLTextAreaElement>('textarea')!, [sized('big.png', 60)]);
+    await settleDrop();
+    expect(uploadSpy).not.toHaveBeenCalled();
+    expect(propsRef.value).toBe('abc');
+    expect(target.querySelector('[data-testid="upload-error"]')?.textContent).toContain('big.png is over the 50 MB limit.');
+  });
+
+  it('one file over the limit in a drop of several on the editor uploads none', async () => {
+    uploadLimit.mb = 50;
+    const uploadSpy = stubCtx.upload as ReturnType<typeof vi.fn>;
+    const { target } = mountEditor({ value: 'abc' });
+    await settleDrop();
+    drop(target.querySelector<HTMLElement>('.edit-content')!, [sized('small.png', 1), sized('big.png', 60)]);
+    await settleDrop();
+    expect(uploadSpy).not.toHaveBeenCalled();
+    expect(target.querySelector('[data-testid="upload-error"]')?.textContent)
+      .toContain('Nothing was uploaded. big.png is over the 50 MB limit.');
+  });
+
+  it('a file of a type not allowed is not uploaded either, and every reason shows', async () => {
+    uploadLimit.mb = 50;
+    const uploadSpy = stubCtx.upload as ReturnType<typeof vi.fn>;
+    const { target } = mountEditor({ value: 'abc' });
+    await settleDrop();
+    const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
+    drop(ta, [sized('tool.exe', 1)]);
+    await settleDrop();
+    expect(uploadSpy).not.toHaveBeenCalled();
+    expect(target.querySelector('[data-testid="upload-error"]')?.textContent).toContain('tool.exe: extension not allowed.');
+    drop(target.querySelector<HTMLElement>('.edit-content')!, [sized('a.png', 1), sized('big.png', 60), sized('tool.exe', 1)]);
+    await settleDrop();
+    expect(uploadSpy).not.toHaveBeenCalled();
+    expect(target.querySelector('[data-testid="upload-error"]')?.textContent)
+      .toContain('Nothing was uploaded. big.png is over the 50 MB limit. tool.exe: extension not allowed.');
+  });
+
+  it('a drop over the limit while an upload runs flashes, like any drop then, with no error', async () => {
+    uploadLimit.mb = 50;
+    let finish: (a: AssetResponse) => void = () => {};
+    const uploadSpy = (stubCtx.upload as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(new Promise<AssetResponse>((r) => { finish = r; }));
+    const { target } = mountEditor({ value: '' });
+    await settleDrop();
+    const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
+    drop(ta, [sized('first.png', 1)]);
+    flushSync();
+    expect(target.querySelector('.edit-content')!.classList.contains('flash')).toBe(false);
+    drop(ta, [sized('big.png', 60)]);
+    flushSync();
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
+    expect(target.querySelector('.edit-content')!.classList.contains('flash')).toBe(true);
+    expect(target.querySelector('[data-testid="upload-error"]')).toBeNull();
+    finish(mkAsset({ filename: 'first.png' }));
+    await settleDrop();
+  });
+
+  it('a file at the limit, or any file while the limit is unknown, uploads', async () => {
+    const uploadSpy = (stubCtx.upload as ReturnType<typeof vi.fn>)
+      .mockResolvedValue(mkAsset({ filename: 'ok.png', mime_type: 'image/png' }));
+    const { target } = mountEditor({ value: '' });
+    await settleDrop();
+    const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
+    drop(ta, [sized('huge.png', 500)]);
+    await settleDrop();
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
+    uploadLimit.mb = 50;
+    drop(ta, [sized('ok.png', 50)]);
+    await settleDrop();
+    expect(uploadSpy).toHaveBeenCalledTimes(2);
+    expect(target.querySelector('[data-testid="upload-error"]')).toBeNull();
   });
 });
 

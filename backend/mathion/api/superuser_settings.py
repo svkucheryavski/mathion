@@ -24,7 +24,8 @@ from mathion.branding import load_branding
 from mathion.config import settings
 from mathion.database import SessionLocal, get_db
 from mathion.models_auth import NotificationLogEntry, SiteSettings, User
-from mathion.notifications.mailer import DEV_MODES, SMTPMailer
+from mathion.notifications.dispatcher import refusal_on_card
+from mathion.notifications.mailer import DEV_MODES, SMTPMailer, logs_in
 from mathion.notifications.smtp_errors import SMTP_FAILURES, describe
 from mathion.schemas import (
     EmailSettingsIn, EmailTestIn, EmailTestResult, LimitsIn, PanelEmailSettings, PanelEmailTest,
@@ -51,11 +52,18 @@ _SAVED_NOT_ASCII = "The saved password has characters that can't be sent: type i
 _NEEDS_PASSWORD = "Type the password for this username."
 _RETYPE = "Type the password again: the mail server, username or certificate check has changed."
 _UNREADABLE = "The saved password can't be read on this server: type it again."
-_TEST_RUNNING = "A test is already running."
+_TEST_RUNNING = "The last test is still finishing. Try again in a minute."  # the user's (2026-11-12)
+# The user's sentences (2026-11-12).
+_FROM_QUOTES = "Put a name with a comma or colon in quotes."
+_FROM_UNDERSCORE = "The From address's domain can't contain _."
+_USERNAME_ASCII = "The username can't contain letters like æ, ø or å."
 _SKIPPED_OFF = "skipped: email was off"
 
 _PRINTABLE_ASCII = re.compile(r"[\x20-\x7e]*")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+# An address like a@uni.dk: a word, an @ and a dotted domain (a name like
+# "Maths@AAU" has no dot, so it is a name to quote).
+_AN_ADDRESS = re.compile(r'[^\s@,:;<>()"]+@[^\s@,:;<>()"]+\.[^\s@,:;<>()"]')
 # Labels of letters, digits and hyphens, one dot between them.
 _DOMAIN = re.compile(r"[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*")
 
@@ -71,6 +79,29 @@ def _bad(sentence: str):
     raise HTTPException(status_code=422, detail=sentence)
 
 
+def _outside_quotes(text: str) -> str:
+    """The characters of `text` outside double quotes and (comments): only
+    there does a comma split the From into two addresses, a colon make it a
+    group (which From may not be), or an @ start an address."""
+    quoted = escaped = False
+    depth = 0
+    kept = []
+    for ch in text:
+        if escaped:
+            escaped = False
+        elif ch == "\\" and (quoted or depth):
+            escaped = True
+        elif ch == '"' and not depth:
+            quoted = not quoted
+        elif ch == "(" and not quoted:
+            depth += 1
+        elif ch == ")" and not quoted and depth:
+            depth -= 1
+        elif not quoted and not depth:
+            kept.append(ch)
+    return "".join(kept)
+
+
 def _from_problem(value: str) -> str | None:
     """D7b: a name and an address with an @, and no line break of any kind.
     The address is plain ASCII: most mail servers refuse any other (no
@@ -79,8 +110,24 @@ def _from_problem(value: str) -> str | None:
     the envelope sender smtplib takes from it, and the From a receiver reads
     back, must both be the one address checked here. So nothing passes that
     would fail every message later."""
+    # Read outside quotes and (comments), where a "<", ">", comma or colon
+    # is part of the name.
+    bare = _outside_quotes(value)
     if (len(value) > 320 or _CONTROL.search(value) or len(value.splitlines()) != 1
-            or value.count("<") != value.count(">")):
+            or bare.count("<") != bare.count(">")):
+        return _FROM
+    # The name is what comes before the first "<": after it, or after an
+    # address before it, a comma starts a second address, which the format
+    # sentence covers. After the address only a (comment) may follow: a
+    # trailing comma starts an empty one. With no "<" there is no name to
+    # quote: a comma or colon is a second address, a group or a pasted link.
+    name, bracket, after = bare.partition("<")
+    if bracket:
+        if not _AN_ADDRESS.search(name) and any(c in ",:" for c in name):
+            return _FROM_QUOTES
+        if after.partition(">")[2].strip():
+            return _FROM
+    elif any(c in ",:" for c in name):
         return _FROM
     _name, addr = parseaddr(value)
     local, at, domain = addr.rpartition("@")
@@ -88,6 +135,8 @@ def _from_problem(value: str) -> str | None:
         return _FROM
     if not addr.isascii():
         return _FROM_ASCII
+    if "_" in domain:
+        return _FROM_UNDERSCORE  # RFC 5321: a host name has letters, digits and hyphens
     try:
         msg = EmailMessage()
         msg["From"] = value
@@ -100,6 +149,9 @@ def _from_problem(value: str) -> str | None:
                 return _FROM
         # As a receiver reads it: one mailbox, with a domain of the right shape
         # (a pasted quote leaves "noreply@uni.dk" with no domain at all).
+        # A backstop: the scan above already refuses a colon outside quotes.
+        if any(group.display_name for group in back["From"].groups):
+            return _FROM_QUOTES
         mailboxes = back["From"].addresses
         if (len(mailboxes) != 1 or mailboxes[0].addr_spec != addr
                 or not _DOMAIN.fullmatch(mailboxes[0].domain or "")):
@@ -125,6 +177,8 @@ def _check_email(data: EmailTestIn, row: SiteSettings, secret: str) -> str:
         _bad(_HOST_TOO_LONG)
     if len(data.username) > 254:
         _bad(_USERNAME_TOO_LONG)
+    if not _PRINTABLE_ASCII.fullmatch(data.username):
+        _bad(_USERNAME_ASCII)  # smtplib can't send any other
     if not 1 <= data.port <= 65535:
         _bad(_PORT)
     problem = _from_problem(data.from_address)
@@ -370,7 +424,9 @@ def _run_test(attempt: _Attempt, data: EmailTestIn, password: str, recipient: st
             failure = describe(exc, host=data.host, port=data.port, sender=data.from_address,
                                recipient=recipient, encryption=data.encryption, timeout=SMTP_TIMEOUT_SECONDS)
             logger.info("settings: test email failed: %s", failure.text())
-            attempt.settle(False, failure.sentence)
+            # D9d: the refusal after the body says what the card says.
+            card = refusal_on_card(exc, failure, data.from_address, has_login=logs_in(data.username, data.encryption))
+            attempt.settle(False, (card or failure).sentence)
             return
         except Exception as exc:
             # Not the mail server's: still logged by class only, since smtplib's

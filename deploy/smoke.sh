@@ -80,7 +80,10 @@ echo "==> Non-root asset-volume write"
 [ "$("${CMP[@]}" exec -T app id -u | tr -d '\r')" = "10001" ] || fail "not uid 10001"
 
 echo "==> First-login round-trip (verify-pin → 200 + Secure cookie)"
-PIN=$("${CMP[@]}" exec -T app python -m mathion.superuser pin you@example.edu | grep -oE '[0-9]{6}' | head -1)
+# `pin` exits 1 for an unknown or disabled email; run it on its own line so
+# its message reaches the failure, and let grep find nothing without stopping.
+PIN_OUT=$("${CMP[@]}" exec -T app python -m mathion.superuser pin you@example.edu) || fail "pin failed: ${PIN_OUT:-no output}"
+PIN=$(printf '%s\n' "${PIN_OUT}" | grep -oE '[0-9]{6}' | head -1 || true)
 [ -n "${PIN}" ] || fail "no PIN issued"
 hdrs=$(curl -s -D - -o /dev/null \
   -H 'Content-Type: application/json' -H 'X-Requested-With: mathion' \

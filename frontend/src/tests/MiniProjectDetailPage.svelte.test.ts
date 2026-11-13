@@ -557,7 +557,7 @@ describe('MiniProjectDetailPage (D6 — submit flow)', () => {
     expect(vi.mocked(submit)).not.toHaveBeenCalled();
     const banner = target.querySelector('[data-testid="mp-submit-error"]');
     if (!banner) throw new Error('expected client-size banner');
-    expect(banner.textContent).toContain('File too large — 20 MB maximum.');
+    expect(banner.textContent).toContain('big.pdf is over the 20 MB limit.');
   });
 
   it('the size check says the saved limit (Settings D11b)', async () => {
@@ -570,7 +570,7 @@ describe('MiniProjectDetailPage (D6 — submit flow)', () => {
     clickSubmit();
     await settle();
     expect(vi.mocked(submit)).not.toHaveBeenCalled();
-    expect(target.querySelector('[data-testid="mp-submit-error"]')?.textContent).toContain('File too large — 50 MB maximum.');
+    expect(target.querySelector('[data-testid="mp-submit-error"]')?.textContent).toContain('big.pdf is over the 50 MB limit.');
   });
 
   it('while the limit is unknown the browser skips its size check; the server decides (Settings D11b)', async () => {

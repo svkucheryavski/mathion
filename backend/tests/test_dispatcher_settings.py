@@ -293,8 +293,12 @@ def test_failure_text_in_db_has_no_server_reply(db, seeded_run, mailer, caplog):
 # for good) and never holds up the others; while refusals come and nothing gets
 # through, the Email card says so (no queue back-off).
 
-REFUSED_SENTENCE = ("The mail server refused a message: check that the login may send as "
-                    "Mathion <noreply@uni.dk>.")
+REFUSED_SENTENCE = ("The mail server refused a message: check that it accepts mail from "
+                    "Mathion <noreply@uni.dk> without a login.")
+REFUSED_LOGIN_SENTENCE = ("The mail server refused a message: check that the login may send as "
+                          "Mathion <noreply@uni.dk> and that it accepts Mathion's messages.")
+EVERYONE_SENTENCE = ("The mail server refused every recipient: check that it lets Mathion send to "
+                     "other addresses.")
 
 
 def _fresh_view(db):
@@ -450,3 +454,304 @@ def test_refusal_tick_records_failure_not_send(db, seeded_run, mailer):
     assert _sent(db, r1, r2) == [True, False]
     view = _fresh_view(db)
     assert (view.send_failure_message, view.last_sent_at) == (SENDER_SENTENCE, None)
+
+
+# --- D9c, D9d, rev 8: the card and the queue's state ---
+
+def test_card_refusal_without_login():
+    from mathion.notifications.dispatcher import refusal_on_card
+    from mathion.notifications.smtp_errors import describe
+    exc = smtplib.SMTPDataError(554, b"x")
+    failure = describe(exc, host="mail.uni.dk", port=587, sender="Mathion <noreply@uni.dk>", recipient="a@b")
+    card = refusal_on_card(exc, failure, "Mathion <noreply@uni.dk>", has_login=False)
+    assert (card.sentence, card.batch_level) == (REFUSED_SENTENCE, False)
+
+
+def test_card_refusal_with_login_is_hedged():
+    from mathion.notifications.dispatcher import refusal_on_card
+    from mathion.notifications.smtp_errors import describe
+    exc = smtplib.SMTPDataError(554, b"x")
+    failure = describe(exc, host="mail.uni.dk", port=587, sender="Mathion <noreply@uni.dk>", recipient="a@b")
+    card = refusal_on_card(exc, failure, "Mathion <noreply@uni.dk>", has_login=True)
+    assert card.sentence == REFUSED_LOGIN_SENTENCE
+
+
+def test_queue_card_refusal_names_the_login_when_one_is_saved(db, seeded_run, mailer):
+    mailer["m"] = _Mailer(fail=smtplib.SMTPDataError(554, b"rejected"))
+    set_site(db, **ON, smtp_username="u@uni.dk", email_off_at=None)
+    _row(db, seeded_run, T0)
+    _tick_once(_state(), T0 + H)
+    assert _fresh_view(db).send_failure_message == REFUSED_LOGIN_SENTENCE
+
+
+def test_session_with_nothing_sent_clears_the_red_line(db, seeded_run, mailer):
+    # It connected and logged in, so the server's side works, though the one
+    # message was refused on its own (one recipient's problem).
+    mailer["m"] = _Mailer(fail=smtplib.SMTPRecipientsRefused({"x@uni.dk": (550, b"no such user")}))
+    set_site(db, **ON, smtp_username="u@uni.dk", email_off_at=None,
+             send_failure_message="The mail server refused the login.",
+             send_failure_at=T0, send_retry_at=T0, send_backoff_step=2)
+    _row(db, seeded_run, T0)
+    _tick_once(_state(), T0 + H)
+    view = _fresh_view(db)
+    assert (view.send_failure_message, view.send_failure_at, view.send_retry_at, view.send_backoff_step) == (
+        None, None, None, 0)
+    assert view.last_sent_at is None
+
+
+def test_refusal_after_body_clears_the_backoff(db, seeded_run, mailer):
+    # The wait has run out by the tick (the queue doesn't run during one), so
+    # this pins the reset step: the next D9c failure waits 5 minutes again.
+    mailer["m"] = _Mailer(fail=smtplib.SMTPDataError(554, b"rejected"))
+    set_site(db, **ON, email_off_at=None, send_failure_message="The mail server refused the login.",
+             send_failure_at=T0, send_retry_at=T0 + timedelta(minutes=30), send_backoff_step=3)
+    _row(db, seeded_run, T0)
+    _tick_once(_state(), T0 + H)
+    view = _fresh_view(db)
+    assert view.send_failure_message == REFUSED_SENTENCE
+    assert (view.send_retry_at, view.send_backoff_step) == (None, 0)
+
+
+def _other_student(db):
+    from mathion.models_auth import User
+    user = User(email="ben@example.com", full_name="Ben")
+    db.add(user)
+    db.commit()
+    return user
+
+
+def _row_for(db, seeded_run, user, created_at):
+    e = NotificationLogEntry(user_id=user.id, kind="run_enrolled", payload={"run_id": seeded_run["run"].id},
+                             created_at=created_at)
+    db.add(e)
+    db.commit()
+    return e
+
+
+def test_relay_refusing_everyone_shows_on_card(db, seeded_run, mailer):
+    mailer["m"] = _Mailer(fail=smtplib.SMTPRecipientsRefused({"x@uni.dk": (554, b"5.7.1 Relay access denied")}))
+    set_site(db, **ON, email_off_at=None, send_failure_message="The mail server refused the login.",
+             send_failure_at=T0, send_retry_at=T0, send_backoff_step=3)   # D9d: it ends a wait
+    rows = [_row(db, seeded_run, T0), _row_for(db, seeded_run, _other_student(db), T0 + timedelta(seconds=1))]
+    now = T0 + H
+    _tick_once(_state(), now)
+    view = _fresh_view(db)
+    assert (view.send_failure_message, view.send_failure_at) == (EVERYONE_SENTENCE, now)
+    assert (view.send_retry_at, view.send_backoff_step) == (None, 0)
+    for r in rows:
+        db.refresh(r)
+        assert r.retry_count == 1
+        assert r.error is not None   # each still fails for good
+
+
+def test_two_refusals_for_one_address_are_not_everyone(db, seeded_run, mailer):
+    # Two messages to one dead mailbox are that address's problem.
+    mailer["m"] = _Mailer(fail=smtplib.SMTPRecipientsRefused({"x@uni.dk": (550, b"no such user")}))
+    set_site(db, **ON, email_off_at=None)
+    for i in range(2):
+        _row(db, seeded_run, T0 + timedelta(seconds=i))
+    _tick_once(_state(), T0 + H)
+    assert _fresh_view(db).send_failure_message is None
+
+
+def test_the_card_names_no_login_when_none_happens(db, seeded_run, mailer):
+    # A username copied with no encryption logs in to nothing (D7a).
+    mailer["m"] = _Mailer(fail=smtplib.SMTPDataError(554, b"rejected"))
+    set_site(db, **ON, smtp_username="u@uni.dk", smtp_encryption="none", email_off_at=None)
+    _row(db, seeded_run, T0)
+    _tick_once(_state(), T0 + H)
+    assert _fresh_view(db).send_failure_message == REFUSED_SENTENCE
+
+
+@pytest.mark.parametrize("rows, on_calls", [(1, ()), (2, [1])])
+def test_one_refused_recipient_leaves_the_card(db, seeded_run, mailer, rows, on_calls):
+    # One refused address is that address's problem; so is one beside a sent message.
+    mailer["m"] = _Mailer(fail=smtplib.SMTPRecipientsRefused({"x@uni.dk": (550, b"no such user")}),
+                          on_calls=on_calls)
+    set_site(db, **ON, email_off_at=None)
+    for i in range(rows):
+        _row(db, seeded_run, T0 + timedelta(seconds=i))
+    _tick_once(_state(), T0 + H)
+    assert _fresh_view(db).send_failure_message is None
+
+
+class _Seq(MemoryMailer):
+    """Raises the n-th exception on the n-th send (None sends)."""
+    def __init__(self, *fails):
+        super().__init__()
+        self.fails = list(fails)
+
+    def send(self, msg):
+        fail = self.fails.pop(0) if self.fails else None
+        if fail is not None:
+            raise fail
+        self.sent.append(msg)
+
+
+NO_UTF8 = ("One or more source or delivery addresses require internationalized email support,"
+           " but the server does not advertise the required SMTPUTF8 capability")
+RCPT_554 = smtplib.SMTPRecipientsRefused({"x@uni.dk": (554, b"5.7.1 Relay access denied")})
+
+
+def test_a_non_ascii_recipient_fails_only_its_message(db, seeded_run, mailer):
+    mailer["m"] = _Seq(smtplib.SMTPNotSupportedError(NO_UTF8), None)
+    set_site(db, **ON, email_off_at=None)
+    a, b = (_row(db, seeded_run, T0 + timedelta(seconds=i)) for i in range(2))
+    _tick_once(_state(), T0 + H)
+    db.refresh(a)
+    assert a.error is not None and a.retry_count == 1
+    assert _sent(db, b) == [True]
+    assert _fresh_view(db).send_failure_message is None
+
+
+def test_a_non_ascii_from_stops_the_queue(db, seeded_run, mailer):
+    mailer["m"] = _Seq(smtplib.SMTPNotSupportedError(NO_UTF8))
+    set_site(db, **{**ON, "email_from": "Mathion <nø@uni.dk>"}, email_off_at=None)
+    r = _row(db, seeded_run, T0)
+    _tick_once(_state(), T0 + H)
+    db.refresh(r)
+    assert (r.retry_count, r.error) == (0, None)
+    view = _fresh_view(db)
+    assert view.send_failure_message == "The mail server can't take an address with letters like æ, ø or å."
+    assert view.send_retry_at is not None
+
+
+def test_a_drop_mid_send_leaves_the_red_line(db, seeded_run, mailer):
+    # The session opened but the message didn't go: nothing says the server works.
+    mailer["m"] = _Seq(smtplib.SMTPServerDisconnected("Connection unexpectedly closed: timed out"))
+    set_site(db, **ON, email_off_at=None, send_failure_message="The mail server refused the login.",
+             send_failure_at=T0, send_retry_at=T0, send_backoff_step=2)
+    _row(db, seeded_run, T0)
+    _tick_once(_state(), T0 + H)
+    view = _fresh_view(db)
+    assert (view.send_failure_message, view.send_failure_at, view.send_backoff_step) == (
+        "The mail server refused the login.", T0, 2)
+
+
+def test_session_with_only_skipped_rows_clears_the_red_line(db, seeded_run, mailer):
+    mailer["m"] = _Seq()
+    set_site(db, **ON, email_off_at=None, send_failure_message="The mail server refused the login.",
+             send_failure_at=T0, send_retry_at=T0, send_backoff_step=2)
+    db.add(NotificationLogEntry(user_id=seeded_run["student_user"].id, kind="course_admin_assigned",
+                                payload={"course_id": 987654}, created_at=T0))   # course gone: skipped
+    db.commit()
+    _tick_once(_state(), T0 + H)
+    view = _fresh_view(db)
+    assert (view.send_failure_message, view.send_retry_at, view.send_backoff_step) == (None, None, 0)
+    assert mailer["m"].sent == []
+
+
+@pytest.mark.parametrize("line", [REFUSED_SENTENCE, REFUSED_LOGIN_SENTENCE, EVERYONE_SENTENCE])
+def test_a_refusal_line_stays_through_a_session_that_sends_nothing(db, seeded_run, mailer, line):
+    # A refusal's line goes when a message gets through, not when a tick
+    # merely connects (else a retried refusal flickers on and off).
+    mailer["m"] = _Seq(smtplib.SMTPRecipientsRefused({"x@uni.dk": (550, b"no such user")}))
+    set_site(db, **ON, email_off_at=None, send_failure_message=line, send_failure_at=T0)
+    _row(db, seeded_run, T0)
+    _tick_once(_state(), T0 + H)
+    view = _fresh_view(db)
+    assert (view.send_failure_message, view.send_failure_at) == (line, T0)
+
+
+def test_relay_refusing_everyone_beside_a_broken_row_still_shows(db, seeded_run, mailer):
+    # A row that fails before it reaches the server doesn't count.
+    mailer["m"] = _Seq(RCPT_554, RCPT_554)
+    set_site(db, **ON, email_off_at=None)
+    _row(db, seeded_run, T0)
+    db.add(NotificationLogEntry(user_id=seeded_run["student_user"].id, kind="evaluation_received",
+                                payload={"run_id": seeded_run["run"].id}, created_at=T0 + timedelta(seconds=1)))
+    db.commit()
+    _row_for(db, seeded_run, _other_student(db), T0 + timedelta(seconds=2))
+    _tick_once(_state(), T0 + H)
+    assert _fresh_view(db).send_failure_message == EVERYONE_SENTENCE
+
+
+def test_two_greylisted_recipients_are_not_everyone(db, seeded_run, mailer):
+    grey = smtplib.SMTPRecipientsRefused({"x@uni.dk": (451, b"4.7.1 try later")})
+    mailer["m"] = _Seq(grey, grey)
+    set_site(db, **ON, email_off_at=None)
+    _row(db, seeded_run, T0)
+    _row_for(db, seeded_run, _other_student(db), T0 + timedelta(seconds=1))
+    _tick_once(_state(), T0 + H)
+    assert _fresh_view(db).send_failure_message is None
+
+
+@pytest.mark.parametrize("third, line", [
+    (smtplib.SMTPDataError(554, b"rejected"), REFUSED_SENTENCE),
+    (smtplib.SMTPServerDisconnected("Connection unexpectedly closed"), None),
+])
+def test_refused_recipients_beside_another_failure_are_not_everyone(db, seeded_run, mailer, third, line):
+    # Two addresses refused, but a third message went further (D9c): not everyone.
+    mailer["m"] = _Seq(RCPT_554, RCPT_554, third)
+    set_site(db, **ON, email_off_at=None)
+    _row(db, seeded_run, T0)
+    _row_for(db, seeded_run, _other_student(db), T0 + timedelta(seconds=1))
+    _row(db, seeded_run, T0 + timedelta(seconds=2))
+    _tick_once(_state(), T0 + H)
+    assert _fresh_view(db).send_failure_message == line
+
+
+# D9d, rev 8: a login doesn't show the server takes the From, so these lines
+# stay until a message gets past the sender.
+SENDER_SIDE = [SENDER_SENTENCE, "The mail server asked Mathion to try again later.",
+               "The mail server can't take an address with letters like æ, ø or å."]
+
+
+@pytest.mark.parametrize("before_sender", [False, True])
+@pytest.mark.parametrize("line", SENDER_SIDE)
+def test_a_sender_line_stays_through_a_session_that_sends_nothing(db, seeded_run, mailer, line, before_sender):
+    # The one row is skipped, or fails before the sender is sent (a
+    # recipient with letters like æ on a server without SMTPUTF8).
+    mailer["m"] = _Seq(smtplib.SMTPNotSupportedError(NO_UTF8))
+    set_site(db, **ON, email_off_at=None, send_failure_message=line,
+             send_failure_at=T0, send_retry_at=T0, send_backoff_step=3)
+    if before_sender:
+        _row(db, seeded_run, T0)
+    else:
+        db.add(NotificationLogEntry(user_id=seeded_run["student_user"].id, kind="course_admin_assigned",
+                                    payload={"course_id": 987654}, created_at=T0))   # course gone: skipped
+        db.commit()
+    _tick_once(_state(), T0 + H)
+    view = _fresh_view(db)
+    assert (view.send_failure_message, view.send_failure_at, view.send_backoff_step) == (line, T0, 3)
+
+
+@pytest.mark.parametrize("fail", [
+    smtplib.SMTPRecipientsRefused({"x@uni.dk": (550, b"no such user")}),
+    smtplib.SMTPRecipientsRefused({"x@uni.dk": (451, b"4.7.1 try later")}),
+    smtplib.SMTPDataError(451, b"4.3.0 try later"),
+])
+@pytest.mark.parametrize("line", SENDER_SIDE)
+def test_a_sender_line_goes_when_a_message_gets_past_the_sender(db, seeded_run, mailer, line, fail):
+    # The server took the sender, then refused or delayed the message: the From works.
+    mailer["m"] = _Seq(fail)
+    set_site(db, **ON, email_off_at=None, send_failure_message=line,
+             send_failure_at=T0, send_retry_at=T0, send_backoff_step=3)
+    _row(db, seeded_run, T0)
+    _tick_once(_state(), T0 + H)
+    view = _fresh_view(db)
+    assert (view.send_failure_message, view.send_retry_at, view.send_backoff_step) == (None, None, 0)
+
+
+def test_a_message_smtplib_stops_before_the_server_does_not_count(db, seeded_run, mailer):
+    # A recipient with letters like æ never reaches a server without SMTPUTF8,
+    # so it doesn't hide a relay refusing everyone (D9c).
+    mailer["m"] = _Seq(RCPT_554, smtplib.SMTPNotSupportedError(NO_UTF8), RCPT_554)
+    set_site(db, **ON, email_off_at=None)
+    _row(db, seeded_run, T0)
+    _row(db, seeded_run, T0 + timedelta(seconds=1))
+    _row_for(db, seeded_run, _other_student(db), T0 + timedelta(seconds=2))
+    _tick_once(_state(), T0 + H)
+    assert _fresh_view(db).send_failure_message == EVERYONE_SENTENCE
+
+
+def test_a_message_that_breaks_before_the_server_does_not_count(db, seeded_run, mailer):
+    # An error of Mathion's own while smtplib builds the message: the server
+    # never heard of it, so it doesn't hide a relay refusing everyone (D9c).
+    mailer["m"] = _Seq(RCPT_554, ValueError("header"), RCPT_554)
+    set_site(db, **ON, email_off_at=None)
+    _row(db, seeded_run, T0)
+    _row(db, seeded_run, T0 + timedelta(seconds=1))
+    _row_for(db, seeded_run, _other_student(db), T0 + timedelta(seconds=2))
+    _tick_once(_state(), T0 + H)
+    assert _fresh_view(db).send_failure_message == EVERYONE_SENTENCE

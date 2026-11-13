@@ -100,3 +100,54 @@ def test_second_admin_row_violates_unique(db):
     with pytest.raises(IntegrityError):
         db.commit()
     db.rollback()
+
+
+def test_removed_admin_lines_name_email_and_course(db, capsys, monkeypatch):
+    # D6: each line is a record of who lost admin rights, and
+    # is flushed so it lands in place in `mathion update`'s piped output.
+    import builtins
+    flushed: list[bool] = []
+    real = builtins.print
+
+    def spy(*args, **kwargs):
+        if args and str(args[0]).startswith("one-admin-per-course:"):
+            flushed.append(kwargs.get("flush") is True)
+        real(*args, **kwargs)
+    monkeypatch.setattr(builtins, "print", spy)
+    db.close()
+    _rerun_migration([
+        ("INSERT INTO users (id, email, is_superuser, is_disabled) VALUES "
+         "(1, 'anna@x.dk', false, false), (2, 'bo@x.dk', false, false)", {}),
+        ("INSERT INTO courses (id, slug, name, description) VALUES (1, 'algebra', 'Algebra', '')", {}),
+        ("INSERT INTO course_admins (id, course_id, user_id) VALUES (10, 1, 2), (11, 1, 1)", {}),
+    ])
+    lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("one-admin-per-course:")]
+    assert lines == ["one-admin-per-course: removed anna@x.dk as admin of algebra (course_admins id=11)"]
+    assert flushed == [True]
+
+
+def test_removed_admin_line_escapes_non_ascii_email_and_slug(db, capsys):
+    # D6: the line stays ASCII, like the site-settings lines, so no locale can
+    # make it fail to print.
+    db.close()
+    _rerun_migration([
+        ("INSERT INTO users (id, email, is_superuser, is_disabled) VALUES "
+         "(1, 'b\u00f8rge@x.dk', false, false), (2, 'bo@x.dk', false, false)", {}),
+        ("INSERT INTO courses (id, slug, name, description) VALUES (1, 'alg\u00e6bra', 'Algebra', '')", {}),
+        ("INSERT INTO course_admins (id, course_id, user_id) VALUES (10, 1, 2), (11, 1, 1)", {}),
+    ])
+    lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("one-admin-per-course:")]
+    assert lines == ["one-admin-per-course: removed 'b\\xf8rge@x.dk' as admin of 'alg\\xe6bra' (course_admins id=11)"]
+
+
+def test_removed_admin_line_escapes_a_control_character(db, capsys):
+    # D6: one line per removed row, even for an address holding a line break.
+    db.close()
+    _rerun_migration([
+        ("INSERT INTO users (id, email, is_superuser, is_disabled) VALUES "
+         "(1, :bad, false, false), (2, 'bo@x.dk', false, false)", {"bad": "a\nb@x.dk"}),
+        ("INSERT INTO courses (id, slug, name, description) VALUES (1, 'algebra', 'Algebra', '')", {}),
+        ("INSERT INTO course_admins (id, course_id, user_id) VALUES (10, 1, 2), (11, 1, 1)", {}),
+    ])
+    out = capsys.readouterr().out
+    assert "one-admin-per-course: removed 'a\\nb@x.dk' as admin of algebra (course_admins id=11)\n" in out

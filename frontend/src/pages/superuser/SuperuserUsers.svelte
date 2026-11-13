@@ -7,7 +7,7 @@
   import { untrack } from 'svelte';
   import { ApiError } from '../../lib/api';
   import {
-    countLine, createUser, deleteUser, disableUser, disableWarning, enableUser, listUsers, panelError, personName,
+    countLine, createUser, deleteUser, disableUser, disableWarning, enableUser, formatCount, listUsers, panelError, personName,
     roleChips, updateUser, type PanelOnAuth, type PanelUser, type PanelUserList, type PanelUserRole,
   } from '../../lib/superuser';
   import { lastActiveText } from '../../lib/relativeTime';
@@ -39,8 +39,9 @@
   let query = $state('');
   let role = $state<PanelUserRole>('all');
   // The list with the search and pill it was fetched for, so the line under
-  // the table describes what is shown, not what is being typed.
-  let shown = $state.raw<{ list: PanelUserList; q: string; role: PanelUserRole } | null>(null);
+  // the table describes what is shown, not what is being typed. `now` is the
+  // time of that fetch, so "Last active" follows each load (rev 11).
+  let shown = $state.raw<{ list: PanelUserList; q: string; role: PanelUserRole; now: Date } | null>(null);
   let loadError = $state('');
   let note = $state<Note | null>(null);
   let noteSeq = 0;
@@ -51,19 +52,23 @@
   let latest = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
-  // D15a: only the newest request's reply counts.
-  async function load(): Promise<void> {
+  // D15a: only the newest request's reply counts. `quiet` reloads behind
+  // the table (after a save or a strip action) and keep it if they fail;
+  // with no rows on screen (no list yet, or an empty one) there is nothing
+  // to keep, so the failure shows (D25, rev 13, as on the Courses page).
+  async function load(quiet = false): Promise<void> {
     const mine = ++latest;
     const q = query.trim();
     const r = role;
     try {
       const list = await listUsers(token, q, r);
       if (mine !== latest) return;
-      shown = { list, q, role: r };
+      shown = { list, q, role: r, now: new Date() };
       loadError = '';
     } catch (err) {
       if (mine !== latest) return;
-      loadError = panelError(err, onAuth) ?? '';
+      const msg = panelError(err, onAuth);
+      if (!quiet || shown === null || shown.list.users.length === 0) loadError = msg ?? '';
     }
   }
 
@@ -85,7 +90,11 @@
     void load();
   }
 
-  const pillOptions = $derived(PILLS.map((p) => ({ ...p, count: shown?.list.counts[p.key] })));
+  // D15: the pills group big counts like the count line.
+  const pillOptions = $derived(PILLS.map((p) => {
+    const n = shown?.list.counts[p.key];
+    return { ...p, count: n === undefined ? undefined : formatCount(n) };
+  }));
 
   function showNote(tone: Note['tone'], text: string): void {
     note = { id: ++noteSeq, tone, text };
@@ -97,7 +106,7 @@
     try {
       return await run();
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) void load();
+      if (err instanceof ApiError && err.status === 409) void load(true);
       throw err;
     }
   }
@@ -106,14 +115,14 @@
     const made = await guarded(() => createUser(token, body));
     dialog = null;
     showNote('info', `The account for ${made.email} is created. No email was sent.`);
-    void load();
+    void load(true);
   }
 
   async function saveEdit(u: PanelUser, body: { full_name?: string | null; email?: string }): Promise<void> {
     await guarded(() => updateUser(token, u.id, body));
     dialog = null;
     note = null;
-    void load();
+    void load(true);
   }
 
   const askKey = (a: Ask) => `${a.id}-${a.kind}`;
@@ -127,19 +136,30 @@
   async function confirmAsk(u: PanelUser, kind: Ask['kind']): Promise<void> {
     if (asking) return;
     asking = true;
+    const mine = ask;
     try {
       if (kind === 'disable') await disableUser(token, u.id);
       else if (kind === 'enable') await enableUser(token, u.id);
-      else await deleteUser(token, u.id);
+      else {
+        await deleteUser(token, u.id);
+        // D25 (rev 13): the row goes at once, so a failed reload can't keep
+        // it; the pill counts wait for the next load. A list loaded during
+        // the delete may not hold the row, and then nothing changes.
+        if (shown?.list.users.some((x) => x.id === u.id)) {
+          const users = shown.list.users.filter((x) => x.id !== u.id);
+          shown = { ...shown, list: { ...shown.list, users, total: shown.list.total - 1 } };
+        }
+      }
       note = null;
     } catch (err) {
       const msg = panelError(err, onAuth);
       if (msg) showNote('error', msg);
     } finally {
       asking = false;
-      ask = null;
+      // Only this strip closes: another row's, opened meanwhile, stays (rev 11).
+      if (ask === mine) ask = null;
     }
-    void load();
+    void load(true);
   }
 
   function askText(u: PanelUser, kind: Ask['kind']): string {
@@ -174,7 +194,6 @@
   <Skeleton rows={4} label="Loading accounts…" />
 {:else}
   {#if shown.list.users.length > 0}
-    {@const now = new Date()}
     <div class="table-scroll">
       <table class="u-table">
         <thead>
@@ -208,7 +227,7 @@
                   </span>
                 {/if}
               </td>
-              <td class="u-last">{lastActiveText(u.last_seen_at, now)}</td>
+              <td class="u-last">{lastActiveText(u.last_seen_at, shown.now)}</td>
               <td class="u-actions">
                 <span class="row-icons">
                   <IconButton glyph="pencil" size="sm" title="Edit" aria-label="Edit {who}" data-action="edit"
@@ -234,6 +253,8 @@
               {@const kind = ask.kind}
               <tr class="u-confirm">
                 <td colspan="5">
+                  <!-- One confirm at a time: another row's strip opened meanwhile waits
+                       (busy) until this one finishes, then stays open (rev 11). -->
                   <InlineConfirm row align="end" takeFocus busy={asking} warning={askText(u, kind)}
                     tone={kind === 'enable' ? 'primary' : 'danger'}
                     confirmLabel={kind === 'disable' ? 'Disable' : kind === 'enable' ? 'Enable' : 'Delete'}

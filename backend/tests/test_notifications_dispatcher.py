@@ -440,6 +440,317 @@ def test_skip_does_not_touch_retry_or_log_warning(db, admin_row, caplog):
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
+def _reassign(session, course_id, user_id):
+    from mathion.models import CourseAdmin
+    session.query(CourseAdmin).filter_by(course_id=course_id).one().user_id = user_id
+    session.commit()
+
+
+def test_skip_is_checked_again_under_the_course_lock(db, admin_row, monkeypatch):
+    """Rev 11: A -> B, the dispatcher sees B, then the panel puts A back before
+    the skip is written: the second look, under the course lock the panel's
+    assign holds, sees A again and the email goes."""
+    from mathion.database import SessionLocal
+    from mathion.notifications import dispatcher
+    other = User(email="ole@x"); db.add(other); db.commit()
+    course_id, anna_id = admin_row["course"].id, admin_row["admin"].id
+    _reassign(db, course_id, other.id)
+    real = dispatcher._lock_course
+
+    def put_anna_back_then_lock(session, cid):
+        with SessionLocal() as panel:
+            _reassign(panel, course_id, anna_id)
+        real(session, cid)
+
+    monkeypatch.setattr(dispatcher, "_lock_course", put_anna_back_then_lock)
+    mailer = MemoryMailer()
+    tick(db, mailer, now=datetime.now(timezone.utc))
+    db.refresh(admin_row["row"])
+    assert admin_row["row"].error is None
+    assert [m["To"] for m in mailer.sent] == ["anna@x"]
+
+
+def test_a_second_look_that_clears_lets_go_of_the_lock_before_sending(db, admin_row, monkeypatch):
+    """Rev 11: a row the second look clears is sent without the course lock,
+    so a slow mail server can't hold up the panel's edits of that course."""
+    from sqlalchemy import select, text
+    from sqlalchemy.exc import OperationalError
+    from mathion.database import SessionLocal
+    from mathion.models import Course
+    from mathion.notifications import dispatcher
+    other = User(email="ole@x"); db.add(other); db.commit()
+    course_id, anna_id = admin_row["course"].id, admin_row["admin"].id
+    _reassign(db, course_id, other.id)
+    real = dispatcher._lock_course
+
+    def put_anna_back_then_lock(session, cid):
+        with SessionLocal() as panel:
+            _reassign(panel, course_id, anna_id)
+        real(session, cid)
+
+    monkeypatch.setattr(dispatcher, "_lock_course", put_anna_back_then_lock)
+    blocked = []
+
+    class PanelEditsDuringSend(MemoryMailer):
+        def send(self, msg):
+            with SessionLocal() as panel:
+                panel.execute(text("SET LOCAL lock_timeout = '300ms'"))
+                try:
+                    panel.execute(select(Course).where(Course.id == course_id).with_for_update())
+                    blocked.append(False)
+                except OperationalError:
+                    blocked.append(True)
+                panel.rollback()
+            super().send(msg)
+
+    mailer = PanelEditsDuringSend()
+    tick(db, mailer, now=datetime.now(timezone.utc))
+    assert blocked == [False]
+    assert [m["To"] for m in mailer.sent] == ["anna@x"]
+
+
+def test_a_skip_keeps_the_course_lock_until_it_is_written(db, admin_row, monkeypatch):
+    """Rev 11: a reason found by the second look is written under the same
+    lock, so a re-assign can't slip in between the look and the skip."""
+    from sqlalchemy import select, text
+    from sqlalchemy.exc import OperationalError
+    from mathion.database import SessionLocal
+    from mathion.models import Course
+    from mathion.notifications import dispatcher
+    other = User(email="ole@x"); db.add(other); db.commit()
+    course_id = admin_row["course"].id
+    _reassign(db, course_id, other.id)
+    real = dispatcher.skip_reason
+    blocked = []
+
+    def then_try_the_lock(session, row):
+        reason = real(session, row)
+        with SessionLocal() as panel:
+            panel.execute(text("SET LOCAL lock_timeout = '300ms'"))
+            try:
+                panel.execute(select(Course).where(Course.id == course_id).with_for_update())
+                blocked.append(False)
+            except OperationalError:
+                blocked.append(True)
+            panel.rollback()
+        return reason
+
+    monkeypatch.setattr(dispatcher, "skip_reason", then_try_the_lock)
+    tick(db, MemoryMailer(), now=datetime.now(timezone.utc))
+    db.refresh(admin_row["row"])
+    assert blocked == [True]
+    assert admin_row["row"].error == "skipped: no longer admin"
+
+
+def _said_gone(caplog, row_id, quietly=True):
+    """A gone row is named in one info line; `quietly`: nothing louder."""
+    assert any(r.getMessage() == f"notification id={row_id} is gone; passed over" for r in caplog.records)
+    if quietly:
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_a_row_deleted_mid_send_is_passed_over(db, admin_row, monkeypatch, caplog):
+    """A row deleted after its checks (its account deleted) is passed over:
+    the loop keeps the row's id, so the tick doesn't fail on the gone row."""
+    from mathion.database import SessionLocal
+    from mathion.notifications import dispatcher
+    row_id = admin_row["row"].id
+
+    def delete_it_then_clear(session, row):
+        with SessionLocal() as panel:
+            panel.delete(panel.get(NotificationLogEntry, row_id))
+            panel.commit()
+        session.commit()  # as a clearing second look ends its transaction
+        return None
+
+    monkeypatch.setattr(dispatcher, "skip_reason", delete_it_then_clear)
+    mailer = MemoryMailer()
+    with caplog.at_level(logging.INFO, logger="mathion.notifications"):
+        tick(db, mailer, now=datetime.now(timezone.utc))
+    assert mailer.sent == []
+    assert db.get(NotificationLogEntry, row_id) is None
+    _said_gone(caplog, row_id)
+
+
+def test_a_row_deleted_while_it_is_sent_is_passed_over(db, admin_row, caplog):
+    """Deleted after the send, before its commit: the email went, the row is
+    gone, and that is an info line, not a failed commit to retry."""
+    from mathion.database import SessionLocal
+    row_id = admin_row["row"].id
+    db.add(NotificationLogEntry(user_id=admin_row["admin"].id, kind="course_admin_assigned",
+                                payload={"course_id": admin_row["course"].id}))
+    db.commit()
+
+    class DeleteWhileSending(MemoryMailer):
+        def send(self, msg):
+            super().send(msg)
+            if len(self.sent) == 1:
+                with SessionLocal() as panel:
+                    panel.delete(panel.get(NotificationLogEntry, row_id))
+                    panel.commit()
+
+    from mathion.notifications.dispatcher import _run
+    mailer = DeleteWhileSending()
+    with caplog.at_level(logging.INFO, logger="mathion.notifications"):
+        result = _run(db, mailer, now=datetime.now(timezone.utc))
+    # It went, so the server works (Set up D6); the row after it goes too.
+    assert (result.processed, result.sent) == (2, 2)
+    assert [m["To"] for m in mailer.sent] == ["anna@x", "anna@x"]
+    _said_gone(caplog, row_id)
+
+
+def test_a_row_deleted_before_its_skip_is_written_is_passed_over(db, admin_row, monkeypatch, caplog):
+    """Deleted between the skip decision and its commit: an info line."""
+    from mathion.database import SessionLocal
+    from mathion.notifications import dispatcher
+    other = User(email="ole@x"); db.add(other); db.commit()
+    _reassign(db, admin_row["course"].id, other.id)
+    db.add(NotificationLogEntry(user_id=other.id, kind="course_admin_assigned",
+                                payload={"course_id": admin_row["course"].id}))
+    db.commit()
+    row_id = admin_row["row"].id
+    real = dispatcher.skip_reason
+
+    def decide_then_delete(session, row):
+        reason = real(session, row)
+        if row.id == row_id:
+            with SessionLocal() as panel:
+                panel.delete(panel.get(NotificationLogEntry, row_id))
+                panel.commit()
+        return reason
+
+    monkeypatch.setattr(dispatcher, "skip_reason", decide_then_delete)
+    mailer = MemoryMailer()
+    with caplog.at_level(logging.INFO, logger="mathion.notifications"):
+        assert tick(db, mailer, now=datetime.now(timezone.utc)) == 2
+    assert [m["To"] for m in mailer.sent] == ["ole@x"]  # the row after it, in this same tick
+    _said_gone(caplog, row_id)
+
+
+def test_a_row_deleted_before_its_check_is_passed_over_quietly(db, admin_row, monkeypatch, caplog):
+    """Row 1 is sent (its commit expires row 2), then row 2 is deleted before
+    its skip check: the tick goes on, and a gone row is no error in the log."""
+    from mathion.database import SessionLocal
+    from mathion.notifications import dispatcher
+    second, third = (NotificationLogEntry(user_id=admin_row["admin"].id, kind="course_admin_assigned",
+                                          payload={"course_id": admin_row["course"].id}) for _ in range(2))
+    db.add(second); db.commit()
+    db.add(third); db.commit()
+    second_id = second.id
+    real = dispatcher.skip_reason
+    seen = []
+
+    def delete_the_second_first(session, row):
+        seen.append(1)
+        if len(seen) == 2:
+            with SessionLocal() as panel:
+                panel.delete(panel.get(NotificationLogEntry, second_id))
+                panel.commit()
+        return real(session, row)
+
+    monkeypatch.setattr(dispatcher, "skip_reason", delete_the_second_first)
+    mailer = MemoryMailer()
+    with caplog.at_level(logging.INFO, logger="mathion.notifications"):
+        assert tick(db, mailer, now=datetime.now(timezone.utc)) == 3
+    assert [m["To"] for m in mailer.sent] == ["anna@x", "anna@x"]  # the first and the third
+    _said_gone(caplog, second_id)
+
+
+def test_a_row_deleted_while_it_is_charged_does_not_stop_the_tick(db, admin_row, monkeypatch, caplog):
+    """A send fails and the row is deleted before its charge is written: the
+    commit that finds it gone is passed over, named by the id the loop kept."""
+    from mathion.database import SessionLocal
+    from mathion.notifications import dispatcher
+    row_id = admin_row["row"].id
+    after = NotificationLogEntry(user_id=admin_row["admin"].id, kind="course_admin_assigned",
+                                 payload={"course_id": admin_row["course"].id})
+    db.add(after); db.commit()
+    real = dispatcher.classify
+    deleted = []
+
+    def delete_then_classify(exc):
+        if not deleted:
+            with SessionLocal() as panel:
+                panel.delete(panel.get(NotificationLogEntry, row_id))
+                panel.commit()
+            deleted.append(row_id)
+        return real(exc)
+
+    monkeypatch.setattr(dispatcher, "classify", delete_then_classify)
+
+    class Boom(MemoryMailer):
+        def send(self, msg):
+            raise RuntimeError("boom")
+
+    with caplog.at_level(logging.INFO, logger="mathion.notifications"):
+        assert tick(db, Boom(), now=datetime.now(timezone.utc)) == 2
+    # Its failure is still flagged first, with the detail for the operator.
+    assert any(r.getMessage().startswith(f"notification id={row_id} flagged permanently") for r in caplog.records)
+    _said_gone(caplog, row_id, quietly=False)
+    assert not [r for r in caplog.records if "commit failed" in r.getMessage()]
+    db.refresh(after)
+    assert after.error == "boom"  # the row after it was charged in the same tick
+
+
+def test_the_second_look_reads_the_account_again(db, admin_row, monkeypatch):
+    """Rev 11: the first look cached the account as disabled; one enabled while
+    the lock waited is read again, not taken from that cache."""
+    from mathion.database import SessionLocal
+    from mathion.notifications import dispatcher
+    anna_id = admin_row["admin"].id
+    admin_row["admin"].is_disabled = True
+    db.commit()
+    real = dispatcher._lock_course
+
+    def enable_anna_then_lock(session, cid):
+        with SessionLocal() as panel:
+            panel.get(User, anna_id).is_disabled = False
+            panel.commit()
+        real(session, cid)
+
+    monkeypatch.setattr(dispatcher, "_lock_course", enable_anna_then_lock)
+    mailer = MemoryMailer()
+    tick(db, mailer, now=datetime.now(timezone.utc))
+    assert [m["To"] for m in mailer.sent] == ["anna@x"]
+
+
+def test_a_skip_waits_for_the_course_lock(db, admin_row):
+    """Rev 11: the skip is decided under the course's row lock, so it can't
+    cross a panel assign that holds it."""
+    from sqlalchemy import select, text
+    from sqlalchemy.exc import OperationalError
+    from mathion.database import SessionLocal
+    from mathion.models import Course
+    from mathion.notifications.dispatcher import skip_reason
+    other = User(email="ole@x"); db.add(other); db.commit()
+    _reassign(db, admin_row["course"].id, other.id)
+    with SessionLocal() as panel:
+        panel.execute(select(Course).where(Course.id == admin_row["course"].id).with_for_update())
+        try:
+            db.execute(text("SET LOCAL lock_timeout = '300ms'"))
+            with pytest.raises(OperationalError):
+                skip_reason(db, admin_row["row"])
+        finally:
+            db.rollback()
+            panel.rollback()
+
+
+def test_a_row_still_to_send_takes_no_course_lock(db, admin_row):
+    """Rev 11: only a skip takes the lock, so a slow send never holds up the panel."""
+    from sqlalchemy import select, text
+    from mathion.database import SessionLocal
+    from mathion.models import Course
+    from mathion.notifications.dispatcher import skip_reason
+    with SessionLocal() as panel:
+        panel.execute(select(Course).where(Course.id == admin_row["course"].id).with_for_update())
+        try:
+            db.execute(text("SET LOCAL lock_timeout = '300ms'"))
+            assert skip_reason(db, admin_row["row"]) is None
+        finally:
+            db.rollback()
+            panel.rollback()
+
+
 def test_course_slug_read_at_send_time(db, admin_row):
     admin_row["course"].slug = "stat-2027"
     db.commit()
@@ -480,3 +791,19 @@ def test_tick_signs_with_mathion_by_default(db, seeded_run):
     mailer = MemoryMailer()
     tick(db, mailer, now=datetime.now(timezone.utc))
     assert mailer.sent[0].get_content().endswith("\n\n\u2014 Mathion\n")
+
+
+def test_non_smtp_failure_in_charge_logs_class_only(db, seeded_run, caplog):
+    # Superuser Settings D9b, rev 8: no traceback for a failure that isn't
+    # the mail server's; its class names it.
+    entry = NotificationLogEntry(user_id=seeded_run["student_user"].id, kind="run_enrolled",
+                                 payload={"run_id": seeded_run["run"].id})
+    db.add(entry); db.commit()
+    caplog.set_level(logging.DEBUG, logger="mathion.notifications")
+    tick(db, _RaisingMailer(UnicodeEncodeError("ascii", "x", 0, 1, "ordinal not in range(128)")),
+         now=datetime.now(timezone.utc))
+    db.refresh(entry)
+    assert entry.error is not None
+    assert all(r.exc_info is None for r in caplog.records)
+    assert any(r.levelname == "ERROR" and r.getMessage().endswith(": UnicodeEncodeError")
+               for r in caplog.records)

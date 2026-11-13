@@ -218,6 +218,37 @@ describe('LogoPick (Branding D4-D6)', () => {
     beforeEach(() => { FakeReader.all = []; vi.stubGlobal('FileReader', FakeReader); });
     afterEach(() => { vi.unstubAllGlobals(); });
 
+    it('picking a file over 1 MB is refused without reading it (Branding rev 15)', async () => {
+      for (const [kind, sentence] of [['logo', 'The logo can be at most 1 MB.'], ['icon', 'The tab icon can be at most 1 MB.']] as const) {
+        const p = new LogoPick(kind);
+        const big = new File([new Uint8Array(8)], 'film.mov');
+        Object.defineProperty(big, 'size', { value: 5 * 1024 * 1024 });
+        await p.choose(big);
+        expect(FakeReader.all).toHaveLength(0);
+        expect([p.checking, p.changed, p.error]).toEqual([false, false, sentence]);
+      }
+    });
+
+    it('a file over 1 MB picked while another is read ends the checking', async () => {
+      const p = new LogoPick('logo');
+      const first = p.choose(pngFile(400, 100, 'a.png'));
+      expect(p.checking).toBe(true);
+      const big = new File([new Uint8Array(8)], 'film.mov');
+      Object.defineProperty(big, 'size', { value: 5 * 1024 * 1024 });
+      await p.choose(big);
+      FakeReader.all[0].load(pngBytes(400, 100));
+      await first;
+      expect([p.checking, p.changed, p.error]).toEqual([false, false, 'The logo can be at most 1 MB.']);
+    });
+
+    it('a file of exactly 1 MB is read', async () => {
+      const p = new LogoPick('logo');
+      const edge = pngFile(400, 100, 'a.png');
+      Object.defineProperty(edge, 'size', { value: 1_048_576 });
+      void p.choose(edge);
+      expect(FakeReader.all).toHaveLength(1);
+    });
+
     it("a read that fails ends the checking and says the file can't be read", async () => {
       const p = new LogoPick('logo');
       const read = p.choose(pngFile(400, 100, 'a.png'));

@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from mathion import branding
 from mathion.api import branding as branding_api
-from mathion.branding import BrandingUnavailable, load_branding, short_hash
+from mathion.branding import DEFAULT_BRANDING, BrandingUnavailable, load_branding, short_hash
 from mathion.branding_defaults import ICON_32_PNG, ICON_180_PNG, ICON_SVG
 from mathion.models_auth import SiteBranding, SiteBrandingImage
 
@@ -171,6 +171,10 @@ def test_outage_favicon_without_upload_known_answers_default(client, monkeypatch
     monkeypatch.setattr(branding_api, "read_image", _unavailable)
     r = client.get("/favicon.ico")
     assert r.status_code == 200 and r.content == ICON_32_PNG
+    # A read has shown there is no upload, so a browser holding another icon
+    # (say, one since reset) gets Mathion's, not a 503 (rev 15).
+    r = client.get("/favicon.ico", headers={"If-None-Match": '"other"'})
+    assert r.status_code == 200 and r.content == ICON_32_PNG
 
 
 def test_outage_theme_from_last_good(client, db, monkeypatch):
@@ -184,3 +188,33 @@ def test_outage_theme_from_last_good(client, db, monkeypatch):
     monkeypatch.setattr(branding, "_read", refused)
     r = client.get("/api/branding/theme.css")
     assert r.status_code == 200 and r.text == ":root:root {\n  --bg: #fff;\n}\n"
+
+
+def test_favicon_takes_one_look_at_the_kept_copy(client, db, monkeypatch):
+    # The icon and "read yet" come from one look, so a read landing between
+    # two looks can't pair "no icon" with "read".
+    looks = []
+
+    def kept_copy():
+        looks.append(1)
+        return DEFAULT_BRANDING, False
+
+    monkeypatch.setattr(branding_api, "read_image", _unavailable)
+    monkeypatch.setattr(branding_api, "kept_copy", kept_copy)
+    monkeypatch.setattr(branding_api, "last_good", lambda: pytest.fail("a second look"))
+    r = client.get("/favicon.ico", headers={"If-None-Match": '"other"'})
+    assert r.status_code == 503 and looks == [1]
+
+
+def test_favicon_before_any_read_during_an_outage_is_503_unless_default(client, db, monkeypatch):
+    # Branding spec rev 15: with nothing read since startup the address can't
+    # tell "no upload" from "not read yet", so a browser holding another icon
+    # is told to ask again rather than handed Mathion's.
+    _upload(db, "icon", ICON)
+    monkeypatch.setattr(branding_api, "read_image", _unavailable)
+    default = f'"{short_hash(ICON_32_PNG)}"'
+    r = client.get("/favicon.ico", headers={"If-None-Match": f'"{short_hash(ICON)}"'})
+    assert r.status_code == 503 and r.headers["cache-control"] == "no-store"
+    assert client.get("/favicon.ico", headers={"If-None-Match": default}).status_code == 304
+    r = client.get("/favicon.ico")
+    assert r.status_code == 200 and r.content == ICON_32_PNG

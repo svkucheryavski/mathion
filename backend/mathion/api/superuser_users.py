@@ -67,11 +67,12 @@ def _rows(db: DBSession, users: list[User]) -> list[PanelUser]:
     student_runs: dict[int, list[PanelRunRef]] = {i: [] for i in ids}
     with_data: set[int] = set()
     if ids:
-        for uid, cid, name in db.execute(
-            select(CourseAdmin.user_id, Course.id, Course.name).join(Course, Course.id == CourseAdmin.course_id)
+        for uid, cid, name, slug in db.execute(
+            select(CourseAdmin.user_id, Course.id, Course.name, Course.slug)
+            .join(Course, Course.id == CourseAdmin.course_id)
             .where(CourseAdmin.user_id.in_(ids)).order_by(func.lower(Course.name), Course.id)
         ).all():
-            admin_of[uid].append(PanelCourseRef(id=cid, name=name))
+            admin_of[uid].append(PanelCourseRef(id=cid, name=name, slug=slug))
         for link, into in ((RunTeacher, teacher_runs), (RunStudent, student_runs)):
             for uid, rid, title, course_name in db.execute(
                 select(link.user_id, Run.id, Run.title, Course.name)

@@ -1,5 +1,7 @@
 import { it, expect, vi, afterEach } from 'vitest';
-import { uploadLimit, loadUploadLimit, overUploadLimit, resetUploadLimit, tooLargeSentence } from '../lib/uploadLimit.svelte';
+import {
+  uploadLimit, loadUploadLimit, overUploadLimit, overLimitSentence, resetUploadLimit, setUploadLimit, tooLargeSentence,
+} from '../lib/uploadLimit.svelte';
 import { ApiError } from '../lib/api';
 
 const MB = 1024 * 1024;
@@ -63,4 +65,41 @@ it('a given config answer that fails leaves the limit unknown', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, {})));
   await expect(loadUploadLimit(Promise.reject(new Error('down')))).resolves.toBeUndefined();
   expect(uploadLimit.mb).toBeNull();
+});
+
+// The user's call (2026-11-12): one sentence everywhere, the server's words.
+it('overLimitSentence names the file when there is one', () => {
+  uploadLimit.mb = 20;
+  expect(overLimitSentence('a.png')).toBe('a.png is over the 20 MB limit.');
+  expect(overLimitSentence()).toBe('This file is over the 20 MB limit.');
+  // A pasted or dragged blob can have an empty name.
+  expect(overLimitSentence('')).toBe('This file is over the 20 MB limit.');
+});
+
+// Settings Task 6 backlog: a limits save reaches this tab's screens at once.
+it('setUploadLimit sets the limit, and a late startup answer does not undo it', async () => {
+  let answer!: (r: Response) => void;
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((r) => { answer = r; })));
+  const loading = loadUploadLimit();
+  setUploadLimit(75);
+  expect(uploadLimit.mb).toBe(75);
+  answer(jsonResponse(200, { send_pin_enabled: true, longest_sign_in_days: 30, max_file_mb: 20 }));
+  await loading;
+  expect(uploadLimit.mb).toBe(75);
+});
+
+it('setUploadLimit after a failed read makes the check work again', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('network down'); }));
+  await loadUploadLimit();
+  expect(uploadLimit.mb).toBeNull();
+  setUploadLimit(5);
+  expect(overUploadLimit(6 * MB)).toBe(true);
+});
+
+it('resetUploadLimit forgets a set limit, so the next startup answer counts again', async () => {
+  setUploadLimit(5);
+  resetUploadLimit();
+  vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, { send_pin_enabled: true, longest_sign_in_days: 30, max_file_mb: 20 })));
+  await loadUploadLimit();
+  expect(uploadLimit.mb).toBe(20);
 });

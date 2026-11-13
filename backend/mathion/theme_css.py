@@ -20,27 +20,43 @@ MAX_PROBLEMS = 20
 _ECHO = 40
 _ELLIPSIS = chr(0x2026)
 _BOM = chr(0xFEFF)
+# D10: CSS whitespace, the only kind that separates (line breaks are \n by
+# then). Python's own strip and \s take Unicode spaces too, which would let
+# a no-break space through; it is a non-ASCII character and refused.
+_WS = " \t\n\f"
 
 NOT_UTF8 = "The theme file must be UTF-8 text."
 TOO_BIG = "The theme file can be at most 64 KB."
 NO_COLOURS = "The theme file sets no colours."
 
 
-def _cut(text: str) -> str:
-    return text if len(text) <= _ECHO else text[:_ECHO] + _ELLIPSIS
+def _code(ch: str) -> str:
+    n = ord(ch)
+    return f"\\u{n:04x}" if n <= 0xFFFF else f"\\U{n:08x}"
 
 
-def _shown(raw: str) -> str:
-    """A refused value as the problem shows it: CSS whitespace runs as one
-    space, and any other character outside printable ASCII as its code
-    (`\\u00a0`), so a copied invisible character can't look valid."""
-    text = re.sub(r"[ \t\n\f]+", " ", raw.strip(" \t\n\f"))
-    return "".join(ch if " " <= ch <= "~" else f"\\u{ord(ch):04x}" for ch in text)
+def _echo(raw: str) -> str:
+    """A refused value or name as a problem shows it (rev 15): CSS whitespace
+    runs as one space, cut to 40 characters with "…", then every character
+    outside printable ASCII, and the backtick that would end the echo, as its
+    code (`\\u00a0`, `\\U0001f642`). So a copied invisible character can't
+    look valid, and the cut never splits a code."""
+    text = re.sub(r"[ \t\n\f]+", " ", raw.strip(_WS))
+    cut = len(text) > _ECHO
+    text = text[:_ECHO].rstrip(" ") if cut else text
+    text = "".join(ch if " " <= ch <= "~" and ch != "`" else _code(ch) for ch in text)
+    return text + _ELLIPSIS if cut else text
 
 
-def _not_a_colour(line: int, value: str) -> str:
-    return (f"Line {line}: `{_cut(value)}` isn't a colour. Use a hex colour, rgb(), hsl() "
-            "(like `hsl(210deg 30% 36%)`), a colour name or var(--another-colour).")
+_COLOUR_HELP = ("Use a hex colour, rgb(), hsl() (like `hsl(210deg 30% 36%)`), "
+                "a colour name or var(--another-colour).")
+
+
+def _not_a_colour(line: int, raw: str) -> str:
+    shown = _echo(raw)
+    if not shown:
+        return f"Line {line}: the value is empty. {_COLOUR_HELP}"
+    return f"Line {line}: `{shown}` isn't a colour. {_COLOUR_HELP}"
 
 
 def _structure(line: int) -> str:
@@ -48,15 +64,15 @@ def _structure(line: int) -> str:
 
 
 def _unknown(line: int, name: str) -> str:
-    return f"Line {line}: `{_cut(name)}` isn't a theme variable."
+    return f"Line {line}: `{_echo(name)}` isn't a theme variable."
 
 
 def _not_colour_set(line: int, name: str) -> str:
-    return f"Line {line}: `{_cut(name)}` isn't a colour, so it can't be changed here."
+    return f"Line {line}: `{_echo(name)}` isn't a colour, so it can't be changed here."
 
 
 def _not_colour_ref(line: int, name: str) -> str:
-    return f"Line {line}: `{_cut(name)}` isn't a colour, so it can't be referred to here."
+    return f"Line {line}: `{_echo(name)}` isn't a colour, so it can't be referred to here."
 
 
 # CSS's fixed table of named colours (CSS Color 4), as RGB hex.
@@ -104,7 +120,8 @@ class RGBA:
 
 # --- the value grammar ---
 
-_NUM = r"[+-]?(?:\d+|\d*\.\d+)(?:e[+-]?\d+)?"
+# ASCII digits only: \d and float() take other scripts' digits too.
+_NUM = r"[+-]?(?:[0-9]+|[0-9]*\.[0-9]+)(?:e[+-]?[0-9]+)?"
 _RE_NUM = re.compile(_NUM)
 _RE_PCT = re.compile(_NUM + "%")
 _RE_HUE = re.compile(f"({_NUM})(deg|turn|rad|grad)?")
@@ -120,7 +137,7 @@ _ALLOWED = frozenset(map(chr, range(0x20, 0x7F))) | {"\t", "\n", "\f"}
 def canonical(value: str) -> str:
     """D10's stored form: lowercased; runs of whitespace as one space; no space
     just inside ( or ) or before a comma; one after a comma and around /."""
-    v = re.sub(r"\s+", " ", value.strip().lower())
+    v = re.sub(r"[ \t\n\f]+", " ", value.strip(_WS).lower())
     v = re.sub(r"\( ", "(", v)
     v = re.sub(r" \)", ")", v)
     v = re.sub(r" ?, ?", ", ", v)
@@ -271,8 +288,8 @@ class ThemeParse:
     more: int = 0
 
 
-_RE_DECL = re.compile(r"(--[^\s:]+)\s*:(.*)", re.S)
-_RE_CHARSET = re.compile(r'@charset\s+"utf-8"', re.I)
+_RE_DECL = re.compile(r"(--[^ \t\n\f:]+)[ \t\n\f]*:(.*)", re.S)
+_RE_CHARSET = re.compile(r'@charset[ \t\n\f]+"utf-8"', re.I | re.A)
 
 
 def _strip_comments(text: str) -> tuple[str, int | None]:
@@ -309,14 +326,14 @@ class _Reader:
     def read(self) -> None:
         text, i, n, root_seen, first = self.text, 0, len(self.text), False, True
         while i < n:
-            while i < n and text[i].isspace():
+            while i < n and text[i] in _WS:
                 i += 1
             if i >= n:
                 break
             ends = [p for p in (text.find(ch, i) for ch in ";{}") if p >= 0]
             j = min(ends) if ends else n
             if j == n or text[j] in ";}":
-                statement = text[i:j].strip()
+                statement = text[i:j].strip(_WS)
                 if not (first and text[j:j + 1] == ";" and _RE_CHARSET.fullmatch(statement)):
                     self.problem(i, _structure)
                 first, i = False, j + 1
@@ -325,7 +342,7 @@ class _Reader:
             while close < n and depth:
                 depth += {"{": 1, "}": -1}.get(text[close], 0)
                 close += 1
-            if depth or text[i:j].strip() != ":root" or root_seen:
+            if depth or text[i:j].strip(_WS) != ":root" or root_seen:
                 self.problem(i, _structure)
             else:
                 root_seen = True
@@ -335,9 +352,9 @@ class _Reader:
     def body(self, start: int, end: int) -> None:
         pos = start
         for chunk in self.text[start:end].split(";"):
-            lead = len(chunk) - len(chunk.lstrip())
-            if chunk.strip():
-                self.declaration(pos + lead, chunk.strip())
+            lead = len(chunk) - len(chunk.lstrip(_WS))
+            if chunk.strip(_WS):
+                self.declaration(pos + lead, chunk.strip(_WS))
             pos += len(chunk) + 1
 
     def declaration(self, pos: int, chunk: str) -> None:
@@ -347,7 +364,7 @@ class _Reader:
             return
         self.declarations += 1
         name, raw = m.group(1), m.group(2)
-        value_pos = pos + m.start(2) + len(raw) - len(raw.lstrip())
+        value_pos = pos + m.start(2) + len(raw) - len(raw.lstrip(_WS))
         if name not in BY_NAME:
             self.problem(pos, (lambda line: _not_colour_set(line, name)) if name in NON_COLOUR_NAMES
                          else (lambda line: _unknown(line, name)))
@@ -356,7 +373,6 @@ class _Reader:
             self.problem(pos, lambda line: f"Line {line}: `{name}` is set twice.")
             return
         self.seen.add(name)
-        shown = _shown(raw)
         value = canonical(raw)
         refused = not set(raw) <= _ALLOWED or any(x in value for x in _REFUSED)
         ref = None if refused else _reference(value)
@@ -368,7 +384,7 @@ class _Reader:
                 self.problem(value_pos, lambda line: _unknown(line, ref))
                 return
         elif refused or _literal(value) is None:
-            self.problem(value_pos, lambda line: _not_a_colour(line, shown))
+            self.problem(value_pos, lambda line: _not_a_colour(line, raw))
             return
         self.declared.append((self.line(pos), name, value))
 
@@ -412,24 +428,34 @@ _logged: set[tuple[str, str]] = set()
 
 def changes_in_use(stored: dict[str, str]) -> dict[str, str]:
     """D10 "after a release": the stored changes without removed names, var()
-    to anything that isn't an overridable colour, or loops. Each dropped entry
-    is logged once."""
+    to anything that isn't an overridable colour, loops, or a value a release
+    made equal to Mathion's own colour (rev 15). In the theme's order, as the
+    downloaded file has them, not the database's key order. Each dropped
+    entry is logged once."""
     def drop(name: str, value: str, why: str) -> None:
         if (name, value) not in _logged:
             _logged.add((name, value))
             log.warning("branding: the stored colour %s: %s is left out (%s)", name, value, why)
 
-    in_use = {}
     for name, value in stored.items():
         if name not in BY_NAME:
             drop(name, value, "not a theme colour")
+    in_use = {}
+    for var in THEME_VARS:
+        name = var.name
+        if name not in stored:
             continue
+        value = stored[name]
         ref = _reference(value)
         if ref is not None and ref not in BY_NAME:
             drop(name, value, "refers to something that isn't a theme colour")
             continue
         if value != canonical(value) or (ref is None and _literal(value) is None):
             drop(name, value, "not a colour in the stored form")
+            continue
+        if same_colour(value, var.default):
+            # A warning like the others: Mathion's logging hides anything below a warning.
+            drop(name, value, "the same as Mathion's colour now, expected after a release")
             continue
         in_use[name] = value
     merged = _merged(in_use)

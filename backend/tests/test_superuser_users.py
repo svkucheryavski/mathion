@@ -221,7 +221,9 @@ def test_row_shape(panel, db):
     rows = _rows_by_email(client.get(f"{base}/users"))
     a = rows["anna@x"]
     assert a["id"] == anna.id and a["full_name"] == "Anna Holm"
-    assert a["admin_of"] == [{"id": other.id, "name": "algebra"}, {"id": w["course"].id, "name": "Statistics 101"}]
+    # D14 rev 11: the address tells same-named courses apart.
+    assert a["admin_of"] == [{"id": other.id, "name": "algebra", "slug": other.slug},
+                             {"id": w["course"].id, "name": "Statistics 101", "slug": w["course"].slug}]
     # D14 rev 8: the runs as lists for the chip's hover, by course then run title.
     assert a["teacher_runs"] == [
         {"id": w["run"].id, "title": "R", "course_name": "Statistics 101"},

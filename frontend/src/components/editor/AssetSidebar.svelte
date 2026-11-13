@@ -6,8 +6,7 @@
   import { ApiError } from '../../lib/api';
   import { formatRef } from '../../lib/assets';
   import type { AssetContext, AssetItem } from '../../lib/assetContext';
-  import { ALLOWED_EXTENSIONS } from '../../lib/runAssets';
-  import { uploadLimit, overUploadLimit } from '../../lib/uploadLimit.svelte';
+  import { assetDropRefusal } from '../../lib/assetDrop';
   import { formatFileSize } from '../../lib/format';
   import { repairFocus } from '../../lib/askInPlace.svelte';
 
@@ -197,33 +196,14 @@
 
   function pickFile() { if (disabled || uploading) return; fileInputEl?.click(); }
 
-  function validateFile(file: File): string | null {
-    if (overUploadLimit(file.size)) return `${file.name} (file exceeds ${uploadLimit.mb} MB)`;
-    const dot = file.name.lastIndexOf('.');
-    const ext = dot >= 0 ? file.name.slice(dot + 1).toLowerCase() : '';
-    if (!ALLOWED_EXTENSIONS.has(ext)) return `${file.name} (extension not allowed)`;
-    return null;
-  }
-
   // Stop-on-any-invalid pre-pass: validate ALL files BEFORE invoking onUploadFile.
   // If any file fails, write a single uploadError summarizing them and call
   // nothing. Rationale: uploadOne clears uploadError at its start, so per-file
   // validation messages would get wiped by the next file's upload start.
   async function handleDrop(files: File[]) {
     if (disabled || uploading) return;
-    const invalid: string[] = [];
-    for (const f of files) {
-      const err = validateFile(f);
-      if (err) invalid.push(err);
-    }
-    if (invalid.length > 0) {
-      uploadError = {
-        detail: invalid.length === 1
-          ? `Cannot upload: ${invalid[0]}`
-          : `Cannot upload ${invalid.length} files: ${invalid.join(', ')}`,
-      };
-      return;
-    }
+    const refused = assetDropRefusal(files);
+    if (refused !== null) { uploadError = { detail: refused }; return; }
     for (let i = 0; i < files.length; i++) {
       const result = await onUploadFile(files[i], { current: i + 1, total: files.length });
       if (result === null) break;

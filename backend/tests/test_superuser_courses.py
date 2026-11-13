@@ -1,5 +1,5 @@
 """The superuser panel's Courses API (spec D4-D13, D25)."""
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -266,11 +266,91 @@ def test_remove_admin(panel, db):
     assert db.query(CourseAdmin).filter_by(course_id=course.id).count() == 0
 
 
-def test_remove_when_none_409(panel, db):
+def test_remove_admin_twice_is_done(panel, db):
+    # Rev 11: removing an admin someone else already removed is done, not an error.
     client, base = panel
-    course, _ = _course(db)
-    r = client.delete(f"{base}/courses/{course.id}/admin")
-    assert r.status_code == 409 and r.json()["detail"] == "This course has no admin"
+    course, _ = _course(db, admin=_user(db))
+    assert client.delete(f"{base}/courses/{course.id}/admin").status_code == 204
+    assert client.delete(f"{base}/courses/{course.id}/admin").status_code == 204
+    assert db.query(CourseAdmin).filter_by(course_id=course.id).count() == 0
+
+
+def test_reassign_back_queues_one_email(panel, db, monkeypatch):
+    # Rev 11: A -> B -> A before the queue drains sends A one email, not two.
+    client, base = panel
+    monkeypatch.setattr(settings, "email_mode", "disabled")
+    _user(db), _user(db, "ole@x", "Ole")
+    course, _ = _course(db, "ab")
+    other, _ = _course(db, "other")
+    set_site(db, email_on=True, smtp_host="mail.uni.dk", email_from="a@uni.dk")
+    for email in ("anna@x", "ole@x", "anna@x"):
+        assert client.put(f"{base}/courses/{course.id}/admin", json={"email": email}).json()["admin_email"] == "queued"
+    client.put(f"{base}/courses/{other.id}/admin", json={"email": "anna@x"})
+    db.expire_all()
+    anna = db.query(User).filter_by(email="anna@x").one()
+    mine = [r for r in _log_rows(db) if r.user_id == anna.id and r.payload["course_id"] == course.id]
+    assert len(mine) == 1
+    # Another course's email to the same person stays.
+    assert [r.payload["course_id"] for r in _log_rows(db) if r.user_id == anna.id].count(other.id) == 1
+
+
+def test_reassign_back_keeps_the_pending_row_untouched(panel, db, monkeypatch):
+    # The pending row may be the one the dispatcher is sending right now, so
+    # it is never deleted or rewritten; no second row is added beside it.
+    client, base = panel
+    monkeypatch.setattr(settings, "email_mode", "disabled")
+    _user(db), _user(db, "ole@x", "Ole")
+    course, _ = _course(db, "ab")
+    set_site(db, email_on=True, smtp_host="mail.uni.dk", email_from="a@uni.dk")
+    client.put(f"{base}/courses/{course.id}/admin", json={"email": "anna@x"})
+    db.expire_all()
+    first = _log_rows(db)[0]
+    first_id, first_created = first.id, first.created_at
+    client.put(f"{base}/courses/{course.id}/admin", json={"email": "ole@x"})
+    client.put(f"{base}/courses/{course.id}/admin", json={"email": "anna@x"})
+    db.expire_all()
+    anna = db.query(User).filter_by(email="anna@x").one()
+    mine = [r for r in _log_rows(db) if r.user_id == anna.id]
+    assert [(r.id, r.created_at) for r in mine] == [(first_id, first_created)]
+
+
+def test_reassign_back_after_a_failed_email_queues_a_new_one(panel, db, monkeypatch):
+    # A row closed with an error keeps its record, and the person gets a new email.
+    client, base = panel
+    monkeypatch.setattr(settings, "email_mode", "disabled")
+    _user(db), _user(db, "ole@x", "Ole")
+    course, _ = _course(db, "ab")
+    set_site(db, email_on=True, smtp_host="mail.uni.dk", email_from="a@uni.dk")
+    client.put(f"{base}/courses/{course.id}/admin", json={"email": "anna@x"})
+    db.expire_all()
+    first = _log_rows(db)[0]
+    first.error = "skipped: recipient disabled"
+    db.commit()
+    client.put(f"{base}/courses/{course.id}/admin", json={"email": "ole@x"})
+    client.put(f"{base}/courses/{course.id}/admin", json={"email": "anna@x"})
+    db.expire_all()
+    anna = db.query(User).filter_by(email="anna@x").one()
+    mine = sorted(_log_rows(db), key=lambda r: r.id)
+    mine = [r for r in mine if r.user_id == anna.id]
+    assert len(mine) == 2 and mine[0].error == "skipped: recipient disabled" and mine[1].error is None
+
+
+def test_reassign_back_keeps_a_sent_email(panel, db, monkeypatch):
+    client, base = panel
+    monkeypatch.setattr(settings, "email_mode", "disabled")
+    _user(db), _user(db, "ole@x", "Ole")
+    course, _ = _course(db, "ab")
+    set_site(db, email_on=True, smtp_host="mail.uni.dk", email_from="a@uni.dk")
+    client.put(f"{base}/courses/{course.id}/admin", json={"email": "anna@x"})
+    db.expire_all()
+    first = _log_rows(db)[0]
+    first.sent_at = datetime.now(timezone.utc)
+    db.commit()
+    client.put(f"{base}/courses/{course.id}/admin", json={"email": "ole@x"})
+    client.put(f"{base}/courses/{course.id}/admin", json={"email": "anna@x"})
+    db.expire_all()
+    anna = db.query(User).filter_by(email="anna@x").one()
+    assert len([r for r in _log_rows(db) if r.user_id == anna.id]) == 2
 
 
 def test_assign_gone_course_409(panel, db):

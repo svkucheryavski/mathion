@@ -7,8 +7,10 @@ import {
   getBranding, saveSiteName, saveImage, checkTheme, saveTheme,
   type AdminAssignResult, type PanelUser, type PanelUserList, type PanelUserRole,
 } from '../lib/superuser';
+import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
 
-afterEach(() => vi.restoreAllMocks());
+// A limits save sets the tab's upload limit; forget it, also after a failure.
+afterEach(() => { vi.restoreAllMocks(); resetUploadLimit(); });
 
 it("panelError: anything that is not an ApiError or a lost connection says the general sentence", () => {
   expect(panelError(new SyntaxError('Unexpected token'), vi.fn())).toBe(REQUEST_ERROR_MESSAGE);
@@ -90,9 +92,9 @@ function result(over: Partial<AdminAssignResult> = {}, admin: Partial<AdminAssig
 
 it('queued: the result sentence, then the email is on its way', () => {
   expect(adminNote(result(), 'assign')).toBe(
-    'Anna Holm is now the admin of Statistics 101. An email with a sign-in link is on its way to aho@uni.dk.');
+    'Anna Holm is now the admin of Statistics 101. An email with a link to the course is on its way to aho@uni.dk.');
   expect(adminNote(result(), 'create')).toBe(
-    'Statistics 101 is created; Anna Holm is its admin. An email with a sign-in link is on its way to aho@uni.dk.');
+    'Statistics 101 is created; Anna Holm is its admin. An email with a link to the course is on its way to aho@uni.dk.');
 });
 
 it('email off: tell them yourself, with the sign-in address, the pin command and the PIN lifetime', () => {
@@ -115,7 +117,7 @@ it('unchanged: only that nothing changed, with no result sentence', () => {
 
 it('the result sentence falls back to the email for an admin with no name', () => {
   expect(adminNote(result({}, { full_name: null }), 'assign')).toBe(
-    'aho@uni.dk is now the admin of Statistics 101. An email with a sign-in link is on its way to aho@uni.dk.');
+    'aho@uni.dk is now the admin of Statistics 101. An email with a link to the course is on its way to aho@uni.dk.');
 });
 
 // --- adminNote when the admin is you, and Email's reason (Set up D8) ---
@@ -138,13 +140,13 @@ it('you is compared lower-cased', () => {
 
 it('no signed-in email: the usual note', () => {
   expect(adminNote(result(), 'create', { me: null })).toBe(
-    'Statistics 101 is created; Anna Holm is its admin. An email with a sign-in link is on its way to aho@uni.dk.');
+    'Statistics 101 is created; Anna Holm is its admin. An email with a link to the course is on its way to aho@uni.dk.');
 });
 
 it("queued with Email's reason: the reason follows after one space; other outcomes ignore it", () => {
   const why = { emailReason: 'Not tested yet: send a test email.' };
   expect(adminNote(result(), 'create', why)).toBe(
-    'Statistics 101 is created; Anna Holm is its admin. An email with a sign-in link is on its way to aho@uni.dk. '
+    'Statistics 101 is created; Anna Holm is its admin. An email with a link to the course is on its way to aho@uni.dk. '
     + 'Not tested yet: send a test email.');
   expect(adminNote(result({ admin_email: 'disabled' }), 'create', why)).not.toContain('Not tested yet');
   expect(adminNote(result({ admin_email: 'unchanged' }), 'assign', why)).toBe('They are already the admin; nothing changed.');
@@ -189,7 +191,7 @@ it.each([
   expect(line(shown, total, role, searching)).toBe(text);
 });
 
-const ref = (id: number, name: string) => ({ id, name });
+const ref = (id: number, name: string, slug = name.toLowerCase()) => ({ id, name, slug });
 const run = (id: number, title: string, course_name: string) => ({ id, title, course_name });
 const runs = (n: number) => Array.from({ length: n }, (_, i) => run(i + 1, `Run ${i + 1}`, 'Stat'));
 it.each([
@@ -208,6 +210,14 @@ it.each([
   const got = roleChips(u);
   if (chips.length && typeof chips[0] === 'string') expect(got.map((c) => c.text)).toEqual(chips);
   else expect(got).toEqual(chips);
+});
+
+// D15 (the user's call): a chip's count is grouped like every other count.
+it('roleChips: big counts read "Student (1,200)" and "Admin (1,000)"', () => {
+  const many = Array.from({ length: 1000 }, (_, i) => ref(i + 1, `C${i + 1}`));
+  const got = roleChips(user({ admin_of: many, student_runs: runs(1200) }));
+  expect(got.map((c) => c.text)).toEqual(['Admin (1,000)', 'Student (1,200)']);
+  expect(got[1].tip.split('\n').at(-1)).toBe('… and 1,190 more');
 });
 
 // D14 rev 9: the tooltip is capped; the hidden list (items) is not.
@@ -243,6 +253,18 @@ it('roleChips tip: cutting counts characters, never splitting one in two (D14 re
   expect(tip).toBe(`- ${'𝔸'.repeat(29)}…`);
 });
 
+it('roleChips: without Intl.Segmenter (Firefox before 125) the panel still loads and cuts by code point', async () => {
+  vi.stubGlobal('Intl', { ...Intl, Segmenter: undefined });
+  vi.resetModules();
+  try {
+    const lib = await import('../lib/superuser');
+    expect(lib.roleChips(user({ admin_of: [ref(1, 'x'.repeat(31))] }))[0].tip).toBe(`- ${'x'.repeat(29)}…`);
+  } finally {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  }
+});
+
 const SIGNED_OUT = "They'll be signed out and can't sign in until enabled; tell them yourself.";
 it('disableWarning: the spec example, admin and teacher (D18)', () => {
   expect(disableWarning(user({ admin_of: [ref(1, 'Statistics 101')], teacher_runs: runs(2) })))
@@ -255,9 +277,60 @@ it('disableWarning: admin only, of two and of more than two courses', () => {
 it('disableWarning: teacher only, singular for one run', () => {
   expect(disableWarning(user({ teacher_runs: runs(1) }))).toBe(`Disable Anna Holm? Anna Holm teaches 1 run. ${SIGNED_OUT}`);
 });
+it('disableWarning: big numbers are grouped (rev 11)', () => {
+  const many = Array.from({ length: 1001 }, (_, i) => ref(i + 1, `C${i}`));
+  expect(disableWarning(user({ admin_of: many, teacher_runs: runs(1234) })))
+    .toBe(`Disable Anna Holm? Anna Holm is the admin of 1,001 courses and teaches 1,234 runs. ${SIGNED_OUT}`);
+});
 it('disableWarning: no role has no middle sentence, and a nameless account is named by email', () => {
-  expect(disableWarning(user({ student_runs: runs(4) }))).toBe(`Disable Anna Holm? ${SIGNED_OUT}`);
+  expect(disableWarning(user())).toBe(`Disable Anna Holm? ${SIGNED_OUT}`);
   expect(disableWarning(user({ full_name: null, teacher_runs: runs(1) }))).toBe(`Disable aho@uni.dk? aho@uni.dk teaches 1 run. ${SIGNED_OUT}`);
+});
+// D18 rev 11 (the user's call 2026-11-12): commas, and student runs are named too.
+it.each([
+  ['admin of two, teacher and student', { admin_of: [ref(1, 'Algebra'), ref(2, 'Geometry')], teacher_runs: runs(2), student_runs: runs(1) },
+    'Anna Holm is the admin of Algebra and Geometry, teaches 2 runs and is a student in 1 run.'],
+  ['admin of two and teacher', { admin_of: [ref(1, 'Algebra'), ref(2, 'Geometry')], teacher_runs: runs(2) },
+    'Anna Holm is the admin of Algebra and Geometry, and teaches 2 runs.'],
+  ['admin of one and student', { admin_of: [ref(1, 'Algebra')], student_runs: runs(1) },
+    'Anna Holm is the admin of Algebra and is a student in 1 run.'],
+  ['student only', { student_runs: runs(3) }, 'Anna Holm is a student in 3 runs.'],
+  ['admin of three, teacher and student', { admin_of: [ref(1, 'A'), ref(2, 'B'), ref(3, 'C')], teacher_runs: runs(1), student_runs: runs(2) },
+    'Anna Holm is the admin of 3 courses, teaches 1 run and is a student in 2 runs.'],
+] as const)('disableWarning: %s (D18 rev 11)', (_label, over, middle) => {
+  expect(disableWarning(user(over as Partial<PanelUser>))).toBe(`Disable Anna Holm? ${middle} ${SIGNED_OUT}`);
+});
+
+it('countLine groups thousands (D15 rev 11)', () => {
+  expect(line(20, 4213, 'all', false)).toBe('Showing the 20 newest of 4,213 accounts. Search to find others.');
+  expect(line(20, 4213, 'all', true)).toBe('20 of 4,213 match. Keep typing to narrow.');
+  expect(line(1234, 1234, 'students', false)).toBe('1,234 students');
+  expect(line(1500, 1500, 'all', true)).toBe('1,500 match');
+});
+
+// D14 rev 11 (the planner's call): identical lines say which course or run they are.
+it('roleChips: identical admin lines get the course address, in the tip and the hidden list', () => {
+  const [chip] = roleChips(user({ admin_of: [ref(1, 'Algebra', 'algebra'), ref(2, 'Algebra', 'algebra-2'), ref(3, 'Geometry')] }));
+  expect(chip.items).toEqual(['Algebra (algebra)', 'Algebra (algebra-2)', 'Geometry']);
+  expect(chip.tip).toBe('- Algebra (algebra)\n- Algebra (algebra-2)\n- Geometry');
+});
+it('roleChips: identical run lines get the run id, in the tip and the hidden list', () => {
+  const [chip] = roleChips(user({ student_runs: [run(14, 'Spring', 'Algebra'), run(15, 'Spring', 'Algebra'), run(16, 'Autumn', 'Algebra')] }));
+  expect(chip.items).toEqual(['Algebra · Spring (run 14)', 'Algebra · Spring (run 15)', 'Algebra · Autumn']);
+  expect(chip.tip).toBe('- Algebra · Spring (run 14)\n- Algebra · Spring (run 15)\n- Algebra · Autumn');
+});
+it('roleChips: lines that only look alike once cut get the suffix too, in the tip and the list', () => {
+  const long = 'Analysis of Variance for Agricultural Scientists';
+  const [ad] = roleChips(user({ admin_of: [ref(1, `${long} A`, 'anova-a'), ref(2, `${long} B`, 'anova-b')] }));
+  expect(ad.tip).toBe('- Analysis of Variance for Agri… (anova-a)\n- Analysis of Variance for Agri… (anova-b)');
+  expect(ad.items).toEqual([`${long} A (anova-a)`, `${long} B (anova-b)`]);
+  const [te] = roleChips(user({ teacher_runs: [run(7, 'Spring', 'Introduction to Statistics A'), run(8, 'Spring', 'Introduction to Statistics B')] }));
+  expect(te.tip).toBe('- Introduction to Statist… · Spring (run 7)\n- Introduction to Statist… · Spring (run 8)');
+  expect(te.items).toEqual(['Introduction to Statistics A · Spring (run 7)', 'Introduction to Statistics B · Spring (run 8)']);
+});
+it('roleChips tip: a cut never splits a visible character (a flag, a letter and its accent)', () => {
+  expect(tipLines(user({ admin_of: [ref(1, 'a'.repeat(28) + '🇩🇰🇩🇰🇩🇰')] }))[0]).toBe(`- ${'a'.repeat(28)}🇩🇰…`);
+  expect(tipLines(user({ admin_of: [ref(1, 'a'.repeat(28) + 'e\u0301e\u0301e\u0301')] }))[0]).toBe(`- ${'a'.repeat(28)}e\u0301…`);
 });
 
 it('the Settings calls: one GET, a PATCH per card, a POST for the test, all on the token', async () => {
@@ -274,9 +347,12 @@ it('the Settings calls: one GET, a PATCH per card, a POST for the test, all on t
   expect(f.mock.calls[1][1]?.method).toBe('PATCH');
   expect(f.mock.calls[1][1]?.body).toBe(JSON.stringify({ on: false }));
 
+  // Settings D11b: the saved limit reaches this tab's upload screens.
+  f.mockImplementationOnce(async () => jsonResponse(200, { limits: { max_file_mb: 50, max_total_mb: 500 } }));
   await saveLimits('T', { max_file_mb: 50, max_total_mb: 500 });
   expect(String(f.mock.calls[2][0])).toBe('/api/superuser/T/settings/limits');
   expect(f.mock.calls[2][1]?.method).toBe('PATCH');
+  expect(uploadLimit.mb).toBe(50);
 
   await saveSignIn('T', { pin_minutes: 10, pin_requests_per_hour: 3, pin_failures_per_hour: 5, longest_sign_in_days: 7 });
   expect(String(f.mock.calls[3][0])).toBe('/api/superuser/T/settings/sign-in');
@@ -292,6 +368,15 @@ it('the Settings calls: one GET, a PATCH per card, a POST for the test, all on t
   f.mockImplementation(async () => jsonResponse(401, { detail: 'Not authenticated' }));
   await expect(getSettings('T')).rejects.toBeInstanceOf(ApiError);
   expect(unauth).not.toHaveBeenCalled();
+});
+
+// Settings D11b: only a saved limit reaches the upload screens; a refused
+// save leaves the tab's limit as it was.
+it('a refused limits save leaves the upload limit alone', async () => {
+  uploadLimit.mb = 20;
+  vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(422, { detail: 'Nope.' })));
+  await expect(saveLimits('T', { max_file_mb: 50, max_total_mb: 500 })).rejects.toBeInstanceOf(ApiError);
+  expect(uploadLimit.mb).toBe(20);
 });
 
 // --- Branding (D2, D5, D10, D14) ---

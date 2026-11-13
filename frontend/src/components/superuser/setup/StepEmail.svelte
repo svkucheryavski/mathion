@@ -11,6 +11,7 @@
   import Skeleton from '../../ui/Skeleton.svelte';
   import ErrorState from '../../ui/ErrorState.svelte';
   import { EmailForm } from '../../../lib/panelForms/emailForm.svelte';
+  import { scrollIntoSight } from '../../../lib/panelForms/scrollIntoSight';
   import { getSettings, panelError, saveEmail, testEmail } from '../../../lib/superuser';
   import { setupSaved, type StepProps } from '../../../lib/setup';
   import { useStepGuards } from '../../../lib/stepGuards.svelte';
@@ -67,6 +68,12 @@
     clearErrors: () => { if (form) form.error = null; },
   });
 
+  // D13: the "step 1 saved" error on show, if any. A test never clears it;
+  // it goes by the error itself, not by the step's state, which a re-read can
+  // change during a test (and which can't be read once the step is gone).
+  let savedError: string | null = null;
+  const holdsSavedError = (f: EmailForm): boolean => f.error !== null && f.error === savedError;
+
   async function sendSaved(): Promise<void> {
     if (form) form.error = null;
     try {
@@ -76,6 +83,7 @@
     } catch (e) {
       const message = panelError(e, onAuth);
       if (form) form.error = message;
+      savedError = message;
       // D13: the email may have saved; a re-read updates the list's marks
       // (the reason waits for "step 1 saved"). The error holds the card, so
       // the read can't move it.
@@ -86,9 +94,11 @@
   async function onSave(): Promise<void> {
     if (busy || !form || !canSave) return;
     if (onlySaved) { await sendSaved(); return; }
+    savedError = null;
     const body = form.saveBody();
-    if (typeof body === 'string') { form.error = body; return; }
+    if (typeof body === 'string') { form.saveFailed(body); return; }
     form.error = null;
+    form.saves++;
     setup.saving = true;
     try {
       const s = await saveEmail(token, body);
@@ -99,7 +109,8 @@
       form.result = result;
       due = true;
     } catch (e) {
-      form.error = panelError(e, onAuth);
+      // Only the newer of a save error and a test answer shows (Settings D9).
+      form.saveFailed(panelError(e, onAuth));
       return;
     } finally {
       setup.saving = false;
@@ -108,21 +119,28 @@
   }
 
   // Settings D9: one test at a time, of the form as it is now. An answer about
-  // older values is dropped. D6: any answer re-reads the state.
+  // older values, or older than an email save, is dropped. D6: any answer
+  // re-reads the state. Send test does nothing while a save runs: it would
+  // only test what is being saved. A test's answer replaces an email save's
+  // error, never a "step 1 saved" one: that one holds the card (D13), and
+  // shows only while just that is retried.
   async function onTest(): Promise<void> {
     const f = form;
-    if (testing || !f) return;
+    if (testing || busy || !f) return;
     const body = f.testBody();
-    if (typeof body === 'string') { f.result = { ok: false, message: body }; return; }
+    if (typeof body === 'string') { f.answered({ ok: false, message: body }, !holdsSavedError(f)); return; }
     f.result = null;
+    if (!holdsSavedError(f)) f.error = null;
     testing = true;
     const asked = f.edits;
+    const saves = f.saves;
+    const current = () => f === form && asked === f.edits && saves === f.saves;
     try {
       const answer = await testEmail(token, body);
-      if (f === form && asked === f.edits) f.result = answer;
+      if (current()) f.answered(answer, !holdsSavedError(f));
     } catch (e) {
       const message = panelError(e, onAuth);
-      if (f === form && asked === f.edits && message !== null) f.result = { ok: false, message };
+      if (current() && message !== null) f.answered({ ok: false, message }, !holdsSavedError(f));
     } finally {
       testing = false;
       void setup.read();
@@ -149,11 +167,11 @@
     </div>
     {#if form.on}
       <div class="se-test">
-        <Button variant="secondary" loading={testing} aria-disabled={testing} onclick={() => void onTest()}>Send test email</Button>
+        <Button variant="secondary" loading={testing} aria-disabled={testing || busy} onclick={() => void onTest()}>Send test email</Button>
       </div>
     {/if}
     {#if form.result}
-      <p class="se-result" class:ok={form.result.ok} class:err={!form.result.ok} role="status">{form.result.message}</p>
+      <p class="se-result" class:ok={form.result.ok} class:err={!form.result.ok} role="status" {@attach scrollIntoSight(form.result)}>{form.result.message}</p>
     {/if}
   {/if}
 </StepCard>

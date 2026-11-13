@@ -601,7 +601,7 @@ describe('DashboardSidePanel', () => {
     Object.defineProperty(fileInput, 'files', { value: [f], configurable: true });
     fileInput.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();
-    expect(host.textContent).toContain('File exceeds 20 MB limit.');
+    expect(host.textContent).toContain('This file is over the 20 MB limit.');
     f = new File([new Uint8Array([0x50])], 'fake.pdf', { type: 'application/msword' });
     Object.defineProperty(fileInput, 'files', { value: [f], configurable: true });
     fileInput.dispatchEvent(new Event('change', { bubbles: true }));
@@ -2016,7 +2016,7 @@ describe('DashboardSidePanel — submission cards (6c T6)', () => {
     const dds = Array.from(card.querySelectorAll('[data-test="submission-content"] dd')).map((d) => d.textContent?.trim());
     expect(dds).toEqual([formatLocalWithTz('2026-06-04T10:00:00Z'), 'Alice', '3']);
     expect(card.querySelector('.sc-file-name')!.textContent).toBe('Submission 3');
-    expect(card.querySelector('.sc-file-meta')!.textContent).toBe('PDF · 2.4 MB');
+    expect(card.querySelector('.sc-file-meta')!.textContent).toBe('PDF · 2.3 MB');
     const a = card.querySelector('a[href="/api/submissions/100/file"]') as HTMLAnchorElement;
     expect(a.hasAttribute('download')).toBe(true);
     expect(a.getAttribute('aria-label')).toBe('Download submission 3');
@@ -2122,7 +2122,7 @@ describe('DashboardSidePanel — the Evaluate form (6c T6, R37, R44)', () => {
     Object.defineProperty(input, 'files', { value: [big], configurable: true });
     input.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();
-    expect(host.textContent).toContain('File exceeds 50 MB limit.');
+    expect(host.textContent).toContain('This file is over the 50 MB limit.');
   });
 
   it('while the limit is unknown, the help has no number and nothing is checked (Settings D11b)', async () => {
@@ -2135,7 +2135,7 @@ describe('DashboardSidePanel — the Evaluate form (6c T6, R37, R44)', () => {
     Object.defineProperty(input, 'files', { value: [big], configurable: true });
     input.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();
-    expect(host.textContent).not.toContain('File exceeds');
+    expect(host.textContent).not.toContain('MB limit');
   });
 
   it("a proxy's 413 (an HTML page) says the server's upload limit (Settings D11a)", async () => {

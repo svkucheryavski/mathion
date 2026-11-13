@@ -18,7 +18,7 @@ function u(over: Partial<PanelUser>): PanelUser {
   };
 }
 const SU = u({ id: 1, email: 'svk@uni.dk', full_name: 'Sergey Kucheryavskiy', is_superuser: true });
-const ANNA = u({ id: 9, email: 'aho@uni.dk', full_name: 'Anna Holm', admin_of: [{ id: 1, name: 'Statistics 101' }],
+const ANNA = u({ id: 9, email: 'aho@uni.dk', full_name: 'Anna Holm', admin_of: [{ id: 1, name: 'Statistics 101', slug: 'stat' }],
   teacher_runs: [{ id: 3, title: 'Autumn 2026', course_name: 'Statistics 101' }, { id: 4, title: 'Spring 2026', course_name: 'Statistics 101' }] });
 const OLE = u({ id: 7, email: 'old@uni.dk', full_name: 'Ole Dahl', is_disabled: true, teacher_runs: [{ id: 5, title: 'Autumn 2025', course_name: 'Algebra' }] });
 const NEW = u({ id: 12, email: 'new.colleague@uni.dk', has_data: false });
@@ -108,11 +108,14 @@ it('rows show name, email, the role chips and last active (D14, D22)', async () 
   expect([...target.querySelectorAll('thead th')].map((t) => t.textContent?.trim())).toEqual(['Name', 'Email', 'Roles', 'Last active', 'Actions']);
 });
 
-it('an admin of two courses with the same name lists both on hover (course names are not unique)', async () => {
-  const twin = u({ id: 30, email: 'twin@uni.dk', full_name: 'Twin', admin_of: [{ id: 4, name: 'Algebra' }, { id: 5, name: 'Algebra' }] });
+it('an admin of two courses with the same name lists both on hover, each with its address (D14 rev 11)', async () => {
+  const twin = u({ id: 30, email: 'twin@uni.dk', full_name: 'Twin',
+    admin_of: [{ id: 4, name: 'Algebra', slug: 'algebra' }, { id: 5, name: 'Algebra', slug: 'algebra-2' }] });
   routes['GET /users'] = () => [200, page([twin])];
   await render();
-  expect(row('twin@uni.dk').querySelector<HTMLElement>('.chip')?.title).toBe('- Algebra\n- Algebra');
+  const chip = row('twin@uni.dk').querySelector<HTMLElement>('.chip')!;
+  expect(chip.title).toBe('- Algebra (algebra)\n- Algebra (algebra-2)');
+  expect(chip.querySelector('.vh')?.textContent).toBe(': Algebra (algebra), Algebra (algebra-2)');
 });
 
 it('a disabled account\'s row is greyed and says Disabled to a screen reader, with no Disabled chip (D14 rev 8)', async () => {
@@ -306,4 +309,171 @@ it('a load error that is not the guard shows the error with a retry', async () =
   routes['GET /users'] = () => [200, page()];
   [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Try again')!.click(); await settle();
   expect(rows()).toHaveLength(4);
+});
+
+it('"Last active" is worked out at each load, not once (rev 11)', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const start = new Date('2026-11-12T10:00:00Z').getTime();
+  vi.setSystemTime(start);
+  routes['GET /users'] = () => [200, page([{ ...ANNA, last_seen_at: new Date(start - HOUR).toISOString() }])];
+  await render();
+  expect(row('aho@uni.dk').querySelector('.u-last')?.textContent?.trim()).toBe('1 hour ago');
+  vi.setSystemTime(start + 3 * HOUR);
+  pill('Admins').click(); await settle();
+  expect(row('aho@uni.dk').querySelector('.u-last')?.textContent?.trim()).toBe('4 hours ago');
+});
+
+it('a failed reload after a strip action keeps the table on screen (rev 11, as on the Courses page)', async () => {
+  routes['POST /users/9/disable'] = () => [200, { ...ANNA, is_disabled: true }];
+  await render();
+  routes['GET /users'] = () => [500, { detail: 'Internal Server Error' }];
+  act(row('aho@uni.dk'), 'disable')!.click(); await settle();
+  (row('aho@uni.dk').nextElementSibling as HTMLElement).querySelector<HTMLButtonElement>('[data-action="confirm-disable"]')!.click(); await settle();
+  expect(gets()).toBe(2);
+  expect(target.textContent).not.toContain('Could not load accounts.');
+  expect(rows()).toHaveLength(4);
+});
+
+it('a failed reload after a strip action keeps a one-row table on screen (D25, rev 13)', async () => {
+  routes['GET /users'] = () => [200, page([ANNA])];
+  routes['POST /users/9/disable'] = () => [200, { ...ANNA, is_disabled: true }];
+  await render();
+  routes['GET /users'] = () => [500, { detail: 'Internal Server Error' }];
+  act(row('aho@uni.dk'), 'disable')!.click(); await settle();
+  (row('aho@uni.dk').nextElementSibling as HTMLElement).querySelector<HTMLButtonElement>('[data-action="confirm-disable"]')!.click(); await settle();
+  expect(rows()).toHaveLength(1);
+  expect(target.textContent).not.toContain('Could not load accounts.');
+});
+
+it('a deleted account leaves the table even when the reload after it fails, and the count line follows (D25, rev 13)', async () => {
+  routes['DELETE /users/12'] = () => [204, null];
+  await render();
+  expect(countLine()).toBe('4 accounts');
+  routes['GET /users'] = () => [500, { detail: 'Internal Server Error' }];
+  act(row('new.colleague@uni.dk'), 'delete')!.click(); await settle();
+  target.querySelector<HTMLElement>('.u-confirm')!.querySelector<HTMLButtonElement>('[data-action="confirm-delete"]')!.click(); await settle();
+  expect(row('new.colleague@uni.dk')).toBeUndefined();
+  expect(rows()).toHaveLength(3);
+  expect(countLine()).toBe('3 accounts');
+  expect(pill('All').textContent?.trim()).toBe('All (42)');   // the pill counts wait for the next load
+  expect(target.textContent).not.toContain('Could not load accounts.');
+});
+
+it('a delete that ends after a pill switch leaves the count line alone when its row is not on screen (D25, rev 13)', async () => {
+  let release!: () => void;
+  routes['DELETE /users/12'] = () => new Promise<Reply>((r) => { release = () => r([204, null]); });
+  routes['GET /users'] = (_b, p) => [200, p.get('role') === 'disabled' ? page([OLE], 1) : page()];
+  await render();
+  act(row('new.colleague@uni.dk'), 'delete')!.click(); await settle();
+  target.querySelector<HTMLElement>('.u-confirm')!.querySelector<HTMLButtonElement>('[data-action="confirm-delete"]')!.click(); await settle();
+  pill('Disabled').click(); await settle();
+  expect(countLine()).toBe('1 disabled account');
+  routes['GET /users'] = () => [500, { detail: 'Internal Server Error' }];
+  release(); await settle();
+  expect(row('old@uni.dk')).toBeTruthy();
+  expect(countLine()).toBe('1 disabled account');
+});
+
+it('deleting the only account a search shows, then a failed reload, shows the error (D25, rev 13)', async () => {
+  vi.useFakeTimers();
+  routes['GET /users'] = (_b, p) => [200, p.get('q') ? page([NEW]) : page()];
+  routes['DELETE /users/12'] = () => [204, null];
+  await render();
+  type(search(), 'new');
+  await vi.advanceTimersByTimeAsync(260); await settle();
+  expect(rows()).toHaveLength(1);
+  routes['GET /users'] = () => [500, { detail: 'Internal Server Error' }];
+  act(row('new.colleague@uni.dk'), 'delete')!.click(); await settle();
+  target.querySelector<HTMLElement>('.u-confirm')!.querySelector<HTMLButtonElement>('[data-action="confirm-delete"]')!.click(); await settle();
+  expect(target.textContent).toContain('Could not load accounts.');
+});
+
+it('a failed delete keeps the account in the table (D25, rev 13)', async () => {
+  routes['DELETE /users/12'] = () => [500, { detail: 'Internal Server Error' }];
+  await render();
+  routes['GET /users'] = () => [500, { detail: 'Internal Server Error' }];   // no reload repaints it
+  act(row('new.colleague@uni.dk'), 'delete')!.click(); await settle();
+  target.querySelector<HTMLElement>('.u-confirm')!.querySelector<HTMLButtonElement>('[data-action="confirm-delete"]')!.click(); await settle();
+  expect(row('new.colleague@uni.dk')).toBeTruthy();
+  expect(rows()).toHaveLength(4);
+});
+
+it("a confirm that finishes doesn't close another row's strip opened meanwhile (rev 11)", async () => {
+  let release!: () => void;
+  routes['POST /users/9/disable'] = () => new Promise<Reply>((r) => { release = () => r([200, { ...ANNA, is_disabled: true }]); });
+  await render();
+  act(row('aho@uni.dk'), 'disable')!.click(); await settle();
+  (row('aho@uni.dk').nextElementSibling as HTMLElement).querySelector<HTMLButtonElement>('[data-action="confirm-disable"]')!.click(); await settle();
+  act(row('new.colleague@uni.dk'), 'delete')!.click(); await settle();
+  expect((row('new.colleague@uni.dk').nextElementSibling as HTMLElement).classList.contains('u-confirm')).toBe(true);
+  release(); await settle();
+  expect((row('new.colleague@uni.dk').nextElementSibling as HTMLElement | null)?.classList.contains('u-confirm')).toBe(true);
+});
+
+it('a failed reload after Edit, or after a 409, keeps the table on screen (rev 11)', async () => {
+  routes['PATCH /users/9'] = () => [200, { ...ANNA, full_name: 'Anna H.' }];
+  await render();
+  routes['GET /users'] = () => [500, { detail: 'Internal Server Error' }];
+  act(row('aho@uni.dk'), 'edit')!.click(); await settle();
+  type(field('Name'), 'Anna H.');
+  footButton('Save').click(); await settle();
+  expect(gets()).toBe(2);
+  expect(target.textContent).not.toContain('Could not load accounts.');
+  expect(rows()).toHaveLength(4);
+  routes['PATCH /users/9'] = () => [409, { detail: 'This email is already used by another account' }];
+  act(row('aho@uni.dk'), 'edit')!.click(); await settle();
+  type(field('Email'), 'svk@uni.dk');
+  footButton('Save').click(); await settle();
+  expect(gets()).toBe(3);
+  expect(target.textContent).not.toContain('Could not load accounts.');
+  expect(rows()).toHaveLength(4);
+});
+
+it('a failed reload after New account keeps the table on screen (rev 11)', async () => {
+  routes['POST /users'] = () => [201, NEW];
+  await render();
+  routes['GET /users'] = () => [500, { detail: 'Internal Server Error' }];
+  target.querySelector<HTMLButtonElement>('.panel-head button')!.click(); await settle();
+  type(field('Email'), 'new.colleague@uni.dk');
+  footButton('Create').click(); await settle();
+  expect(gets()).toBe(2);
+  expect(target.textContent).not.toContain('Could not load accounts.');
+  expect(rows()).toHaveLength(4);
+});
+
+// D15 (the user's call): every count on the page uses English grouping, the pills too.
+it('the pills group big counts like the count line: "All (4,213)"', async () => {
+  routes['GET /users'] = () => [200, { ...page(), total: 4213, counts: { all: 4213, admins: 3, teachers: 1200, students: 3009, disabled: 1 } }];
+  await render();
+  expect(pill('All').textContent?.replace(/\s+/g, ' ').trim()).toBe('All (4,213)');
+  expect(pill('Teachers').textContent?.replace(/\s+/g, ' ').trim()).toBe('Teachers (1,200)');
+});
+
+it('a failed quiet reload behind an empty pill shows the error, not the empty line (D25, rev 13)', async () => {
+  routes['GET /users'] = (_b, p) => [200, p.get('role') === 'disabled' ? page([], 0) : page()];
+  routes['POST /users'] = () => [201, NEW];
+  await render();
+  pill('Disabled').click(); await settle();
+  expect(countLine()).toBe('No disabled accounts');
+  routes['GET /users'] = () => [500, { detail: 'Internal Server Error' }];
+  target.querySelector<HTMLButtonElement>('.panel-head button')!.click(); await settle();
+  type(field('Email'), 'new.colleague@uni.dk');
+  footButton('Create').click(); await settle();
+  expect(target.textContent).toContain('Could not load accounts.');
+});
+
+it('a failed quiet reload with nothing on screen yet shows the error, not "Loading" (rev 11)', async () => {
+  let release: (r: Reply) => void = () => {};
+  routes['GET /users'] = () => new Promise<Reply>((res) => { release = res; });
+  routes['POST /users'] = () => [201, NEW];
+  await render();
+  expect(target.textContent).toContain('Loading accounts…');
+  expect(pill('All').textContent?.trim()).toBe('All');   // no count until the list answers
+  const first = release;
+  routes['GET /users'] = () => [500, { detail: 'Internal Server Error' }];
+  target.querySelector<HTMLButtonElement>('.panel-head button')!.click(); await settle();
+  type(field('Email'), 'new.colleague@uni.dk');
+  footButton('Create').click(); await settle();
+  first([200, page()]); await settle();   // the older first load answers late; it is dropped
+  expect(target.textContent).toContain('Could not load accounts.');
 });

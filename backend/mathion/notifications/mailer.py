@@ -68,6 +68,11 @@ class FileMailer(Mailer):
         tmp.rename(path)
 
 
+def logs_in(username: str | None, encryption: str | None) -> bool:
+    """D7, D7a: a login happens only with a username and encryption."""
+    return bool(username) and encryption in ("starttls", "ssl")
+
+
 class SMTPMailer(Mailer):
     """Superuser Settings D7, D7a: STARTTLS, SSL/TLS or plain SMTP; the
     certificate is checked unless the box says not to; a login only with a
@@ -90,7 +95,7 @@ class SMTPMailer(Mailer):
 
     @contextmanager
     def session(self):
-        login = bool(self.username) and self.encryption in ("starttls", "ssl")
+        login = logs_in(self.username, self.encryption)
         password = self.password() if (login and callable(self.password)) else self.password
         if self.encryption == "ssl":
             self._smtp = smtplib.SMTP_SSL(self.host, self.port, timeout=self.timeout, context=self._context())

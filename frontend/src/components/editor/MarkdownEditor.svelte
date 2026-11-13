@@ -3,6 +3,7 @@
   import { ApiError } from '../../lib/api';
   import { formatRef } from '../../lib/assets';
   import { tooLargeSentence } from '../../lib/uploadLimit.svelte';
+  import { assetDropRefusal } from '../../lib/assetDrop';
   import type { AssetContext, AssetItem } from '../../lib/assetContext';
   import AssetSidebar from './AssetSidebar.svelte';
   import { externalLinks } from '../../lib/externalLinks';
@@ -200,6 +201,18 @@
     return lastOffset;
   }
 
+  // Settings D11b (the user's call, 2026-11-13): a drop onto the editor gets
+  // the sidebar's check (the saved limit and the file type). One refused file
+  // stops the whole drop, before anything uploads. A drop while an upload
+  // runs is left to uploadOne's flash, so its error stays.
+  function refusedDrop(files: File[]): boolean {
+    if (uploading) return false;
+    const refused = assetDropRefusal(files);
+    if (refused === null) return false;
+    uploadError = { detail: refused };
+    return true;
+  }
+
   function handleTextareaDragOver(e: DragEvent) {
     e.preventDefault();
     e.stopPropagation();
@@ -209,7 +222,7 @@
     e.stopPropagation();
     if (disabled || frozen || noAssets) return;
     const files = Array.from(e.dataTransfer?.files ?? []);
-    if (files.length === 0) return;
+    if (files.length === 0 || refusedDrop(files)) return;
     let offset = dropOffsetFromPoint(e);
     for (let i = 0; i < files.length; i++) {
       const result = await uploadOne(files[i], { current: i + 1, total: files.length });
@@ -229,7 +242,7 @@
     e.preventDefault();
     if (disabled || frozen || noAssets) return;
     const files = Array.from(e.dataTransfer?.files ?? []);
-    if (files.length === 0) return;
+    if (files.length === 0 || refusedDrop(files)) return;
     for (let i = 0; i < files.length; i++) {
       const result = await uploadOne(files[i], { current: i + 1, total: files.length });
       if (result === null) break;

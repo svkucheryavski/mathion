@@ -3,12 +3,15 @@
   // radiogroup of visually hidden radios, each inside its visible label, so
   // the arrow keys, Space and a screen reader come from the platform.
   // `fit` sizes the segments to their text instead of sharing the row.
+  // `frozen` (Switch's R19): a request is running, so the choice keeps its
+  // look and focus but ignores clicks and the arrow keys.
   let {
     options,
     value = $bindable(),
     name,
     label,
     disabled = false,
+    frozen = false,
     fit = false,
     onchange = undefined,
   }: {
@@ -17,15 +20,35 @@
     name: string;
     label: string;
     disabled?: boolean;
+    frozen?: boolean;
     fit?: boolean;
     onchange?: (next: T) => void;
   } = $props();
+
+  const ARROWS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+  // A cancelled click puts the radio back, so no change fires; the arrow keys
+  // would move the choice without a click, so they stop here too. Browsers
+  // also re-check the radio that was on; jsdom doesn't, so once the click is
+  // over the radios are set from the value again.
+  function hold(e: Event): void {
+    if (!frozen) return;
+    e.preventDefault();
+    const group = (e.currentTarget as HTMLElement).closest('[role="radiogroup"]');
+    queueMicrotask(() => {
+      group?.querySelectorAll<HTMLInputElement>('input[type="radio"]')
+        .forEach((r, i) => { r.checked = options[i]?.value === value; });
+    });
+  }
+  function holdKey(e: KeyboardEvent): void {
+    if (frozen && ARROWS.has(e.key)) e.preventDefault();
+  }
 </script>
 
 <div class="segmented" class:fit class:disabled role="radiogroup" aria-label={label}>
   {#each options as o (o.value)}
     <label class="segment" class:selected={value === o.value}>
-      <input type="radio" {name} value={o.value} bind:group={value} {disabled} onchange={() => onchange?.(o.value)} />
+      <input type="radio" {name} value={o.value} bind:group={value} {disabled} aria-disabled={frozen ? 'true' : undefined}
+        onclick={hold} onkeydown={holdKey} onchange={() => onchange?.(o.value)} />
       {o.label}
     </label>
   {/each}
