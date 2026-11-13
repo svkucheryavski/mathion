@@ -79,6 +79,23 @@ def test_pin_command_prints_the_saved_minutes(db, capsys, monkeypatch):
     assert out.startswith("PIN: ") and "It expires in 25 minutes." in out
 
 
+def test_pin_unknown_email_exits_non_zero(db, capsys, monkeypatch):
+    # D14: no PIN, so `mathion pin` must not go on to say "Log in at…".
+    from mathion.superuser import __main__ as cli
+    monkeypatch.setattr(cli, "SessionLocal", lambda: db)
+    assert cli.main(["pin", "ghost@example.com"]) == 1
+    assert capsys.readouterr().out == "unknown email\n"
+
+
+def test_pin_disabled_user_exits_non_zero(db, capsys, monkeypatch):
+    from mathion.superuser import __main__ as cli
+    db.add(User(email="off@example.com", is_disabled=True))
+    db.commit()
+    monkeypatch.setattr(cli, "SessionLocal", lambda: db)
+    assert cli.main(["pin", "off@example.com"]) == 1
+    assert capsys.readouterr().out == "user is disabled\n"
+
+
 def test_activate_no_superuser_warns(db):
     result = activate_panel(db)
     assert isinstance(result, ActivateResult)

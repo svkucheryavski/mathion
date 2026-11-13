@@ -4,9 +4,10 @@ D2 (superuser Settings spec): email, file limits and sign-in rules move from
 `.env` into one database row, which the panel's Settings page edits. This
 migration creates the row from the current environment, read raw (never
 through `Settings()`), so no value in `.env` can make it fail (D2a): a number
-out of range is clamped, one that isn't a number gets the default, and email
-"on" without a mail server, or with a login but no password, is copied as off.
-Each such case prints one line (`mathion update` shows the output).
+out of range is clamped, one that isn't a number gets the default, a text value
+that can't be stored is not copied, and email "on" without a mail server, or
+with a login but no password, is copied as off. Each such case prints one line
+(`mathion update` shows the output).
 
 Everything it needs is frozen here, so later code changes can't change what it
 writes: the v1 password seal (`mathion/secret_box.py`), the From default and
@@ -57,82 +58,133 @@ def _seal_v1(plain: str, secret: str) -> str:
 
 
 def _note(text: str) -> None:
-    print(f"site-settings: {text}")
+    # Flushed: `mathion update` reads this through a pipe, where an unflushed
+    # line can land out of place.
+    print(f"site-settings: {text}", flush=True)
 
 
-def _text(key: str, max_len: int) -> str:
-    """A text value as it can be stored, or "" with a printed line."""
+def _echo(raw: str) -> str:
+    """The raw value as a note shows it: cut to 40 characters, and escaped
+    when it holds anything but printable ASCII (a control character, a letter
+    like æ, bytes that aren't UTF-8). Every line stays ASCII, so no locale can
+    make it fail to print."""
+    value = raw.strip()
+    if len(value) > 40:
+        value = value[:40] + "..."
+    return value if value.isascii() and value.isprintable() else ascii(value)
+
+
+def _dropped(key: str, why: str, then: str | None = None, also: str | None = None) -> None:
+    """One line for a value that is not copied, with what else isn't (`also`)
+    and what that means (`then`), if anything."""
+    _note(f"{key} {why}; it is not copied"
+          + (f", and neither is {also}" if also else "") + (f", {then}" if then else ""))
+
+
+def _text(key: str, max_len: int) -> tuple[str, str | None]:
+    """A text value as it can be stored, or "" and why it was dropped."""
     raw = os.environ.get(key, "")
     try:
         raw.encode()
     except UnicodeEncodeError:
-        _note(f"{key} is not valid UTF-8 text; it is not copied")
-        return ""
+        return "", "is not valid UTF-8 text"
     value = raw.strip()
     if len(value) > max_len:
-        _note(f"{key} is longer than {max_len} characters; it is not copied")
-        return ""
-    return value
+        return "", f"is longer than {max_len} characters"
+    return value, None
 
 
-def _int(key: str, default: int) -> tuple[int, str | None]:
+def _int(key: str, default: int, shown: str | None = None) -> tuple[int, str | None]:
+    """A number, or the default with a line; `shown` is how the default reads."""
     raw = os.environ.get(key)
     if raw is None or raw.strip() == "":
         return default, None
     try:
         return int(raw.strip()), raw
     except ValueError:
-        _note(f"{key}={raw!r} is not a number; using the default {default}")
+        _note(f"{key}={_echo(raw)} is not a number; using the default {shown or default}")
         return default, None
 
 
 def _clamp(key: str, raw: str | None, value: int, lo: int, hi: int, unit: str = "") -> int:
     new = min(max(value, lo), hi)
     if new != value:
-        _note(f"{key}={raw} is out of range; using {new}{unit}")
+        _note(f"{key}={_echo(raw or '')} is out of range; using {new}{unit}")
     return new
 
 
 def _mb(key: str, default_mb: int) -> tuple[int, str | None]:
-    value, raw = _int(key, default_mb * _MB)
-    return max(1, -(-value // _MB)), raw  # whole MB, rounded up; exact for any size
+    """Bytes in .env as whole MB, rounded up (exact for any size); 0 or below
+    stays there, so the caller's range check names it."""
+    value, raw = _int(key, default_mb * _MB, f"{default_mb} MB")
+    return -(-value // _MB), raw
 
 
 def _copy() -> dict:
     env = os.environ
     mode = env.get("MATHION_EMAIL_MODE", "disabled").strip()
-    host = _text("MATHION_SMTP_HOST", 253)
-    username = _text("MATHION_SMTP_USERNAME", 254)
-    password = env.get("MATHION_SMTP_PASSWORD", "")
-    try:
-        password.encode()
-    except UnicodeEncodeError:
-        _note("MATHION_SMTP_PASSWORD is not valid UTF-8 text; it is not copied")
-        password = ""
+    email_on = mode == "smtp"
+    off = "so email is copied as off"
+
+    host, why = _text("MATHION_SMTP_HOST", 253)
+    if why:
+        _dropped("MATHION_SMTP_HOST", why, off if email_on else None)
+        email_on = False
+    elif email_on and not host:
+        _note("MATHION_EMAIL_MODE=smtp but MATHION_SMTP_HOST is empty; email is copied as off")
+        email_on = False
+
+    # D2a: a dropped username drops its password too: without a username it
+    # isn't used, and a login with no username can't send.
+    username, why = _text("MATHION_SMTP_USERNAME", 254)
+    password = ""
+    secret = env.get("MATHION_SECRET_KEY", _DEV_SECRET)
+    if why:
+        had_password = env.get("MATHION_SMTP_PASSWORD", "") != ""
+        _dropped("MATHION_SMTP_USERNAME", why, off if email_on else None,
+                 "MATHION_SMTP_PASSWORD" if had_password else None)
+        email_on = False
+    else:
+        password = env.get("MATHION_SMTP_PASSWORD", "")
+        try:
+            password.encode()
+        except UnicodeEncodeError:
+            password = ""
+            _dropped("MATHION_SMTP_PASSWORD", "is not valid UTF-8 text", off if email_on and username else None)
+            if username:
+                email_on = False
+        try:
+            secret.encode()
+        except UnicodeEncodeError:
+            # The password is sealed with the secret key; one that isn't text
+            # can't seal it (and can't sign anyone in either).
+            if password:
+                _note("MATHION_SECRET_KEY is not valid UTF-8 text, so MATHION_SMTP_PASSWORD can't be sealed; "
+                      "it is not copied" + (f", {off}" if email_on and username else ""))
+                password = ""
+                if username:
+                    email_on = False
+        if email_on and username and not password:
+            _note("MATHION_SMTP_USERNAME is set but MATHION_SMTP_PASSWORD is empty; email is copied as off")
+            email_on = False
+
     port, raw_port = _int("MATHION_SMTP_PORT", 587)
     port = _clamp("MATHION_SMTP_PORT", raw_port, port, 1, 65535)
 
-    email_on = mode == "smtp"
-    if email_on and not host:
-        _note("MATHION_EMAIL_MODE=smtp but MATHION_SMTP_HOST is empty; email is copied as off")
-        email_on = False
-    if email_on and username and not password:
-        _note("MATHION_SMTP_USERNAME is set but MATHION_SMTP_PASSWORD is empty; email is copied as off")
-        email_on = False
-
-    email_from = _text("MATHION_EMAIL_FROM", 320)
-    if not email_from:
-        if email_on:
-            _note(f"MATHION_EMAIL_FROM is not set; email stays on with the default From {_FROM_DEFAULT}")
-            email_from = _FROM_DEFAULT
-        else:
-            email_from = ""
+    email_from, why = _text("MATHION_EMAIL_FROM", 320)
+    stays_on = f"so email stays on with the default From {_FROM_DEFAULT}"
+    if why:
+        _dropped("MATHION_EMAIL_FROM", why, stays_on if email_on else None)
+    elif email_on and not email_from:
+        _note(f"MATHION_EMAIL_FROM is not set; email stays on with the default From {_FROM_DEFAULT}")
+    if email_on and not email_from:
+        email_from = _FROM_DEFAULT
 
     file_mb, raw = _mb("MATHION_MAX_FILE_SIZE", 20)
     file_mb = _clamp("MATHION_MAX_FILE_SIZE", raw, file_mb, 1, 50, " MB")
     total_mb, raw = _mb("MATHION_MAX_COURSE_SIZE", 500)
     if total_mb < file_mb:
-        _note(f"MATHION_MAX_COURSE_SIZE is below the largest file; using {file_mb} MB")
+        _note(f"MATHION_MAX_COURSE_SIZE={_echo(raw or '')} is below the largest file; using {file_mb} MB")
         total_mb = file_mb
     total_mb = _clamp("MATHION_MAX_COURSE_SIZE", raw, total_mb, file_mb, 102_400, " MB")
 
@@ -143,7 +195,6 @@ def _copy() -> dict:
     failures, raw = _int("MATHION_MAX_PIN_FAILURES_PER_HOUR", 5)
     failures = _clamp("MATHION_MAX_PIN_FAILURES_PER_HOUR", raw, failures, 3, 20)
 
-    secret = env.get("MATHION_SECRET_KEY", _DEV_SECRET)
     return {
         "id": 1,
         "email_on": email_on,

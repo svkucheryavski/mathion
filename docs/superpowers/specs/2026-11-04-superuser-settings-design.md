@@ -1,6 +1,6 @@
 # Superuser panel: Settings — design
 
-**Status:** rev 10, 2026-11-13.
+**Status:** rev 11, 2026-11-13.
 - Rev 2 folded in the builder check: D2a, D7a, D8a, D11b, the lower file ceiling in D11, and the user's D10a.
 - Rev 3 folds in spec review round 1, three lanes (`.superpowers/sdd/2026-11-04-superuser-settings/spec-r1-*.md`), and the user's answer on the upload ceiling (D11c). New or changed:
   - **D10b:** every email reader is listed;
@@ -39,6 +39,7 @@
 - Rev 8 (the superuser backlog round, 2026-11-12; the sentences are the user's): **D7:** the username is plain ASCII; **D7b:** a name with a comma or colon needs quotes, an underscore in the domain says why, invisible characters at the ends are dropped; **D9:** new sentences, and the test's refusal after the body says the card's; **D9c:** a server without SMTPUTF8 stops the batch when the From's address has letters like æ, and a relay that refuses every recipient reaches the card; **D9d:** the refusal sentence with and without a login, a session that sends nothing clears the line (not one about the sender or a refusal), and a refusal ends the wait.
 - Rev 9 (the superuser backlog round, Task 4, 2026-11-13; the sentences are the user's): **D8:** the placeholder follows D8a, a note when the username is cleared, the unreadable line only while it applies; **D9:** Send test does nothing while a save runs, the fields hold still during a save, only the later-started of a save and a test shows its message, the answer scrolls into view, in the dialog a save's error too; **D11b:** a limits save reaches the tab's upload screens at once, one over-the-limit sentence, file sizes 1024-based.
 - Rev 10 (the superuser backlog round, Task 4, 2026-11-13, the user's calls): **D8:** a password typed with no username gets its own note; **D8:** a typed password with no username doesn't turn Save on (mine, from review); **D11b:** a drop onto the Markdown editor's text or its box gets the sidebar's checks (the limit, the user's; the file type, mine), and sizes go up to GB.
+- Rev 11 (the superuser backlog round, Task 5, 2026-11-13): **D2a:** a text value that can't be stored gets one line that says what follows, a dropped username turns email off and names its password, lines are ASCII only, and a secret key that isn't UTF-8 drops the password instead of failing; **D14:** the PIN command exits 1 when it issues no PIN, and `mathion pin` then gives no "Log in at…"; **D11c:** an old CLI's bundled proxy lacks the two timeouts until the CLI is upgraded, and the release note says so.
 
 **Builds on:** `docs/superpowers/specs/2026-11-03-superuser-users-courses-design.md` (panel pages, dialogs, D25 errors) and `docs/superpowers/specs/2026-07-11-superuser-panel-slice-1-design.md` (panel access and shell).
 
@@ -115,6 +116,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - **A value that isn't a number** gets the default, with the same kind of log line.
   - **A total below the largest file** is raised to the largest file.
   - **Email "on" without a usable setup:** a copied `smtp` mode without a mail server, or with a username but no password, is copied as off, with a log line naming what's missing.
+  - **A text value that can't be stored** (too long, or not UTF-8) is not copied, in one line that says what follows. A dropped mail server, username or password (with a username) turns a copied `smtp` mode off; a dropped username drops its password too; a dropped From keeps email on with the default From. A dropped username says that its password isn't copied either, and a secret key that isn't UTF-8 drops the password instead of failing the migration. Every line is flushed, ASCII only (anything else in the old value is escaped), shows at most 40 characters of the old value, and gives a size's default in MB (rev 11).
   - **A broken login** is copied as it is and simply fails the next test or send.
 - **D2b. The `mathion` CLI and deploy files** (mine). `GenerateEnv` (`cli/internal/config/env.go:18`) stops writing `MATHION_MAX_FILE_SIZE` and `MATHION_MAX_COURSE_SIZE` into a new `.env`, and `deploy/.env.prod.example` drops them. `MATHION_EMAIL_MODE=disabled` stays in both, because the mode is still read for D2c and `disabled` means "the panel decides". On an existing server nothing is removed. No CLI path adds missing keys to an existing `.env` today, and none starts to.
 - **D2c. Developer modes stay in `.env`** (mine). `MATHION_EMAIL_MODE=file` or `memory` still wins over the panel, for development and tests. The Email card then shows "Email goes to a developer outbox (set on the server)." with no pencil. `smtp` and `disabled` in `.env` mean nothing after D2's copy, so D2's startup log line doesn't name the mode for `file` or `memory`.
@@ -303,7 +305,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   - Only `mathion update --version` run from an old CLI gets the new image with a 25 MB proxy. D11a's proxy sentence covers that case.
   - The README's upload-limit paragraph (`README.md:259-261`) changes to match: the panel sets the limit, and the bundled proxy allows up to the ceiling.
   - The File limits dialog says under Largest file: "Uploads also pass the server's proxy. With `mathion tls`, an up-to-date `mathion` allows 50 MB; another proxy must allow at least this."
-  - **The proxy's timeouts** (rev 6, from the whole-branch review). The bundled proxy (reproxy) waits 5 s for a response header and gives a request 30 s by default, which cuts off the 20 s email test (D9) and a 50 MB upload or download on a slow link. Both compose copies set `TIMEOUT_RESP_HEADER: "30s"` and `TIMEOUT_WRITE: "15m"` (50 MB at about 0.45 Mbit/s), and `embed_test.go` pins them. The README's line for running reproxy yourself adds `--timeout.resp-header=30s --timeout.write=15m`.
+  - **The proxy's timeouts** (rev 6, from the whole-branch review). The bundled proxy (reproxy) waits 5 s for a response header and gives a request 30 s by default, which cuts off the 20 s email test (D9) and a 50 MB upload or download on a slow link. Both compose copies set `TIMEOUT_RESP_HEADER: "30s"` and `TIMEOUT_WRITE: "15m"` (50 MB at about 0.45 Mbit/s), and `embed_test.go` pins them. The README's line for running reproxy yourself adds `--timeout.resp-header=30s --timeout.write=15m`. An old CLI's compose file has neither: until the CLI is upgraded and `mathion update` is run, a slow email test gets a 502 at 5 s, and a large upload or download is cut off at 30 s. The release note (`docs/release-notes/settings-release-order.md`) says so.
   - **What a proxy refusal shows** (Safari pass, 2026-11-05). The pinned reproxy answers a body over `MAX_SIZE` with a clean 413, and Safari shows D11a's "This file is over the server's upload limit.", not the network error.
 - **D12. Sign-in rules** (user's; ranges mine). The Edit sign-in dialog has four fields:
   - **A PIN lasts:** 5 to 60 minutes;
@@ -322,6 +324,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
 - **D14. Server and CLI text stops quoting old numbers and keys** (mine, from review).
   - The bootstrap PIN command no longer hits the request limit (D12), so its rate-limit message (`backend/mathion/superuser/__main__.py:40-44`) goes. What it prints for a PIN says the real minutes from the saved settings.
   - `mathion pin`'s help (`cli/cmd/pin.go:12, 24`) stops quoting "10 min" and "3/hour" and says the panel's Settings set them.
+  - **No PIN, no advice** (rev 11). The bootstrap PIN command exits 1 for an unknown or disabled email, after saying which. `mathion pin` then says "no PIN was issued" and leaves out its "Log in at…" line.
   - The README (`README.md:171, 201, 230, 259-261, 297`) stops telling operators to set the moved keys in `.env`.
   - The Users/Courses spec's backlog line on stale emails (`2026-11-03-superuser-users-courses-design.md:243`) gets a note that D10a of this spec settles it.
 

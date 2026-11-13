@@ -304,20 +304,24 @@ join the compose network and target `http://app:8000`, or use host networking.
 - **Rate limits:** PIN requests and wrong PIN tries are limited per email per hour;
   the superuser panel's Settings page sets both. If someone is locked out,
   `sudo mathion pin <email>` makes a new PIN: it skips the request limit and clears
-  that email's wrong tries.
+  that email's wrong tries. On the manual docker-compose path, which has no
+  `mathion` command, run
+  `docker compose -f docker-compose.prod.yml exec app python -m mathion.superuser pin <email>`.
 - **Data safety:** `mathion_pgdata` + `mathion_assets` hold all state (project-prefixed as
   `mathion_prod_mathion_pgdata` / `mathion_prod_mathion_assets` in `docker volume ls`).
   **`docker compose -f docker-compose.prod.yml down -v` permanently deletes them** — use
   `docker compose -f docker-compose.prod.yml down` (no `-v`) to stop. Always pass
   `-f docker-compose.prod.yml` so the command targets the prod stack, not the dev `db`.
-  Interim backup (until Slice 3 adds `mathion backup`):
+  Backup on the manual docker-compose path (with the `mathion` CLI, `sudo mathion backup` takes the
+  same pair, online):
   `docker compose -f docker-compose.prod.yml exec db pg_dump -U mathion mathion > backup.sql`
   plus a snapshot of the assets volume. For a point-in-time-consistent pair, stop `app` first
   (`docker compose -f docker-compose.prod.yml stop app`) so a concurrent asset change can't leave
   the dump referencing a since-deleted file — at the cost of a longer stop.
 - **DB password is first-init-only:** don't change `POSTGRES_PASSWORD` after the
   first `up` against an existing `mathion_pgdata`.
-- **Interim upgrade (brief downtime; until Slice 3's `mathion update`):** back up →
+- **Upgrade on the manual docker-compose path** (brief downtime; with the `mathion` CLI,
+  `sudo mathion update` pulls, backs up, migrates and restarts, rolling back on failure): back up →
   stop the proxy → `docker compose -f docker-compose.prod.yml stop app` → bump
   `MATHION_VERSION` → `pull` → migrate on the new image
   (`docker compose -f docker-compose.prod.yml run --rm app alembic upgrade head`) →

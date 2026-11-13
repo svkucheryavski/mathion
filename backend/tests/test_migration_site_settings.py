@@ -176,3 +176,191 @@ def test_copy_text_that_is_not_utf8_is_dropped(rerun):
 def test_copy_caps_total_at_100_gb(rerun):
     row, _ = rerun(MATHION_MAX_COURSE_SIZE=str(200_000 * 1_048_576))
     assert row.max_total_mb == 102_400
+
+
+# D2a (rev 11): one clear line per key, each flushed (`mathion update` reads it
+# through a pipe), sizes in MB, and a short ASCII echo of the raw value.
+def test_copy_zero_file_size_is_noted(rerun):
+    row, out = rerun(MATHION_MAX_FILE_SIZE="0")
+    assert row.max_file_mb == 1
+    assert "site-settings: MATHION_MAX_FILE_SIZE=0 is out of range; using 1 MB\n" in out
+
+
+def test_copy_negative_file_size_is_noted(rerun):
+    row, out = rerun(MATHION_MAX_FILE_SIZE="-5")
+    assert row.max_file_mb == 1
+    assert "site-settings: MATHION_MAX_FILE_SIZE=-5 is out of range; using 1 MB\n" in out
+
+
+def test_copy_course_below_file_shows_the_old_value(rerun):
+    raw = str(10 * 1_048_576)
+    row, out = rerun(MATHION_MAX_COURSE_SIZE=raw)
+    assert row.max_total_mb == 20
+    assert out == f"site-settings: MATHION_MAX_COURSE_SIZE={raw} is below the largest file; using 20 MB\n"
+
+
+def test_copy_over_long_username_turns_email_off(rerun):
+    row, out = rerun(MATHION_EMAIL_MODE="smtp", MATHION_SMTP_HOST="h",
+                     MATHION_SMTP_USERNAME="u" * 255, MATHION_SMTP_PASSWORD="pw")
+    assert row.email_on is False and row.smtp_skip_cert_check is False
+    assert row.smtp_username == "" and row.smtp_password_sealed is None
+    assert row.email_from == ""
+    assert out == ("site-settings: MATHION_SMTP_USERNAME is longer than 254 characters; "
+                   "it is not copied, and neither is MATHION_SMTP_PASSWORD, so email is copied as off\n")
+
+
+def test_copy_over_long_host_says_it_once(rerun):
+    row, out = rerun(MATHION_EMAIL_MODE="smtp", MATHION_SMTP_HOST="h" * 300)
+    assert row.email_on is False
+    assert out == ("site-settings: MATHION_SMTP_HOST is longer than 253 characters; "
+                   "it is not copied, so email is copied as off\n")
+
+
+def test_copy_over_long_text_with_email_off_just_says_not_copied(rerun):
+    _, out = rerun(MATHION_SMTP_HOST="h" * 300)
+    assert out == "site-settings: MATHION_SMTP_HOST is longer than 253 characters; it is not copied\n"
+
+
+def test_copy_over_long_from_keeps_email_on_in_one_line(rerun):
+    row, out = rerun(MATHION_EMAIL_MODE="smtp", MATHION_SMTP_HOST="h",
+                     MATHION_EMAIL_FROM="x" * 400 + "@uni.dk")
+    assert row.email_on is True and row.email_from == "Mathion <noreply@mathion.test>"
+    assert out == ("site-settings: MATHION_EMAIL_FROM is longer than 320 characters; it is not copied, "
+                   "so email stays on with the default From Mathion <noreply@mathion.test>\n")
+
+
+def test_copy_password_not_utf8_says_it_once(rerun):
+    row, out = rerun(MATHION_EMAIL_MODE="smtp", MATHION_SMTP_HOST="h",
+                     MATHION_SMTP_USERNAME="u", MATHION_SMTP_PASSWORD="p\udcff")
+    assert row.email_on is False and row.smtp_password_sealed is None
+    assert out == ("site-settings: MATHION_SMTP_PASSWORD is not valid UTF-8 text; "
+                   "it is not copied, so email is copied as off\n")
+
+
+def test_copy_size_not_a_number_names_the_default_in_mb(rerun):
+    row, out = rerun(MATHION_MAX_FILE_SIZE="20MB")
+    assert row.max_file_mb == 20
+    assert out == "site-settings: MATHION_MAX_FILE_SIZE=20MB is not a number; using the default 20 MB\n"
+
+
+def test_copy_cuts_a_long_echo(rerun):
+    _, out = rerun(MATHION_MAX_FILE_SIZE="9" * 400, MATHION_MAX_COURSE_SIZE="9" * 5000)
+    lines = out.splitlines()
+    assert len(lines) == 2
+    for line in lines:
+        assert "=" + "9" * 40 + "... " in line and "9" * 41 not in line
+
+
+def test_copy_echo_shows_control_characters_escaped(rerun):
+    _, out = rerun(MATHION_SMTP_PORT="ab\x1bc")
+    assert out == "site-settings: MATHION_SMTP_PORT='ab\\x1bc' is not a number; using the default 587\n"
+
+
+def test_copy_lines_are_flushed(rerun, monkeypatch):
+    import builtins
+    seen: list[bool] = []
+    real = builtins.print
+
+    def spy(*args, **kwargs):
+        if args and str(args[0]).startswith("site-settings:"):
+            seen.append(kwargs.get("flush") is True)
+        real(*args, **kwargs)
+    monkeypatch.setattr(builtins, "print", spy)
+    rerun(MATHION_MAX_FILE_SIZE="0", MATHION_SMTP_PORT="abc", MATHION_SMTP_HOST="h" * 300)
+    assert len(seen) == 3 and all(seen)
+
+
+def test_copy_dropped_username_with_email_off_names_the_password(rerun):
+    row, out = rerun(MATHION_SMTP_USERNAME="u" * 255, MATHION_SMTP_PASSWORD="pw")
+    assert row.smtp_username == "" and row.smtp_password_sealed is None
+    assert out == ("site-settings: MATHION_SMTP_USERNAME is longer than 254 characters; "
+                   "it is not copied, and neither is MATHION_SMTP_PASSWORD\n")
+
+
+def test_copy_dropped_username_without_password_says_only_that(rerun):
+    _, out = rerun(MATHION_SMTP_USERNAME="u" * 255)
+    assert out == "site-settings: MATHION_SMTP_USERNAME is longer than 254 characters; it is not copied\n"
+
+
+def test_copy_bad_password_without_username_keeps_email_on(rerun):
+    row, out = rerun(MATHION_EMAIL_MODE="smtp", MATHION_SMTP_HOST="h", MATHION_SMTP_PASSWORD="p\udcff")
+    assert row.email_on is True and row.smtp_password_sealed is None
+    assert out == ("site-settings: MATHION_SMTP_PASSWORD is not valid UTF-8 text; it is not copied\n"
+                   "site-settings: MATHION_EMAIL_FROM is not set; email stays on with the default From "
+                   "Mathion <noreply@mathion.test>\n")
+
+
+def test_copy_dropped_from_with_email_off_just_says_not_copied(rerun):
+    row, out = rerun(MATHION_EMAIL_FROM="x" * 400 + "@uni.dk")
+    assert row.email_on is False and row.email_from == ""
+    assert out == "site-settings: MATHION_EMAIL_FROM is longer than 320 characters; it is not copied\n"
+
+
+def test_copy_echo_escapes_bytes_that_are_not_utf8(rerun):
+    _, out = rerun(MATHION_MAX_FILE_SIZE="1\udcff")
+    assert out == ("site-settings: MATHION_MAX_FILE_SIZE='1\\udcff' is not a number; "
+                   "using the default 20 MB\n")
+
+
+def test_copy_prints_only_ascii(rerun):
+    # Whatever the container's locale, a line never fails to print (D2a).
+    _, out = rerun(MATHION_SMTP_PORT="æøå", MATHION_MAX_FILE_SIZE="9" * 400)
+    assert out.isascii()
+    assert "MATHION_SMTP_PORT='\\xe6\\xf8\\xe5' is not a number" in out
+
+
+def test_copy_secret_key_not_utf8_drops_the_password_not_the_migration(rerun):
+    row, out = rerun(MATHION_SECRET_KEY="s\udcff", MATHION_EMAIL_MODE="smtp", MATHION_SMTP_HOST="h",
+                     MATHION_SMTP_USERNAME="u", MATHION_SMTP_PASSWORD="pw")
+    assert row.email_on is False and row.smtp_password_sealed is None
+    assert out == ("site-settings: MATHION_SECRET_KEY is not valid UTF-8 text, so MATHION_SMTP_PASSWORD "
+                   "can't be sealed; it is not copied, so email is copied as off\n")
+
+
+def test_copy_secret_key_not_utf8_without_username_keeps_email_on(rerun):
+    row, out = rerun(MATHION_SECRET_KEY="s\udcff", MATHION_EMAIL_MODE="smtp", MATHION_SMTP_HOST="h",
+                     MATHION_SMTP_PASSWORD="pw")
+    assert row.email_on is True and row.smtp_password_sealed is None
+    assert out == ("site-settings: MATHION_SECRET_KEY is not valid UTF-8 text, so MATHION_SMTP_PASSWORD "
+                   "can't be sealed; it is not copied\n"
+                   "site-settings: MATHION_EMAIL_FROM is not set; email stays on with the default From "
+                   "Mathion <noreply@mathion.test>\n")
+
+
+def test_copy_secret_key_not_utf8_with_email_off_says_only_not_copied(rerun):
+    row, out = rerun(MATHION_SECRET_KEY="s\udcff", MATHION_SMTP_USERNAME="u", MATHION_SMTP_PASSWORD="pw")
+    assert row.email_on is False and row.smtp_password_sealed is None and row.smtp_username == "u"
+    assert out == ("site-settings: MATHION_SECRET_KEY is not valid UTF-8 text, so MATHION_SMTP_PASSWORD "
+                   "can't be sealed; it is not copied\n")
+
+
+def test_copy_secret_key_not_utf8_without_password_says_nothing(rerun):
+    row, out = rerun(MATHION_SECRET_KEY="s\udcff", MATHION_EMAIL_MODE="smtp", MATHION_SMTP_HOST="h",
+                     MATHION_EMAIL_FROM="Mathion <m@uni.dk>")
+    assert row.email_on is True
+    assert out == ""
+
+
+def test_copy_echo_drops_the_spaces_around_a_value(rerun):
+    _, out = rerun(MATHION_MAX_FILE_SIZE=" 0 ")
+    assert out == "site-settings: MATHION_MAX_FILE_SIZE=0 is out of range; using 1 MB\n"
+
+
+def test_copy_course_below_file_echoes_the_trimmed_value(rerun):
+    _, out = rerun(MATHION_MAX_COURSE_SIZE=" 1000 ")
+    assert out == "site-settings: MATHION_MAX_COURSE_SIZE=1000 is below the largest file; using 20 MB\n"
+
+
+def test_copy_echo_of_exactly_40_characters_is_not_cut(rerun):
+    _, out = rerun(MATHION_SMTP_PORT="a" * 40)
+    assert out == f"site-settings: MATHION_SMTP_PORT={'a' * 40} is not a number; using the default 587\n"
+
+
+def test_copy_echo_of_41_characters_is_cut_to_40(rerun):
+    _, out = rerun(MATHION_SMTP_PORT="a" * 41)
+    assert out == f"site-settings: MATHION_SMTP_PORT={'a' * 40}... is not a number; using the default 587\n"
+
+
+def test_copy_course_size_equal_to_the_file_size_says_nothing(rerun):
+    row, out = rerun(MATHION_MAX_COURSE_SIZE=str(20 * 1_048_576))
+    assert row.max_total_mb == 20 and out == ""

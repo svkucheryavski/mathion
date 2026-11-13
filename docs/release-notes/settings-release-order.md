@@ -58,23 +58,40 @@ sudo mathion update
 sudo mathion version          # shows the new CLI tag and the new image tag
 ```
 
-If `sudo mathion version` still shows the old CLI, the upgrade didn't happen:
-`mathion update` then says there is nothing to do.
+Run `sudo mathion version` before `mathion update` too: if it still shows the
+old CLI, the upgrade didn't happen, and `mathion update` then says there is
+nothing to do.
 
 - Your email, upload and sign-in settings are copied once from `.env` into
-  the panel's Settings. From then on the panel decides, and startup names any
-  of those keys that `.env` still sets.
+  the panel's Settings. From then on the panel decides. Startup names any of
+  those keys that `.env` still sets, in one INFO line in
+  `sudo mathion logs app`.
 - Nothing is removed from an existing `.env`.
 - The upload limit stays where it was (20 MB unless `.env` said otherwise)
   until a superuser raises it in the panel. A value above 50 MB becomes 50 MB;
-  the update prints a `site-settings:` line for each value it changed.
+  the update prints a `site-settings:` line for each value it changed or
+  dropped.
 - Running `mathion update --version <tag>` from an **old** CLI deploys the new
   image with the old 25 MiB proxy. If the panel's limit is then raised above
   25 MB, bigger files are refused by the proxy, and Mathion says "This file is
   over the server's upload limit." Upgrading the CLI and running
   `mathion update` fixes it.
+- An old CLI's bundled proxy (`mathion tls`) also lacks the new timeouts:
+  until the CLI is upgraded and `mathion update` is run, a slow email test gets
+  a 502 after 5 seconds, and a large upload or download is cut off at 30
+  seconds.
+- Restoring a backup taken before this update, with the old image, needs the
+  old email keys still in `.env`: with `MATHION_EMAIL_MODE=smtp` and those
+  keys removed, the old image refuses to start.
+- On the manual docker-compose path there is no `mathion self-update` or
+  `mathion update`: set `MATHION_VERSION` to the new tag, pull the image and
+  run the migration yourself, as the README's "Upgrade on the manual
+  docker-compose path" under Operations says. The migration prints the same
+  `site-settings:` lines there too.
 - With your own proxy in front of Mathion (not `mathion tls`), raise its body
   limit first (reproxy `--max`, nginx `client_max_body_size`) to a little more
-  than the largest file you'll allow, then raise the limit in the panel.
+  than the largest file you'll allow, then raise the limit in the panel. Raise
+  its timeouts too (reproxy `--timeout.resp-header=30s --timeout.write=15m`,
+  as in the README), or a slow email test and a large upload are cut off.
 
 The release itself is the maintainer's step; nothing here is automated.

@@ -5,21 +5,6 @@ Minor findings from the per-task review lanes of the Settings slice
 
 Sorted 2026-11-12: only items a person using the site can meet, and open calls, remain; test and comment nits were dropped and screen-reader items moved to beta-voiceover-pass.md.
 
-## Task 1 (data, copy and seal)
-
-- A 0 or negative MATHION_MAX_FILE_SIZE / MATHION_MAX_COURSE_SIZE silently
-  becomes 1 MB with no printed line.
-- The "MATHION_MAX_COURSE_SIZE is below the largest file" line doesn't show
-  the old value.
-- A username the copy drops (over 254 characters or not valid UTF-8)
-  leaves email on with no login, and the password stays sealed. A dropped
-  host is already copied as off; a dropped username should be too.
-- After `_text` drops an over-long host or From, the next line says "is
-  empty" / "is not set", which contradicts "is not copied".
-- The "not a number" line for a byte limit prints the default in bytes
-  (20971520), not in MB. Every note also echoes the whole raw value, so a
-  5000-digit size prints a 5000-character line.
-
 ## Task 5: the Settings page and its dialogs
 
 Minors from the review lanes, Task 5 (Opus + Fable, round 1).
@@ -40,31 +25,11 @@ Minors from the review lanes, Task 5 (Opus + Fable, round 1).
 
 ## Task 7: CLI, deploy files and docs
 
-- **The README's way back in is CLI-only.** Operations names
-  `sudo mathion pin <email>`; an operator on the manual docker-compose path has
-  no `mathion` binary. Add the `docker compose … exec app python -m
-  mathion.superuser pin <email>` form.
-- **The man page calls `pin` "pin the image"** (`deploy/man/mathion.1:36-37`,
-  pre-existing). It issues a sign-in PIN.
-- **`mathion pin` prints its "Log in at…" advisory after "unknown email" or
-  "user is disabled"** (pre-existing; the backend command always exits 0).
 - **An old CLI's `mathion pin` still prints "10 min"** under the server's real
   minutes, until the operator upgrades the CLI.
-- **The release note (`docs/release-notes/settings-release-order.md`) could
-  say more** (review r3):
-  - operators could check `sudo mathion version` before `mathion update` too;
-  - say where startup names the leftover `.env` keys (one INFO line in
-    `sudo mathion logs app`);
-  - a line for operators on the manual docker-compose path, who have no
-    `mathion self-update`.
 
 ## Whole-branch review
 
-- **Restoring a pre-update backup with the old image** needs the old email
-  keys still in `.env`: with `MATHION_EMAIL_MODE=smtp` and the keys removed,
-  the old image refuses to boot. One sentence in the release note.
-- **The Email-off card names only `mathion pin`**; the manual docker-compose
-  path has no `mathion` binary.
 - **The PIN email ignores the queue's back-off**, so each "Send PIN" tries a
   refused login again.
 - **A session-start reply smtplib doesn't name reads "The mail server refused
@@ -87,10 +52,3 @@ Minors from the review lanes, Task 5 (Opus + Fable, round 1).
   queue doesn't see the session end (pre-existing).
 - **A PIN email whose recipient is refused clears no "refused as the sender"
   line**, though it got past the sender; the queue would clear it.
-
-## Cleanup (spec rev 6 review)
-
-- **An old CLI's proxy also lacks the new timeouts**: through `mathion tls`,
-  a slow email test gets a 502 at 5 s, and a large upload or download is cut
-  at 30 s. One sentence in spec D11c and in
-  `docs/release-notes/settings-release-order.md`.
