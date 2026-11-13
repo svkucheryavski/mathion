@@ -226,11 +226,11 @@ it('while a test runs the button spins, and Save and Cancel stay usable (D9)', a
 });
 
 it("a 409 answer to the test shows its sentence where the result shows (D9)", async () => {
-  render({ test: vi.fn(() => Promise.reject(new ApiError(409, 'A test is already running.'))) });
+  render({ test: vi.fn(() => Promise.reject(new ApiError(409, 'The last test is still finishing. Try again in a minute.'))) });
   await settle();
   footButton('Send test email')!.click(); await settle();
   const result = panel().querySelector<HTMLElement>('.ee-result')!;
-  expect(result.textContent).toBe('A test is already running.');
+  expect(result.textContent).toBe('The last test is still finishing. Try again in a minute.');
   expect(result.classList.contains('err')).toBe(true);
 });
 
@@ -260,7 +260,7 @@ it('a failed test answer that arrives after the switch went off is dropped too',
   footButton('Send test email')!.click(); await settle();
   sw().click(); flushSync();
   sw().click(); flushSync();
-  fail(new ApiError(409, 'A test is already running.')); await settle();
+  fail(new ApiError(409, 'The last test is still finishing. Try again in a minute.')); await settle();
   expect(panel().querySelector('.ee-result')).toBeNull();
 });
 

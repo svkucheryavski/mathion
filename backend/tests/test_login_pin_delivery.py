@@ -375,8 +375,8 @@ def test_pin_email_refused_after_body_reaches_the_card(client, db, monkeypatch):
     _make_user(db)
     _smtp_on(monkeypatch, Refused())
     client.post("/api/auth/request-pin", json={"email": "real@example.com"})
-    assert _card(db) == ("The mail server refused a message: check that the login may send as "
-                         "Mathion <noreply@uni.dk>.", None, 0)
+    assert _card(db) == ("The mail server refused a message: check that it accepts mail from "
+                         "Mathion <noreply@uni.dk> without a login.", None, 0)
 
 
 # --- superuser Branding D3, D13: the PIN email names the site, even during an outage ---
@@ -424,3 +424,99 @@ def test_pin_email_survives_branding_read_error(client, db, monkeypatch):
     client.post("/api/auth/request-pin", json={"email": "other@example.com"})
     assert len(mailer.sent) == 1
     assert mailer.sent[0]["Subject"] == "Your Riverside sign-in PIN"
+
+
+def test_pin_refused_after_body_clears_a_login_backoff(client, db, monkeypatch):
+    # The refusal came after the body, so the login works: the queue's wait
+    # for a refused login no longer holds (whole-branch review).
+    class Refused(MemoryMailer):
+        def send(self, msg):
+            raise smtplib.SMTPDataError(554, b"5.2.252 SendAsDenied")
+
+    later = datetime.now(timezone.utc) + timedelta(minutes=30)
+    set_site(db, email_from="Mathion <noreply@uni.dk>", smtp_username="u@uni.dk",
+             send_failure_message="The mail server refused the login.",
+             send_failure_at=datetime.now(timezone.utc), send_retry_at=later, send_backoff_step=3)
+    _make_user(db)
+    _smtp_on(monkeypatch, Refused())
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db) == ("The mail server refused a message: check that the login may send as "
+                         "Mathion <noreply@uni.dk> and that it accepts Mathion's messages.", None, 0)
+
+
+def test_non_smtp_pin_failure_logs_class_only(client, db, monkeypatch, caplog):
+    import logging
+
+    class Broken(MemoryMailer):
+        def send(self, msg):
+            raise UnicodeEncodeError("ascii", "S3ntinel-\u00f8", 9, 10, "ordinal not in range(128)")
+
+    _make_user(db)
+    _smtp_on(monkeypatch, Broken())
+    caplog.set_level(logging.DEBUG, logger="mathion.api.auth")
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    lines = [r for r in caplog.records if r.name == "mathion.api.auth"]
+    assert [(r.levelname, r.getMessage(), r.exc_info) for r in lines] == [
+        ("ERROR", "login PIN email send failed: UnicodeEncodeError", None)]
+
+
+def test_pin_session_start_failure_leaves_the_queue_wait(client, db, monkeypatch):
+    # D9d: a PIN email failing before it is sent is the server's side, so the
+    # queue's wait stays, whatever sentence describe() gives it. (The 454's
+    # generic sentence is the backlog's "session-start reply" item.)
+    class TlsRefused(MemoryMailer):
+        @contextmanager
+        def session(self):
+            raise smtplib.SMTPResponseException(454, b"4.7.0 TLS not available")
+            yield
+
+    later = datetime.now(timezone.utc) + timedelta(minutes=30)
+    set_site(db, send_failure_message="The mail server refused the login.",
+             send_failure_at=datetime.now(timezone.utc), send_retry_at=later, send_backoff_step=3)
+    _make_user(db)
+    _smtp_on(monkeypatch, TlsRefused())
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db) == ("The mail server refused the message.", later, 3)
+
+
+def test_pin_to_a_non_ascii_address_leaves_the_card(client, db, monkeypatch):
+    # D9c, rev 8: with a plain From, the letters are the recipient's.
+    class NoUtf8(MemoryMailer):
+        def send(self, msg):
+            raise smtplib.SMTPNotSupportedError(
+                "One or more source or delivery addresses require internationalized email support,"
+                " but the server does not advertise the required SMTPUTF8 capability")
+
+    set_site(db, email_from="Mathion <noreply@uni.dk>")
+    _make_user(db)
+    _smtp_on(monkeypatch, NoUtf8())
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db) == (None, None, 0)
+
+
+def test_pin_with_a_non_ascii_from_reaches_the_card_and_keeps_the_wait(client, db, monkeypatch):
+    class NoUtf8(MemoryMailer):
+        def send(self, msg):
+            raise smtplib.SMTPNotSupportedError("SMTPUTF8 not supported by server")
+
+    later = datetime.now(timezone.utc) + timedelta(minutes=30)
+    set_site(db, email_from="Mathion <nø@uni.dk>", send_failure_message="The mail server refused the login.",
+             send_failure_at=datetime.now(timezone.utc), send_retry_at=later, send_backoff_step=3)
+    _make_user(db)
+    _smtp_on(monkeypatch, NoUtf8())
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db) == ("The mail server can't take an address with letters like æ, ø or å.", later, 3)
+
+
+def test_pin_card_names_no_login_when_none_happens(client, db, monkeypatch):
+    # A username copied with no encryption logs in to nothing (D7a).
+    class Refused(MemoryMailer):
+        def send(self, msg):
+            raise smtplib.SMTPDataError(554, b"rejected")
+
+    set_site(db, email_from="Mathion <noreply@uni.dk>", smtp_username="u@uni.dk", smtp_encryption="none")
+    _make_user(db)
+    _smtp_on(monkeypatch, Refused())
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db)[0] == ("The mail server refused a message: check that it accepts mail from "
+                            "Mathion <noreply@uni.dk> without a login.")

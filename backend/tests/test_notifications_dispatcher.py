@@ -791,3 +791,19 @@ def test_tick_signs_with_mathion_by_default(db, seeded_run):
     mailer = MemoryMailer()
     tick(db, mailer, now=datetime.now(timezone.utc))
     assert mailer.sent[0].get_content().endswith("\n\n\u2014 Mathion\n")
+
+
+def test_non_smtp_failure_in_charge_logs_class_only(db, seeded_run, caplog):
+    # Superuser Settings D9b, rev 8: no traceback for a failure that isn't
+    # the mail server's; its class names it.
+    entry = NotificationLogEntry(user_id=seeded_run["student_user"].id, kind="run_enrolled",
+                                 payload={"run_id": seeded_run["run"].id})
+    db.add(entry); db.commit()
+    caplog.set_level(logging.DEBUG, logger="mathion.notifications")
+    tick(db, _RaisingMailer(UnicodeEncodeError("ascii", "x", 0, 1, "ordinal not in range(128)")),
+         now=datetime.now(timezone.utc))
+    db.refresh(entry)
+    assert entry.error is not None
+    assert all(r.exc_info is None for r in caplog.records)
+    assert any(r.levelname == "ERROR" and r.getMessage().endswith(": UnicodeEncodeError")
+               for r in caplog.records)

@@ -1284,7 +1284,9 @@ class EmailTestIn(BaseModel):
     @field_validator("host", "username", "from_address")
     @classmethod
     def _trim(cls, v: str) -> str:
-        return v.strip()
+        # Spaces, and the invisible characters a paste can bring (zero-width
+        # space, joiners, word joiner, byte-order mark), from both ends.
+        return re.sub(r"^[\s\u200b\u200c\u200d\u2060\ufeff]+|[\s\u200b\u200c\u200d\u2060\ufeff]+$", "", v)
 
 
 class EmailSettingsIn(EmailTestIn):

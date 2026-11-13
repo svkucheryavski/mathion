@@ -1,5 +1,5 @@
 import asyncio, fcntl, logging, smtplib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -17,8 +17,8 @@ from mathion.models_auth import User, NotificationLogEntry, SiteSettings
 from mathion.site_settings import get_row, load as load_site
 
 from .errors import classify
-from .mailer import DEV_MODES, build_mailer
-from .smtp_errors import SMTP_FAILURES, SmtpFailure, describe, stops_the_batch
+from .mailer import DEV_MODES, build_mailer, logs_in
+from .smtp_errors import SMTP_FAILURES, SmtpFailure, describe, sender_side, stops_the_batch
 from .templates import render, _build_email_message, RenderContext, COURSE_ADMIN_ASSIGNED
 
 
@@ -160,6 +160,17 @@ class TickResult:
     sent: int = 0
     failure: SmtpFailure | None = None  # D9c: a failure on the server's side stopped the batch
     refused: SmtpFailure | None = None  # D9c, extended: a message was refused after the body
+    connected: bool = False  # the session opened (and logged in, when one happens): the server's side works
+    past_sender: bool = False  # a message got past the sender: the server takes the From
+
+
+# D9d: the start of the card's refusal sentences (refusal_on_card).
+REFUSED_PREFIX = "The mail server refused a message: "
+
+# D9c, extended (the user's sentence, 2026-11-12): a relay that takes no mail
+# for other addresses refuses every recipient.
+EVERYONE_REFUSED = ("The mail server refused every recipient: check that it lets Mathion send to "
+                    "other addresses.")
 
 
 def off_interval_for(view) -> tuple[datetime, datetime | None] | None:
@@ -214,8 +225,9 @@ def _charge(db, row_id: int, send_exc: BaseException, failure: SmtpFailure | Non
         logger.warning("notification id=%s flagged permanently: %s",
                        row_id, row_db.error)
         if failure is None:
-            # Full exception for operator (logs only, never DB).
-            logger.exception("notification id=%s permanent-error detail", row_id, exc_info=send_exc)
+            # The class only: an error's text or traceback can quote what it
+            # failed on (the row's error above keeps Mathion's own text).
+            logger.error("notification id=%s permanent-error detail: %s", row_id, type(send_exc).__name__)
     else:
         idx = min(row_db.retry_count - 1, len(BACKOFF_SECONDS) - 1)
         row_db.next_attempt_at = now + timedelta(seconds=BACKOFF_SECONDS[idx])
@@ -230,15 +242,22 @@ def _charge(db, row_id: int, send_exc: BaseException, failure: SmtpFailure | Non
         db.rollback()
 
 
-def refusal_on_card(send_exc: BaseException, failure: SmtpFailure | None, sender: str) -> SmtpFailure | None:
+def refusal_on_card(send_exc: BaseException, failure: SmtpFailure | None, sender: str, *,
+                    has_login: bool) -> SmtpFailure | None:
     """D9c, extended (user 2026-11-05): a 5xx refusal after the message body,
     as the Email card says it. Microsoft 365 refuses a From the login may not
-    send as only here; each such message is retried on its own (`classify`)."""
+    send as only here; each such message is retried on its own (`classify`).
+    A content filter refuses here too, so the login's sentence is hedged; a
+    server without a login is asked about the From (the user's, 2026-11-12)."""
     if (failure is None or not isinstance(send_exc, smtplib.SMTPDataError)
             or failure.code is None or not 500 <= failure.code <= 599):
         return None
-    return SmtpFailure(failure.cls, failure.code,
-                       f"The mail server refused a message: check that the login may send as {sender}.", False)
+    if has_login:
+        sentence = (f"{REFUSED_PREFIX}check that the login may send as {sender} "
+                    "and that it accepts Mathion's messages.")
+    else:
+        sentence = f"{REFUSED_PREFIX}check that it accepts mail from {sender} without a login."
+    return SmtpFailure(failure.cls, failure.code, sentence, False)
 
 
 def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = True,
@@ -301,11 +320,19 @@ def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = T
                 # No exc_info: the cleanup error can carry the server's reply (D9b).
                 logger.warning("notifications: session __exit__ raised during acquire-failure cleanup")
         failure = describe(session_exc, recipient="", **_where(mailer, view))
-        result.failure = SmtpFailure(failure.cls, failure.code, failure.sentence, True)
+        result.failure = replace(failure, batch_level=True)
         if log_failures:
             logger.warning("notifications: failed to acquire mailer session (%s rows queued): %s",
                            len(rows), result.failure.text())
         return result
+    result.connected = True
+    sender = _where(mailer, view)["sender"]
+    # Only a tick with saved settings records its result (_record).
+    has_login = view is not None and logs_in(view.smtp_username, view.smtp_encryption)
+    # D9c, extended: messages that reached the server, and the addresses it
+    # refused at the recipient with a 5xx. Two or more addresses, every
+    # message refused: the relay is refusing everyone.
+    attempts, rcpt_refusals, refused_to, first_rcpt = 0, 0, set(), None
 
     # The ids are taken while the rows are loaded: a commit expires them, and
     # a row deleted meanwhile can't be read again to name it.
@@ -339,15 +366,25 @@ def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = T
                 continue
             send_exc: BaseException | None = None
             recipient = ""
+            reached = False  # the server heard of this message
             try:
                 ctx = _build_render_context(db, row, site_name)
                 recipient = ctx.user.email or ""
                 subject, body = render(row.kind, ctx)
                 msg = _build_email_message(subject, body, ctx, kind=row.kind, sender=mailer.sender)
+                reached = True
                 mailer.send(msg)
             except Exception as exc:
                 send_exc = exc
+                if isinstance(exc, smtplib.SMTPNotSupportedError) or not isinstance(exc, SMTP_FAILURES):
+                    # smtplib stopped it, or it broke while being built.
+                    reached = False
+            attempts += reached
 
+            if send_exc is None or isinstance(send_exc, (smtplib.SMTPRecipientsRefused, smtplib.SMTPDataError)):
+                # smtplib names the recipients and the body only after the
+                # server took the sender (D9d, rev 8).
+                result.past_sender = True
             if send_exc is None:
                 # Success branch — stamp sent_at + commit; on commit failure
                 # rollback and treat as transient (row stays unsent, retried next tick).
@@ -370,7 +407,7 @@ def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = T
 
             failure = (describe(send_exc, recipient=recipient, **_where(mailer, view))
                        if isinstance(send_exc, SMTP_FAILURES) else None)
-            if failure is not None and stops_the_batch(send_exc):
+            if failure is not None and stops_the_batch(send_exc, sender=sender):
                 # D9c: the server's side (login, TLS, the sender, the password).
                 # No message is charged; the loop retries after its back-off.
                 db.rollback()
@@ -381,12 +418,21 @@ def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = T
                 break
 
             # Error branch — failure path.
-            result.refused = refusal_on_card(send_exc, failure, _where(mailer, view)["sender"]) or result.refused
+            if (isinstance(send_exc, smtplib.SMTPRecipientsRefused) and failure is not None
+                    and failure.code is not None and 500 <= failure.code <= 599):
+                rcpt_refusals += 1
+                refused_to.add(recipient)   # stored lowercased
+                first_rcpt = first_rcpt or failure
+            result.refused = refusal_on_card(send_exc, failure, sender, has_login=has_login) or result.refused
             _charge(db, row_id, send_exc, failure, now)
             if isinstance(send_exc, smtplib.SMTPServerDisconnected):
                 # D9c: a disconnect mid-batch is charged to the message being
                 # sent and ends the batch, so the ones after it aren't charged.
+                # Nothing then says the server's side works.
+                result.connected = False
                 break
+        if first_rcpt is not None and len(refused_to) >= 2 and rcpt_refusals == attempts:
+            result.refused = SmtpFailure(first_rcpt.cls, first_rcpt.code, EVERYONE_REFUSED, False)
     finally:
         try:
             session_cm.__exit__(None, None, None)
@@ -447,6 +493,43 @@ def _record(db, view, result: TickResult, now: datetime) -> None:
     elif result.refused is not None:
         # Refusals and nothing through: the card says so, the queue goes on.
         record_send_outcome(db, view, result.refused, now)
+    elif result.connected:
+        _record_connected(db, view, past_sender=result.past_sender)
+
+
+def _clear_failure(row) -> None:
+    # D9c, D9d: the red line and the queue's back-off go together.
+    row.send_failure_message = row.send_failure_at = row.send_retry_at = None
+    row.send_backoff_step = 0
+
+
+def _nothing_stored(view) -> bool:
+    return view.send_failure_message is None and view.send_retry_at is None and not view.send_backoff_step
+
+
+def _refusal_line(message: str | None) -> bool:
+    # D9d: the card's lines for refusals (refusal_on_card, EVERYONE_REFUSED).
+    return message is not None and (message == EVERYONE_REFUSED or message.startswith(REFUSED_PREFIX))
+
+
+def _record_connected(db, view, *, past_sender: bool) -> None:
+    """The session opened (and logged in, when one happens), but nothing
+    went out (every row was skipped, or failed on its own): the server's
+    side works, so a stored failure on that side and the back-off go. A
+    line about the sender stays unless a message got past the sender: a
+    login doesn't show the server takes the From. A refusal's line stays
+    until a message gets through, so a retried refusal doesn't flicker. No
+    send happened, so the time of the last send stays (Set up D6). Nothing
+    to clear takes no lock."""
+    message = view.send_failure_message
+    if (_nothing_stored(view) or _refusal_line(message)
+            or (sender_side(message) and not past_sender)):
+        return
+    row = _fresh_row(db, view)
+    if row is None:
+        return
+    _clear_failure(row)
+    db.commit()
 
 
 def _record_sent(db, view, now: datetime) -> None:
@@ -459,8 +542,7 @@ def _record_sent(db, view, now: datetime) -> None:
     can fail after `view` was read. The PIN email's time is taken after its
     send, so it then counts; the queue's is the batch's start, so a test that
     failed during the batch stays newer and wins (Set up D6)."""
-    if (view.last_sent_at is not None and view.send_failure_message is None and view.send_retry_at is None
-            and not view.send_backoff_step):
+    if view.last_sent_at is not None and _nothing_stored(view):
         ok, at = db.execute(select(SiteSettings.card_test_ok, SiteSettings.card_test_at)
                             .where(SiteSettings.id == 1)).one()
         if not (ok is False and at is not None and at > view.last_sent_at):
@@ -469,16 +551,16 @@ def _record_sent(db, view, now: datetime) -> None:
     if row is None:
         return
     row.last_sent_at = now
-    row.send_failure_message = row.send_failure_at = row.send_retry_at = None
-    row.send_backoff_step = 0
+    _clear_failure(row)
     db.commit()
 
 
 def record_send_outcome(db, view, failure: SmtpFailure | None, now: datetime) -> None:
-    """A send outside the queue (the login PIN, whole-branch review): a
-    failure on the server's side shows on the Email card, without starting
-    the queue's back-off; a sent message is recorded and clears a stored
-    failure."""
+    """A send outside the queue (the login PIN, whole-branch review), or the
+    queue's refusals: a failure shows on the Email card, without starting the
+    queue's back-off; a sent message is recorded and clears a stored failure.
+    A refusal (not the server's side: it came after the login) also ends a
+    back-off still in place, so the queue tries again."""
     if failure is None:
         _record_sent(db, view, now)
         return
@@ -489,6 +571,9 @@ def record_send_outcome(db, view, failure: SmtpFailure | None, now: datetime) ->
         logger.warning("notifications: sending is failing: %s", failure.text())
         row.send_failure_at = now
     row.send_failure_message = failure.sentence
+    if not failure.batch_level:
+        row.send_retry_at = None
+        row.send_backoff_step = 0
     db.commit()
 
 

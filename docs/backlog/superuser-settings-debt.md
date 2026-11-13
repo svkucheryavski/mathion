@@ -20,54 +20,6 @@ Sorted 2026-11-12: only items a person using the site can meet, and open calls, 
   (20971520), not in MB. Every note also echoes the whole raw value, so a
   5000-digit size prints a 5000-character line.
 
-## Task 3 (email follows the panel)
-
-- `describe()` sentences that misname the failure:
-  - `SMTPNotSupportedError` from `login()` (a server without AUTH) or for
-    SMTPUTF8 says "The secure connection … failed.";
-  - a banner timeout that smtplib wraps as a disconnect says "Couldn't reach".
-- `_send_login_pin`'s `logger.exception` for non-SMTP failures can log a
-  `UnicodeEncodeError` that names one character of a copied non-ASCII
-  password and its position. This is pre-existing; D7 blocks new ones.
-- A temporary 4xx reply to MAIL FROM (a provider's sending limit) arrives as
-  `SMTPSenderRefused`, so the card says "The mail server refused <from> as the
-  sender." and sends the superuser to fix a From that is fine. Stopping and
-  backing off is right. For 4xx codes, say "The mail server asked Mathion to
-  try again later."
-- The failure line clears only after a message is sent. Consider also
-  clearing it after a good session start that sends nothing (every row
-  skipped or failed per message).
-
-## Task 4 (the Settings API)
-
-- After the 20 s answer, a retry can get "A test is already running." for as
-  long as smtplib's per-step timeouts take: 20 s per step and per address of
-  the host. A hostile server can drip bytes for longer. The sentence could say
-  the last test is still finishing.
-- A display name with an unquoted comma (`Mathion, AAU <m@uni.dk>`) is refused
-  with the format sentence, which doesn't say why. Suggest: "Put a name with a
-  comma in quotes."
-- A display name with a colon (`Aalborg Universitet: Institut <m@aau.dk>`) is
-  accepted, but goes out as group syntax (`…<m@aau.dk>;`), which RFC 5322
-  doesn't allow in From. How strict receivers treat it is unverified. Fix:
-  refuse when `back["From"].groups[0].display_name` is set, and add "or
-  colon" to the comma sentence above.
-- A pasted zero-width space (U+200B) at the end of the From isn't stripped,
-  so the field looks right but gets the format sentence.
-- An underscore domain (`my_school.dk`) is refused (correct under RFC 5321)
-  with a sentence that doesn't say why.
-- A non-ASCII username passes, and the test then says "Sending failed
-  (UnicodeEncodeError).", which nobody can act on. Give the username the
-  printable-ASCII check.
-- A From copied by the migration (D2) isn't checked: a non-ASCII address on a
-  relay without SMTPUTF8 fails every message, one by one, as "secure
-  connection failed". Add `SMTPNotSupportedError` to `_STOP_MID_SEND`, so it
-  becomes D9c's batch stop with the card's red line, and give it its own
-  sentence (see Task 3's describe() line). Saving from the dialog fixes it.
-- `_send_login_pin` and the dispatcher still use `logger.exception` for
-  non-SMTP failures. The test endpoint now logs those by class only; do the
-  same there (see Task 3's line on this).
-
 ## Task 5: the Settings page and its dialogs
 
 Minors from the review lanes, Task 5 (Opus + Fable, round 1).
@@ -146,23 +98,26 @@ Minors from the review lanes, Task 5 (Opus + Fable, round 1).
   path has no `mathion` binary.
 - **The PIN email ignores the queue's back-off**, so each "Send PIN" tries a
   refused login again.
-- **A relay that refuses every recipient (`554 Relay access denied`) still
-  fails each message for good, with no card line.** Refusals after the body
-  are retried and shown on the card; a refused recipient still fails at once,
-  because it is usually that address's own problem.
-- **A relay with no username still reads "check that the login may send as
-  <From>"**; there is no login. Pick a no-login sentence when the saved
-  username is empty.
-- **Send test answers only "The mail server refused the message."** for the
-  same refusal the card explains; reuse `refusal_on_card`'s hint in the test.
-- **A refusal after the body leaves an old queue back-off in place.** It
-  proves the login works, but a PIN refused after the body during a "refused
-  the login" back-off relabels the card while the queue still waits up to
-  60 min, and `send_backoff_step` keeps its old value. Clear the retry time
-  and step when the failure is not server-side.
-- **One template refused by a content filter on a busy install** toggles the
-  red line on and off for ~8.5 h with a fresh "since" each time; hedge the
-  copy ("…or that it accepts Mathion's messages").
+- **A session-start reply smtplib doesn't name reads "The mail server refused
+  the message."** A `454 TLS not available` to STARTTLS arrives as a plain
+  `SMTPResponseException`, and "No suitable authentication method found." from
+  `login()` as a plain `SMTPException`; both are the server's side, not a
+  refused message. Found reviewing the backlog round's Task 3 (pre-existing).
+- **A PIN email that went out but whose closing QUIT fails is logged as
+  failed** and not recorded as sent, though the person got the PIN.
+- **Curly quotes around a From name get the quotes sentence**:
+  `“Mathion, AAU” <m@uni.dk>` reads "Put a name with a comma or colon in
+  quotes." although they did. Accept curly quotes, or say "straight quotes".
+- **A From name with `@ ; [ ]` and no comma gets the general format
+  sentence** (`Mathion @ AAU <m@uni.dk>`), not the quotes hint.
+- **A non-ASCII username copied from `.env` shows "Sending failed
+  (UnicodeEncodeError)."** on the card; saving the Edit email dialog gives
+  the right sentence.
+- **A 421 at the recipient or after the body charges the next message a
+  try**: smtplib closes the connection without a disconnect error, so the
+  queue doesn't see the session end (pre-existing).
+- **A PIN email whose recipient is refused clears no "refused as the sender"
+  line**, though it got past the sender; the queue would clear it.
 
 ## Cleanup (spec rev 6 review)
 
