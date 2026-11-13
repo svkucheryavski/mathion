@@ -376,3 +376,27 @@ it('a failed reload after New account keeps the table on screen (rev 11)', async
   expect(target.textContent).not.toContain('Could not load accounts.');
   expect(rows()).toHaveLength(4);
 });
+
+// D15 (the user's call): every count on the page uses English grouping, the pills too.
+it('the pills group big counts like the count line: "All (4,213)"', async () => {
+  routes['GET /users'] = () => [200, { ...page(), total: 4213, counts: { all: 4213, admins: 3, teachers: 1200, students: 3009, disabled: 1 } }];
+  await render();
+  expect(pill('All').textContent?.replace(/\s+/g, ' ').trim()).toBe('All (4,213)');
+  expect(pill('Teachers').textContent?.replace(/\s+/g, ' ').trim()).toBe('Teachers (1,200)');
+});
+
+it('a failed quiet reload with nothing on screen yet shows the error, not "Loading" (rev 11)', async () => {
+  let release: (r: Reply) => void = () => {};
+  routes['GET /users'] = () => new Promise<Reply>((res) => { release = res; });
+  routes['POST /users'] = () => [201, NEW];
+  await render();
+  expect(target.textContent).toContain('Loading accounts…');
+  expect(pill('All').textContent?.trim()).toBe('All');   // no count until the list answers
+  const first = release;
+  routes['GET /users'] = () => [500, { detail: 'Internal Server Error' }];
+  target.querySelector<HTMLButtonElement>('.panel-head button')!.click(); await settle();
+  type(field('Email'), 'new.colleague@uni.dk');
+  footButton('Create').click(); await settle();
+  first([200, page()]); await settle();   // the older first load answers late; it is dropped
+  expect(target.textContent).toContain('Could not load accounts.');
+});

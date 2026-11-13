@@ -171,6 +171,10 @@ def test_outage_favicon_without_upload_known_answers_default(client, monkeypatch
     monkeypatch.setattr(branding_api, "read_image", _unavailable)
     r = client.get("/favicon.ico")
     assert r.status_code == 200 and r.content == ICON_32_PNG
+    # A read has shown there is no upload, so a browser holding another icon
+    # (say, one since reset) gets Mathion's, not a 503 (rev 15).
+    r = client.get("/favicon.ico", headers={"If-None-Match": '"other"'})
+    assert r.status_code == 200 and r.content == ICON_32_PNG
 
 
 def test_outage_theme_from_last_good(client, db, monkeypatch):

@@ -7,7 +7,7 @@
   import { untrack } from 'svelte';
   import { ApiError } from '../../lib/api';
   import {
-    countLine, createUser, deleteUser, disableUser, disableWarning, enableUser, listUsers, panelError, personName,
+    countLine, createUser, deleteUser, disableUser, disableWarning, enableUser, formatCount, listUsers, panelError, personName,
     roleChips, updateUser, type PanelOnAuth, type PanelUser, type PanelUserList, type PanelUserRole,
   } from '../../lib/superuser';
   import { lastActiveText } from '../../lib/relativeTime';
@@ -89,7 +89,11 @@
     void load();
   }
 
-  const pillOptions = $derived(PILLS.map((p) => ({ ...p, count: shown?.list.counts[p.key] })));
+  // D15: the pills group big counts like the count line.
+  const pillOptions = $derived(PILLS.map((p) => {
+    const n = shown?.list.counts[p.key];
+    return { ...p, count: n === undefined ? undefined : formatCount(n) };
+  }));
 
   function showNote(tone: Note['tone'], text: string): void {
     note = { id: ++noteSeq, tone, text };

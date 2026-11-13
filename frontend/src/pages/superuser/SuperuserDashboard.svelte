@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getSuperuserStats, panelError, type PanelOnAuth, type SuperuserStats } from '../../lib/superuser';
+  import { formatCount, getSuperuserStats, panelError, type PanelOnAuth, type SuperuserStats } from '../../lib/superuser';
   import { formatFileSize } from '../../lib/format';
   import PanelHead from '../../components/superuser/PanelHead.svelte';
   import FinishCard from '../../components/superuser/FinishCard.svelte';
@@ -47,11 +47,11 @@
     <p class="panel-error">{error}</p>
   {:else if stats}
     <div class="cards">
-      <div class="card"><span class="label">Users</span><span class="value">{stats.total_users}</span></div>
-      <div class="card"><span class="label">Courses</span><span class="value">{stats.total_courses}</span></div>
+      <div class="card"><span class="label">Users</span><span class="value">{formatCount(stats.total_users)}</span></div>
+      <div class="card"><span class="label">Courses</span><span class="value">{formatCount(stats.total_courses)}</span></div>
       <div class="card"><span class="label">Storage</span><span class="value">{formatFileSize(stats.storage_bytes)}</span></div>
-      <div class="card"><span class="label">Active 24h</span><span class="value">{stats.active_users_24h}</span></div>
-      <div class="card"><span class="label">Active 7d</span><span class="value">{stats.active_users_7d}</span></div>
+      <div class="card"><span class="label">Active 24h</span><span class="value">{formatCount(stats.active_users_24h)}</span></div>
+      <div class="card"><span class="label">Active 7d</span><span class="value">{formatCount(stats.active_users_7d)}</span></div>
     </div>
   {/if}
 </div>

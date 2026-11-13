@@ -262,7 +262,7 @@ function told<T>(things: T[], full: (t: T) => string, short: (t: T) => string, w
 // D14 rev 9: "- " lines, at most ten, then "… and N more" with no bullet.
 function tip(lines: string[]): string {
   const shown = lines.slice(0, TIP_LINES).map((l) => `- ${l}`);
-  if (lines.length > TIP_LINES) shown.push(`… and ${lines.length - TIP_LINES} more`);
+  if (lines.length > TIP_LINES) shown.push(`… and ${formatCount(lines.length - TIP_LINES)} more`);
   return shown.join('\n');
 }
 
@@ -277,12 +277,12 @@ export function roleChips(u: PanelUser): RoleChip[] {
   const runId = (r: PanelRunRef) => `run ${r.id}`;
   const runChip = (role: string, runs: PanelRunRef[]): RoleChip => {
     const { items, tips } = told(runs, named, short, runId);
-    return { kind: 'role', text: `${role} (${runs.length})`, items, tip: tip(tips) };
+    return { kind: 'role', text: `${role} (${formatCount(runs.length)})`, items, tip: tip(tips) };
   };
   if (u.is_superuser) chips.push({ kind: 'su', text: 'Superuser', items: [], tip: '' });
   if (u.admin_of.length) {
     const { items, tips } = told(u.admin_of, (c) => c.name, (c) => cut(c.name, 30), (c) => c.slug);
-    chips.push({ kind: 'ad', text: `Admin (${items.length})`, items, tip: tip(tips) });
+    chips.push({ kind: 'ad', text: `Admin (${formatCount(items.length)})`, items, tip: tip(tips) });
   }
   if (u.teacher_runs.length) chips.push(runChip('Teacher', u.teacher_runs));
   if (u.student_runs.length) chips.push(runChip('Student', u.student_runs));

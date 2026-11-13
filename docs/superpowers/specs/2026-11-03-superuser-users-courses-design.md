@@ -1,6 +1,6 @@
 # Superuser panel: Users and Courses — design
 
-**Status:** rev 11, 2026-11-12.
+**Status:** rev 12, 2026-11-13.
 - Rev 2 folded in the builder check (D12a, D12b).
 - Rev 3 folded in spec review round 1, three lanes (`.superpowers/sdd/2026-11-03-superuser-users-courses/spec-r1-*.md`), and the user's answers on mockup 2.
 - Rev 4 folded in spec review round 2 (`spec-r2-*.md`) and the user's answer on confirms (D24).
@@ -11,6 +11,7 @@
 - Rev 9 caps the D14 hover list (Safari pass, user's: "looks very busy").
 - Rev 10 words the course-delete confirm for a course with no versions (D12) and the address warning for one with no runs or students (D11), both from the Safari pass.
 - Rev 11 is the backlog round (2026-11-12, the user's calls): the Disable warning's commas and student runs (D18), English number grouping (D15), the admin email's "a link to the course" and "Hi," with no name (D5, D5a), the Edit course lines (D9), same-named lines in a tooltip (D14), and removing an admin that is already gone counts as done (D9); an admin email still waiting in the queue isn't queued twice (D5).
+- Rev 12 (the backlog round's whole-branch review, 2026-11-13, the user's call): **D15:** the grouping also reaches the pills, the role chips and the panel Dashboard's cards.
 
 **Branch:** `feat/superuser-users-courses` (local).
 
@@ -149,7 +150,7 @@ Each decision is marked as the **user's** or **mine** (a call a sensible builder
   A **disabled account's row is greyed** (user's; a Disabled column with a disc was tried in the Safari pass and dropped): the row's cells take the `--disabled-bg` fill (#FBFBFC, the theme's disabled-control fill; user asked for "#fafafa or similar", and #F5F6F9 was too dark), the name turns the muted grey and loses its weight, and the role chips take the disabled-state grey; email and last active are muted already. The icons stay as they are, since Enable and Edit are what a superuser needs there. A screen reader hears "Disabled" after the name (visually hidden). There is no "Disabled" chip and no Disabled column. The Disable warning (D18) still names the courses and says "teaches N runs".
 - D15 (user's): **no pages.** The list shows the **20 most recently created** accounts, newest first. Typing in the search box filters on the server and shows up to 20 matches. Filter pills (All, Admins, Teachers, Students, Disabled) combine with the search.
 
-  A line under the table always says how many are shown (exact copy mine, rev 4). Numbers use English grouping, "4,213" (rev 11, the user's), here and wherever these pages print a count (the Courses table, the warnings, the delete dialog). The noun follows the pill: "accounts", "admins", "teachers", "students", "disabled accounts", and is singular for one ("1 account").
+  A line under the table always says how many are shown (exact copy mine, rev 4). Numbers use English grouping, "4,213" (rev 11, the user's), here and wherever these pages print a count (the Courses table, the warnings, the delete dialog, the pills' counts and the role chips), and on the panel Dashboard's cards (rev 12, the user's). The noun follows the pill: "accounts", "admins", "teachers", "students", "disabled accounts", and is singular for one ("1 account").
   - no search, more than 20: "Showing the 20 newest of 42 accounts. Search to find others."
   - no search, 20 or fewer: "12 accounts".
   - searching, more than 20 matches: "20 of 57 match. Keep typing to narrow."

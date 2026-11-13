@@ -212,6 +212,14 @@ it.each([
   else expect(got).toEqual(chips);
 });
 
+// D15 (the user's call): a chip's count is grouped like every other count.
+it('roleChips: big counts read "Student (1,200)" and "Admin (1,000)"', () => {
+  const many = Array.from({ length: 1000 }, (_, i) => ref(i + 1, `C${i + 1}`));
+  const got = roleChips(user({ admin_of: many, student_runs: runs(1200) }));
+  expect(got.map((c) => c.text)).toEqual(['Admin (1,000)', 'Student (1,200)']);
+  expect(got[1].tip.split('\n').at(-1)).toBe('… and 1,190 more');
+});
+
 // D14 rev 9: the tooltip is capped; the hidden list (items) is not.
 const tipLines = (u: PanelUser) => roleChips(u)[0].tip.split('\n');
 it('roleChips tip: ten runs are all listed, with no "more" line (D14 rev 9)', () => {

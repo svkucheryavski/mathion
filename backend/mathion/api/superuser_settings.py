@@ -424,7 +424,7 @@ def _run_test(attempt: _Attempt, data: EmailTestIn, password: str, recipient: st
             failure = describe(exc, host=data.host, port=data.port, sender=data.from_address,
                                recipient=recipient, encryption=data.encryption, timeout=SMTP_TIMEOUT_SECONDS)
             logger.info("settings: test email failed: %s", failure.text())
-            # The refusal after the body says what the card says (whole-branch review).
+            # D9d: the refusal after the body says what the card says.
             card = refusal_on_card(exc, failure, data.from_address, has_login=logs_in(data.username, data.encryption))
             attempt.settle(False, (card or failure).sentence)
             return
