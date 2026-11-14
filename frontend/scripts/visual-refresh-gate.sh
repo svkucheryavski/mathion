@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3049
+EXPECTED_CHECKS=3054
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4563,6 +4563,8 @@ uniq1 inline-confirm
 if [[ -n $REPLY ]]; then
   N=InlineConfirm; H=$REPLY
   d '\.inline-confirm\.row' '' 'flex-direction:row' 'align-items:center' 'gap:12px'
+  # VR backlog T7: a confirm held by its disabledReason takes the blocked look.
+  chk "\.confirm\[aria-disabled=true\]\.${H}:not\(\[aria-busy=true\]\)" 'background:var\(--disabled-bg\)' 'color:var\(--faint\)' 'cursor:not-allowed'
 fi
 if grep -rqE 'max-width:[[:space:]]*960px' src --include='*.svelte' --include='*.css'; then
   echo "FAIL  no hard-coded 960px page width left"; fail=1
@@ -4948,6 +4950,8 @@ if [[ -n $REPLY ]]; then
   N=InlineName; H=$REPLY
   d '\.in-input' '' 'height:var\(--control-h-sm\)' 'border:1px solid var\(--border-strong\)' 'caret-color:var\(--primary\)'
   d '\.in-err' '' 'font-size:12px' 'color:var\(--danger\)'
+  # Call 16: the wait line is a muted hint, not an error.
+  d '\.in-hint' '' 'font-size:12px' 'color:var\(--muted\)'
   sweep InlineName $H
 fi
 

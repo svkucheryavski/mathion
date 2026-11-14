@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { ApiError, api } from '../../lib/api';
+  import { ApiError, api, failureText } from '../../lib/api';
   import { listRuns, listVersions, deleteRun } from '../../lib/runs';
   import { listTeachingRuns, type TeachingRunRow } from '../../lib/teaching';
   import { runStatus } from '../../lib/runStatus';
@@ -75,13 +75,19 @@
 
   // §Focus: on success the next row's trash, then the previous row's, then +,
   // then the h1; on failure back to this row's trash.
+  // R54: the confirm stays busy while its DELETE runs, so Cancel cannot start a second one.
+  let deletingId = $state<number | null>(null);
+  // R44: the other rows' 🗑 wait while it runs; cleared before the focus move (focusFirst skips a waiting 🗑).
+  const WAIT_TITLE = 'Wait for the request to finish';
   async function confirmDelete(runId: number) {
+    deletingId = runId;
     const before = runs ?? [];
     const idx = before.findIndex((r) => r.id === runId);
     try {
       await deleteRun(runId);
       runs = before.filter((r) => r.id !== runId);
       pendingDelete = null;
+      deletingId = null;
       pushToast('Run deleted.', 'success');
       await tick();
       const next = runs[idx];
@@ -89,7 +95,8 @@
       focusFirst([next && trashEls[next.id], prev && trashEls[prev.id], newRunEl, headingEl]);
     } catch (e) {
       pendingDelete = null;
-      if (e instanceof ApiError) pushToast(e.displayMessage, 'error');
+      deletingId = null;
+      pushToast(failureText(e, 'Could not delete the run.'), 'error');
       await tick();
       trashEls[runId]?.focus();
     }
@@ -155,14 +162,16 @@
                   <td class="row-actions">
                     {#if pendingDelete === run.id}
                       <InlineConfirm takeFocus label="Delete run {run.title}?" confirmLabel="Delete"
+                                     busy={deletingId === run.id}
                                      onConfirm={() => confirmDelete(run.id)}
                                      onCancel={() => cancelDelete(run.id)} />
                     {:else}
                       <IconButton glyph="trash" size="sm" danger data-action="delete-run"
                                   aria-label="Delete run {run.title}"
-                                  title={status === 'draft' ? 'Delete' : 'Only a draft run can be deleted'}
-                                  disabled={status !== 'draft'} bind:element={trashEls[run.id]}
-                                  onclick={() => (pendingDelete = run.id)} />
+                                  title={status !== 'draft' ? 'Only a draft run can be deleted' : deletingId !== null ? WAIT_TITLE : 'Delete'}
+                                  disabled={status !== 'draft'} aria-disabled={deletingId !== null}
+                                  bind:element={trashEls[run.id]}
+                                  onclick={() => { if (deletingId === null) pendingDelete = run.id; }} />
                     {/if}
                   </td>
                 </tr>

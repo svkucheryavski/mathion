@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { tick, untrack } from 'svelte';
-  import { api, ApiError, OFFLINE_MESSAGE } from '../../lib/api';
+  import { onDestroy, tick, untrack } from 'svelte';
+  import { api, ApiError, OFFLINE_MESSAGE, failureText } from '../../lib/api';
   import { deleteRun, getRun, listVersions, publishRun, unpublishRun } from '../../lib/runs';
   import { listRunTeachers } from '../../lib/runTeachers';
   import { listGroups } from '../../lib/runGroups';
@@ -100,6 +100,9 @@
   }
 
   let loadToken = 0;
+  // A delete that lands after the page is gone navigates nowhere.
+  let gone = false;
+  onDestroy(() => { gone = true; });
 
   async function loadAll(slug: string, rid: number) {
     const myToken = ++loadToken;
@@ -374,12 +377,18 @@
     if (runIdInt === null) return { kind: 'failed', message: 'Invalid run.' };
     const myToken = loadToken;
     const rid = runIdInt;
+    const deleted = (): DeleteOutcome => {
+      pushToast('Run deleted.', 'success');
+      // Only while the page still shows this run (a reload of it counts).
+      if (!gone && rid === runIdInt) void navigate(`/teaching/${encodeURIComponent(courseSlug)}`);
+      return { kind: 'deleted' };
+    };
     try {
       await deleteRun(rid, { force: true });
-      pushToast('Run deleted.', 'success');
-      void navigate(`/teaching/${encodeURIComponent(courseSlug)}`);
-      return { kind: 'deleted' };
+      return deleted();
     } catch (e) {
+      // Deleted elsewhere meanwhile: the same end.
+      if (e instanceof ApiError && e.status === 404) return deleted();
       if (e instanceof ApiError && e.status === 409) {
         try {
           const r = await getRun(rid);
@@ -388,7 +397,7 @@
         pushToast('This run was published in the meantime. Unpublish it before deleting.', 'error');
         return { kind: 'published-now' };
       }
-      return { kind: 'failed', message: e instanceof ApiError ? e.displayMessage : 'Could not delete the run.' };
+      return { kind: 'failed', message: failureText(e, 'Could not delete the run.') };
     }
   }
 </script>

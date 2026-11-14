@@ -19,7 +19,7 @@
   const formId = `${uid}-form`;
   const fid = (key: string) => `${uid}-${key}`;
   const NO_VERSION = 'No published version — close this modal and publish one first.';
-  const RANGE = 'End date must be on or after start date';
+  const RANGE = 'End date must be on or after the start date.';
 
   let title = $state('');
   let start_date = $state('');

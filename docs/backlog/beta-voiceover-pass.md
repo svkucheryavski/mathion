@@ -128,3 +128,7 @@ These were parked from the superuser panel slices and the visual-refresh slices 
 ## VR backlog round (student quiz)
 
 - After a submit, focus that fell to the page goes to the result card's Try again or Show correct answers button, and after a reveal it goes to the card itself. On the button, VoiceOver may read only the button and not the score above it. Possible fix: `aria-describedby` on the button pointing at the score line. Check in the VoiceOver pass at beta.
+
+## VR backlog round (teaching)
+
+- The Overview's wait hint ("Wait for the current change to save", InlineName `p.in-hint`, `role="status"`) is inserted with its text, and focus stays on the field, so VoiceOver may not announce it. Possible fix: an always-rendered empty status line that the hint fills. Check in the VoiceOver pass at beta.

@@ -19,7 +19,8 @@
     message?: Snippet;
     confirmLabel: string;
     confirmDataAction?: string;
-    onConfirm: () => void;
+    // A returned promise holds Confirm until it settles: a double click acts once.
+    onConfirm: () => void | Promise<unknown>;
     onCancel?: () => void;
     takeFocus?: boolean;
     label?: string;
@@ -30,6 +31,8 @@
     // 'end': a question under a row ends under the row's actions (D42).
     align?: 'start' | 'end';
     busy?: boolean;
+    // Confirm is aria-disabled with this title, and does nothing (R44).
+    disabledReason?: string;
   };
   let {
     confirmLabel,
@@ -45,6 +48,7 @@
     row = false,
     align = 'start',
     busy = false,
+    disabledReason = undefined,
   }: Props = $props();
 
   const WAIT = 'Wait for the request to finish';
@@ -65,9 +69,15 @@
   });
 
   const tooSoon = (e: MouseEvent) => e.detail > 0 && performance.now() - openedAt < 400;
+  let pending = false;
   function confirmClick(e: MouseEvent) {
-    if (tooSoon(e) || busy) return;
-    onConfirm();
+    if (tooSoon(e) || busy || pending || disabledReason) return;
+    const r = onConfirm();
+    if (r instanceof Promise) {
+      pending = true;
+      // finally, not then: a rejection stays the caller's (still reported).
+      void r.finally(() => { pending = false; });
+    }
   }
   function cancelClick(e: MouseEvent) {
     if (tooSoon(e) || busy) return;
@@ -87,8 +97,8 @@
   {:else if warning}<div class="warning" id={warnId}>{warning}</div>{/if}
   <div class="actions">
     <button type="button" class="ic-btn confirm {tone}" data-action={confirmDataAction}
-            aria-disabled={busy ? 'true' : undefined} aria-busy={busy ? 'true' : undefined}
-            aria-describedby={describedBy} title={busy ? WAIT : undefined}
+            aria-disabled={busy || disabledReason ? 'true' : undefined} aria-busy={busy ? 'true' : undefined}
+            aria-describedby={describedBy} title={busy ? WAIT : disabledReason}
             onclick={confirmClick} onkeydown={onKeydown}>{#if busy}<span class="spinner" aria-hidden="true"></span>{/if}{confirmLabel}</button>
     <button type="button" class="ic-btn cancel" bind:this={cancelEl}
             aria-disabled={busy ? 'true' : undefined} aria-describedby={describedBy} title={busy ? WAIT : undefined}
@@ -147,6 +157,8 @@
      takes the blocked look (Button's .btn.blocked). */
   .confirm[aria-busy="true"] { cursor: progress; }
   .cancel[aria-disabled="true"] { background: var(--disabled-bg); color: var(--faint); border-color: var(--border-faint); cursor: not-allowed; }
+  /* A confirm held by its disabledReason takes the same blocked look. */
+  .confirm[aria-disabled="true"]:not([aria-busy="true"]) { background: var(--disabled-bg); color: var(--faint); border-color: var(--border-faint); cursor: not-allowed; }
   @media (pointer: coarse) {
     .ic-btn { min-height: 28px; }
   }

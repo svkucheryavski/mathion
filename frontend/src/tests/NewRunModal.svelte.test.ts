@@ -80,7 +80,7 @@ describe('NewRunModal', () => {
     target.querySelector('input[name="end_date"]')!.dispatchEvent(new Event('input', { bubbles: true }));
     (target.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     flushSync();
-    expect(target.textContent).toMatch(/end date must be on or after start date/i);
+    expect(target.textContent).toMatch(/End date must be on or after the start date\./);
     expect(fetchSpy).not.toHaveBeenCalled();
     unmount(cmp);
   });
@@ -170,13 +170,13 @@ describe('NewRunModal', () => {
     flushSync();
     (target.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
-    expect(target.textContent).toContain('End date must be on or after start date');
+    expect(target.textContent).toContain('End date must be on or after the start date.');
     fill(target, 'start_date', '2026-06-10');   // still after the end: the error stays
     flushSync();
-    expect(target.textContent).toContain('End date must be on or after start date');
+    expect(target.textContent).toContain('End date must be on or after the start date.');
     fill(target, 'start_date', '2026-05-20');   // fixed
     flushSync();
-    expect(target.textContent).not.toContain('End date must be on or after start date');
+    expect(target.textContent).not.toContain('End date must be on or after the start date.');
     expect(input(target, 'end_date').getAttribute('aria-invalid')).toBeNull();
     unmount(cmp);
   });

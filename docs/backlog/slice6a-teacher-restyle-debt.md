@@ -2,14 +2,6 @@
 
 Walked 2026-11-14 against main `1c904f9`: done and code-only items were dropped, screen-reader items moved to `beta-voiceover-pass.md`, by-hand browser checks to `beta-browser-pass.md`. What is left goes into one fix round; **[open]** marks an item that needs the user's call first.
 
-## T3 — DangerConfirm, InlineName, InlineConfirm takeFocus
-
-- InlineName shows "Please correct the highlighted fields." for a 422 with a list detail, though nothing else is highlighted. Callers pass `maxlength={80}`, so a 422 is unlikely.
-
-## T6 — the two runs lists
-
-- Pre-existing: a double-click on "Confirm Delete" sends two `deleteRun` calls; the second 404s, so an error toast follows "Run deleted." and focus jumps. InlineConfirm has no in-flight guard (DangerConfirm got one in T3).
-
 ## T7 — Progress
 
 - **[open]** `.block-header, .seq-header { position: sticky; top: 0 }` is inert (`.table-scroll` has no height limit, so headers never stick on a page scroll). Pre-existing; look at it in the browser pass.

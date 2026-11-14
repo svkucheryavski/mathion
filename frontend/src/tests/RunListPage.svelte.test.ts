@@ -5,10 +5,12 @@ import * as routerModule from '../lib/router.svelte';
 import { expectRoutesInApp } from './support/routeClickProbe';
 import { currentRoute, __resetGuardsForTests } from '../lib/router.svelte';
 import { session } from '../stores/session.svelte';
+import { toasts, clearToasts } from '../stores/toasts.svelte';
 
 const fetchSpy = vi.fn();
 
 beforeEach(() => {
+  clearToasts();
   fetchSpy.mockReset();
   globalThis.fetch = fetchSpy as typeof globalThis.fetch;
   document.body.innerHTML = '';
@@ -160,6 +162,30 @@ describe('RunListPage', () => {
     unmount(cmp);
   });
 
+  it('a double click on Confirm Delete sends one request', async () => {
+    let release!: (r: Response) => void;
+    let deletes = 0;
+    adminFetch([draftRun, pubRun], [v99, v98], (_url, init) => {
+      if (init?.method !== 'DELETE') return null;
+      deletes++;
+      return new Promise<Response>((r) => { release = r; });
+    });
+    const { target, cmp } = open();
+    await settle();
+    trash(target)[0]!.click();
+    await settle();
+    const del = Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Delete') as HTMLButtonElement;
+    del.click();
+    del.click();
+    await settle();
+    expect(deletes).toBe(1);
+    release({ ok: true, status: 204, json: () => Promise.resolve(null), headers: new Headers() } as unknown as Response);
+    await settle();
+    await settle();
+    expect(deletes).toBe(1);
+    unmount(cmp);
+  });
+
   it('a failed delete returns focus to the 🗑', async () => {
     adminFetch([draftRun, pubRun], [v99, v98], (_url, init) =>
       init?.method === 'DELETE' ? err(409, 'Clear roster first') : null);
@@ -170,6 +196,107 @@ describe('RunListPage', () => {
     (Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
     await settle();
     await settle();
+    expect(document.activeElement).toBe(trash(target)[0]);
+    unmount(cmp);
+  });
+
+  it('the confirm is busy while its DELETE runs: Cancel waits, so no second DELETE can start', async () => {
+    let release!: (r: Response) => void;
+    let deletes = 0;
+    adminFetch([draftRun, pubRun], [v99, v98], (_url, init) => {
+      if (init?.method !== 'DELETE') return null;
+      deletes++;
+      return new Promise<Response>((r) => { release = r; });
+    });
+    const { target, cmp } = open();
+    await settle();
+    trash(target)[0]!.click();
+    await settle();
+    const del = Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Delete') as HTMLButtonElement;
+    del.click();
+    await settle();
+    expect(del.getAttribute('aria-busy')).toBe('true');
+    const cancel = target.querySelector('.inline-confirm button.cancel') as HTMLButtonElement;
+    expect(cancel.getAttribute('aria-disabled')).toBe('true');
+    cancel.click();
+    await settle();
+    expect(target.querySelector('.inline-confirm')).not.toBeNull();
+    release({ ok: true, status: 204, json: () => Promise.resolve(null), headers: new Headers() } as unknown as Response);
+    await settle();
+    await settle();
+    expect(deletes).toBe(1);
+    unmount(cmp);
+  });
+
+  it('while one DELETE runs, the other rows\' 🗑 wait', async () => {
+    let release!: (r: Response) => void;
+    adminFetch([draftRun, { ...draftRun, id: 12, title: 'Summer 2026' }], [v99], (_url, init) =>
+      init?.method === 'DELETE' ? new Promise<Response>((r) => { release = r; }) : null);
+    const { target, cmp } = open();
+    await settle();
+    trash(target)[0]!.click();
+    await settle();
+    (Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
+    await settle();
+    const other = target.querySelector('button[aria-label="Delete run Summer 2026"]') as HTMLButtonElement;
+    expect(other.getAttribute('aria-disabled')).toBe('true');
+    expect(other.title).toBe('Wait for the request to finish');
+    other.click();
+    await settle();
+    expect(target.querySelectorAll('.inline-confirm')).toHaveLength(1);
+    expect(target.querySelector('.inline-confirm')!.getAttribute('aria-label')).toBe('Delete run Spring 2026?');
+    release({ ok: true, status: 204, json: () => Promise.resolve(null), headers: new Headers() } as unknown as Response);
+    await settle();
+    await settle();
+    expect(other.getAttribute('aria-disabled')).toBeNull();
+    expect(other.title).toBe('Delete');
+    unmount(cmp);
+  });
+
+  it('the 🗑 that takes focus after a delete is no longer waiting', async () => {
+    const seen: (string | null)[][] = [];
+    // The confirm replaces its row's 🗑, so listen on the document.
+    const onFocus = (e: FocusEvent) => {
+      const b = e.target as HTMLElement;
+      if (b.dataset?.action === 'delete-run') seen.push([b.getAttribute('aria-label'), b.getAttribute('aria-disabled'), b.title]);
+    };
+    document.addEventListener('focusin', onFocus);
+    let fail = false;
+    adminFetch([draftRun, { ...draftRun, id: 12, title: 'Summer 2026' }], [v99], (_url, init) =>
+      init?.method === 'DELETE'
+        ? (fail ? Promise.reject(new TypeError('Failed to fetch'))
+          : Promise.resolve({ ok: true, status: 204, json: () => Promise.resolve(null), headers: new Headers() } as unknown as Response))
+        : null);
+    const { target, cmp } = open();
+    await settle();
+    const ask = async (b: HTMLButtonElement) => {
+      b.click();
+      await settle();
+      (Array.from(target.querySelectorAll('button')).find((x) => x.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
+      await settle();
+      await settle();
+    };
+    // Success: focus moves to the next row's 🗑.
+    await ask(target.querySelector('button[aria-label="Delete run Spring 2026"]') as HTMLButtonElement);
+    // Failure: focus returns to the row's own 🗑.
+    fail = true;
+    await ask(target.querySelector('button[aria-label="Delete run Summer 2026"]') as HTMLButtonElement);
+    document.removeEventListener('focusin', onFocus);
+    expect(seen).toEqual([['Delete run Summer 2026', null, 'Delete'], ['Delete run Summer 2026', null, 'Delete']]);
+    unmount(cmp);
+  });
+
+  it('an offline delete toasts OFFLINE_MESSAGE', async () => {
+    adminFetch([draftRun, pubRun], [v99, v98], (_url, init) =>
+      init?.method === 'DELETE' ? Promise.reject(new TypeError('Failed to fetch')) : null);
+    const { target, cmp } = open();
+    await settle();
+    trash(target)[0]!.click();
+    await settle();
+    (Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
+    await settle();
+    await settle();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toContainEqual(['Could not reach server. Check your connection.', 'error']);
     expect(document.activeElement).toBe(trash(target)[0]);
     unmount(cmp);
   });

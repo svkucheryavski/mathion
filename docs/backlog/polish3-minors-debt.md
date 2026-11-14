@@ -11,13 +11,7 @@ Walked 2026-11-14 against main `1c904f9`: done and code-only items were dropped,
 
 - **Focus in the "used by" panel drops to `<body>` when only its own entry goes.** A reload that removes the focused mini-project's line from an open panel, while the chip keeps other uses, unmounts the focused Edit button; the D87 repair runs only when the chip drops to 0. Older than Polish 3. Fix: in the same `$effect.pre`, repair a focused panel button whose mini-project left the list to the panel's next Edit, else the chip (Fable r2 m1).
 
-## Task 8 — behaviour
-
-- **The Teaching crumb on a run page drops the status filter.** `TeachingCrumbs.svelte:15` links to the bare `/teaching`, so a teacher who filtered to Upcoming or Finished and goes back through the crumb lands on Active; the browser's Back keeps `?status=` (C18). Fix: carry the last `?status=` into the crumb's link, or have the crumb go back in history when the previous entry is `/teaching?…` (Opus r1 m4).
-
 ## Whole-branch review (71dd8cc..8bc9497)
 
-- **[open]** **Three offline sentences on one run page.** An offline title or date save on the Overview shows InlineName's "Could not save." (`InlineName.svelte:58-60`), while the groups switch and Publish/Unpublish toast `OFFLINE_MESSAGE`, and Delete says "Could not delete the run.". Spec rev 12 ("every offline write says the same thing") and its InlineName bullet disagree. Fix: InlineName maps a `TypeError` to `OFFLINE_MESSAGE` (Opus m1, Fable m2).
 - **A failed Refresh shows the browser's raw text.** On Progress and Submissions (`RunProgressTab.svelte:63, 83`, `RunSubmissionTab.svelte:68, 88`) a failed Refresh shows "Failed to fetch" / "Load failed"; since C17 keeps the table, it sits above the still-visible rows. Older than Polish 3. Fix: map a non-API error to "Check your connection and try again." as CourseList does (Opus m2).
 - **An offline Roster or Teachers add paints the e-mail field red.** `RunRosterTab.svelte:681` and `RunTeachersTab.svelte:97` set `aria-invalid` whenever `addError` is set, so `OFFLINE_MESSAGE` shows under a red field, the look C3 removed elsewhere for network failures. Fix: mark the field invalid only for an `ApiError` about the address (Fable m1).
-- **[open]** **Two wordings for the date rule.** `NewRunModal.svelte:22` says "End date must be on or after start date"; the Overview's 422 says "End date must be on or after the start date (01 Sep 2026). …" (Opus m3, nit).

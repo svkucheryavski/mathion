@@ -17,7 +17,7 @@
 
 
 <script lang="ts">
-  import { tick, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import { ApiError, OFFLINE_MESSAGE } from '../../lib/api';
   import { updateRun } from '../../lib/runs';
   import { formatShortDate } from '../../lib/datetime';
@@ -75,6 +75,8 @@
   // An open field is not a write.
   let localWrite = $state(false);
   const runWrite = $derived(localWrite || publishing);
+  let alive = true;
+  onDestroy(() => { alive = false; });
   const editEls: Partial<Record<Field, HTMLButtonElement>> = $state({});
 
   let unpublishConfirmOpen = $state(false);
@@ -134,9 +136,8 @@
 
   // InlineName shows a rejection under the field, so this only rethrows.
   async function saveField(field: Field, value: string): Promise<void> {
-    // R32: an open field is not a write, so the switch stays live; its ✓ /
-    // Enter must wait for the switch's request (the reason shows under it).
-    if (runWrite) throw new Error(WAIT);
+    // R32: one write at a time; InlineName's `wait` hint stops ✓ / Enter first.
+    if (runWrite) return;
     localWrite = true;
     const updated = await updateRun(run.id, { [field]: value } as RunUpdateRequest)
       .finally(() => { localWrite = false; });
@@ -201,11 +202,13 @@
   }
 
   function toggleDelete() {
+    // R44: aria-disabled while a write runs, so it does nothing, closing included.
+    if (runWrite) return;
     if (deleteOpen) {
       void cancelDelete();
       return;
     }
-    if (runWrite || run.is_published) return;
+    if (run.is_published) return;
     deleteError = null;
     deleteOpen = true;
   }
@@ -229,7 +232,13 @@
       deleteBusy = false;
     });
     if (outcome.kind === 'failed') {
-      deleteError = outcome.message;
+      // Left the Overview meanwhile: its card is gone, so the failure toasts.
+      if (!alive) {
+        const m = outcome.message;
+        // The page's own sentences (offline, the fallback) stand as they are.
+        pushToast(m === OFFLINE_MESSAGE || m.startsWith('Could not delete') ? m : `Could not delete the run: ${m}`, 'error');
+      }
+      else deleteError = outcome.message;
     } else if (outcome.kind === 'published-now') {
       deleteOpen = false;
       await tick();
@@ -257,6 +266,7 @@
                   maxlength={f.key === 'title' ? 200 : undefined}
                   saveTitle="Save {f.name.toLowerCase()}"
                   emptyTitle={f.type === 'date' ? 'Choose a date' : undefined}
+                  wait={runWrite ? WAIT : null}
                   onSave={(v) => saveField(f.key, v)}
                   onCancel={() => cancelField(f.key)}
                 />
@@ -355,6 +365,8 @@
             warning="Students lose access immediately; their progress is kept."
             confirmLabel="Unpublish"
             confirmDataAction="confirm-unpublish"
+            busy={publishing}
+            disabledReason={runWrite && !publishing ? WAIT : undefined}
             onConfirm={() => void confirmUnpublish()}
             onCancel={() => void cancelUnpublish()}
           />

@@ -6,6 +6,7 @@
   import { formatShortDate } from '../../lib/datetime';
   import { routeClick } from '../../lib/routeClick';
   import { currentRoute, navigate } from '../../lib/router.svelte';
+  import { rememberTeachingStatus } from '../../lib/teachingFilter';
   import Skeleton from '../../components/ui/Skeleton.svelte';
   import EmptyState from '../../components/ui/EmptyState.svelte';
   import ErrorState from '../../components/ui/ErrorState.svelte';
@@ -27,6 +28,7 @@
     return (PILLS as readonly string[]).includes(v ?? '') ? (v as Pill) : 'active';
   }
   let pill = $derived<Pill>(statusFrom(currentRoute.search));
+  $effect(() => { rememberTeachingStatus(pill); });
   function setPill(k: Pill) {
     pill = k;
     const p = new URLSearchParams(currentRoute.search);

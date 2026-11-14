@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync, createRawSnippet, type ComponentProps } from 'svelte';
 import InlineName from '../components/ui/InlineName.svelte';
-import { ApiError } from '../lib/api';
+import { ApiError, OFFLINE_MESSAGE } from '../lib/api';
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
@@ -172,7 +172,7 @@ describe('InlineName (handoff §4 Inline field editing)', () => {
 
   // Polish 3: never an empty error, never the browser's raw fetch text.
   it.each([
-    ['a TypeError', new TypeError('Failed to fetch'), 'Could not save.'],
+    ['a TypeError (offline, call 13)', new TypeError('Failed to fetch'), OFFLINE_MESSAGE],
     ["an ApiError with detail ''", new ApiError(500, ''), 'Could not save.'],
     ['a plain Error', new Error('Wait for the setting to save'), 'Wait for the setting to save'],
     ['a SyntaxError (a malformed 2xx body)', new SyntaxError('Unexpected token < in JSON'), 'Could not save.'],
@@ -183,6 +183,103 @@ describe('InlineName (handoff §4 Inline field editing)', () => {
     await settle();
     expect(host.querySelector('p.in-err')?.textContent).toBe(shown);
     expect(input.getAttribute('aria-invalid')).toBe('true');
+  });
+
+  it('InlineName offline says OFFLINE_MESSAGE', async () => {
+    const { input } = render({ onSave: vi.fn().mockRejectedValue(new TypeError('Load failed')) });
+    type(input, 'Group O');
+    key(input, 'Enter');
+    await settle();
+    expect(host.querySelector('p.in-err')?.textContent).toBe('Could not reach server. Check your connection.');
+  });
+
+  it('InlineName 422 list shows the first msg', async () => {
+    const detail = [{ loc: ['body', 'title'], msg: 'String too long', type: 'value_error' }, { loc: ['body', 'x'], msg: 'Other', type: 'value_error' }];
+    const { input } = render({ onSave: vi.fn().mockRejectedValue(new ApiError(422, detail)) });
+    type(input, 'Group L');
+    key(input, 'Enter');
+    await settle();
+    expect(host.querySelector('p.in-err')?.textContent).toBe('String too long');
+  });
+
+  it('a 422 msg loses pydantic\'s "Value error, " prefix', async () => {
+    const detail = [{ loc: ['body', 'title'], msg: 'Value error, Title is required', type: 'value_error' }];
+    const { input } = render({ onSave: vi.fn().mockRejectedValue(new ApiError(422, detail)) });
+    type(input, 'Group V');
+    key(input, 'Enter');
+    await settle();
+    expect(host.querySelector('p.in-err')?.textContent).toBe('Title is required');
+  });
+
+  it('the wait line is a neutral hint: no aria-invalid, no error class; it clears when the wait ends (call 16)', async () => {
+    const props = $state<{ wait: string | null }>({ wait: 'Wait for the current change to save' });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    component = mount(InlineName, {
+      target: host,
+      props: {
+        label: 'Title', value: 'A', onSave, onCancel: vi.fn(),
+        get wait() { return props.wait; },
+      } as ComponentProps<typeof InlineName>,
+    });
+    flushSync();
+    const input = host.querySelector('input.in-input') as HTMLInputElement;
+    type(input, 'B');
+    key(input, 'Enter');
+    await settle();
+    expect(onSave).not.toHaveBeenCalled();
+    const hint = host.querySelector('p.in-hint');
+    expect(hint?.textContent).toBe('Wait for the current change to save');
+    expect(host.querySelector('p.in-err')).toBeNull();
+    expect(input.getAttribute('aria-invalid')).toBeNull();
+    expect(input.getAttribute('aria-describedby')).toBe(hint!.id);
+    expect(document.activeElement).toBe(input);
+    // Typing clears the hint; Enter brings it back while the wait lasts.
+    type(input, 'BB');
+    expect(host.querySelector('p.in-hint')).toBeNull();
+    type(input, 'B');
+    key(input, 'Enter');
+    await settle();
+    expect(host.querySelector('p.in-hint')).not.toBeNull();
+    props.wait = null;
+    flushSync();
+    expect(host.querySelector('p.in-hint')).toBeNull();
+    expect(input.getAttribute('aria-describedby')).toBeNull();
+    // A later wait does not bring the old hint back by itself.
+    props.wait = 'Wait for the current change to save';
+    flushSync();
+    expect(host.querySelector('p.in-hint')).toBeNull();
+    props.wait = null;
+    flushSync();
+    key(input, 'Enter');
+    await settle();
+    expect(onSave).toHaveBeenCalledWith('B');
+  });
+
+  it('an error showing when a wait starts gives way to the hint on Enter', async () => {
+    const props = $state<{ wait: string | null }>({ wait: null });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const onSave = vi.fn().mockRejectedValue(new ApiError(500, 'Server down'));
+    component = mount(InlineName, {
+      target: host,
+      props: { label: 'Title', value: 'A', onSave, onCancel: vi.fn(), get wait() { return props.wait; } } as ComponentProps<typeof InlineName>,
+    });
+    flushSync();
+    const input = host.querySelector('input.in-input') as HTMLInputElement;
+    type(input, 'B');
+    key(input, 'Enter');
+    await settle();
+    expect(host.querySelector('p.in-err')?.textContent).toBe('Server down');
+    props.wait = 'Wait for the current change to save';
+    flushSync();
+    key(input, 'Enter');
+    await settle();
+    expect(host.querySelector('p.in-err')).toBeNull();
+    expect(host.querySelector('p.in-hint')?.textContent).toBe('Wait for the current change to save');
+    expect(input.getAttribute('aria-invalid')).toBeNull();
+    expect(onSave).toHaveBeenCalledTimes(1);
   });
 
   it('a subject names × and ✓ after their row; the tooltips stay short (final review)', () => {
