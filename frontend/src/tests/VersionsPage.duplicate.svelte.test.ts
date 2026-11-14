@@ -124,6 +124,17 @@ describe('VersionsPage — Duplicate', () => {
     expect(pushToastMock).toHaveBeenCalledWith(expect.any(String), 'error');
   });
 
+  it('an offline duplicate says OFFLINE_MESSAGE (VR-B)', async () => {
+    versionsPageState.versions = [mkVersion({ id: 7 })];
+    postMock.mockRejectedValue(new TypeError('Failed to fetch'));
+    component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
+    await settle();
+    clickByLabel(target, 'Duplicate v7');
+    clickButtonByText(target, 'Create copy');
+    await settle();
+    expect(pushToastMock).toHaveBeenCalledWith('Could not reach server. Check your connection.', 'error');
+  });
+
   it('single-open: opening a second row does not keep the first open', async () => {
     versionsPageState.versions = [mkVersion({ id: 7, label: 'A' }), mkVersion({ id: 8, label: 'B' })];
     component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });

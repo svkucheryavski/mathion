@@ -9,7 +9,7 @@
   import { createDirtyRegistry, DIRTY_REGISTRY_KEY } from '../../lib/dirtyRegistry.svelte';
   import { deriveExpansion } from '../../lib/deriveExpansion';
   import { handleStaleIdFallback } from '../../lib/handleStaleIdFallback';
-  import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
+  import { createErrorText, mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import { externalLinks } from '../../lib/externalLinks';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
   import AskSlot from '../../components/ui/AskSlot.svelte';
@@ -452,7 +452,7 @@
       // would resurface stale on the next open — toast it instead (as the
       // accordions' create forms do).
       if (!creating) {
-        pushToast(mapped.globalMessage ?? Object.values(mapped.fieldErrors)[0] ?? 'Create failed', 'error');
+        pushToast(createErrorText(mapped), 'error');
         return;
       }
       createErrors = mapped.fieldErrors;

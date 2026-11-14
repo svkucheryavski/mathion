@@ -34,6 +34,12 @@ export class ApiError extends Error {
 /** Polish 3: what a write that never reached the server (a fetch TypeError) says. */
 export const OFFLINE_MESSAGE = 'Could not reach server. Check your connection.';
 
+/** A failed write's sentence: the server's, OFFLINE_MESSAGE for a fetch TypeError, else `fallback`. */
+export function failureText(e: unknown, fallback: string): string {
+  if (e instanceof ApiError) return e.displayMessage;
+  return e instanceof TypeError ? OFFLINE_MESSAGE : fallback;
+}
+
 /** What a 5xx with no sentence of its own (a crash's plain-text page, a
  *  proxy's 502) says, never the raw status text. */
 export const SERVER_ERROR_MESSAGE = 'Something went wrong on the server. Try again.';

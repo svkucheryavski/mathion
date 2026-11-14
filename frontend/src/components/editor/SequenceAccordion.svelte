@@ -238,6 +238,8 @@
   // "+ Add item" (5c D10): the line opens the New item modal. `creating` = the
   // modal is open; the modal owns the form and its guard tracker.
   let creating = $state(false);
+  // Counts opens: a late create only closes and follows the modal it came from.
+  let opens = 0;
   let addLineEl = $state<HTMLButtonElement>();
 
   // The modal owns the form; this owns the request, the reload and the
@@ -249,15 +251,18 @@
     const savedBid = block.id;
     const savedSid = seq.id;
     const savedSlug = courseSlug;
+    const mine = opens;
     const item = await api.post<{ id: number }>(`/api/sequences/${savedSid}/items`, body);
     if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
+    // VR-B: its modal closed meanwhile (discard, collapse): say so and stay.
+    if (!alive || !creating || opens !== mine) { pushToast('Item created', 'success'); return; }
     creating = false;
     // Let the modal unmount first: its guard tracker (dirty — the typed
     // title) unregisters on teardown; navigating before that would prompt.
     await tick();
     // Gated like the reload: a late success must not pull the author back
     // into the old version's item editor.
-    if (!check(savedVid)) return;
+    if (!check(savedVid)) { pushToast('Item created', 'success'); return; }
     // 5b D18: closing the new item's editor focuses its ✎. The modal's
     // teardown just handed focus back to its opener ("+ Add item" in Chrome,
     // where a click focuses buttons; whatever held focus before in Safari);
@@ -332,7 +337,7 @@
 
       {#if canStructure}
         <!-- After the list: new items land at the end (user, T3). -->
-        <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} onclick={() => (creating = true)}>+ Add item</button>
+        <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} onclick={() => { opens++; creating = true; }}>+ Add item</button>
       {/if}
       {#if creating}
         <NewItemModal

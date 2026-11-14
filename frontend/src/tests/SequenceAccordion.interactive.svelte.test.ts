@@ -81,10 +81,11 @@ function mountAccordion(seq: AdminTreeSequence = mkSeq(), version = mkVersion())
     courseSlug: 'c', vid: 1, block: tree.blocks[0], seq, index: 1, sequenceCount: 1,
     routeBid: '3' as string | null, routeSid: '2' as string | null, stillOnVid, onMoveUp: vi.fn(), onMoveDown: vi.fn(),
   });
-  const cmp = mount(SequenceAccordion, { target, props, context: new Map([[DIRTY_REGISTRY_KEY, createDirtyRegistry()]]) });
+  const registry = createDirtyRegistry();
+  const cmp = mount(SequenceAccordion, { target, props, context: new Map([[DIRTY_REGISTRY_KEY, registry]]) });
   cleanup = () => unmount(cmp);
   flushSync();
-  return { target, stillOnVid, props };
+  return { target, stillOnVid, props, registry };
 }
 // Slice-5c T3 (user 2026-10-08): "+ Add item" is a text line like + Add block /
 // + Add sequence; T4: it opens the New item modal.
@@ -330,6 +331,125 @@ describe('SequenceAccordion — "+ Add item" opens the New item modal (Slice-5c 
     release();
     await settle();
     expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Title already taken', 'error']]);
+  });
+
+  it('discard during an in-flight create neither opens the item nor blurs (VR-B)', async () => {
+    clearToasts();
+    let release!: () => void;
+    serve((url, init) => (url === '/api/sequences/2/items' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ id: 99 }))
+      : undefined));
+    const { target, registry } = mountAccordion();
+    addItem(target).click();
+    await settle();
+    pickQuiz();
+    type(modalTitle(), 'New quiz');
+    modalTitle().form!.requestSubmit();
+    await settle();
+    registry.discardAll();                     // Back + Discard
+    await settle();
+    expect(modalPanel()).toBeNull();
+    const other = document.createElement('button');
+    document.body.appendChild(other);
+    other.focus();
+    release();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/3/sequences/2');
+    expect(document.activeElement).toBe(other);
+    expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Item created', 'success']]);
+    other.remove();
+  });
+
+  it('discard during the reload after a create does not open the item either (VR-B)', async () => {
+    clearToasts();
+    let releaseTree!: () => void;
+    serve((url, init) => (url === '/api/sequences/2/items' && init?.method === 'POST' ? jres({ id: 99 })
+      : url.endsWith('/admin-tree') ? new Promise<void>((r) => { releaseTree = r; }).then(() => jres(structuredClone(served)))
+      : undefined));
+    const { target, registry } = mountAccordion();
+    addItem(target).click();
+    await settle();
+    pickQuiz();
+    type(modalTitle(), 'New quiz');
+    modalTitle().form!.requestSubmit();
+    await settle();
+    registry.discardAll();
+    await settle();
+    releaseTree();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/3/sequences/2');
+    expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Item created', 'success']]);
+  });
+
+  it('an accordion unmounted during the POST neither navigates nor blurs (VR-B)', async () => {
+    clearToasts();
+    let release!: () => void;
+    serve((url, init) => (url === '/api/sequences/2/items' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ id: 99 }))
+      : undefined));
+    const { target } = mountAccordion();
+    addItem(target).click();
+    await settle();
+    pickQuiz();
+    type(modalTitle(), 'New quiz');
+    modalTitle().form!.requestSubmit();
+    await settle();
+    cleanup?.(); cleanup = null;                  // a forced navigation unmounts it
+    const other = document.createElement('button');
+    document.body.appendChild(other);
+    other.focus();
+    release();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/3/sequences/2');
+    expect(document.activeElement).toBe(other);
+    expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Item created', 'success']]);
+    other.remove();
+  });
+
+  it('a create that lands after a version change toasts and stays (VR-B)', async () => {
+    clearToasts();
+    let release!: () => void;
+    serve((url, init) => (url === '/api/sequences/2/items' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ id: 99 }))
+      : undefined));
+    const { target, stillOnVid } = mountAccordion();
+    addItem(target).click();
+    await settle();
+    pickQuiz();
+    type(modalTitle(), 'New quiz');
+    modalTitle().form!.requestSubmit();
+    await settle();
+    stillOnVid.mockReturnValue(false);
+    release();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/3/sequences/2');
+    expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Item created', 'success']]);
+  });
+
+  it('a modal reopened during the POST survives the late success (VR-B)', async () => {
+    clearToasts();
+    let release!: () => void;
+    serve((url, init) => (url === '/api/sequences/2/items' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ id: 99 }))
+      : undefined));
+    const { target, registry } = mountAccordion();
+    addItem(target).click();
+    await settle();
+    pickQuiz();
+    type(modalTitle(), 'New quiz');
+    modalTitle().form!.requestSubmit();
+    await settle();
+    registry.discardAll();
+    await settle();
+    addItem(target).click();
+    await settle();
+    type(modalTitle(), 'Second');
+    release();
+    await settle();
+    expect(modalPanel()).not.toBeNull();
+    expect(modalTitle().value).toBe('Second');
+    expect(currentRoute.path).toBe('/courses/c/edit/v/1/blocks/3/sequences/2');
+    expect(toasts.list.map((t) => t.message)).toEqual(['Item created']);
   });
 
   it('collapse closes the modal; re-expanding, the line opens a fresh one', async () => {

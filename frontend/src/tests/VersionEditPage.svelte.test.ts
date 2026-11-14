@@ -472,6 +472,25 @@ describe('VersionEditPage — "+ Add block" (Slice-5c T3)', () => {
     expect(document.activeElement).toBe(ok());
   });
 
+  it('a create that fails after a discard toasts the field and the unmapped parts (VR-B)', async () => {
+    clearToasts();
+    let release!: () => void;
+    serve((url, init) => (url === '/api/versions/1/blocks' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: [
+        { loc: ['body', 'title'], msg: 'Too long' }, { loc: ['body', 'slug'], msg: 'Bad slug' }] }, 422))
+      : undefined));
+    await render();
+    addLine()!.click(); await settle();
+    typeTitle('Matrices');
+    addInput()!.form!.requestSubmit(); await settle();
+    const nav = navigate('/courses/c/edit/v/1/blocks/10');
+    await settle();
+    pageBtn('confirm')!.click();
+    await nav; await settle();
+    release(); await settle();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Too long; Bad slug', 'error']]);
+  });
+
   it('a rejected create frees the field and ✕ again (VR-B)', async () => {
     let release!: () => void;
     serve((url, init) => (url === '/api/versions/1/blocks' && init?.method === 'POST'

@@ -16,6 +16,7 @@ import { navigate, currentRoute, __resetGuardsForTests } from '../lib/router.sve
 import { api } from '../lib/api';
 import { versionsPageState } from '../lib/versionsPageLoader.svelte';
 import VersionsPage from '../pages/editor/VersionsPage.svelte';
+import { toasts, clearToasts } from '../stores/toasts.svelte';
 import type { Version } from '../lib/types';
 
 const postMock = vi.mocked(api.post);
@@ -188,18 +189,72 @@ describe('VersionsPage — the create form guards navigation (Polish 3 C8)', () 
     expect(currentRoute.path).toBe('/courses');
   });
 
-  // Review r2 m3: a reload that fails while the navigation question is open
-  // withdraws it (R55), so later navigations do not join a hidden question.
-  it('a list error while the navigation question is open refuses that navigation and frees the next', async () => {
+  // Call 6 (VR-B): a list error that withdraws the open navigation question
+  // lets that navigation go; the form it asked about is gone anyway.
+  it('a list error under an open navigation question lets the navigation go', async () => {
     await openDirtyForm();
     const nav = navigate('/courses');
     await settle();
     versionsPageState.error = { status: 500, message: 'Server error' };
     await settle();
-    expect(await nav).toBe(false);
+    expect(await nav).toBe(true);
+    expect(currentRoute.path).toBe('/courses');
+  });
+
+  it('a list error under the form\'s own question does not navigate', async () => {
+    await openDirtyForm();
+    formCancel()!.click();
+    await settle();
+    versionsPageState.error = { status: 500, message: 'Server error' };
+    await settle();
     expect(currentRoute.path).toBe('/courses/c');
     expect(await navigate('/courses')).toBe(true);
-    expect(currentRoute.path).toBe('/courses');
+  });
+
+  it('a failed list reload moves a free focus to Back to courses (VR-B)', async () => {
+    await openDirtyForm();
+    target.querySelector<HTMLInputElement>('input.new-label')!.focus();
+    versionsPageState.error = { status: 500, message: 'Server error' };
+    await settle();
+    const back = [...target.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Back to courses')!;
+    expect(document.activeElement).toBe(back);
+  });
+
+  it('a first load that fails does not move focus (VR-B)', async () => {
+    versionsPageState.error = { status: 500, message: 'Server error' };
+    const tmp = document.createElement('input'); document.body.appendChild(tmp); tmp.focus(); tmp.remove();
+    component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
+    await settle();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('an offline Create says OFFLINE_MESSAGE (VR-B)', async () => {
+    clearToasts();
+    postMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await openDirtyForm();
+    target.querySelector<HTMLFormElement>('form.create')!.requestSubmit();
+    await settle();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Could not reach server. Check your connection.', 'error']]);
+  });
+
+  it('a failed list reload does not take a focus that is elsewhere (VR-B)', async () => {
+    await openDirtyForm();
+    const other = document.createElement('button');
+    document.body.appendChild(other);
+    other.focus();
+    versionsPageState.error = { status: 500, message: 'Server error' };
+    await settle();
+    expect(document.activeElement).toBe(other);
+    other.remove();
+  });
+
+  it('an IME-commit Escape (keyCode 229) neither asks nor closes the form (VR-B)', async () => {
+    await openDirtyForm();
+    const input = target.querySelector<HTMLInputElement>('input.new-label')!;
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 229, isComposing: false, bubbles: true, cancelable: true }));
+    await settle();
+    expect(submit()!.querySelector('.inline-confirm')).toBeNull();
+    expect(target.querySelector<HTMLInputElement>('input.new-label')!.value).toBe('Spring');
   });
 
   // Ruling: no question while Create's POST runs — it would take the busy

@@ -20,6 +20,7 @@ import { api } from '../lib/api';
 import { loadVersionsPage } from '../lib/versionsPageLoader.svelte';
 import { versionsPageState } from '../lib/versionsPageLoader.svelte';
 import VersionsPage from '../pages/editor/VersionsPage.svelte';
+import { toasts, clearToasts } from '../stores/toasts.svelte';
 import type { Version } from '../lib/types';
 
 const navigateMock = vi.mocked(navigate);
@@ -426,6 +427,20 @@ describe('VersionsPage — row actions through the slots', () => {
     expect(deleteMock).not.toHaveBeenCalled();
     expect(loadMock).toHaveBeenCalledWith('c');
   });
+
+  for (const [label, mockKey] of [['Disable v7', 'post'], ['Delete v7', 'delete']] as const) {
+    it(`an offline ${label.split(' ')[0]} says OFFLINE_MESSAGE (VR-B)`, async () => {
+      clearToasts();
+      (mockKey === 'post' ? postMock : deleteMock).mockRejectedValueOnce(new TypeError('Failed to fetch'));
+      versionsPageState.versions = [mkVersion({ id: 7 })];
+      await render();
+      byLabel(label)!.click();
+      await settle();
+      rowBtn('confirm').click();
+      await settle();
+      expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Could not reach server. Check your connection.', 'error']]);
+    });
+  }
 
   it('Enable POSTs /enable', async () => {
     versionsPageState.versions = [mkVersion({ id: 7, is_disabled: true })];

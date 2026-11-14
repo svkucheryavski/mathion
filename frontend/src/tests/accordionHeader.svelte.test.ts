@@ -374,6 +374,12 @@ describe('AccordionHeader — backlog round (VR-B)', () => {
     expect(document.activeElement).toBe(target.querySelector('#h'));
     release(); await settle();
   });
+  it('an offline rename says OFFLINE_MESSAGE', async () => {
+    render({ onRename: vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))) });
+    pencil()!.click(); await settle();
+    type('New'); key('Enter'); await settle();
+    expect(target.querySelector('.err')!.textContent).toBe('Could not reach server. Check your connection.');
+  });
   it('a mode close of an edited title neither toasts nor moves focus to the row', async () => {
     const p = render();
     pencil()!.click(); await settle();

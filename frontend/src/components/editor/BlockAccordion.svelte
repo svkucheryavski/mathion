@@ -3,7 +3,7 @@
   import AccordionHeader, { type HeaderMode } from './AccordionHeader.svelte';
   import SequenceAccordion from './SequenceAccordion.svelte';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
-  import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
+  import { createErrorText, mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import { versionPermissions } from '../../lib/versionPermissions';
   import { unsavedSuffix } from '../../lib/editorReasons';
   import TreeAskRow from './TreeAskRow.svelte';
@@ -322,7 +322,7 @@
       // discard, a read-only flip): there is no form to show the error on, and
       // writing it would resurface stale on the next open — toast it instead.
       if (!creating) {
-        pushToast(mapped.globalMessage ?? Object.values(mapped.fieldErrors)[0] ?? 'Create failed', 'error');
+        pushToast(createErrorText(mapped), 'error');
         return;
       }
       createErrors = mapped.fieldErrors;

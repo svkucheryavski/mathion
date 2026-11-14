@@ -555,6 +555,36 @@ describe('BlockAccordion — "+ Add sequence" (Slice-5c T3)', () => {
     expect(document.activeElement).toBe(submitBtn());
   });
 
+  it('a create that fails after a collapse toasts the field and the unmapped parts (VR-B)', async () => {
+    clearToasts();
+    let release!: () => void;
+    serve((url, init) => (url === '/api/blocks/3/sequences' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: [
+        { loc: ['body', 'title'], msg: 'Too long' }, { loc: ['body', 'slug'], msg: 'Bad slug' }] }, 422))
+      : undefined));
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    type(addInput()!, 'Span');
+    addInput()!.form!.requestSubmit(); await settle();
+    await navigate('/courses/c/edit/v/1', { force: true });
+    await settle();
+    release(); await settle();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Too long; Bad slug', 'error']]);
+  });
+
+  it('an offline create shows OFFLINE_MESSAGE (VR-B)', async () => {
+    serve((url, init) => (url === '/api/blocks/3/sequences' && init?.method === 'POST' ? Promise.reject(new TypeError('Failed to fetch')) : undefined));
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    type(addInput()!, 'Span');
+    addInput()!.form!.requestSubmit(); await settle();
+    expect(target.querySelector('.add-err')!.textContent).toBe('Could not reach server. Check your connection.');
+  });
+
   it('a rejected create frees the field and ✕ again (VR-B)', async () => {
     let release!: () => void;
     serve((url, init) => (url === '/api/blocks/3/sequences' && init?.method === 'POST'

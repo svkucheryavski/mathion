@@ -3,6 +3,7 @@ import { mount, unmount, flushSync } from 'svelte';
 import NewItemModal from '../components/editor/NewItemModal.svelte';
 import { createDirtyRegistry, DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../lib/dirtyRegistry.svelte';
 import { ApiError } from '../lib/api';
+import { toasts, clearToasts } from '../stores/toasts.svelte';
 
 let target: HTMLDivElement;
 let cmp: ReturnType<typeof mount> | null = null;
@@ -95,7 +96,7 @@ describe('NewItemModal (Slice-5c T4, D10)', () => {
     const p = render();
     type(titleIn(), '  Dot ');
     create().click(); await settle();
-    expect(p.onCreate).toHaveBeenLastCalledWith({ title: '  Dot ', type: 'static_page', content_md: '# Dot\n' });
+    expect(p.onCreate).toHaveBeenLastCalledWith({ title: 'Dot', type: 'static_page', content_md: '# Dot\n' });   // VR-B: sent trimmed
     type(titleIn(), 'Dot');
     create().click(); await settle();
     expect(p.onCreate).toHaveBeenLastCalledWith({ title: 'Dot', type: 'static_page', content_md: '# Dot\n' });
@@ -216,5 +217,47 @@ describe('NewItemModal (Slice-5c T4, D10)', () => {
     expect(panel().querySelector<HTMLButtonElement>('header.modal-head button[aria-label="Close"]')!.disabled).toBe(true);
     release(); await settle();
     expect(p.onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe('NewItemModal — backlog round (VR-B)', () => {
+  it('the type picker is frozen while posting, and a 422 maps against the sent type', async () => {
+    let reject!: (e: unknown) => void;
+    render({ onCreate: vi.fn(() => new Promise<void>((_r, j) => { reject = j; })) });
+    type(titleIn(), 'Dot');
+    create().click(); await settle();
+    expect(panel().querySelector<HTMLFieldSetElement>('fieldset.type-picker')!.disabled).toBe(true);
+    pick('video');                                   // a forced switch mid-POST
+    reject(new ApiError(422, [{ loc: ['body', 'video_url'], msg: 'Bad URL', type: 'x' }])); await settle();
+    expect(panel().querySelector('[role="alert"]')!.textContent).toBe('Bad URL');
+    expect(panel().querySelector('small.field-err')).toBeNull();
+    expect(panel().querySelector<HTMLFieldSetElement>('fieldset.type-picker')!.disabled).toBe(false);
+  });
+  it('a failed create from a focused type radio gives focus back to that radio', async () => {
+    let reject!: (e: unknown) => void;
+    render({ onCreate: vi.fn(() => new Promise<void>((_r, j) => { reject = j; })) });
+    await settle();                                  // the mount's autofocus has run
+    type(titleIn(), 'Dot');
+    pick('quiz');
+    radio('quiz').focus();
+    titleIn().form!.requestSubmit(); await settle();
+    // A browser drops focus to <body> from the frozen picker (jsdom keeps it there).
+    const tmp = document.createElement('input'); panel().appendChild(tmp); tmp.focus(); tmp.remove();
+    expect(document.activeElement).toBe(document.body);
+    reject(new ApiError(500, 'boom')); await settle();
+    expect(document.activeElement).toBe(radio('quiz'));
+  });
+  it('a failure after the modal closed toasts the field and the unmapped parts', async () => {
+    clearToasts();
+    let reject!: (e: unknown) => void;
+    render({ onCreate: vi.fn(() => new Promise<void>((_r, j) => { reject = j; })) });
+    type(titleIn(), 'Dot');
+    create().click(); await settle();
+    unmount(cmp!); cmp = null;
+    reject(new ApiError(422, [
+      { loc: ['body', 'title'], msg: 'Too long', type: 'x' },
+      { loc: ['body', 'content_md'], msg: 'Content too large', type: 'x' },
+    ])); await settle();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Too long; Content too large', 'error']]);
   });
 });

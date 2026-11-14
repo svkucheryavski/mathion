@@ -15,8 +15,6 @@ Walked 2026-11-14 against main `1c904f9`: done and code-only items were dropped,
 ## Task 8 — behaviour
 
 - **The Teaching crumb on a run page drops the status filter.** `TeachingCrumbs.svelte:15` links to the bare `/teaching`, so a teacher who filtered to Upcoming or Finished and goes back through the crumb lands on Active; the browser's Back keeps `?status=` (C18). Fix: carry the last `?status=` into the crumb's link, or have the crumb go back in history when the previous entry is `/teaching?…` (Opus r1 m4).
-- **A failed list reload leaves focus on `<body>`.** When a row action's reload fails, the page ErrorState replaces the frame; a focus parked on the `<h1>` (R54) or in the create form goes with it. Older than C8. Fix: in VersionsPage's error effect, repair a free focus to the ErrorState's "Back to courses" (Fable r2 M2).
-- **[open]** **A list error refuses the navigation whose question it withdraws.** The author clicked a link, the navigation question opened, and the reload failed: the form and its input are dropped, but that link resolves `false` (R55), so the author lands on "Couldn't load" and clicks again. A one-request window. Fix, if wanted: let the error effect settle an open navigation question as confirmed (Opus r2 m4).
 
 ## Whole-branch review (71dd8cc..8bc9497)
 

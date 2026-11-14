@@ -17,7 +17,7 @@
   // pointer convenience only (5a D14).
   import { getContext, onDestroy, tick, untrack } from 'svelte';
   import { labelFor } from '../../lib/labelFor';
-  import { ApiError } from '../../lib/api';
+  import { ApiError, failureText } from '../../lib/api';
   import { mapCreateError } from '../../lib/formErrors';
   import { pushToast } from '../../stores/toasts.svelte';
   import { repairFocus } from '../../lib/askInPlace.svelte';
@@ -90,7 +90,7 @@
   onDestroy(() => { alive = false; });
 
   function msg(e: unknown): string {
-    return e instanceof ApiError ? (e.validationErrors()?.[0]?.msg ?? e.displayMessage) : 'Save failed';
+    return e instanceof ApiError ? (e.validationErrors()?.[0]?.msg ?? e.displayMessage) : failureText(e, 'Save failed');
   }
 
   async function startRename() {

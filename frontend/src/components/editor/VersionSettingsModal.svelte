@@ -8,7 +8,8 @@
   import Button from '../ui/Button.svelte';
   import AskSlot from '../ui/AskSlot.svelte';
   import { DISCARD_ASK, focusAfter, modalClose, repairFocus, useModalAsk } from '../../lib/askInPlace.svelte';
-  import { api, ApiError } from '../../lib/api';
+  import { api, ApiError, failureText } from '../../lib/api';
+  import { metaReason } from '../../lib/editorReasons';
   import { pushToast } from '../../stores/toasts.svelte';
   import { loadAdminTree } from '../../stores/currentEditorVersion.svelte';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
@@ -44,7 +45,8 @@
   const dirty = $derived(editable && (label !== initial.label || info !== initial.info || attempts !== initial.attempts));
 
   const registry = getContext<DirtyRegistry | undefined>(DIRTY_REGISTRY_KEY);
-  const tracker: RegisteredTracker = { get isDirty() { return dirty; }, discard() { onClose(); } };
+  // A running Save is not unsaved work: the guard does not ask over it.
+  const tracker: RegisteredTracker = { get isDirty() { return dirty && !saving; }, discard() { onClose(); } };
   $effect(() => {
     if (!registry) return;
     registry.register(tracker);
@@ -72,6 +74,17 @@
     if (a === 'cancel') void focusAfter(() => modalClose(labelId));
   }
 
+  // VR-B: a flip to read-only takes the form, footer and close question away; a lost focus goes to ×.
+  let wasEditable = untrack(() => editable);
+  $effect(() => {
+    const now = editable;
+    if (wasEditable && !now) {
+      untrack(() => footAsk.dismiss());
+      void repairFocus(modalClose(labelId));
+    }
+    wasEditable = now;
+  });
+
   function discard() {
     label = initial.label; info = initial.info; attempts = initial.attempts;
     attemptsError = null; labelError = null; globalError = null;
@@ -88,15 +101,12 @@
   async function save() {
     if (!dirty || saving) return;
     // The label is mandatory (user, 2026-10-08): it can't be cleared.
-    if (label.trim() === '') {
-      labelError = 'Label is required';
-      return;
-    }
+    const badLabel = label.trim() === '';
     const n = Number(attempts);
-    if (!(attempts.trim() !== '' && Number.isInteger(n) && n >= 1 && n <= 10)) {
-      attemptsError = 'Max quiz attempts must be a whole number between 1 and 10';
-      return;
-    }
+    const badAttempts = !(attempts.trim() !== '' && Number.isInteger(n) && n >= 1 && n <= 10);
+    if (badLabel) labelError = 'Label is required';
+    if (badAttempts) attemptsError = 'Max quiz attempts must be a whole number between 1 and 10';
+    if (badLabel || badAttempts) return;
     const body: Record<string, unknown> = {};
     if (label !== initial.label) body.label = label;
     if (info !== initial.info) body.info_md = info;
@@ -107,13 +117,18 @@
     try {
       await api.patch(`/api/versions/${savedVid}`, body);
     } catch (e) {
+      // VR-B: rights changed elsewhere; the reload turns the modal read-only.
+      if (e instanceof ApiError && (e.status === 403 || e.status === 409) && stillOnVid(savedVid)) {
+        void loadAdminTree(savedVid, { force: true });
+      }
+      const message = e instanceof ApiError ? (e.validationErrors()?.[0]?.msg ?? e.displayMessage) : failureText(e, 'Save failed');
       if (alive) {
         saving = false;
-        globalError = e instanceof ApiError ? (e.validationErrors()?.[0]?.msg ?? e.displayMessage) : 'Save failed';
-        // F4: Discard and × are disabled while saving; a focus the browser dropped there comes back.
-        void repairFocus(saveEl);
+        globalError = message;
+        // F4: a focus dropped while saving returns to Save, or to × once the footer is gone.
+        void repairFocus(saveEl, modalClose(labelId));
       } else {
-        pushToast('Save failed', 'error');
+        pushToast(message, 'error');
       }
       return;
     }
@@ -179,6 +194,10 @@
       {#if globalError}<p class="field-err" role="alert">{globalError}</p>{/if}
     </div>
   {:else}
+    {@const reason = metaReason(version)}
+    {#if reason}<p class="reason">{reason}</p>{/if}
+    <!-- A refused Save's message stays after the reload turns the modal read-only. -->
+    {#if globalError}<p class="field-err ro-err" role="alert">{globalError}</p>{/if}
     <dl class="ro">
       <dt>Label</dt><dd>{#if version.label}{version.label}{:else}<span class="not-set">Not set</span>{/if}</dd>
       <dt>Info</dt><dd class="pre">{#if version.info_md}{version.info_md}{:else}<span class="not-set">Not set</span>{/if}</dd>
@@ -217,6 +236,8 @@
   .field-err { margin: 0; font-size: 12px; color: var(--danger); }
   /* Fills the footer's left, pushing Discard / Save right (the item editor's slot). */
   .dirty { margin-right: auto; font-size: 12px; color: var(--muted); }
+  .reason { margin: 0 0 12px; font-size: 12.5px; color: var(--muted); }
+  .ro-err { margin: 0 0 12px; }
   .ro { display: grid; grid-template-columns: 132px 1fr; gap: 10px 12px; margin: 0; }
   .ro dt { font-size: 12.5px; color: var(--muted); }
   .ro dd { margin: 0; font-size: 13px; color: var(--text); overflow-wrap: anywhere; }

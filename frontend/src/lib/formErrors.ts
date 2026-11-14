@@ -16,9 +16,10 @@
 //     Backend's auto-derived-slug error messages reference both "slug" and
 //     "title"; the frontend always surfaces them on the title input because
 //     that's the field the admin actually edits.
-//   - All other errors: `globalMessage = displayMessage` (or 'Save failed').
+//   - All other errors: `globalMessage = displayMessage`; a fetch TypeError
+//     (offline) says OFFLINE_MESSAGE; anything else 'Create failed'.
 
-import { ApiError } from './api';
+import { ApiError, OFFLINE_MESSAGE } from './api';
 
 export type FieldErrors = Record<string, string>;
 export type CreateError = { fieldErrors: FieldErrors; globalMessage: string | null };
@@ -53,5 +54,11 @@ export function mapCreateError(e: unknown, knownFields: readonly string[]): Crea
     }
     return { fieldErrors: {}, globalMessage: e.displayMessage };
   }
-  return { fieldErrors: {}, globalMessage: 'Save failed' };
+  if (e instanceof TypeError) return { fieldErrors: {}, globalMessage: OFFLINE_MESSAGE };
+  return { fieldErrors: {}, globalMessage: 'Create failed' };
+}
+
+/** One line for a create that failed after its form closed: field messages, then the rest. */
+export function createErrorText(m: CreateError): string {
+  return [...Object.values(m.fieldErrors), m.globalMessage].filter(Boolean).join('; ') || 'Create failed';
 }
