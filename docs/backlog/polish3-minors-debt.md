@@ -20,7 +20,6 @@ Walked 2026-11-14 against main `1c904f9`: done and code-only items were dropped,
 
 ## Safari pass
 
-- **A root-relative content link is refused as a missing asset.** `[All courses](/courses)` in an item or a quiz prompt fails the preview and the save with "Referenced assets not found in version: /courses": `extract_asset_filenames` (`backend/mathion/markdown.py:244-255`) skips only `http://`, `https://`, `mailto:` and `#` targets and treats anything else as an asset filename. Older than Polish 3; C6 routes a pasted full address (`http://host/courses`) in-app, which works. Fix: skip targets that start with `/` too, and decide whether C6 should route them (Safari pass, step 5).
 - **The create rows' ✓ and × sit 3px above the field's centre.** `.add-row` aligns to the top (`BlockAccordion.svelte`, `VersionEditPage.svelte`), and its 24px IconButtons are bare flex items, so they sit flush with the 30px field's top edge; since D90 the rename row centres them on the field. "+ Add sequence" and a rename of the sequence above it therefore show ✓/× at slightly different heights. Fix: wrap the add rows' buttons in a 30px `display:flex; align-items:center` span as the rename row does, with gate rows (D90 r1, Fable M1).
 
 ## Whole-branch review (71dd8cc..8bc9497)

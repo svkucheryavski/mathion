@@ -535,6 +535,8 @@ else:
 # --space-2 below it, items are --space-3 apart (li+li ca5345b0 -> dc00e0ee);
 # the compact scale has its own pair (--space-1 / --space-2), written in full so
 # it beats the page pair. +3 rules (49 -> 52).
+# VR-B (2026-11-14): the four D85 selectors also match the renderer's ul/ol.loose
+# (:is(.loose,:has(>li>p))); declarations, hashes and order unchanged.
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
     ('', '.prose', '115422ed'),
@@ -542,8 +544,8 @@ WANT_FULL = [
     ('', '.prose :where(h1,h2,h3,h4,h5,h6)', '8f770fc2'),
     ('', '.prose :where(p,ul,ol,pre,blockquote,hr,div.math)', '13af6f60'),
     ('', '.prose :where(ul,ol)', '17bebee9'),
-    ('', '.prose :where(ul,ol):has(>li>p)>li+li', 'dc00e0ee'),
-    ('', '.prose :where(ul,ol):has(>li>p)>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)', 'd9f228dd'),
+    ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li+li', 'dc00e0ee'),
+    ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)', 'd9f228dd'),
     ('', '.prose a', '0be0b8c6'),
     ('', '.prose a:hover', '98e62ed4'),
     ('', '.prose blockquote', '5fe22df0'),
@@ -560,8 +562,8 @@ WANT_FULL = [
     ('', '.prose pre code', 'f4859c1f'),
     ('', '.prose ul>li', '20d7366f'),
     ('', '.prose.compact :where(p,ul,ol,pre,blockquote,hr,div.math)', 'e291811a'),
-    ('', '.prose.compact :where(ul,ol):has(>li>p)>li+li', 'ca5345b0'),
-    ('', '.prose.compact :where(ul,ol):has(>li>p)>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)', '4a789cab'),
+    ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li+li', 'ca5345b0'),
+    ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)', '4a789cab'),
     ('', '.prose.compact h1', 'a5b38d68'),
     ('', '.prose.compact h2', 'c2943c7b'),
     ('', '.prose>:first-child,.prose :where(li,blockquote)>:first-child', 'd462248a'),
@@ -601,10 +603,10 @@ WANT_ORDER = [
     ('', '.prose.compact :where(p,ul,ol,pre,blockquote,hr,div.math)'),
     ('', '.prose>:first-child,.prose :where(li,blockquote)>:first-child'),
     ('', '.prose>:last-child,.prose :where(li,blockquote)>:last-child'),
-    ('', '.prose :where(ul,ol):has(>li>p)>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)'),
-    ('', '.prose :where(ul,ol):has(>li>p)>li+li'),
-    ('', '.prose.compact :where(ul,ol):has(>li>p)>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)'),
-    ('', '.prose.compact :where(ul,ol):has(>li>p)>li+li'),
+    ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)'),
+    ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li+li'),
+    ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)'),
+    ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li+li'),
     ('', '.prose :where(ul,ol)'), ('', '.prose ul>li'), ('', '.prose ol>li'),
     ('', '.prose blockquote'), ('', '.prose hr'), ('', '.prose code'),
     ('', '.prose pre'), ('', '.prose pre code'), ('', '.prose a'), ('', '.prose a:hover'),

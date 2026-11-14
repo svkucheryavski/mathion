@@ -264,6 +264,25 @@ def test_render_bare_url_ends_at_a_character_urls_do_not_use(md, href, rest):
     "See https://x.org/__init__/https://y.org here.",
     # Past a closing delimiter the next token still decides: a letter glues.
     "See *https://x.org/caf*\u00e9 here.",
+    # VR-B: a trimmed "." before a seam still glues, as in object.__init__ above.
+    "See https://x.org.**Note** that",
+    # VR-B: past the empty token a ** closer leaves, math or code still glues.
+    "See **https://x.org**$x$ here.",
+    "See **https://x.org**`c` here.",
+    # VR-B: a closer whose opener is not right before the address is no boundary.
+    "See https://x.org/path)\u00e9/more here.",
+    "See https://x.org/a)b(c)\u00e9 here.",
+    "(see https://x.org)\u00e9",
+    "See (https://x.org/caf\u00e9) here.",
+    "See [https://b\u00fccher.de] here.",
+    # VR-B: the opener must partner the trimmed closer, not one the address keeps.
+    "(https://x.org/a)b)\u00e9 here",
+    "(https://x.org)(https://y.org)\u00e9",
+    "(see https://x.org.)__init__",
+    "https://x.org\u00e9/https://a.org/(x https://b.org)\u00e9 here",
+    "https://a.org/\u00e9/https://b.org/(x https://c.org)\u00e9",
+    "*https://x.org/caf*\u00e9/(x https://b.org)\u00e9 here",
+    "*https://x.org/caf*$x$",
 ])
 def test_render_address_of_non_url_characters_stays_plain(md):
     assert "<a" not in render_markdown(md)
@@ -339,3 +358,78 @@ def test_good_links_next_to_a_stripped_one_keep_their_href():
     assert result.count("<a ") == 2
     assert 'href="https://example.com"' in result and 'href="https://x.org"' in result
     assert "bad" in result
+
+
+def test_loose_list_gets_class():
+    # VR-B: a loose list is marked by the renderer, even with no paragraph in it.
+    loose = render_markdown("- ```\n  a\n  ```\n\n- ```\n  b\n  ```\n")
+    assert '<ul class="loose">' in loose
+    assert "<p>" not in loose
+    assert '<ol class="loose">' in render_markdown("1. ```\n   a\n   ```\n\n2. ```\n   b\n   ```\n")
+    assert '<ol start="3" class="loose">' in render_markdown("3. a\n\n4. b\n")
+    tight = render_markdown("- a\n- b\n\n1. c\n2. d\n")
+    assert "<ul>" in tight and "<ol>" in tight
+    assert "class=" not in tight
+
+
+def test_loose_is_the_only_class_kept_on_lists():
+    from mathion.markdown import _clean
+
+    out = _clean('<ul class="loose x"><li class="loose">a</li></ul><p class="loose">b</p>'
+                 '<ol class="tight"><li>c</li></ol><span class="math">m</span>')
+    assert out == ('<ul class="loose"><li>a</li></ul><p>b</p>'
+                   '<ol class=""><li>c</li></ol><span class="math">m</span>')
+
+
+@pytest.mark.parametrize("md", [
+    "(https://x.org)*note*",
+    "[https://x.org]*note*",
+    "(https://x.org.)__init__",
+    "(https://x.org)\u00e9",
+    # A stray closer earlier in the text does not cancel the address's opener.
+    "a) see (https://x.org)\u00e9",
+    ":-) (https://x.org)\u00e9",
+    "Options: a) foo (https://x.org)*note*",
+])
+def test_bare_url_trimmed_boundary_links(md):
+    # VR-B: a trimmed closer whose opener sits right before the address ends it, even at a seam.
+    result = render_markdown(md)
+    assert 'href="https://x.org"' in result
+    assert result.count("<a ") == 1
+
+
+def test_bare_url_opener_is_used_once():
+    # VR-B: the "(" closed after the first address does not open the second.
+    result = render_markdown("(https://a.org) https://b.org/p)\u00e9 here")
+    assert result.count("<a ") == 1
+    assert 'href="https://a.org"' in result
+
+
+@pytest.mark.parametrize("md, first", [
+    ("See https://a.org/(x https://b.org)\u00e9 here", "https://a.org/(x"),
+    ("(see https://a.org/x)y and https://b.org)\u00e9 here", "https://a.org/x)y"),
+    ("See https://a.org/[x https://b.org]\u00e9 here", "https://a.org/%5Bx"),
+])
+def test_bare_url_bracket_inside_an_address_is_not_prose(md, first):
+    # VR-B: a "(" in the first address does not open the second.
+    result = render_markdown(md)
+    assert result.count("<a ") == 1
+    assert f'href="{first}"' in result
+
+
+def test_bare_url_wrapped_keeps_its_inner_pair():
+    result = render_markdown("(https://x.org/(a))\u00e9 here")
+    assert 'href="https://x.org/(a)"' in result
+    assert result.count("<a ") == 1
+
+
+def test_bare_url_skips_empty_text_token():
+    # VR-B: a spent delimiter's empty text token does not end the look-past.
+    assert "<a" not in render_markdown("*https://x.org/caf*__é__")
+
+
+def test_bare_url_entity_ends_link():
+    # VR-B (call 11): an &amp; ends the link, as in markdown-it's own linkify.
+    result = render_markdown("https://x.org/?a=1&amp;b=2")
+    assert 'href="https://x.org/?a=1"' in result
+    assert result.count("<a ") == 1

@@ -25,8 +25,8 @@
    first/last-child rules follow at (0,2,0) and win by order. Headings take
    em margins (D63), so the space follows each heading's own size and the same
    rule serves both scales; a paragraph's bottom margin collapses into the
-   heading's top margin, so the larger one sets the gap. A loose list (items
-   wrapped in <p>) groups by item, closer inside an item than between items (D85):
+   heading's top margin, so the larger one sets the gap. A loose list (class
+   "loose", or items wrapped in <p>) groups by item, closer inside an item than between items (D85):
    its rules come after the first/last-child pair and use :not(:last-child), so
    the last-child zeroing stays intact; the compact pair is written in full so it
    beats the page pair. */
@@ -37,13 +37,13 @@
 .prose :where(li, blockquote) > :first-child { margin-top: 0; }
 .prose > :last-child,
 .prose :where(li, blockquote) > :last-child { margin-bottom: 0; }
-/* A loose list (items wrapped in <p>) groups by item (D85): every block in an item but the last
-   is --space-2 above the next (a heading keeps its em margins), items are --space-3 apart;
-   compact: --space-1 / --space-2. */
-.prose :where(ul, ol):has(> li > p) > li > :where(p, ul, ol, pre, blockquote, hr, div.math):not(:last-child) { margin-bottom: var(--space-2); }
-.prose :where(ul, ol):has(> li > p) > li + li { margin-top: var(--space-3); }
-.prose.compact :where(ul, ol):has(> li > p) > li > :where(p, ul, ol, pre, blockquote, hr, div.math):not(:last-child) { margin-bottom: var(--space-1); }
-.prose.compact :where(ul, ol):has(> li > p) > li + li { margin-top: var(--space-2); }
+/* A loose list (class "loose" from the renderer, or items wrapped in <p> in older stored HTML)
+   groups by item (D85, VR-B): every block in an item but the last is --space-2 above the next
+   (a heading keeps its em margins), items are --space-3 apart; compact: --space-1 / --space-2. */
+.prose :where(ul, ol):is(.loose, :has(> li > p)) > li > :where(p, ul, ol, pre, blockquote, hr, div.math):not(:last-child) { margin-bottom: var(--space-2); }
+.prose :where(ul, ol):is(.loose, :has(> li > p)) > li + li { margin-top: var(--space-3); }
+.prose.compact :where(ul, ol):is(.loose, :has(> li > p)) > li > :where(p, ul, ol, pre, blockquote, hr, div.math):not(:last-child) { margin-bottom: var(--space-1); }
+.prose.compact :where(ul, ol):is(.loose, :has(> li > p)) > li + li { margin-top: var(--space-2); }
 
 /* Lists and quotes. reset.css zeroes list padding and markers. */
 .prose :where(ul, ol) { padding-inline-start: var(--space-4); }

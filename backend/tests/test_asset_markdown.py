@@ -84,3 +84,33 @@ def test_resolve_does_not_overwrite_inside_text():
     html = '<p>The file is <code>data.png</code></p>'
     result = resolve_asset_urls(html, 42, {"data.png"})
     assert result == html
+
+
+def test_root_relative_link_is_not_an_asset():
+    # VR-B: a root-relative link is a page; a protocol-relative target is another site.
+    md = "[All courses](/courses) and [x](//host/a) and ![p](//host/p.png)"
+    assert extract_asset_filenames(md) == set()
+
+
+def test_root_relative_image_and_file_paths_stay_assets():
+    # VR-B: a root-relative image and an /assets/ or /api/ link are still checked.
+    md = "![p](/logo.png) [f](/assets/7/x.pdf) [d](/api/runs/3/assets/x.csv)"
+    assert extract_asset_filenames(md) == {"/logo.png", "/assets/7/x.pdf", "/api/runs/3/assets/x.csv"}
+
+
+def test_file_paths_need_the_exact_prefix():
+    # VR-B: only /assets/... and /api/... links are file paths; these are pages.
+    assert extract_asset_filenames("[a](/assets) [b](/api) [c](/Assets/x)") == set()
+
+
+def test_angle_bracket_target_is_unwrapped():
+    # VR-B: <...> is markdown's wrapper, not part of the target.
+    md = "[x](<foo.pdf>) [a](</courses>) ![p](<https://x.org/p.png>)"
+    assert extract_asset_filenames(md) == {"foo.pdf"}
+    html = resolve_asset_urls(render_markdown("[x](<foo.pdf>)"), 7, {"foo.pdf"})
+    assert 'href="/assets/7/foo.pdf"' in html
+
+
+def test_backslash_escapes_are_removed():
+    # VR-B: markdown drops a backslash before punctuation in a link target.
+    assert extract_asset_filenames("[x](my\\_file.pdf) [a](\\/courses)") == {"my_file.pdf"}

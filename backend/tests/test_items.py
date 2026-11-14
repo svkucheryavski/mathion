@@ -827,3 +827,21 @@ def test_api_static_page_bare_url_is_stored_as_a_link(admin_client):
     assert response.status_code == 201
     assert 'href="https://example.org/notes"' in response.json()["content_html"]
 
+
+def test_item_with_root_relative_link_saves_and_publishes(admin_client):
+    # VR-B: a link to a Mathion page is not checked as an asset on preview, save, update or publish.
+    seq, version = _setup_sequence(admin_client)
+    body = "See [All courses](/courses)."
+    preview = admin_client.post(f"/api/versions/{version['id']}/render", json={"content_md": body})
+    assert preview.status_code == 200, preview.text
+    assert 'href="/courses"' in preview.json()["html"]
+    created = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Intro", "type": "static_page", "content_md": body,
+    })
+    assert created.status_code == 201, created.text
+    assert 'href="/courses"' in created.json()["content_html"]
+    updated = admin_client.patch(f"/api/items/{created.json()['id']}", json={"content_md": body + " [Teaching](/teaching)"})
+    assert updated.status_code == 200, updated.text
+    assert 'href="/teaching"' in updated.json()["content_html"]
+    published = admin_client.post(f"/api/versions/{version['id']}/publish")
+    assert published.status_code == 200, published.text
