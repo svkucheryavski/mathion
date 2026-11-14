@@ -1,8 +1,6 @@
 # Polish 3 (the reviewers' minors) — deferred minors
 
-Minors the review lanes raised and the user did not take into the slice, by task.
-Spec: `docs/superpowers/specs/2026-10-31-visual-refresh-polish3-minors-design.md`.
-Plan: `docs/superpowers/plans/2026-10-31-visual-refresh-polish3-minors.md`.
+Walked 2026-11-14 against main `1c904f9`: done and code-only items were dropped, screen-reader items moved to `beta-voiceover-pass.md`, by-hand browser checks to `beta-browser-pass.md`. What is left goes into one fix round; **[open]** marks an item that needs the user's call first.
 
 ## Task 1 — each item its own instance, the attempt count, quiz drafts
 
@@ -13,19 +11,10 @@ Plan: `docs/superpowers/plans/2026-10-31-visual-refresh-polish3-minors.md`.
   (both lanes, r1; Opus r2)
 - **Two submits answered out of order can write the lower attempt count.** `recordQuizAttempt` takes the response's count as is, and after Try again QuizItem's `lastAttempt` memo can hide a newer, higher store count, so the attempts line shows one more than is left. Since D89 the late, lower write also stores that attempt's score and answers, so a return shows the older result. Both need the double in-flight submit above. Fix: take the larger count in both places, and skip the whole store write when the count is lower (Opus r1 M1, r3 m1; D89 r2 Opus m2).
 - **A submit refused with 409** ("max attempts reached", e.g. another tab used the attempts) keeps its draft, and the page warns on a reload or tab close (a confirmed reload then drops it). A 409 updates no store count, so Next/Previous or a sequence move restores the draft and reopens the form. The draft goes only when the course state reloads (the course page loads it again) and the remount auto-reveals, or on a full page reload. Fix: clear the draft on that 409 and record the exhausted count (Opus r1 M3; corrected by both lanes, r2).
-- **The gate row for C13 counts the text `{#key item.id}` only.** A copy in a comment, or a key that wraps part of the branch chain, would still pass. An AST or markup-scanner row would pin the key as the outermost block (Opus r1 M5).
-- `setAnswer` snapshots `answers` and `setDraft` snapshots again: one snapshot is enough (Fable r1).
-- `currentCourse.recordQuizAttempt.test.ts`: `warn.mockRestore()` is not in a `finally` or `afterEach`, so a failing field assertion would leak the `console.warn` spy into the next test (harmless pass-through; both lanes, r5).
 
 ## Task 2 — in-app links and the course crumb
 
 - **A content link to another sequence with a non-member `#item=` opens an empty player** ("Item 0 of 1", no item body). This includes an empty `#item=`. Before C6 the link reloaded the app, and a fresh load resolved to an item. On the reused player instance, the re-resolve skips any address with `#item=`, because `SequencePlayer.svelte.test.ts` pins that a stale non-member hash shows no item (flatIndex −1). It only happens after an authoring mistake. Fix: drop the hash clause from the re-resolve and re-decide that pin (both lanes, r3).
-
-## Task 3 — the focus primitives
-
-- **"Focus is nowhere" has two definitions.** The ⌘S clause (ItemEditorModal and the three level-3 quiz modals) counts `<body>` and `document.documentElement`. Modal's key backstop, `repairFocus` and FocusTrap's `opener()` count only null and `<body>`. `documentElement` as `activeElement` is practically unreachable, so this is harmless today. Fix: one shared `focusIsLoose()` helper (both lanes, r1).
-- **The press record only knows `button, a[href], [role=button]`.** A modal opened from a `[role=switch]`, `<summary>` or a checkbox/radio by mouse in Safari would still return focus to `<body>`. No current F13 opener is one; all are `<button>`s. Fix: widen the selector when such an opener appears (Fable r1).
-- `FocusTrap.svelte.test.ts`: "a keydown after the press clears the record" and "a press on a non-control resets the record" assert `.not.toBe(b)`; `toBe(document.body)` would also catch focus going somewhere else. "focus already on the opener is kept as is" focuses a different control than the pressed one; rename it to "focus already on a real control is kept" (Opus r3).
 
 ## Task 4 — the focus sites
 
@@ -36,19 +25,12 @@ Plan: `docs/superpowers/plans/2026-10-31-visual-refresh-polish3-minors.md`.
 ## Task 7 — teacher screens
 
 - **Focus in the "used by" panel drops to `<body>` when only its own entry goes.** A reload that removes the focused mini-project's line from an open panel, while the chip keeps other uses, unmounts the focused Edit button; the D87 repair runs only when the chip drops to 0. Older than Polish 3. Fix: in the same `$effect.pre`, repair a focused panel button whose mini-project left the list to the panel's next Edit, else the chip (Fable r2 m1).
-- **An empty load error leaves Progress and Submissions blank, with no Retry.** When the dashboard GET fails with no `detail` and an empty status text (HTTP/2 through a proxy 502, a plain-text 500), `ApiError.message` is `''`, so `error = ''` is falsy: no ErrorState, no Skeleton, no data, and the Refresh control is never drawn. Older than Polish 3 (`LoadingPlaceholder` was blank the same way). Fix: a non-empty fallback in `api.ts` (~:60) or in the tabs' catch, with a test that a `''` message still shows the error with Retry (Opus r3 m1).
 
 ## Task 8 — behaviour
 
 - **The Teaching crumb on a run page drops the status filter.** `TeachingCrumbs.svelte:15` links to the bare `/teaching`, so a teacher who filtered to Upcoming or Finished and goes back through the crumb lands on Active; the browser's Back keeps `?status=` (C18). Fix: carry the last `?status=` into the crumb's link, or have the crumb go back in history when the previous entry is `/teaching?…` (Opus r1 m4).
 - **A failed list reload leaves focus on `<body>`.** When a row action's reload fails, the page ErrorState replaces the frame; a focus parked on the `<h1>` (R54) or in the create form goes with it. Older than C8. Fix: in VersionsPage's error effect, repair a free focus to the ErrorState's "Back to courses" (Fable r2 M2).
-- **A list error refuses the navigation whose question it withdraws.** The author clicked a link, the navigation question opened, and the reload failed: the form and its input are dropped, but that link resolves `false` (R55), so the author lands on "Couldn't load" and clicks again. A one-request window. Fix, if wanted: let the error effect settle an open navigation question as confirmed (Opus r2 m4).
-- **The offline wording is one string by copy only.** `OFFLINE_MESSAGE` lives in `lib/api.ts`, but `lib/assets.ts:57, 99`, `lib/runAssets.ts:47, 93` and `lib/evaluations.ts:64` throw the same text as literals, so a wording change must touch six places. Fix: import the constant when those files are next touched (Fable r3 nit).
-
-## Task 9 — backend
-
-- **Submission and evaluation PDFs carry no `nosniff`.** C12 covered the two asset endpoints; `api/submissions.py` and `api/evaluations.py` serve their PDFs through `FileResponse` without `X-Content-Type-Options: nosniff`. The files are PDF-checked on upload, so the risk is small. Fix: the same `headers=` line on both (Fable r1).
-- **An explicit `null` still misbehaves on a few other Update models.** C10 covered runs, questions and options. Probed live (Opus r3): Course `name: null` is a 500 (NOT NULL); Group `name: null` and `is_disabled: null` both answer a misleading 409 "Group name already exists in this run" (`api/groups.py:58-61` catches every `IntegrityError`); MiniProject `assignment_md: null` is a 500 (NOT NULL at autoflush). Already fine: Block / Sequence / Item `title` 422 in their handlers (`api/blocks.py:147`, `api/items.py:135`); `User.full_name` is nullable (200). Read but not probed: Course `description`, Block `info`, Evaluation `result` (Fable r3). Fix: `_reject_null` on each field whose column is NOT NULL (Course `description` and Block `info` may be empty, but not null), with a test each.
+- **[open]** **A list error refuses the navigation whose question it withdraws.** The author clicked a link, the navigation question opened, and the reload failed: the form and its input are dropped, but that link resolves `false` (R55), so the author lands on "Couldn't load" and clicks again. A one-request window. Fix, if wanted: let the error effect settle an open navigation question as confirmed (Opus r2 m4).
 
 ## Safari pass
 
@@ -58,12 +40,8 @@ Plan: `docs/superpowers/plans/2026-10-31-visual-refresh-polish3-minors.md`.
 
 ## Whole-branch review (71dd8cc..8bc9497)
 
-- **Three offline sentences on one run page.** An offline title or date save on the Overview shows InlineName's "Could not save." (`InlineName.svelte:58-60`), while the groups switch and Publish/Unpublish toast `OFFLINE_MESSAGE`, and Delete says "Could not delete the run.". Spec rev 12 ("every offline write says the same thing") and its InlineName bullet disagree. Fix: InlineName maps a `TypeError` to `OFFLINE_MESSAGE` (Opus m1, Fable m2).
+- **[open]** **Three offline sentences on one run page.** An offline title or date save on the Overview shows InlineName's "Could not save." (`InlineName.svelte:58-60`), while the groups switch and Publish/Unpublish toast `OFFLINE_MESSAGE`, and Delete says "Could not delete the run.". Spec rev 12 ("every offline write says the same thing") and its InlineName bullet disagree. Fix: InlineName maps a `TypeError` to `OFFLINE_MESSAGE` (Opus m1, Fable m2).
 - **A failed Refresh shows the browser's raw text.** On Progress and Submissions (`RunProgressTab.svelte:63, 83`, `RunSubmissionTab.svelte:68, 88`) a failed Refresh shows "Failed to fetch" / "Load failed"; since C17 keeps the table, it sits above the still-visible rows. Older than Polish 3. Fix: map a non-API error to "Check your connection and try again." as CourseList does (Opus m2).
 - **An offline Roster or Teachers add paints the e-mail field red.** `RunRosterTab.svelte:681` and `RunTeachersTab.svelte:97` set `aria-invalid` whenever `addError` is set, so `OFFLINE_MESSAGE` shows under a red field, the look C3 removed elsewhere for network failures. Fix: mark the field invalid only for an `ApiError` about the address (Fable m1).
-- **Two wordings for the date rule.** `NewRunModal.svelte:22` says "End date must be on or after start date"; the Overview's 422 says "End date must be on or after the start date (01 Sep 2026). …" (Opus m3, nit).
-- **A routed same-path content link without `#item=` drops the hash.** `SequencePlayer.svelte:74-82`: the player stays on its item, but the address loses `#item=…`, so a reload opens the sequence's first item (Fable m3).
-- **`href="#"` in authored content appends a bare `#`** to the player address through `linkRouter` (spec rev 6 accepts it) (Fable m4).
+- **[open]** **Two wordings for the date rule.** `NewRunModal.svelte:22` says "End date must be on or after start date"; the Overview's 422 says "End date must be on or after the start date (01 Sep 2026). …" (Opus m3, nit).
 - **Modal focuses its panel on every loose keydown, modifier-only included** (`Modal.svelte:95`). Cosmetic: a focus ring can flash on Shift or ⌘ alone (Fable m5).
-- **The run-date 422 names the stored opposite date on a run the old check left inverted** (`api/runs.py:107`), so the message can name a date that is itself wrong. Only legacy rows (Fable m6, note).
-
