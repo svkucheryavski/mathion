@@ -201,6 +201,21 @@ describe('Choice answers — inline text (5d T5)', () => {
     expect(optWrites(s)).toEqual([]);
   });
 
+  it('an open row takes the tight padding, off while an error line shows (call 9)', async () => {
+    const s = single();
+    await renderQuiz(s);
+    const r = () => rows(cards()[0])[0];
+    expect(r().classList.contains('editing')).toBe(false);
+    textBtn(r()).click();
+    await settle();
+    expect(r().classList.contains('editing')).toBe(true);
+    typeInto(field(cards()[0]), ' ');
+    press(field(cards()[0]), 'Enter');
+    await settle();
+    expect(text(cards()[0].querySelector('.inline-err'))).toBe('Enter the answer text');
+    expect(r().classList.contains('editing')).toBe(false);
+  });
+
   it('a failed save keeps the field with its text and error, and re-fetches the answers', async () => {
     const s = single();
     s.failNext('PATCH', /\/api\/options\/11$/, 422, 'Too long');
@@ -578,6 +593,24 @@ describe('Choice answers — version states (5d T5)', () => {
     await settle();
     expect(optWrites(s)).toEqual([]);
     expect(document.activeElement).toBe(marker(rows(cards()[0])[1]));
+  });
+
+  it('marking C with the key question open refocuses it before asking D10', async () => {
+    const s = single();
+    await renderQuiz(s, { version: { state: 'published' } });
+    marker(rows(cards()[0])[1]).click();
+    await settle();
+    expect(keyLine(cards()[0])).not.toBeNull();
+    textBtn(rows(cards()[0])[0]).click();
+    await settle();
+    typeInto(field(cards()[0]), 'changed');
+    marker(rows(cards()[0])[2]).click();
+    await settle();
+    // R53: the open key question comes back; no D10 for an action that cannot run.
+    expect(rowAsk(cards()[0])).toBeNull();
+    expect(document.activeElement).toBe(btnOf(keyLine(cards()[0]), 'cancel'));
+    expect(field(cards()[0]).value).toBe('changed');
+    expect(optWrites(s)).toEqual([]);
   });
 
   it('#2 R49: the answer it asks about leaves the list (a reload) — the question goes; focus the author moved stays', async () => {

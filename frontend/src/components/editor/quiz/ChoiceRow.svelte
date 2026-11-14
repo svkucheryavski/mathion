@@ -24,7 +24,8 @@
   const name = $derived(cutName(opt.text));
 </script>
 
-<li class="ans-row" class:ok={opt.is_correct} data-a-id={opt.id}>
+<!-- editing: the tight padding, off while an error line shows under the field. -->
+<li class="ans-row" class:ok={opt.is_correct} class:editing={!!edit && !edit.error} data-a-id={opt.id}>
   {#if canText}
     <button
       type="button"
@@ -68,7 +69,9 @@
 </li>
 
 <style>
-  .ans-row { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: var(--radius); font-size: 13.5px; color: var(--text-2); }
+  /* Call 9: one height closed and open; min-height = the 30px field + 1px each side. */
+  .ans-row { display: flex; align-items: center; gap: 8px; min-height: calc(var(--control-h) + 2px); padding: 4px 8px; border-radius: var(--radius); font-size: 13.5px; color: var(--text-2); }
+  .ans-row.editing { padding-block: 1px; }
   .ans-row:not(.ok):hover { background: var(--focus-row); }
   .ans-row.ok { background: var(--status-accepted-bg); color: var(--status-accepted-fg); }
   .ans-mark {

@@ -64,7 +64,8 @@
   // ---- Polish 1: the body-top row (#19) and the page question while this is
   //      the top modal (R46). Without a footer (a quiz, a read-only item) the
   //      page question asks in the body-top row too; R53 keeps the two apart.
-  const { own: bodyAsk, page, here: pageHere } = useModalAsk(labelId);
+  // A quiz edit's own question counts too (R53); quizEdits is read only once mounted.
+  const { own: bodyAsk, page, here: pageHere } = useModalAsk(labelId, () => quizEdits?.question ?? null);
   const hasFoot = $derived(canEditText && !isQuiz);
   const asking = $derived(bodyAsk.open || pageHere());
   // Memoised per vid (as ItemEditPage did): bodies compare it by identity.
@@ -112,10 +113,11 @@
   let shownTitle = $state(untrack(() => item.title));   // the last server echo
   let titleEdit = $state<InlineEdit<string> | null>(null);
   let titleEditBtn = $state<HTMLButtonElement>();
-  // A tree reload (renamed elsewhere) shows through while no edit is open.
+  // A tree reload (renamed elsewhere) shows through; while the edit is open it waits for the close.
+  let pendingTitle: string | null = null;
   $effect(() => {
     const t = item.title;
-    untrack(() => { if (!titleEdit) shownTitle = t; });
+    untrack(() => { if (titleEdit) pendingTitle = t; else shownTitle = t; });
   });
 
   async function openTitle() {
@@ -137,7 +139,7 @@
       send: async (v) => {
         try {
           const echo = await renameItem(item.id, v.trim());
-          if (alive && stillOnVid(savedVid)) shownTitle = echo.title;
+          if (alive && stillOnVid(savedVid)) { shownTitle = echo.title; pendingTitle = null; }
           if (stillOnVid(savedVid)) void loadAdminTree(savedVid, { force: true });
         } catch (e) {
           if (e instanceof ApiError && (e.status === 403 || e.status === 409) && stillOnVid(savedVid)) {
@@ -148,6 +150,7 @@
       },
       close: (refocus) => {
         titleEdit = null;
+        if (pendingTitle !== null) { shownTitle = pendingTitle; pendingTitle = null; }
         if (!refocus) return;
         // Back to ✎ — or to × when a 403/409 reload removed it.
         void tick().then(() => {

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
-  QuizServer, q, mkVersion, renderQuiz, cleanup, settle, panel, byName, typeInto, press, live, toastTexts, text, cards,
+  QuizServer, q, opt, mkVersion, renderQuiz, cleanup, settle, panel, byName, typeInto, press, live, toastTexts, text, cards,
 } from './support/quizHarness.svelte';
 import { versionPermissions } from '../lib/versionPermissions';
 import { DISCARD_PROMPT, FORBIDDEN_TITLE } from '../lib/quizEdits.svelte';
@@ -255,6 +255,18 @@ describe('Quiz header (5d T4)', () => {
     expect(document.querySelectorAll('section.modal-panel').length).toBe(2);   // the question text editor
   });
 
+  it('a tree reload while the title is open is applied on Cancel', async () => {
+    const r = await renderQuiz(new QuizServer([q({ id: 1 })]));
+    await openTitle();
+    typeInto(field(), 'Mine');
+    r.props.modal.item = { ...r.props.modal.item, title: 'Renamed elsewhere' };
+    await settle();
+    expect(field().value).toBe('Mine');
+    press(field(), 'Escape');
+    await settle();
+    expect(text(h2())).toBe('Renamed elsewhere');
+  });
+
   it('R53: while the title\'s D10 question asks, a navigation is refused and focus returns to it', async () => {
     await renderQuiz(new QuizServer([q({ id: 1 })]), { page: true });
     await openTitle();
@@ -268,5 +280,39 @@ describe('Quiz header (5d T4)', () => {
     expect(location.pathname).toBe(before);
     expect(document.activeElement).toBe(topAsk()!.querySelector('button.cancel'));
     expect(text(topAsk()!.querySelector('.warning'))).toBe(DISCARD_PROMPT);
+  });
+
+  it('a saved title wins over a tree reload that landed while it was open', async () => {
+    const r = await renderQuiz(new QuizServer([q({ id: 1 })]));
+    await openTitle();
+    r.props.modal.item = { ...r.props.modal.item, title: 'Renamed elsewhere' };
+    await settle();
+    typeInto(field(), 'Mine');
+    press(field(), 'Enter');
+    await settle();
+    expect(h2().querySelector('input')).toBeNull();
+    expect(text(h2())).toBe('Mine');
+  });
+
+  it('× with an inline question open focuses that question', async () => {
+    // The page routes × and Back through the same guard as a navigation.
+    const s = new QuizServer([q({ id: 1 })], [opt(11, 1, 'A', true), opt(12, 1, 'B')]);
+    await renderQuiz(s, { page: true });
+    const rowsOf = () => [...cards()[0].querySelectorAll<HTMLElement>('li.ans-row')];
+    rowsOf()[0].querySelector<HTMLButtonElement>('button.ans-edit')!.click();
+    await settle();
+    typeInto(cards()[0].querySelector<HTMLInputElement>('input.inline-input')!, 'changed');
+    rowsOf()[1].querySelector<HTMLButtonElement>('button.ans-edit')!.click();
+    await settle();
+    const d10 = () => cards()[0].querySelector<HTMLElement>('.inline-row .inline-confirm');
+    expect(d10()).not.toBeNull();
+    const before = location.pathname;
+    closeX().focus();
+    await navigate('/inline-refused');
+    await settle();
+    // Only one question on screen (R53): no page question in the body-top row.
+    expect(location.pathname).toBe(before);
+    expect(topAsk()).toBeNull();
+    expect(document.activeElement).toBe(d10()!.querySelector('button.cancel'));
   });
 });

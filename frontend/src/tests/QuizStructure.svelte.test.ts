@@ -6,6 +6,7 @@ import {
 import { DISCARD_PROMPT, FORBIDDEN_TITLE, WAIT_TITLE } from '../lib/quizEdits.svelte';
 import { versionPermissions } from '../lib/versionPermissions';
 import { DISCARD } from '../lib/editorReasons';
+import { toasts } from '../stores/toasts.svelte';
 
 afterEach(cleanup);
 
@@ -282,6 +283,19 @@ describe('Moving and deleting questions (5d T8)', () => {
     expect(cards().map((c) => c.dataset.qId)).toEqual(['1', '2']);
   });
 
+  it('the resync failure toast is info', async () => {
+    const s = two();
+    await renderQuiz(s);
+    s.failNext('POST', /\/questions\/reorder$/, 500, 'Nope');
+    s.failNext('GET', /\/items\/7\/questions$/, 500, 'Down');
+    byName(cards()[0], 'Move question 1 down')!.click();
+    await settle();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([
+      ['Nope', 'error'],
+      ["Couldn't reload the questions — reload the page to see the latest.", 'info'],
+    ]);
+  });
+
   it('a failed move keeps focus on the moved card\'s arrows (both directions)', async () => {
     for (const [label, after] of [['Move question 2 up', 'Move question 2 up'], ['Move question 1 down', 'Move question 1 down']] as const) {
       const s = two();
@@ -527,6 +541,107 @@ describe('Moving and deleting questions (5d T8)', () => {
     await settle();
     expect(document.activeElement).toBe(byName(cards()[0], 'Delete question 1'));
     expect(s.writes()).toEqual([]);
+  });
+
+  it('Delete after a dirty edit opened elsewhere asks D10', async () => {
+    const s = two();
+    await renderQuiz(s);
+    byName(cards()[1], 'Delete question 2')!.click();
+    await settle();
+    rows(cards()[0])[0].querySelector<HTMLButtonElement>('button.ans-edit')!.click();
+    await settle();
+    const f = cards()[0].querySelector<HTMLInputElement>('input.inline-input')!;
+    typeInto(f, 'changed');
+    cardAsk(cards()[1])!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    // One question on screen: the delete question gives way to D10 at the edit.
+    expect(cardAsk(cards()[1])).toBeNull();
+    const d10 = cards()[0].querySelector<HTMLElement>('.inline-row .inline-confirm')!;
+    expect(text(d10.querySelector('.warning'))).toBe(DISCARD_PROMPT);
+    expect(document.activeElement).toBe(d10.querySelector('button.cancel'));
+    expect(s.writes()).toEqual([]);
+    d10.querySelector<HTMLButtonElement>('button.cancel')!.click();
+    await settle();
+    expect(document.activeElement).toBe(f);
+    expect(f.value).toBe('changed');
+    expect(cards().length).toBe(2);
+    expect(s.writes()).toEqual([]);
+  });
+
+  it('Delete after a dirty edit opened elsewhere: Discard drops the edit and the delete runs', async () => {
+    const s = two();
+    await renderQuiz(s);
+    byName(cards()[1], 'Delete question 2')!.click();
+    await settle();
+    rows(cards()[0])[0].querySelector<HTMLButtonElement>('button.ans-edit')!.click();
+    await settle();
+    typeInto(cards()[0].querySelector<HTMLInputElement>('input.inline-input')!, 'changed');
+    cardAsk(cards()[1])!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    cards()[0].querySelector<HTMLButtonElement>('.inline-row .inline-confirm button.confirm')!.click();
+    await settle();
+    await settle();
+    expect(cards()[0].querySelector('input.inline-input')).toBeNull();
+    expect(s.writes().map((c) => [c.method, c.path])).toEqual([['DELETE', '/api/questions/2']]);
+    expect(cards().map((c) => c.dataset.qId)).toEqual(['1']);
+    expect(document.activeElement).toBe(byName(cards()[0], 'Edit question 1'));
+  });
+
+  it('Delete after a D10 Discard that fails returns focus to the trash', async () => {
+    const s = two();
+    await renderQuiz(s);
+    byName(cards()[1], 'Delete question 2')!.click();
+    await settle();
+    rows(cards()[0])[0].querySelector<HTMLButtonElement>('button.ans-edit')!.click();
+    await settle();
+    typeInto(cards()[0].querySelector<HTMLInputElement>('input.inline-input')!, 'changed');
+    const hold = s.hold('DELETE', /\/questions\/2$/);
+    cardAsk(cards()[1])!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    cards()[0].querySelector<HTMLButtonElement>('.inline-row .inline-confirm button.confirm')!.click();
+    await settle();
+    // Never <body> while the delete runs: the card's trash.
+    expect(document.activeElement).toBe(byName(cards()[1], 'Delete question 2'));
+    hold.fail(500, 'Nope');
+    await settle();
+    await settle();
+    expect(cards().length).toBe(2);
+    expect(document.activeElement).toBe(byName(cards()[1], 'Delete question 2'));
+  });
+
+  it('Delete while the edit already asks D10 gives way to that question (R53)', async () => {
+    const s = two();
+    await renderQuiz(s);
+    byName(cards()[1], 'Delete question 2')!.click();
+    await settle();
+    rows(cards()[0])[0].querySelector<HTMLButtonElement>('button.ans-edit')!.click();
+    await settle();
+    typeInto(cards()[0].querySelector<HTMLInputElement>('input.inline-input')!, 'changed');
+    byName(cards()[0], 'Edit question 1')!.click();
+    await settle();
+    const d10 = () => cards()[0].querySelector<HTMLElement>('.inline-row .inline-confirm');
+    expect(d10()).not.toBeNull();
+    cardAsk(cards()[1])!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    // The question already open wins: the delete goes, focus returns to it.
+    expect(cardAsk(cards()[1])).toBeNull();
+    expect(document.activeElement).toBe(d10()!.querySelector('button.cancel'));
+    expect(s.writes()).toEqual([]);
+    expect(cards().length).toBe(2);
+  });
+
+  it('Delete after a clean edit opened elsewhere closes that edit', async () => {
+    const s = two();
+    await renderQuiz(s);
+    byName(cards()[1], 'Delete question 2')!.click();
+    await settle();
+    rows(cards()[0])[0].querySelector<HTMLButtonElement>('button.ans-edit')!.click();
+    await settle();
+    cardAsk(cards()[1])!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    await settle();
+    expect(s.writes().map((c) => [c.method, c.path])).toEqual([['DELETE', '/api/questions/2']]);
+    expect(cards()[0].querySelector('input.inline-input')).toBeNull();
   });
 
   it('structure controls are absent when published, archived and disabled', async () => {

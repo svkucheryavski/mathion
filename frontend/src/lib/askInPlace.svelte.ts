@@ -232,12 +232,15 @@ export class PageAsk {
 /** A modal that asks: its own question (`own`: footer or body-top), and the page
  *  question while it is the top host (`here()`). Call during component init:
  *  it registers on mount and dismisses its own question on unmount. */
-export function useModalAsk(labelId: string): { own: InPlaceAsk; page: PageAsk | null; here: () => boolean } {
+export function useModalAsk(
+  labelId: string, inner: () => AskView | null = () => null,
+): { own: InPlaceAsk; page: PageAsk | null; here: () => boolean } {
   const own = new InPlaceAsk();
   const page = getContext<PageAsk | undefined>(PAGE_ASK_KEY) ?? null;
+  // `inner`: a question inside the body (a quiz edit's) also counts as the modal's own (R53).
   const entry: AskHost = {
-    ownOpen: () => own.open,
-    focusOwnCancel: () => own.focusCancel(),
+    ownOpen: () => own.open || !!inner()?.open,
+    focusOwnCancel: () => { if (own.open) own.focusCancel(); else inner()?.focusCancel(); },
     closeEl: () => modalClose(labelId),
   };
   $effect(() => {

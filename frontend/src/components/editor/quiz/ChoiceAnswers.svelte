@@ -208,6 +208,7 @@
   }
   async function mark(o: AuthoringOption) {
     if (!markable(o.id)) return;
+    if (ctx.published && markAsk.open) { markAsk.focusCancel(); return; }   // R53: one question here
     if (!(await ctx.edits.request())) return;                 // D10 first (#14) …
     if (!markable(o.id)) return;
     // The marker, else (disabled by another write) the §Focus fallback: never <body>.
@@ -218,7 +219,7 @@
       await setCorrect(o.id);
       return;
     }
-    if (markAsk.open) { markAsk.focusCancel(); return; }    // R53: one question here
+    if (markAsk.open) { markAsk.focusCancel(); return; }    // R53: opened during D10
     markingId = o.id;
     const kq = keyAsk();
     const a = await markAsk.ask(kq);                         // … then the key question (#2)

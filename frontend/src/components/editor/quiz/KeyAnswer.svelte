@@ -49,6 +49,10 @@
   // The error marks the field it is about: Decimals for DEC_MSG, else Answer.
   const decBad = $derived(numEdit?.error === DEC_MSG);
   const decimalsOk = (d: string) => /^\d{1,2}$/.test(d.trim()) && Number(d) <= 10;
+  const numSame = (a: string, b: string) => {
+    const x = validateNumericAnswer(a), y = validateNumericAnswer(b);
+    return x.ok && y.ok ? x.canonical === y.canonical : a.trim() === b.trim();
+  };
 
   // Back to ✎, or the §Focus fallback when a 403/409 reload removed it.
   async function refocusPencil() {
@@ -85,7 +89,8 @@
       id: `key-${q.id}`,
       edits: ctx.edits,
       initial: { v: stored == null ? '' : formatNumber(stored), d: String(storedD ?? 0) },
-      same: (a, b) => a.v.trim() === b.v.trim() && a.d.trim() === b.d.trim(),
+      // Numeric: "5.0" over 5, or "02" over 2, is no change.
+      same: (a, b) => numSame(a.v, b.v) && (a.d.trim() === b.d.trim() || (decimalsOk(a.d) && decimalsOk(b.d) && Number(a.d) === Number(b.d))),
       // Unchanged against the STORED key: "5.0" equals 5; an unset precision is always a change.
       unchanged: (x) => sameNumber(x.v, stored) && storedD != null && decimalsOk(x.d) && Number(x.d) === storedD,
       check: (x) => {
