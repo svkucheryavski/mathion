@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3029
+EXPECTED_CHECKS=3030
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -1534,13 +1534,15 @@ const SIG = {
   "SequenceLink.svelte":
     ["a:row[class=\"row\" href aria-label onclick]",
      "span:seq-glyph[class=\"seq-glyph\" aria-hidden]", "ItemMark:[type=\"sequence\"]",
-     "span:row-title[class=\"row-title\"]", "ProgressMeter:[{p}]"],
+     // VR-B (user, after call 3): no meter for a sequence with no items.
+     "span:row-title[class=\"row-title\"]", "#if:", "ProgressMeter:[{p}]"],
   "ProgressMeter.svelte":
     ["span:progress[class=\"progress\" aria-hidden]",
      "span:track[class=\"track\"]", "span:fill.class:done[class=\"fill\"]",
      "span:pct.mono[class=\"pct mono\"]",
      "span:quiz-chip.class:on-strip.class:none.class:empty[class=\"quiz-chip\" aria-hidden]", "#if:",
-     "svg:[width=\"10\" height=\"10\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+     // VR-B (call 2): the check only above 0%.
+     "#if:", "svg:[width=\"10\" height=\"10\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:"],
   "CourseProgress.svelte":
     ["div:summary[class=\"summary\"]", "p:sl[class=\"sl\" aria-hidden]",
@@ -1574,7 +1576,7 @@ const SIG = {
      // D93: the bottom bar -- round Previous, the item count, round Next (or
      // Finish in its pointer-events wrapper); icon-only, the glyph hidden.
      "footer:player-nav[class=\"player-nav\"]",
-     "button:nav-btn.prev[type=\"button\" class=\"nav-btn prev\" onclick disabled={flatIndex <= 0} aria-label title]",
+     "button:nav-btn.prev[type=\"button\" class=\"nav-btn prev\" onclick disabled={flatIndex < 0} aria-disabled={flatIndex === 0} aria-label title]",
      "svg:[viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"10,3.5 5.5,8 10,12.5\"]", "span:counter[class=\"counter\"]", "#if:",
      "span:finish[class=\"finish\"]", "Button:[variant=\"primary\" onclick]", "#else:",
@@ -1586,18 +1588,18 @@ const SIG = {
      "article:quiz[class=\"quiz\"]", "h2:", "#each:", "#if:", "hr:q-sep[class=\"q-sep\"]",
      "div:q-block[class=\"q-block\"]",
      "span:q-counter.mono[class=\"q-counter mono\"]", "#if:",
-     "SingleChoice:[question={q} value={valueFor(q.id)} onanswer disabled={locked} correctOptionIds={r?.correct_option_ids ?? null}]",
+     "SingleChoice:[question={q} value={valueFor(q.id)} onanswer disabled={locked || inflight !== null} correctOptionIds={r?.correct_option_ids ?? null}]",
      "#else:", "#if:",
-     "MultiChoice:[question={q} value={valueFor(q.id)} onanswer disabled={locked} correctOptionIds={r?.correct_option_ids ?? null}]",
+     "MultiChoice:[question={q} value={valueFor(q.id)} onanswer disabled={locked || inflight !== null} correctOptionIds={r?.correct_option_ids ?? null}]",
      "#else:", "#if:",
-     "Numeric:[question={q} value={valueFor(q.id)} onanswer disabled={locked} correctValue={r?.correct_numeric ?? null}]",
+     "Numeric:[question={q} value={valueFor(q.id)} onanswer disabled={locked || inflight !== null} correctValue={r?.correct_numeric ?? null}]",
      "#else:", "#if:",
-     "Text:[question={q} value={valueFor(q.id)} onanswer disabled={locked} correctValue={r?.correct_text ?? null}]",
+     "Text:[question={q} value={valueFor(q.id)} onanswer disabled={locked || inflight !== null} correctValue={r?.correct_text ?? null}]",
      "#if:", "div:exp.prose.compact[class=\"exp prose compact\"]", "@html:r.explanation_html", "#if:",
      "div:submit-row[class=\"submit-row\"]",
      "Button:[onclick loading={inflight !== null} disabled={!allAnswered || inflight !== null} title]",
      "#if:", "p:hint[class=\"hint\"]", "span:mono[class=\"mono\"]", "#else:", "#if:",
-     "div:result[class=\"result\"]", "p:", "strong:", "span:mono[class=\"mono\"]",
+     "div:result[class=\"result\" tabindex=\"-1\"]", "p:", "strong:", "span:mono[class=\"mono\"]",
      "p:meta[class=\"meta\"]", "span:mono[class=\"mono\"]", "span:mono[class=\"mono\"]", "#if:",
      "Button:[onclick]", "#else:", "#if:", "Button:[variant=\"secondary\" onclick]"],
   // The two choice components differ in their CONTROL markup exactly as they
@@ -1680,7 +1682,8 @@ const SIG = {
     ["section:block.class:collapsed[class=\"block\"]", "header:", "h2:",
      "button:acc[id class=\"acc\" aria-expanded aria-controls aria-label onclick]",
      "span:num[class=\"num\" aria-hidden]", "span:acc-title[class=\"acc-title\"]",
-     "ProgressMeter:[{p} onStrip={expanded}]",
+     // VR-B (call 3): no meter for a block with no items.
+     "#if:", "ProgressMeter:[{p} onStrip={expanded}]",
      "svg:chev.class:collapsed[class=\"chev\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"4.6,6.6 8,10 11.4,6.6\"]", "div:[id role=\"region\" aria-labelledby]",
      "ul:", "#each:", "li:",
@@ -2852,6 +2855,10 @@ WANT = [
     ('.nav-btn%s:disabled' % W,
      'background:var(--disabled-bg);border-color:var(--border-faint);color:var(--faint);'
      'box-shadow:none;cursor:not-allowed'),
+    # VR-B: ← on the first item is blocked (aria-disabled) and looks disabled.
+    ('.nav-btn[aria-disabled=true]' + W,
+     'background:var(--disabled-bg);border-color:var(--border-faint);color:var(--faint);'
+     'box-shadow:none;cursor:not-allowed'),
 ]
 
 got = sorted((' >> '.join(a), s) for s, b, a in ALL if h in s)
@@ -3636,7 +3643,7 @@ fi
 # toggle), the course meter (white chip, onStrip), then ONE borderless chevron
 # IconButton that collapses or expands every block.
 if [[ $(print -r -- "$cv" | grep -cF 'onclick={() => setAll(!anyOpen)} />') -eq 1 ]] \
-   && print -r -- "$cv" | perl -0ne 'exit(m{<div class="cv-strip">\s*<p class="sr-only">Your progress: \{progressPhrase\(courseP\)\}\.</p>\s*<span class="cv-meter"><ProgressMeter p=\{courseP\} onStrip /></span>\s*<IconButton borderless glyph=\{anyOpen \? .chevron. : .chevron-right.\} title=\{anyOpen \? .Collapse all. : .Expand all.\} onclick=\{\(\) => setAll\(!anyOpen\)\} />} ? 0 : 1)'; then
+   && print -r -- "$cv" | perl -0ne 'exit(m{<div class="cv-strip">\s*\{#if courseP\.total > 0\}\s*<p class="sr-only">Your progress: \{progressPhrase\(courseP\)\}\.</p>\s*<span class="cv-meter"><ProgressMeter p=\{courseP\} onStrip /></span>\s*\{/if\}\s*<IconButton borderless glyph=\{anyOpen \? .chevron. : .chevron-right.\} title=\{anyOpen \? .Collapse all. : .Expand all.\} onclick=\{\(\) => setAll\(!anyOpen\)\} />} ? 0 : 1)'; then
   echo "PASS  CourseView phone row is the course meter plus one chevron IconButton (D78)"
 else
   echo "FAIL  CourseView phone row is not the pinned meter + chevron IconButton (D78)"; fail=1
@@ -3645,7 +3652,7 @@ fi
 # below the deadlines card: the deadlines block closes, then the row in its own
 # `{#if courseP}`, then the blocks ($cv has its comments stripped, so the
 # comment above the row needs no allowance).
-if print -r -- "$cv" | perl -0ne 'exit(m{<CourseDeadlines [^\n]*/></div>\s*\{/if\}\s*\{#if courseP\}\s*<div class="cv-strip">(?:(?!\{/if\}).)*\{/if\}\s*<div class="cv-blocks">}s ? 0 : 1)'; then
+if print -r -- "$cv" | perl -0ne 'exit(m{<CourseDeadlines [^\n]*/></div>\s*\{/if\}\s*\{#if courseP\}\s*<div class="cv-strip">(?:(?!</div>).)*</div>\s*\{/if\}\s*<div class="cv-blocks">}s ? 0 : 1)'; then
   echo "PASS  CourseView phone row follows the deadlines card, right before the blocks (D92)"
 else
   echo "FAIL  CourseView phone row is not between the deadlines card and the blocks (D92)"; fail=1
@@ -5753,6 +5760,9 @@ if [[ -n $REPLY ]]; then
   d '\.cv-body' '' 'display:grid' 'grid-template-columns:minmax\(0,1fr\) 300px' 'grid-template-rows:auto auto auto 1fr' 'gap:14px' 'align-items:start'
   chk "\.cv-prog\.${H},\.cv-dl\.${H},\.cv-tch\.${H},\.cv-body\.${H}>\.info:where\(\.${H}\)" 'grid-column:2'
   d '\.cv-blocks' '' 'grid-column:1' 'grid-row:1 / span 4' 'min-width:0'
+  # VR-B (call 3): nothing for the right column (no items, deadlines, teachers
+  # or info), so the blocks take the full width.
+  chk "\.cv-body\.${H}:not\(:has\(> ?\.cv-prog, ?> ?\.cv-dl, ?> ?\.cv-tch, ?> ?\.info\)\)" 'grid-template-columns:minmax\(0,1fr\)'
   chk "\.cv-body\.${H}>\.info:where\(\.${H}\)" 'margin:0'
   none "CourseView: no grid areas or .has-info left (D80)" "grid-template-areas:\"blocks|\.has-info\.${H}"
   chk "@media \(max-width: ?880px\)\{\.cv-body\.${H}" 'display:flex' 'flex-direction:column' 'align-items:stretch'

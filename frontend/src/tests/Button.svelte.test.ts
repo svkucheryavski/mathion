@@ -51,6 +51,15 @@ describe('Button', () => {
     expect(onclick).toHaveBeenCalledTimes(1);
   });
 
+  // VR-B: QuizItem finds its own quiz from the click's currentTarget, so the
+  // click event reaches onclick unchanged.
+  it('passes the click event, with the button as its currentTarget, to onclick', () => {
+    let target: EventTarget | null = null;
+    const btn = render({ onclick: (e: MouseEvent) => { target = e.currentTarget; } });
+    btn.click();
+    expect(target).toBe(btn);
+  });
+
   it('defaults to the primary variant', () => {
     const btn = render({});
     expect(btn.getAttribute('data-variant')).toBe('primary');

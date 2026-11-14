@@ -1,7 +1,3 @@
-export function formatProgress(covered: number, total: number): string {
-  return `${covered} / ${total}`;
-}
-
 // 1024-based, like the upload limits beside them (the user's call,
 // 2026-11-12): a file of exactly 20 MB (20 × 1024 × 1024 bytes), which a
 // 20 MB limit takes, no longer reads "21.0 MB" beside it. 1 decimal place for

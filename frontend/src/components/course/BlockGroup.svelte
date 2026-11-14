@@ -41,7 +41,8 @@
   // It starts with the visible "1. Title", so voice control still matches it.
   // The number is in the name although `.num` is aria-hidden (Opus lane): the
   // blocks are sibling sections, not a list, so nothing else states it.
-  const label = $derived(`${n}. ${block.title}, ${progressPhrase(p)}`);
+  // VR-B (call 3): a block with no items has no totals to state or show.
+  const label = $derived(p.total > 0 ? `${n}. ${block.title}, ${progressPhrase(p)}` : `${n}. ${block.title}`);
 </script>
 
 <section class="block" class:collapsed={!expanded}>
@@ -68,7 +69,7 @@
         <!-- The strip's white chip fill only on an OPEN header: on a closed
              card's near-white --surface-ground (D76) a white chip vanishes, so a
              closed header takes the row chip's --surface-2 instead. -->
-        <ProgressMeter {p} onStrip={expanded} />
+        {#if p.total > 0}<ProgressMeter {p} onStrip={expanded} />{/if}
         <!-- One down-chevron, rotated when collapsed. A STATIC icon would drop the
              only visible collapsed cue, because `{expanded ? '▾' : '▸'}` encoded
              the state as direction and `aria-expanded` alone is invisible.

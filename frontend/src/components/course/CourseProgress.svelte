@@ -16,8 +16,8 @@
   </div>
   {#if p.hasQuiz}
     <p class="sq" aria-hidden="true">
-      <!-- No check beside a dash (ProgressMeter's "Quiz –" carries none either). -->
-      {#if p.quizPct !== null}
+      <!-- No check beside a dash or 0% (VR-B call 2; ProgressMeter matches). -->
+      {#if p.quizPct !== null && p.quizPct > 0}
         <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,8.6 6.4,12 13,4.6" /></svg>
       {/if}
       Quiz score <b>{p.quizPct === null ? '–' : `${p.quizPct}%`}</b>

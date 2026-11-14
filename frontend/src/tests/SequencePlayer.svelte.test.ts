@@ -11,9 +11,9 @@ vi.mock('../stores/currentCourse.svelte', async (importOriginal) => {
   return { ...real, loadCourse: vi.fn().mockResolvedValue(undefined) };
 });
 
-import { __test__setSlots, loadCourse } from '../stores/currentCourse.svelte';
+import { __test__setSlots, loadCourse, currentCourse } from '../stores/currentCourse.svelte';
 import { ApiError } from '../lib/api';
-import { currentRoute } from '../lib/router.svelte';
+import { currentRoute, registerNavigationGuard, __resetGuardsForTests } from '../lib/router.svelte';
 import SequencePlayer from '../pages/SequencePlayer.svelte';
 import type { BlockContent, Item } from '../lib/types';
 import { expectRoutesInApp } from './support/routeClickProbe';
@@ -124,6 +124,25 @@ describe('SequencePlayer breadcrumb (T1)', () => {
     expect(currentRoute.hash).toBe('#item=1003');
     expect(host.querySelector('.counter')!.textContent).toBe('Item 1 of 1');
   });
+
+  for (const hash of ['#item=1001', '#item=']) {
+    it(`a move to another sequence with ${hash === '#item=' ? 'an empty' : 'a non-member'} #item= opens an item of that sequence`, async () => {
+      seed();
+      seedRoute(100, '#item=1001');
+      host = document.createElement('div');
+      document.body.appendChild(host);
+      const props = $state({ courseSlug: SLUG, sequenceId: '100' });
+      component = mount(SequencePlayer, { target: host, props });
+      flushSync();
+      seedRoute(200, hash);
+      props.sequenceId = '200';
+      flushSync();
+      await new Promise((r) => setTimeout(r, 0));
+      flushSync();
+      expect(currentRoute.hash).toBe('#item=1003');
+      expect(host.querySelector('.counter')!.textContent).toBe('Item 1 of 1');
+    });
+  }
 
   it('C6: a #heading link in the item text leaves the player on its item', async () => {
     const teardown = installLinkRouter();
@@ -251,7 +270,9 @@ describe('SequencePlayer footer (T1 / D4; D93 the bottom bar)', () => {
     seedRoute(100, '#item=1001'); // flatIndex 0
     const el = render('100');
 
-    expect(prevBtn(el).disabled).toBe(true);
+    // VR-B: blocked, not disabled, so focus can stay on it.
+    expect(prevBtn(el).disabled).toBe(false);
+    expect(prevBtn(el).getAttribute('aria-disabled')).toBe('true');
     expect(nextBtn(el).disabled).toBe(false);
     // D4 title reasons: disabled Previous at the first item carries the "first item"
     // reason (NOT "Loading…"); its name stays "Previous item".
@@ -300,20 +321,37 @@ describe('SequencePlayer footer (T1 / D4; D93 the bottom bar)', () => {
     expect(nextBtn(el).getAttribute('aria-label')).toBe('Next: Vector notation');
   });
 
-  it('flatIndex < 0 (unresolved item): Next disabled and named "Next item", both arrows titled "Loading…"', () => {
+  // VR-B (polish3 T2): a non-member hash on the reused player re-resolves to
+  // an item of this sequence (the old pin showed no item, "Item 0 of N").
+  it('a non-member hash on the same sequence re-resolves to one of its items', () => {
     seed();
     seedRoute(100, '#item=1001');
-    const el = render('100'); // currentItemId 1001, flatIndex 0
-
-    // point the hash at a non-member id → currentItem null, flatIndex -1
+    const el = render('100');
     currentRoute.hash = '#item=999999';
     flushSync();
-
-    expect(nextBtn(el).disabled).toBe(true);
-    expect(nextBtn(el).getAttribute('aria-label')).toBe('Next item');
-    expect(nextBtn(el).getAttribute('title')).toBe('Loading…');
-    expect(prevBtn(el).getAttribute('title')).toBe('Loading…');
+    expect(currentRoute.hash).toBe('#item=1001');
+    expect(el.querySelector('.counter')!.textContent).toBe('Item 1 of 2');
+    expect(nextBtn(el).getAttribute('aria-label')).toBe('Next: Vector notation');
   });
+
+  // VR-B (r11 M2): a #item= with no item id names nothing; the address bar
+  // gets the item the player shows.
+  for (const hash of ['#item=', '#item=abc']) {
+    it(`a ${hash === '#item=' ? 'bare' : 'malformed'} #item= on the same sequence is replaced by the item shown`, () => {
+      seed();
+      seedRoute(100, '#item=1001');
+      const el = render('100');
+      // Replaced, not pushed: Back must not land on the bad address again.
+      const push = vi.spyOn(history, 'pushState');
+      currentRoute.hash = hash;
+      flushSync();
+      expect(currentRoute.hash).toBe('#item=1001');
+      const pushes = push.mock.calls.length;
+      push.mockRestore();
+      expect(pushes).toBe(0);
+      expect(el.querySelector('.counter')!.textContent).toBe('Item 1 of 2');
+    });
+  }
 
   it('on the course\'s last item the bar holds Previous, the count and Finish, and no Next arrow', () => {
     seed();
@@ -385,5 +423,218 @@ describe('SequencePlayer 9d states (Slice-4 T2)', () => {
     const err = el.querySelector('.error-state.page');
     expect(err!.querySelector('h1.title')!.textContent).toBe("Couldn't load");
     expect(err!.querySelector('.message')!.textContent).toBe('Server exploded.');
+  });
+});
+
+// VR-B (polish3 Safari): keyboard focus stays in the bar at both ends of the course.
+describe('SequencePlayer focus at the course ends', () => {
+  const prev = (el: HTMLElement) => el.querySelector('footer.player-nav button.nav-btn.prev') as HTMLButtonElement;
+  const next = (el: HTMLElement) => el.querySelector('footer.player-nav button.nav-btn.next') as HTMLButtonElement;
+  const settle = async () => { await new Promise((r) => setTimeout(r, 0)); flushSync(); };
+
+  it('← onto the first item keeps focus on ←, which is blocked, not disabled', async () => {
+    seed();
+    seedRoute(100, '#item=1002');
+    const el = render('100');
+    prev(el).focus();
+    prev(el).click();
+    await settle();
+    expect(currentRoute.hash).toBe('#item=1001');
+    expect(prev(el).disabled).toBe(false);
+    expect(prev(el).getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(prev(el));
+    prev(el).click();
+    await settle();
+    expect(currentRoute.hash).toBe('#item=1001');
+  });
+
+  it('→ onto the last item moves focus to Finish', async () => {
+    seed((b) => [{ ...b[0], sequences: [b[0].sequences[0]] }]);
+    seedRoute(100, '#item=1001');
+    const el = render('100');
+    next(el).focus();
+    next(el).click();
+    await settle();
+    expect(currentRoute.hash).toBe('#item=1002');
+    expect(document.activeElement).toBe(el.querySelector('footer.player-nav .finish button'));
+  });
+
+  it('→ onto the last item in the next sequence moves focus to Finish', async () => {
+    seed();
+    seedRoute(100, '#item=1002');
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    // As App does: the sequence comes from the route, which changes path and
+    // hash in one step.
+    const props = { courseSlug: SLUG, get sequenceId() { return currentRoute.path.split('/seq/')[1]; } };
+    component = mount(SequencePlayer, { target: host, props });
+    flushSync();
+    next(host).focus();
+    next(host).click();
+    await settle();
+    expect(currentRoute.hash).toBe('#item=1003');
+    expect(document.activeElement).toBe(host.querySelector('footer.player-nav .finish button'));
+  });
+
+  it('the Finish repair never moves focus the student put elsewhere', async () => {
+    seed((b) => [{ ...b[0], sequences: [b[0].sequences[0]] }]);
+    seedRoute(100, '#item=1001');
+    const el = render('100');
+    const outside = document.createElement('input');
+    document.body.appendChild(outside);
+    next(el).click();
+    outside.focus();
+    await settle();
+    expect(currentRoute.hash).toBe('#item=1002');
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+
+  // Review r2: two → presses for the same last item; the first is overtaken
+  // and resolves false, which must not drop the second one's repair.
+  it('a second → to the last item keeps its repair when the first is overtaken', async () => {
+    seed();
+    seedRoute(100, '#item=1002');
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const props = { courseSlug: SLUG, get sequenceId() { return currentRoute.path.split('/seq/')[1]; } };
+    component = mount(SequencePlayer, { target: host, props });
+    flushSync();
+    const answers: ((v: boolean) => void)[] = [];
+    const off = registerNavigationGuard(() => new Promise<boolean>((r) => { answers.push(r); }));
+    next(host).focus();
+    next(host).click();
+    next(host).click();
+    await settle();
+    expect(answers.length).toBe(2);
+    answers[0](true);
+    await settle();
+    answers[1](true);
+    await settle();
+    off();
+    __resetGuardsForTests();
+    expect(currentRoute.hash).toBe('#item=1003');
+    expect(document.activeElement).toBe(host.querySelector('footer.player-nav .finish button'));
+  });
+
+  // Review r3: a strip click on the current item does not move, so the →
+  // move still lands; the strip re-renders under focus, which drops to
+  // <body>, and the repair still owes it to Finish.
+  it('a strip click on the current item during a pending → keeps the Finish repair', async () => {
+    seed();
+    seedRoute(100, '#item=1002');
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const props = { courseSlug: SLUG, get sequenceId() { return currentRoute.path.split('/seq/')[1]; } };
+    component = mount(SequencePlayer, { target: host, props });
+    flushSync();
+    const answers: ((v: boolean) => void)[] = [];
+    const off = registerNavigationGuard(() => new Promise<boolean>((r) => { answers.push(r); }));
+    next(host).click();
+    await settle();
+    const current = host.querySelectorAll<HTMLButtonElement>('nav.strip button')[1];
+    current.focus();
+    current.click();
+    await settle();
+    answers[0](true);
+    await settle();
+    off();
+    __resetGuardsForTests();
+    expect(currentRoute.hash).toBe('#item=1003');
+    expect(document.activeElement).toBe(host.querySelector('footer.player-nav .finish button'));
+  });
+
+  // Review r2: the repair looks in this player's own footer.
+  it("the Finish repair focuses this player's Finish, not another in the page", async () => {
+    const decoy = document.createElement('footer');
+    decoy.className = 'player-nav';
+    decoy.innerHTML = '<span class="finish"><button type="button">Decoy</button></span>';
+    document.body.prepend(decoy);
+    seed((b) => [{ ...b[0], sequences: [b[0].sequences[0]] }]);
+    seedRoute(100, '#item=1001');
+    const el = render('100');
+    next(el).focus();
+    next(el).click();
+    await settle();
+    expect(document.activeElement).toBe(el.querySelector('footer.player-nav .finish button'));
+    decoy.remove();
+  });
+
+  it('a refused move to the last item leaves no repair behind for a later arrival', async () => {
+    seed();
+    seedRoute(100, '#item=1002');
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const props = $state({ courseSlug: SLUG, sequenceId: '100' });
+    component = mount(SequencePlayer, { target: host, props });
+    flushSync();
+    const off = registerNavigationGuard(() => false);
+    next(host).click();
+    await settle();
+    off();
+    __resetGuardsForTests();
+    expect(currentRoute.hash).toBe('#item=1002');
+    // Later, a content link brings the student to that last item.
+    (document.activeElement as HTMLElement | null)?.blur();
+    seedRoute(200, '#item=1003');
+    props.sequenceId = '200';
+    flushSync();
+    await settle();
+    expect(host.querySelector('footer.player-nav .finish button')).not.toBeNull();
+    expect(document.activeElement).toBe(document.body);
+  });
+});
+
+// Review r1: the player's own course load and the visit record.
+describe('SequencePlayer load and visits', () => {
+  const settle = async () => { await new Promise((r) => setTimeout(r, 0)); flushSync(); };
+
+  it('an aborted course load leaves loading to the new one', async () => {
+    let resolveA!: () => void;
+    vi.mocked(loadCourse)
+      .mockReturnValueOnce(new Promise<void>((r) => { resolveA = r; }))
+      .mockReturnValueOnce(new Promise<void>(() => {}));
+    seedRoute(100, '#item=1001');
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const props = $state({ courseSlug: 'other-a', sequenceId: '100' });
+    component = mount(SequencePlayer, { target: host, props });
+    flushSync();
+    props.courseSlug = 'other-b';
+    flushSync();
+    resolveA();
+    await settle();
+    expect(host.querySelector('.skeleton')).not.toBeNull();
+  });
+
+  it('an aborted course load that fails leaves no error once the new one loads', async () => {
+    let rejectA!: (e: unknown) => void;
+    vi.mocked(loadCourse)
+      .mockReturnValueOnce(new Promise<void>((_, rej) => { rejectA = rej; }))
+      .mockReturnValueOnce(new Promise<void>(() => {}));
+    seedRoute(100, '#item=1001');
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const props = $state({ courseSlug: 'other-a', sequenceId: '100' });
+    component = mount(SequencePlayer, { target: host, props });
+    flushSync();
+    props.courseSlug = SLUG;
+    flushSync();
+    rejectA(new ApiError(500, 'Server exploded.'));
+    await settle();
+    seed();
+    flushSync();
+    await settle();
+    expect(host.querySelector('.error-state')).toBeNull();
+    expect(host.querySelector('footer.player-nav')).not.toBeNull();
+  });
+
+  it('a non-member hash records no visit for that id', () => {
+    seed();
+    seedRoute(100, '#item=1001');
+    render('100');
+    currentRoute.hash = '#item=999999';
+    flushSync();
+    expect(currentCourse.value!.state.items['999999']).toBeUndefined();
   });
 });

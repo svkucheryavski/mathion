@@ -22,7 +22,8 @@
 <!-- Always rendered, even with no quizzes, so the columns line up row to row. -->
 <span class="quiz-chip" class:on-strip={onStrip} class:none={p.hasQuiz && p.quizPct === null} class:empty={!p.hasQuiz} aria-hidden="true">
   {#if p.quizPct !== null}
-    <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,8.6 6.4,12 13,4.6" /></svg>
+    <!-- VR-B (call 2): no check beside 0%, where it could read as "passed". -->
+    {#if p.quizPct > 0}<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,8.6 6.4,12 13,4.6" /></svg>{/if}
     Quiz {p.quizPct}%
   {:else if p.hasQuiz}
     Quiz –

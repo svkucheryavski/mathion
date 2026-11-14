@@ -33,21 +33,27 @@
   $effect(() => {
     loading = true;
     error = null;
+    // VR-B: a load the page has moved on from (a new slug) leaves `open` and
+    // `loading` to the new one.
+    let cancelled = false;
     loadCourse(courseSlug)
       .then(() => {
+        if (cancelled) return;
         const c = currentCourse.value;
         if (!c) return;
         const current = firstUnfinishedBlockId(c.blocks, c.state);
         open = Object.fromEntries(c.blocks.map((b) => [b.id, b.id === current]));
       })
       .catch((e: unknown) => {
+        if (cancelled) return;
         if (e instanceof ApiError) {
           error = { status: e.status, message: e.displayMessage };
         } else {
           error = { status: 500, message: 'Could not load course.' };
         }
       })
-      .finally(() => { loading = false; });
+      .finally(() => { if (!cancelled) loading = false; });
+    return () => { cancelled = true; };
   });
 
   // The course-wide totals for the summary card: every item in every block.
@@ -108,7 +114,7 @@
            the blocks come before a long info on a phone, and the reading order
            is the order on screen. -->
       <div class="cv-body">
-        {#if courseP}
+        {#if courseP && courseP.total > 0}
           <div class="cv-prog"><CourseProgress p={courseP} /></div>
         {/if}
         {#if deadlines.length > 0}
@@ -123,8 +129,11 @@
                the card does. D92 (user): it sits on the blocks it collapses,
                below the deadlines card. -->
           <div class="cv-strip">
-            <p class="sr-only">Your progress: {progressPhrase(courseP)}.</p>
-            <span class="cv-meter"><ProgressMeter p={courseP} onStrip /></span>
+            <!-- VR-B (call 3): nothing to measure, so only the chevron. -->
+            {#if courseP.total > 0}
+              <p class="sr-only">Your progress: {progressPhrase(courseP)}.</p>
+              <span class="cv-meter"><ProgressMeter p={courseP} onStrip /></span>
+            {/if}
             <IconButton borderless glyph={anyOpen ? 'chevron' : 'chevron-right'} title={anyOpen ? 'Collapse all' : 'Expand all'} onclick={() => setAll(!anyOpen)} />
           </div>
         {/if}
@@ -176,6 +185,9 @@
   .cv-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: auto auto auto 1fr; gap: 14px; align-items: start; }
   .cv-prog, .cv-dl, .cv-tch, .cv-body > .info { grid-column: 2; }
   .cv-blocks { grid-column: 1; grid-row: 1 / span 4; min-width: 0; }
+  /* VR-B (call 3): a course with no items, no deadlines, no teachers and no
+     info has nothing for the right column, so the blocks take the full width. */
+  .cv-body:not(:has(> .cv-prog, > .cv-dl, > .cv-tch, > .info)) { grid-template-columns: minmax(0, 1fr); }
   .cv-body > .info { margin: 0; }
   /* Right-aligned over the blocks' chevron column, at the top of the left column. */
   .all-toggle { display: flex; justify-content: flex-end; margin: 0 0 4px; }

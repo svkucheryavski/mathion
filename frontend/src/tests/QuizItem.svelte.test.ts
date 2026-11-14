@@ -9,10 +9,11 @@ vi.mock('../stores/currentCourse.svelte', async (importOriginal) => {
   return { ...real, recordQuizAttempt: vi.fn(real.recordQuizAttempt) };
 });
 
-import { __test__setSlots, recordQuizAttempt } from '../stores/currentCourse.svelte';
+import { __test__setSlots, clearCourse, currentCourse, recordQuizAttempt } from '../stores/currentCourse.svelte';
 import { session } from '../stores/session.svelte';
-import { getDraft, clearAllDrafts } from '../stores/quizDrafts.svelte';
-import { api } from '../lib/api';
+import { getDraft, clearAllDrafts, hasUnsavedDrafts } from '../stores/quizDrafts.svelte';
+import { api, ApiError } from '../lib/api';
+import { toasts, clearToasts } from '../stores/toasts.svelte';
 import QuizItem from '../components/items/QuizItem.svelte';
 import type {
   ItemStateEntry,
@@ -795,5 +796,774 @@ describe('QuizItem across a remount (C13, D83)', () => {
     await settle();
     expect(getDraft(1)).toBeUndefined();
     expect([...host.querySelectorAll<HTMLInputElement>('input[type="radio"]')].some((r) => r.checked)).toBe(true);
+  });
+});
+
+// VR-B (polish3 T1): a submit in flight. The draft goes when the request is
+// sent and comes back if it fails; the questions are locked meanwhile.
+describe('QuizItem submit in flight (VR backlog)', () => {
+  const student = {
+    id: 7, email: 's@x.test', full_name: null, is_superuser: false, is_disabled: false,
+    photo_url: null, has_course_admin: false, has_run_teacher: false,
+  };
+  function remount(item: QuizItemType): void {
+    if (component) { unmount(component); component = null; }
+    if (host?.parentNode) host.parentNode.removeChild(host);
+    render(item);
+  }
+  function radios(): HTMLInputElement[] {
+    return [...host.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+  }
+  function held(): { resolve: (r: QuizSubmitResponse) => void; reject: (e: unknown) => void } {
+    let resolve!: (r: QuizSubmitResponse) => void;
+    let reject!: (e: unknown) => void;
+    postSpy.mockImplementationOnce(() => new Promise<QuizSubmitResponse>((res, rej) => { resolve = res; reject = rej; }));
+    return { resolve: (r) => resolve(r), reject: (e) => reject(e) };
+  }
+
+  for (const [label, err] of [
+    ['a network failure', new TypeError('Failed to fetch')],
+    ['a 500', new ApiError(500, 'boom')],
+    ['a 422', new ApiError(422, 'Bad answers')],
+  ] as const) {
+    it(`clears the draft when sent and restores it after ${label}`, async () => {
+      session.user = student;
+      seed({ 1: 0 });
+      render(quiz(1, 'Quiz A', 1));
+      answerAll();
+      const h = held();
+      submitButton().click();
+      flushSync();
+      expect(getDraft(1)).toBeUndefined();
+      h.reject(err);
+      await settle();
+      expect(getDraft(1)).toEqual({ '101': [1011] });
+      expect(hasUnsavedDrafts()).toBe(true);
+      expect(radios().every((r) => !r.disabled)).toBe(true);
+      expect(radios().filter((r) => r.checked).map((r) => r.value)).toEqual(['1011']);
+    });
+  }
+
+  // VR-B (user, r9): Submit is disabled in flight, so a keyboard user's
+  // focus falls to <body>. Browsers drop it; jsdom keeps it on a disabled
+  // button and will not blur it, so the test parks it on a removed element.
+  // A failure gives it back to Submit, never stealing it from elsewhere.
+  it('a failed send gives focus back to Submit when it fell to the page', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().focus();
+    submitButton().click();
+    flushSync();
+    const parked = document.createElement('input');
+    document.body.appendChild(parked);
+    parked.focus();
+    parked.remove();
+    expect(document.activeElement).toBe(document.body);
+    h.reject(new TypeError('Failed to fetch'));
+    await settle();
+    expect(document.activeElement).toBe(submitButton());
+  });
+
+  // VR-B (user, r10): on success the Submit row gives way to the result card;
+  // focus that fell to the page goes to the card's button.
+  for (const [label, res, name] of [
+    ['with attempts left', { item_id: 1, attempt_count: 1, can_retry: true }, 'Try again'],
+    ['on the last attempt', { item_id: 1, attempt_count: 3, can_retry: false }, 'Show correct answers'],
+  ] as const) {
+    it(`a successful send ${label} gives focus to the card's button when it fell to the page`, async () => {
+      session.user = student;
+      seed({ 1: res.attempt_count - 1 });
+      render(quiz(1, 'Quiz A', 1));
+      answerAll();
+      const h = held();
+      submitButton().focus();
+      submitButton().click();
+      flushSync();
+      const parked = document.createElement('input');
+      document.body.appendChild(parked);
+      parked.focus();
+      parked.remove();
+      h.resolve(submitResponse(res));
+      await settle();
+      expect(document.activeElement).toBe(buttonNamed(name));
+    });
+  }
+
+  it('a successful send leaves focus the student put elsewhere', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().focus();
+    submitButton().click();
+    flushSync();
+    const outside = document.createElement('input');
+    document.body.appendChild(outside);
+    outside.focus();
+    h.resolve(submitResponse({ item_id: 1, attempt_count: 1, can_retry: true }));
+    await settle();
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+
+  it('a failed send leaves focus the student put elsewhere', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().focus();
+    submitButton().click();
+    flushSync();
+    const outside = document.createElement('input');
+    document.body.appendChild(outside);
+    outside.focus();
+    h.reject(new TypeError('Failed to fetch'));
+    await settle();
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+
+  it('locks the questions while the submit is in flight', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().click();
+    flushSync();
+    expect(radios().every((r) => r.disabled)).toBe(true);
+    h.reject(new TypeError('Failed to fetch'));
+    await settle();
+    expect(radios().every((r) => !r.disabled)).toBe(true);
+  });
+
+  it('a return mid-submit opens an empty form, and the late result does not lock over typed answers', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().click();
+    flushSync();
+    remount(quiz(1, 'Quiz A', 1));
+    expect(radios().some((r) => r.checked)).toBe(false);
+    expect(radios().every((r) => !r.disabled)).toBe(true);
+    radios()[1]!.click();
+    flushSync();
+    h.resolve(submitResponse({ item_id: 1, attempt_count: 1, score_correct: 1, score_total: 1 }));
+    await settle();
+    expect(radios().filter((r) => r.checked).map((r) => r.value)).toEqual(['1012']);
+    expect(radios().every((r) => !r.disabled)).toBe(true);
+    expect(getDraft(1)).toEqual({ '101': [1012] });
+  });
+
+  it('a late, lower attempt count does not hide the newer one', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const first = held();
+    submitButton().click();
+    flushSync();
+    // Leave, come back, answer again and submit: attempt 2 lands first.
+    remount(quiz(1, 'Quiz A', 1));
+    radios()[1]!.click();
+    flushSync();
+    postSpy.mockResolvedValueOnce(submitResponse({ item_id: 1, attempt_count: 2, score_correct: 0, score_total: 1 }));
+    submitButton().click();
+    await settle();
+    buttonNamed('Try again').click();
+    flushSync();
+    first.resolve(submitResponse({ item_id: 1, attempt_count: 1, score_correct: 1, score_total: 1 }));
+    await settle();
+    expect(host.textContent).toMatch(/1\s*attempt\s*left/);
+    remount(quiz(1, 'Quiz A', 1));
+    expect(host.querySelector('.result')?.textContent).toContain('Attempt 2 of 3');
+  });
+
+  it('a 409 drops the draft and records the exhausted count', async () => {
+    session.user = student;
+    seed({ 1: 1 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    postSpy.mockRejectedValueOnce(new ApiError(409, 'Max attempts reached'));
+    submitButton().click();
+    await settle();
+    expect(getDraft(1)).toBeUndefined();
+    expect(hasUnsavedDrafts()).toBe(false);
+    expect(getSpy).toHaveBeenCalledWith('/api/items/1/reveal');
+    getSpy.mockClear();
+    remount(quiz(1, 'Quiz A', 1));
+    // The remounted quiz is the exhausted one: it loads the reveal again and
+    // holds no answers.
+    expect(getSpy).toHaveBeenCalledWith('/api/items/1/reveal');
+    expect(radios().some((r) => r.checked)).toBe(false);
+  });
+
+  // Review r1: a submit refused because the session ended. The 401 handler
+  // signs the student out before the catch runs; the draft must survive the
+  // sign-in round trip (C14).
+  it('a 401 keeps the draft for the sign-in round trip', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    clearToasts();
+    // As main.ts's 401 handler does: no user, no course snapshot.
+    postSpy.mockImplementationOnce(() => {
+      session.user = null;
+      clearCourse();
+      return Promise.reject(new ApiError(401, 'Not authenticated'));
+    });
+    submitButton().click();
+    await settle();
+    expect(getDraft(1)).toEqual({ '101': [1011] });
+    expect(hasUnsavedDrafts()).toBe(true);
+    // VR-B (user, r10): the sign-in page explains itself; no error toast.
+    expect(toasts.list).toEqual([]);
+  });
+
+  it('a 409 that is not about attempts keeps the draft and loads no reveal', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    postSpy.mockRejectedValueOnce(new ApiError(409, 'Quiz has no questions'));
+    submitButton().click();
+    await settle();
+    expect(getDraft(1)).toEqual({ '101': [1011] });
+    expect(hasUnsavedDrafts()).toBe(true);
+    expect(getSpy).not.toHaveBeenCalled();
+  });
+
+  // Review r2: an older submit that fails while a newer one is in flight
+  // holds stale answers; the newer send owns the draft now.
+  it('an older submit that fails while a newer one is in flight leaves no stale draft', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const a = held();
+    submitButton().click();
+    flushSync();
+    remount(quiz(1, 'Quiz A', 1));
+    radios()[1]!.click();
+    flushSync();
+    const b = held();
+    submitButton().click();
+    flushSync();
+    a.reject(new TypeError('Failed to fetch'));
+    await settle();
+    b.resolve(submitResponse({ item_id: 1, attempt_count: 2, score_correct: 0, score_total: 1 }));
+    await settle();
+    expect(getDraft(1)).toBeUndefined();
+    expect(hasUnsavedDrafts()).toBe(false);
+    remount(quiz(1, 'Quiz A', 1));
+    expect(host.querySelector('.result')).not.toBeNull();
+  });
+
+  // Review r2: a draft goes back only to the student who typed it.
+  it('a failure that lands after another student signed in gives them no draft', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().click();
+    flushSync();
+    session.user = { ...student, id: 8, email: 'other@x.test' };
+    h.reject(new TypeError('Failed to fetch'));
+    await settle();
+    expect(getDraft(1)).toBeUndefined();
+  });
+
+  // Review r2: an explicit sign-out drops the drafts (C14); a late failure
+  // must not bring one back into a signed-out tab.
+  it('a failure that lands after a sign-out leaves no draft', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().click();
+    flushSync();
+    clearAllDrafts();
+    session.user = null;
+    h.reject(new TypeError('Failed to fetch'));
+    await settle();
+    expect(getDraft(1)).toBeUndefined();
+    expect(hasUnsavedDrafts()).toBe(false);
+  });
+
+  // Review r3: the draft leaves the store at send; the page still warns
+  // before closing until the answers are safe.
+  it('the page warns before closing while a submit is in flight', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().click();
+    flushSync();
+    expect(hasUnsavedDrafts()).toBe(true);
+    h.resolve(submitResponse({ item_id: 1, attempt_count: 1, score_correct: 1, score_total: 1 }));
+    await settle();
+    expect(hasUnsavedDrafts()).toBe(false);
+  });
+
+  // Review r3: a late answer writes the course state only for the student
+  // who sent it.
+  it('a late success after another student signed in leaves their attempts alone', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().click();
+    flushSync();
+    clearAllDrafts();
+    session.user = { ...student, id: 8, email: 'other@x.test' };
+    h.resolve(submitResponse({ item_id: 1, attempt_count: 1, score_correct: 1, score_total: 1 }));
+    await settle();
+    expect(currentCourse.value!.state.items['1'].attempt_count).toBe(0);
+  });
+
+  it('a late attempts 409 after another student signed in loads no reveal for them', async () => {
+    session.user = student;
+    seed({ 1: 1 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().click();
+    flushSync();
+    clearAllDrafts();
+    session.user = { ...student, id: 8, email: 'other@x.test' };
+    h.reject(new ApiError(409, 'Max attempts reached'));
+    await settle();
+    expect(currentCourse.value!.state.items['1'].attempt_count).toBe(1);
+    expect(getSpy).not.toHaveBeenCalled();
+  });
+
+  // Review r5: an older send learns the attempts are used up, then the newer
+  // send fails. The quiz is exhausted, so its answers have nowhere to go.
+  it('a failed newer send puts no draft back once the quiz is exhausted', async () => {
+    session.user = student;
+    seed({ 1: 1 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const a = held();
+    submitButton().click();
+    flushSync();
+    remount(quiz(1, 'Quiz A', 1));
+    radios()[1]!.click();
+    flushSync();
+    const b = held();
+    submitButton().click();
+    flushSync();
+    remount(quiz(1, 'Quiz A', 1));
+    a.reject(new ApiError(409, 'Max attempts reached'));
+    await settle();
+    b.reject(new TypeError('Failed to fetch'));
+    await settle();
+    expect(getDraft(1)).toBeUndefined();
+    expect(hasUnsavedDrafts()).toBe(false);
+  });
+
+  // Review r6: answers typed after a return have nowhere to go once the late
+  // send uses the quiz up, so they leave no draft (and no unload warning).
+  for (const [label, settleSend] of [
+    ['an attempts 409', (h: ReturnType<typeof held>) => h.reject(new ApiError(409, 'Max attempts reached'))],
+    ['a last-attempt success', (h: ReturnType<typeof held>) =>
+      h.resolve(submitResponse({ item_id: 1, attempt_count: 3, can_retry: false }))],
+  ] as const) {
+    it(`a draft typed after a return goes when the late send ends in ${label}`, async () => {
+      session.user = student;
+      seed({ 1: 2 });
+      render(quiz(1, 'Quiz A', 1));
+      answerAll();
+      const h = held();
+      submitButton().click();
+      flushSync();
+      remount(quiz(1, 'Quiz A', 1));
+      radios()[1]!.click();
+      flushSync();
+      expect(getDraft(1)).toEqual({ '101': [1012] });
+      unmount(component!);
+      component = null;
+      settleSend(h);
+      await settle();
+      expect(getDraft(1)).toBeUndefined();
+      expect(hasUnsavedDrafts()).toBe(false);
+    });
+  }
+
+  // Review r8: the restored draft replaces the stored card of an earlier
+  // attempt; without that the form stays locked over a hidden draft.
+  it("a failure after a return opens the form over the earlier attempt's card", async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    postSpy.mockResolvedValueOnce(submitResponse({ item_id: 1, attempt_count: 1, score_correct: 0, score_total: 1, can_retry: true }));
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    submitButton().click();
+    await settle();
+    buttonNamed('Try again').click();
+    flushSync();
+    answerAll();
+    const h = held();
+    submitButton().click();
+    flushSync();
+    remount(quiz(1, 'Quiz A', 1));
+    expect(host.querySelector('.result')).not.toBeNull();
+    h.reject(new TypeError('Failed to fetch'));
+    await settle();
+    expect(host.querySelector('.result')).toBeNull();
+    expect(radios().every((r) => !r.disabled)).toBe(true);
+    expect(radios().filter((r) => r.checked).map((r) => r.value)).toEqual(['1011']);
+  });
+
+  // Review r8: a late answer belongs to the course it was sent from; the
+  // student may have opened another course meanwhile.
+  // Review r9: the quiz is used up either way, so answers typed after a return
+  // go even though another course is open (item ids are global).
+  for (const [label, settleSend] of [
+    ['last-attempt success', (h: ReturnType<typeof held>) =>
+      h.resolve(submitResponse({ item_id: 1, attempt_count: 3, can_retry: false }))],
+    ['attempts 409', (h: ReturnType<typeof held>) => h.reject(new ApiError(409, 'Max attempts reached'))],
+  ] as const) {
+    it(`a late ${label} writes nothing into another course opened meanwhile, and drops the draft`, async () => {
+      session.user = student;
+      seed({ 1: 2 });
+      render(quiz(1, 'Quiz A', 1));
+      answerAll();
+      const h = held();
+      submitButton().click();
+      flushSync();
+      remount(quiz(1, 'Quiz A', 1));
+      radios()[1]!.click();
+      flushSync();
+      expect(getDraft(1)).toEqual({ '101': [1012] });
+      unmount(component!);
+      component = null;
+      __test__setSlots({
+        slug: 'geometry', versionId: 2,
+        course: { id: 2, slug: 'geometry', name: 'Geometry' },
+        version: { id: 2, state: 'published', info_html: '', max_quiz_attempts: MAX },
+        blocks: [], state: { version_id: 2, items: {} },
+        miniProjectsByBlockId: {}, teachers: [],
+      });
+      settleSend(h);
+      await settle();
+      expect(currentCourse.value!.state.items['1']).toBeUndefined();
+      expect(getDraft(1)).toBeUndefined();
+      expect(hasUnsavedDrafts()).toBe(false);
+    });
+  }
+
+  // Review r9: a reload of the same course (CourseView loads it on every
+  // visit) replaces the snapshot; the late answer still belongs there.
+  it('a late success lands in a reloaded snapshot of the same course', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().click();
+    flushSync();
+    seed({ 1: 0 });
+    h.resolve(submitResponse({ item_id: 1, attempt_count: 1 }));
+    await settle();
+    expect(currentCourse.value!.state.items['1'].attempt_count).toBe(1);
+  });
+
+  // Review r9: a late failure of another student's send is not news for
+  // whoever is signed in now.
+  it('a late failure after another student signed in shows them no toast', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().click();
+    flushSync();
+    clearToasts();
+    clearAllDrafts();
+    session.user = { ...student, id: 8, email: 'other@x.test' };
+    h.reject(new TypeError('Failed to fetch'));
+    await settle();
+    expect(toasts.list).toEqual([]);
+  });
+
+  it('a failure that lands after a return keeps the answers typed since', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().click();
+    flushSync();
+    remount(quiz(1, 'Quiz A', 1));
+    radios()[1]!.click();
+    flushSync();
+    h.reject(new TypeError('Failed to fetch'));
+    await settle();
+    expect(getDraft(1)).toEqual({ '101': [1012] });
+    expect(radios().filter((r) => r.checked).map((r) => r.value)).toEqual(['1012']);
+  });
+
+  it('a failure that lands after a return shows the restored answers', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().click();
+    flushSync();
+    remount(quiz(1, 'Quiz A', 1));
+    expect(radios().some((r) => r.checked)).toBe(false);
+    h.reject(new TypeError('Failed to fetch'));
+    await settle();
+    expect(radios().filter((r) => r.checked).map((r) => r.value)).toEqual(['1011']);
+    expect(radios().every((r) => !r.disabled)).toBe(true);
+    expect(submitButton().disabled).toBe(false);
+  });
+
+  it('after Try again the attempts line counts the higher of the memo and the store', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const first = held();
+    submitButton().click();
+    flushSync();
+    remount(quiz(1, 'Quiz A', 1));
+    radios()[1]!.click();
+    flushSync();
+    const second = held();
+    submitButton().click();
+    flushSync();
+    // The server took the second submit first: the first answer carries 2.
+    first.resolve(submitResponse({ item_id: 1, attempt_count: 2, score_correct: 1, score_total: 1 }));
+    await settle();
+    second.resolve(submitResponse({ item_id: 1, attempt_count: 1, score_correct: 0, score_total: 1 }));
+    await settle();
+    buttonNamed('Try again').click();
+    flushSync();
+    expect(host.querySelector('.hint')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('1 attempt left');
+  });
+
+  it('clearing a typed answer after a late result keeps the form open', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    const textQuiz: QuizItemType = {
+      id: 1, sequence_id: 100, title: 'Text', slug: 'quiz-1', order: 1, type: 'quiz',
+      questions: [{ id: 501, order: 1, type: 'text_answer', text_md: '', text_html: '<p>Name it</p>' }],
+    };
+    render(textQuiz);
+    const field = () => host.querySelector<HTMLInputElement>('input[type="text"], textarea')!;
+    typeInto(field(), 'Oslo');
+    flushSync();
+    const h = held();
+    submitButton().click();
+    flushSync();
+    remount(textQuiz);
+    typeInto(field(), 'Bergen');
+    flushSync();
+    h.resolve(submitResponse({ item_id: 1, attempt_count: 1, score_correct: 1, score_total: 1 }));
+    await settle();
+    typeInto(field(), '');
+    flushSync();
+    expect(field().disabled).toBe(false);
+    expect(host.querySelector('.result')).toBeNull();
+  });
+
+  /** Focus falls to the page (jsdom keeps it on a removed or disabled control). */
+  function dropFocus(): void {
+    const parked = document.createElement('input');
+    document.body.appendChild(parked);
+    parked.focus();
+    parked.remove();
+  }
+  function revealOf1(): QuizRevealResponse {
+    return {
+      item_id: 1, attempt_count: 3, score_correct: 1, score_total: 1,
+      questions: [{ id: 101, type: 'single_choice', text_html: '<p>Prompt 101</p>', explanation_html: null,
+        correct_option_ids: [1011], correct_numeric: null, correct_text: null, student_answer: [1011] }],
+    };
+  }
+
+  // VR-B (r11 M1): the repair looks only inside the quiz that was sent.
+  it('a success after a move to another quiz does not focus that quiz’s card', async () => {
+    session.user = student;
+    const b = entry(1);
+    b.last_score = { correct: 0, total: 1 };
+    b.last_answers = { '201': [2011] };
+    __test__setSlots({
+      slug: 'algebra', versionId: 1,
+      course: { id: 1, slug: 'algebra', name: 'Linear Algebra' },
+      version: { id: 1, state: 'published', info_html: '', max_quiz_attempts: MAX },
+      blocks: [], state: { version_id: 1, items: { '1': entry(0), '2': b } },
+      miniProjectsByBlockId: {}, teachers: [],
+    });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().focus();
+    submitButton().click();
+    flushSync();
+    remount(quiz(2, 'Quiz B', 1));
+    expect(buttonNamed('Try again')).toBeDefined();
+    dropFocus();
+    h.resolve(submitResponse({ item_id: 1, attempt_count: 1, can_retry: true }));
+    await settle();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  // VR-B (user, r11): Try again takes its own button away; focus that fell to
+  // the page goes to the first answer, ready for the new attempt.
+  it('Try again gives focus to the first answer when it fell to the page', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 2));
+    answerAll();
+    submitButton().click();
+    await settle();
+    buttonNamed('Try again').focus();
+    buttonNamed('Try again').click();
+    flushSync();
+    dropFocus();
+    await settle();
+    expect(document.activeElement).toBe(radios()[0]);
+  });
+
+  it('Try again leaves focus the student put elsewhere', async () => {
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    submitButton().click();
+    await settle();
+    buttonNamed('Try again').click();
+    const outside = document.createElement('input');
+    document.body.appendChild(outside);
+    outside.focus();
+    await settle();
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+
+  // VR-B (user, r11): a reveal takes the button away; focus that fell to the
+  // page goes to the result card (tabindex -1), which now heads the answers.
+  it('Show correct answers gives focus to the result card when it fell to the page', async () => {
+    session.user = student;
+    seed({ 1: 2 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    postSpy.mockResolvedValueOnce(submitResponse({ item_id: 1, attempt_count: 3, can_retry: false }));
+    submitButton().click();
+    await settle();
+    getSpy.mockResolvedValueOnce(revealOf1());
+    buttonNamed('Show correct answers').focus();
+    buttonNamed('Show correct answers').click();
+    dropFocus();
+    await settle();
+    expect(document.activeElement).toBe(host.querySelector('.result'));
+  });
+
+  it('Show correct answers leaves focus the student put elsewhere', async () => {
+    session.user = student;
+    seed({ 1: 2 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    postSpy.mockResolvedValueOnce(submitResponse({ item_id: 1, attempt_count: 3, can_retry: false }));
+    submitButton().click();
+    await settle();
+    getSpy.mockResolvedValueOnce(revealOf1());
+    buttonNamed('Show correct answers').click();
+    const outside = document.createElement('input');
+    document.body.appendChild(outside);
+    outside.focus();
+    await settle();
+    expect(host.querySelector('.result')?.textContent).not.toContain('Show correct answers');
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+
+  it('an attempts 409 gives focus to the result card once the answers load', async () => {
+    session.user = student;
+    seed({ 1: 1 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    getSpy.mockResolvedValue(revealOf1());
+    const h = held();
+    submitButton().focus();
+    submitButton().click();
+    flushSync();
+    dropFocus();
+    h.reject(new ApiError(409, 'Max attempts reached'));
+    await settle();
+    await settle();
+    expect(host.querySelector('.result')).not.toBeNull();
+    expect(document.activeElement).toBe(host.querySelector('.result'));
+  });
+
+  it('an attempts 409 leaves focus the student put elsewhere', async () => {
+    session.user = student;
+    seed({ 1: 1 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    getSpy.mockResolvedValue(revealOf1());
+    const h = held();
+    submitButton().click();
+    flushSync();
+    const outside = document.createElement('input');
+    document.body.appendChild(outside);
+    outside.focus();
+    h.reject(new ApiError(409, 'Max attempts reached'));
+    await settle();
+    await settle();
+    expect(host.querySelector('.result')).not.toBeNull();
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+
+  // A 409 that recorded nothing (no course loaded) leaves no focus move behind
+  // for a later reveal, which would be a page load.
+  it('an attempts 409 with no course loaded does not focus a later reveal', async () => {
+    session.user = student;
+    __test__setSlots(null);
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().focus();
+    submitButton().click();
+    flushSync();
+    dropFocus();
+    h.reject(new ApiError(409, 'Max attempts reached'));
+    await settle();
+    getSpy.mockResolvedValue(revealOf1());
+    seed({ 1: 3 });
+    await settle();
+    await settle();
+    expect(host.querySelector('.result')).not.toBeNull();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  // Opening a used-up quiz is a page load: focus stays where the page put it.
+  it('opening a used-up quiz does not focus its result card', async () => {
+    session.user = student;
+    seed({ 1: 3 });
+    getSpy.mockResolvedValue(revealOf1());
+    dropFocus();
+    render(quiz(1, 'Quiz A', 1));
+    await settle();
+    await settle();
+    expect(host.querySelector('.result')).not.toBeNull();
+    expect(document.activeElement).toBe(document.body);
   });
 });

@@ -2,20 +2,6 @@
 
 Walked 2026-11-14 against main `1c904f9`: done and code-only items were dropped, screen-reader items moved to `beta-voiceover-pass.md`, by-hand browser checks to `beta-browser-pass.md`. What is left goes into one fix round; **[open]** marks an item that needs the user's call first.
 
-## Task 1 — each item its own instance, the attempt count, quiz drafts
-
-- **A submit in flight keeps its draft.** The draft is cleared only when the response arrives (`QuizItem.svelte` `submit()`). Two effects:
-  - leaving the quiz and coming back before then shows a filled, unlocked form, so the same answers can be submitted twice. The late response then drops the draft while the remounted form still shows the answers (harmless: those answers were sent). Since D89 the return should show the result card; the draft present at mount keeps the open form instead. Fix: clear the draft when the request is sent and put it back if it fails, which also lets D89's card show (D89 r1, Opus M1). Pair it with a guard so the stored result card never locks a form whose live answers hold something: with the draft cleared at send, a student who comes back mid-request sees an empty form, and a late `recordQuizAttempt` would lock the card over what they typed, while their new draft stays hidden and keeps the leave-page warning on (D89 r1 Fable 2, r2 Opus m1);
-  - an answer changed during the request is written to the draft and then dropped on success, while the locked form still shows it. Fix: lock the questions while `inflight`.
-
-  (both lanes, r1; Opus r2)
-- **Two submits answered out of order can write the lower attempt count.** `recordQuizAttempt` takes the response's count as is, and after Try again QuizItem's `lastAttempt` memo can hide a newer, higher store count, so the attempts line shows one more than is left. Since D89 the late, lower write also stores that attempt's score and answers, so a return shows the older result. Both need the double in-flight submit above. Fix: take the larger count in both places, and skip the whole store write when the count is lower (Opus r1 M1, r3 m1; D89 r2 Opus m2).
-- **A submit refused with 409** ("max attempts reached", e.g. another tab used the attempts) keeps its draft, and the page warns on a reload or tab close (a confirmed reload then drops it). A 409 updates no store count, so Next/Previous or a sequence move restores the draft and reopens the form. The draft goes only when the course state reloads (the course page loads it again) and the remount auto-reveals, or on a full page reload. Fix: clear the draft on that 409 and record the exhausted count (Opus r1 M3; corrected by both lanes, r2).
-
-## Task 2 — in-app links and the course crumb
-
-- **A content link to another sequence with a non-member `#item=` opens an empty player** ("Item 0 of 1", no item body). This includes an empty `#item=`. Before C6 the link reloaded the app, and a fresh load resolved to an item. On the reused player instance, the re-resolve skips any address with `#item=`, because `SequencePlayer.svelte.test.ts` pins that a stale non-member hash shows no item (flatIndex −1). It only happens after an authoring mistake. Fix: drop the hash clause from the re-resolve and re-decide that pin (both lanes, r3).
-
 ## Task 4 — the focus sites
 
 - **Two row group selects changed in quick succession: the first to settle takes focus.** Row A's request is in flight (A disabled, focus on `<body>`); the user changes row B (B disabled too). A settles first, and `repairFocus(selA, search)` focuses A, not the control last used; B's repair then sees focus on A and does nothing. Fix: remember the last changed select and repair to it (Opus r1 M5).
@@ -36,7 +22,6 @@ Walked 2026-11-14 against main `1c904f9`: done and code-only items were dropped,
 
 - **A root-relative content link is refused as a missing asset.** `[All courses](/courses)` in an item or a quiz prompt fails the preview and the save with "Referenced assets not found in version: /courses": `extract_asset_filenames` (`backend/mathion/markdown.py:244-255`) skips only `http://`, `https://`, `mailto:` and `#` targets and treats anything else as an asset filename. Older than Polish 3; C6 routes a pasted full address (`http://host/courses`) in-app, which works. Fix: skip targets that start with `/` too, and decide whether C6 should route them (Safari pass, step 5).
 - **The create rows' ✓ and × sit 3px above the field's centre.** `.add-row` aligns to the top (`BlockAccordion.svelte`, `VersionEditPage.svelte`), and its 24px IconButtons are bare flex items, so they sit flush with the 30px field's top edge; since D90 the rename row centres them on the field. "+ Add sequence" and a rename of the sequence above it therefore show ✓/× at slightly different heights. Fix: wrap the add rows' buttons in a 30px `display:flex; align-items:center` span as the rename row does, with gate rows (D90 r1, Fable M1).
-- **Keyboard focus drops to `<body>` at both ends of the course.** In the player, Enter on ← that lands on the course's first item disables ← while it has focus; Enter on → that lands on the last item replaces → with Finish. Either way the next Tab starts from the top of the page. Older than D93 (the D4 Buttons did the same). Fix: the C7 way, ← `aria-disabled` with a guard in `previous()`, and `repairFocus` to Finish (or ←) after the move (D93 r1, both lanes).
 
 ## Whole-branch review (71dd8cc..8bc9497)
 

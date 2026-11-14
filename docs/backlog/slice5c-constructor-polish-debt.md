@@ -41,25 +41,6 @@ Walked 2026-11-14 against main `1c904f9`: done and code-only items were dropped,
 
 - **The modal shows one field error at a time (r1, Opus).** A blank Label and an invalid attempts value show only the label error; the attempts error appears on the next Save. Set both before returning.
 
-## Student-view follow-up (progress bars, book icon, player breadcrumb; user 2026-10-08)
-
-- **[open]** **Quiz chip rounds, the bar floors.** `quizPct` uses `Math.round` (approved design), so 199/200 points reads "Quiz 100%" while the bar beside it only says 100% when every item is done. `Math.floor` would match the bar's honesty rule; left as designed. (Opus lane, r1.)
-- **[open]** **"✓" next to "Quiz 0%".** The check is the quiz item-type glyph (the same mark the player strip uses for a quiz), but beside 0% it can read as "passed". Raised with the user. (Opus lane, r1.)
-
-## Student-view follow-up 2 (2026-10-08) — review-lane minors, deferred
-
-- **[open]** **Card / header for blocks with no items** (Opus): shows "0%" and announces "0 of 0 items completed".
-  Consider gating the card on `courseP.total > 0`.
-
-## Collapse / expand all (follow-up 3, 2026-10-08) — review-lane minors, deferred
-
-- **Aborted load still runs its `.then`/`.finally`** (both lanes): on a `courseSlug` change A→B the
-  store aborts A, A's promise resolves, its `.then` recomputes `open` from the old snapshot (overwritten
-  by B's later `.then`; harmless) and its `.finally` drops `loading` early (pre-existing). Fix: a
-  `cancelled` flag returned from the effect cleanup, checked in `.then` and `.finally`.
-- **[open]** A block whose only content is a mini-project starts collapsed (as designed: mini-project status does
-  not count toward "unfinished"). Revisit if students miss mini-projects.
-
 ## Whole-branch review (29737f4..1ab391e, 2026-10-09) — minors, deferred
 
 - **5c header renames don't reload the tree on 403/409** (Opus): `BlockAccordion.renameBlock` and

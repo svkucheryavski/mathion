@@ -124,3 +124,7 @@ These were parked from the superuser panel slices and the visual-refresh slices 
 - The 404 announces itself on load (ErrorState's `role="alert"`): check it reads once, title then message, and does not repeat on re-render.
 - Nothing announces that an authored link opens a new tab. A visually hidden "(opens in a new tab)" added by `externalLinks` is the candidate.
 - For the beta VoiceOver pass: `aria-current` on the strip's current ItemIcon (Fable recommendation).
+
+## VR backlog round (student quiz)
+
+- After a submit, focus that fell to the page goes to the result card's Try again or Show correct answers button, and after a reveal it goes to the card itself. On the button, VoiceOver may read only the button and not the score above it. Possible fix: `aria-describedby` on the button pointing at the score line. Check in the VoiceOver pass at beta.

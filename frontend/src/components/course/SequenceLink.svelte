@@ -14,7 +14,9 @@
   const p = $derived(progressOf(sequence.items, state));
   const href = $derived(`/courses/${courseSlug}/seq/${sequence.id}`);
   // The bar and chip are aria-hidden, so this is the only reading of both.
-  const label = $derived(`Sequence: ${sequence.title}, ${progressPhrase(p)}`);
+  // VR-B (user, after call 3): an empty sequence, like an empty block, has
+  // nothing to measure -- no meter and no count.
+  const label = $derived(p.total > 0 ? `Sequence: ${sequence.title}, ${progressPhrase(p)}` : `Sequence: ${sequence.title}`);
 </script>
 
 <a class="row" {href} aria-label={label} onclick={(e) => routeClick(e, href)}>
@@ -23,7 +25,7 @@
   <span class="seq-glyph" aria-hidden="true"><ItemMark type="sequence" /></span>
   <span class="row-title">{sequence.title}</span>
   <!-- Replaces the per-item mark chain, which stopped scaling at ~20 items. -->
-  <ProgressMeter {p} />
+  {#if p.total > 0}<ProgressMeter {p} />{/if}
 </a>
 
 <style>

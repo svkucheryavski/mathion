@@ -24,7 +24,8 @@
     // Slice-6c P48: a test hook (the side panel's Edit and Cancel).
     'data-test': dataTest = undefined as string | undefined,
     element = $bindable(undefined as HTMLButtonElement | undefined),
-    onclick = undefined as (() => void) | undefined,
+    // VR-B: QuizItem reads the event's currentTarget.
+    onclick = undefined as ((e: MouseEvent) => void) | undefined,
     full = false,
     children,
   } = $props();

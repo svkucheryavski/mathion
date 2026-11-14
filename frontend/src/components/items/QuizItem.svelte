@@ -1,9 +1,11 @@
 <script lang="ts">
   import type { QuizItem, Question, QuizSubmitResponse, QuizRevealResponse } from '../../lib/types';
   import { api, ApiError } from '../../lib/api';
-  import { recordQuizAttempt, currentCourse } from '../../stores/currentCourse.svelte';
-  import { getDraft, setDraft, clearDraft, holdsAnswers } from '../../stores/quizDrafts.svelte';
+  import { recordQuizAttempt, recordQuizExhausted, currentCourse } from '../../stores/currentCourse.svelte';
+  import { getDraft, setDraft, clearDraft, takeDraft, restoreDraft, endSend, sendStillOwned, holdsAnswers } from '../../stores/quizDrafts.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
+  import { tick } from 'svelte';
+  import { repairFocus } from '../../lib/askInPlace.svelte';
   import { assertNever } from '../../lib/types';
   import { externalLinks } from '../../lib/externalLinks';
   import SingleChoice from './quiz/SingleChoiceQuestion.svelte';
@@ -32,11 +34,14 @@
   // D89: a quiz opened after a submit with attempts left shows that result
   // (the store's last answers and score), until Try again. A draft kept from
   // a new attempt wins, so it is read once, as `answers` is.
-  // svelte-ignore state_referenced_locally
-  const openedWithDraft = getDraft(item.id) !== undefined;
   let retried = $state(false);
+  // VR-B: set by this quiz's own attempts 409; its reveal then focuses the card.
+  let revealFocusIn: Element | null = null;
+  // VR-B: true once this form holds the student's own answers; the stored card never locks it.
+  // svelte-ignore state_referenced_locally
+  let touched = $state(getDraft(item.id) !== undefined);
   const stored = $derived.by(() => {
-    if (openedWithDraft || retried || lastResult !== null || revealed !== null) return null;
+    if (retried || touched || lastResult !== null || revealed !== null) return null;
     const max = currentCourse.value?.version.max_quiz_attempts;
     const st = currentCourse.value?.state.items[String(item.id)];
     if (max === undefined || st === undefined || st.last_score === null) return null;
@@ -55,9 +60,10 @@
   const attemptsUsed = $derived(
     lastResult?.attempt_count
     ?? revealed?.attempt_count
-    ?? (lastAttempt?.id === item.id ? lastAttempt.count : undefined)
-    ?? currentCourse.value?.state.items[String(item.id)]?.attempt_count
-    ?? 0,
+    ?? Math.max(
+      lastAttempt?.id === item.id ? lastAttempt.count : 0,
+      currentCourse.value?.state.items[String(item.id)]?.attempt_count ?? 0,
+    ),
   );
 
   const remaining = $derived(
@@ -103,43 +109,99 @@
     item.questions.every((q) => holdsAnswers(answers[String(q.id)]))
   );
 
+  // VR-B: an untouched form takes up a draft a failed submit put back.
+  $effect(() => {
+    const d = getDraft(item.id);
+    if (d === undefined || touched) return;
+    // Defensive: never while sending or showing a result.
+    if (inflight !== null || autoRevealed || lastResult !== null || revealed !== null) return;
+    if (Object.values(answers).some(holdsAnswers)) return;
+    answers = d;
+    touched = true;
+  });
+
   function setAnswer(qid: number, ans: number[] | string): void {
+    touched = true;
     answers[String(qid)] = ans;
     setDraft(item.id, $state.snapshot(answers));
   }
 
-  async function submit(): Promise<void> {
+  // A used-up quiz has no use for a failed send's answers.
+  function exhausted(id: number): boolean {
+    const max = currentCourse.value?.version.max_quiz_attempts;
+    const used = currentCourse.value?.state.items[String(id)]?.attempt_count ?? 0;
+    return max !== undefined && used >= max;
+  }
+
+  async function submit(e?: MouseEvent): Promise<void> {
     if (inflight !== null) {
       void inflight;
       return;
     }
+    // VR-B: focus lost while sending goes back to Submit, or to the card's button.
+    const button = e?.currentTarget instanceof HTMLElement ? e.currentTarget : null;
+    const quizEl = button?.closest('article.quiz') ?? null;
+    let failed = false;
+    // VR-B: the draft goes on send and may come back on failure.
+    const sent = $state.snapshot(answers);
+    const id = item.id;
+    const held = takeDraft(id);
+    // VR-B: the student may open another course before the answer lands.
+    const versionId = currentCourse.value?.versionId;
+    const sameCourse = (): boolean => currentCourse.value?.versionId === versionId;
     try {
-      const sent = $state.snapshot(answers);
-      inflight = api.post<QuizSubmitResponse>(`/api/items/${item.id}/submit`, { answers: sent });
+      inflight = api.post<QuizSubmitResponse>(`/api/items/${id}/submit`, { answers: sent });
       const res = await inflight;
       lastResult = res;
       lastAttempt = { id: res.item_id, count: res.attempt_count };
-      recordQuizAttempt(res, sent);
-      clearDraft(res.item_id);
+      // VR-B: only for the sender, only into its own course.
+      if (sendStillOwned(held)) {
+        if (sameCourse()) recordQuizAttempt(res, sent);
+        if (!res.can_retry) clearDraft(res.item_id);
+      }
     } catch (e: unknown) {
+      failed = true;
+      // MAX_ATTEMPTS_DETAIL in backend/mathion/api/quiz.py.
+      if (e instanceof ApiError && e.status === 409 && e.detail === 'Max attempts reached') {
+        if (sendStillOwned(held)) {
+          if (sameCourse() && currentCourse.value !== null) {
+            recordQuizExhausted(id);
+            revealFocusIn = quizEl;
+          }
+          clearDraft(id);
+        }
+      } else if (!exhausted(id)) restoreDraft(id, held);
       const msg = e instanceof ApiError ? e.displayMessage : 'Submit failed.';
-      pushToast(msg, 'error');
+      // No toast for another student's send or a 401.
+      const signedOut = e instanceof ApiError && e.status === 401;
+      if (sendStillOwned(held) && !signedOut) pushToast(msg, 'error');
     } finally {
       inflight = null;
+      endSend(held);
+      if (failed) void repairFocus(button);
+      // After the card renders.
+      else void tick().then(() => repairFocus(quizEl?.querySelector('.result button')));
     }
   }
 
-  function tryAgain(): void {
+  function tryAgain(e?: MouseEvent): void {
     retried = true;
     answers = {};
     lastResult = null;
     revealed = null;
     autoRevealed = false;
+    // VR-B: focus lost with the button goes to the first answer.
+    const quizEl = e?.currentTarget instanceof HTMLElement ? e.currentTarget.closest('article.quiz') : null;
+    void tick().then(() => repairFocus(quizEl?.querySelector('input:not(:disabled), textarea:not(:disabled)')));
   }
 
-  async function revealAnswers(): Promise<void> {
+  async function revealAnswers(e?: MouseEvent): Promise<void> {
+    // VR-B: focus lost goes to the card (from the button or our own 409).
+    const quizEl = e?.currentTarget instanceof HTMLElement ? e.currentTarget.closest('article.quiz') : revealFocusIn;
+    revealFocusIn = null;
     try {
       revealed = await api.get<QuizRevealResponse>(`/api/items/${item.id}/reveal`);
+      void tick().then(() => repairFocus(quizEl?.querySelector('.result')));
     } catch (e: unknown) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Could not load answers.', 'error');
     }
@@ -178,16 +240,16 @@
         <span class="q-counter mono">Question {i + 1} of {item.questions.length}</span>
         {#if q.type === 'single_choice'}
           <SingleChoice question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
-            disabled={locked} correctOptionIds={r?.correct_option_ids ?? null} />
+            disabled={locked || inflight !== null} correctOptionIds={r?.correct_option_ids ?? null} />
         {:else if q.type === 'multiple_choice'}
           <MultiChoice question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
-            disabled={locked} correctOptionIds={r?.correct_option_ids ?? null} />
+            disabled={locked || inflight !== null} correctOptionIds={r?.correct_option_ids ?? null} />
         {:else if q.type === 'numeric_answer'}
           <Numeric question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
-            disabled={locked} correctValue={r?.correct_numeric ?? null} />
+            disabled={locked || inflight !== null} correctValue={r?.correct_numeric ?? null} />
         {:else if q.type === 'text_answer'}
           <Text question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
-            disabled={locked} correctValue={r?.correct_text ?? null} />
+            disabled={locked || inflight !== null} correctValue={r?.correct_text ?? null} />
         {/if}
         {#if r?.explanation_html}
           <div class="exp prose compact" {@attach externalLinks(r.explanation_html)}>{@html r.explanation_html}</div>
@@ -215,7 +277,7 @@
       {@const max = currentCourse.value?.version.max_quiz_attempts ?? 0}
       {@const score = lastResult ? { correct: lastResult.score_correct, total: lastResult.score_total, attempt: lastResult.attempt_count, max: lastResult.max_attempts, canRetry: lastResult.can_retry } : revealed ? { correct: revealed.score_correct, total: revealed.score_total, attempt: revealed.attempt_count, max, canRetry: revealed.attempt_count < max } : stored ? { correct: stored.score.correct, total: stored.score.total, attempt: stored.attempt, max: stored.max, canRetry: true } : null}
       {#if score}
-        <div class="result">
+        <div class="result" tabindex="-1">
           <p><strong>Score:</strong> <span class="mono">{score.correct} / {score.total}</span></p>
           <p class="meta">Attempt <span class="mono">{score.attempt}</span> of <span class="mono">{score.max}</span></p>
           {#if score.canRetry}

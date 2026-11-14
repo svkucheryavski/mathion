@@ -64,4 +64,14 @@ describe('ProgressMeter', () => {
     unmount(component!); host.remove(); component = null;
     expect(chip(render(P({ hasQuiz: true, quizPct: 50 }))).classList.contains('on-strip')).toBe(false);
   });
+
+  // VR-B (call 2): the quiz glyph beside 0% can read as "passed".
+  it('shows no check beside Quiz 0%, and the check from 1%', () => {
+    let r = render(P({ hasQuiz: true, quizPct: 0 }));
+    expect(chip(r).textContent!.trim()).toBe('Quiz 0%');
+    expect(chip(r).querySelector('svg')).toBeNull();
+    unmount(component!); component = null; host.remove();
+    r = render(P({ hasQuiz: true, quizPct: 1 }));
+    expect(chip(r).querySelector('svg')).not.toBeNull();
+  });
 });

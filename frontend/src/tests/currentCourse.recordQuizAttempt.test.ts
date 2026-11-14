@@ -1,5 +1,5 @@
 import { it, expect, afterEach, vi } from 'vitest';
-import { __test__setSlots, currentCourse, clearCourse, recordQuizAttempt } from '../stores/currentCourse.svelte';
+import { __test__setSlots, currentCourse, clearCourse, recordQuizAttempt, recordQuizExhausted } from '../stores/currentCourse.svelte';
 
 function seed(): void {
   __test__setSlots({
@@ -64,4 +64,30 @@ it('recordQuizAttempt does nothing without a course snapshot', () => {
     item_id: 5, attempt_count: 1, max_attempts: 3, score_correct: 0, score_total: 1, can_retry: true,
   }, {});
   expect(currentCourse.value).toBeNull();
+});
+
+// VR-B (polish3 T1): two submits answered out of order must not write the
+// older, lower attempt over the newer one, score and answers included.
+it('recordQuizAttempt skips a write whose attempt count is lower than the stored one', () => {
+  seed();
+  recordQuizAttempt({
+    item_id: 5, attempt_count: 2, max_attempts: 3, score_correct: 2, score_total: 2, can_retry: true,
+  }, { '51': [512] });
+  recordQuizAttempt({
+    item_id: 5, attempt_count: 1, max_attempts: 3, score_correct: 0, score_total: 2, can_retry: true,
+  }, { '51': [511] });
+  const e = currentCourse.value!.state.items['5']!;
+  expect(e.attempt_count).toBe(2);
+  expect(e.last_score).toEqual({ correct: 2, total: 2 });
+  expect(e.last_answers).toEqual({ '51': [512] });
+});
+
+// Review r4: attempts used up elsewhere still count the quiz as done here, as
+// a submit does (the server counts it: it has attempts).
+it('recordQuizExhausted marks a visited, not-yet-covered quiz covered at the maximum', () => {
+  seed();
+  recordQuizExhausted(5);
+  const e = currentCourse.value!.state.items['5']!;
+  expect(e.attempt_count).toBe(3);
+  expect(e.is_covered).toBe(true);
 });
