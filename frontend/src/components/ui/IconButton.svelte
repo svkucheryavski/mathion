@@ -22,6 +22,8 @@
     // the filled create / save control (ref 1479, 1546).
     round?: boolean;
     primary?: boolean;
+    // VR-B (call 10): a ✕ "Cancel" beside a ✓ rings gray.
+    cancel?: boolean;
     // Slice-5c: the ✓ of an inline "+ Add …" row submits its form.
     type?: 'button' | 'submit';
     onclick?: () => void;
@@ -56,6 +58,7 @@
     danger = false,
     round = false,
     primary = false,
+    cancel = false,
     type = 'button',
     onclick = undefined,
     onmousedown = undefined,
@@ -128,6 +131,7 @@
     class:borderless
     class:round
     class:primary
+    class:cancel
     data-glyph={glyph}
     {title}
     {id}
@@ -150,6 +154,7 @@
     class:borderless
     class:round
     class:primary
+    class:cancel
     class:blocked={ariaDisabled}
     data-glyph={glyph}
     {disabled}
@@ -193,6 +198,7 @@
   .md svg { width: 14px; height: 14px; }
   /* Danger (trash): a red glyph, never a red fill. */
   .danger { color: var(--danger); --ring: var(--danger); }
+  .cancel { --ring: var(--muted); }
   /* Borderless (chevron/fold controls): no chrome, just the muted mark. */
   .borderless {
     border-color: transparent;

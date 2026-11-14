@@ -43,6 +43,7 @@ describe('Quiz header (5d T4)', () => {
     expect(h2().querySelectorAll('button').length).toBe(0);
     expect(byName(panel(), 'Save title')).toBeDefined();
     expect(byName(panel(), 'Cancel')).toBeDefined();
+    expect(byName(panel(), 'Cancel')!.classList.contains('cancel')).toBe(true);   // VR-B, call 10
     expect(panel().getAttribute('aria-labelledby')).toBe(h2().id);
   });
 

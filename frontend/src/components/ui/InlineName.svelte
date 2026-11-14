@@ -69,9 +69,9 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    // A key that ends an IME composition is neither a save nor a cancel (Safari: keyCode 229).
+    if (e.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter') {
-      // Enter that ends an IME composition is not a save.
-      if (e.isComposing) return;
       e.preventDefault();
       void save();
     } else if (e.key === 'Escape') {
@@ -98,7 +98,7 @@
       onkeydown={onKeydown}
     />
     {@render aside?.()}
-    <IconButton glyph="close" size="sm" title="Cancel" disabled={saving} onclick={cancel}
+    <IconButton glyph="close" size="sm" title="Cancel" cancel disabled={saving} onclick={cancel}
                 aria-label={subject ? `Cancel renaming ${subject}` : undefined} />
     <IconButton glyph="check" size="sm" primary title={saving ? 'Saving…' : !trimmed ? (emptyTitle ?? saveTitle) : saveTitle}
                 aria-label={subject ? `${saving ? 'Saving' : saveTitle} ${subject}` : undefined}

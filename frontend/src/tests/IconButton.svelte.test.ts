@@ -230,3 +230,13 @@ describe('IconButton — the link variant and describedby (6c R41)', () => {
     expect(render({ glyph: 'plus', title: 'Add' }).hasAttribute('aria-describedby')).toBe(false);
   });
 });
+
+// VR-B (call 10): a ✕ "Cancel" beside a ✓ rings gray, like InlineConfirm's Cancel.
+describe('IconButton — cancel', () => {
+  it('cancel sets the cancel class; without it there is none', () => {
+    expect(render({ glyph: 'close', title: 'Cancel', cancel: true }).classList.contains('cancel')).toBe(true);
+    if (component) unmount(component);
+    component = null;
+    expect(render({ glyph: 'close', title: 'Cancel' }).classList.contains('cancel')).toBe(false);
+  });
+});

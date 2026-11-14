@@ -110,7 +110,15 @@
   async function renameBlock(title: string) {
     const savedVid = vid;
     const savedBid = block.id;
-    await api.patch(`/api/blocks/${savedBid}`, { title });
+    try {
+      await api.patch(`/api/blocks/${savedBid}`, { title });
+    } catch (e) {
+      // VR-B: a 403/409 reloads the tree so the version's rights re-derive.
+      if (e instanceof ApiError && (e.status === 403 || e.status === 409) && stillOnVid(savedVid)) {
+        void loadAdminTree(savedVid, { force: true });
+      }
+      throw e;
+    }
     if (!stillOnVid(savedVid)) return;
     const result = await loadAdminTree(savedVid, { force: true });
     if (result === 'error') pushToast('Saved (refresh failed — reload to see latest)', 'info');
@@ -213,6 +221,8 @@
   let createErrors = $state<FieldErrors>({});
   let createGlobalError = $state<string | null>(null);
   let createBusy = $state(false);
+  // VR-B: only the POST itself; the follow-up reload keeps createBusy but not the form.
+  let posting = $state(false);
   let okEl = $state<HTMLButtonElement>();
   let titleEl = $state<HTMLInputElement>();
   let addLineEl = $state<HTMLButtonElement>();
@@ -271,14 +281,14 @@
   async function openAdd() {
     // Defense-in-depth: the line is disabled in these states, but a stale or
     // programmatic click must not open a row that could not submit.
-    if (createBusy || busy || parentBusy || !canStructure) return;
+    if (posting || busy || parentBusy || !canStructure) return;
     creating = true;
     await tick();
     titleEl?.focus();
   }
 
   async function cancelAdd() {
-    if (createBusy) return;
+    if (posting) return;
     resetCreate(); creating = false;
     await tick();
     addLineEl?.focus();
@@ -291,8 +301,11 @@
     createErrors = {};
     createGlobalError = null;
     createBusy = true;
+    posting = true;
+    let failed = false;
     try {
       await api.post(`/api/blocks/${savedBid}/sequences`, { title: newTitle });
+      posting = false;
       resetCreate(); creating = false;
       // The row is gone; give a keyboard author the line back for the next
       // one — unless focus already moved somewhere on purpose.
@@ -303,6 +316,7 @@
       }
       pushToast('Sequence created', 'success');
     } catch (e) {
+      failed = true;
       const mapped = mapCreateError(e, ['title']);
       // The form closed while the POST was in flight (collapse, a confirmed
       // discard, a read-only flip): there is no form to show the error on, and
@@ -320,9 +334,10 @@
         pushToast(createGlobalError, 'error');
       }
     } finally {
+      posting = false;
       createBusy = false;
-      // F2: × is disabled while busy; a focus the browser dropped there comes back to the ✓.
-      if (creating) void repairFocus(okEl, titleEl);
+      // F2: × is disabled while it posts; a focus the browser dropped there comes back to the ✓.
+      if (failed && creating) void repairFocus(okEl, titleEl);
     }
   }
 </script>
@@ -392,18 +407,20 @@
                 aria-describedby={createErrors.title || createGlobalError ? addErrId : undefined}
                 bind:value={newTitle}
                 maxlength={200}
-                readonly={createBusy}
-                onkeydown={(e) => { if (e.key === 'Escape' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); void cancelAdd(); } }}
+                readonly={posting}
+                onkeydown={(e) => { if (e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); e.stopPropagation(); void cancelAdd(); } }}
                 oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; createGlobalError = null; }}
               />
               {#if createErrors.title || createGlobalError}<p id={addErrId} class="add-err" role="alert">{createErrors.title || createGlobalError}</p>{/if}
             </div>
             <!-- F2: blocked, not disabled, while its create runs, so it keeps focus; submitCreate's guard stops a second submit. -->
-            <IconButton size="sm" glyph="check" primary type="submit" title="Create" aria-label="Create sequence" bind:element={okEl} aria-disabled={createBusy} disabled={!createBusy && (busy || parentBusy || !newTitle.trim())} />
-            <IconButton size="sm" glyph="close" title="Cancel" aria-label="Cancel new sequence" disabled={createBusy} onclick={() => void cancelAdd()} />
+            <span class="add-acts">
+              <IconButton size="sm" glyph="check" primary type="submit" title={createBusy ? 'Wait for the request to finish' : 'Create'} aria-label="Create sequence" bind:element={okEl} aria-disabled={createBusy} disabled={!posting && (busy || parentBusy || !newTitle.trim())} />
+              <IconButton size="sm" glyph="close" title="Cancel" aria-label="Cancel new sequence" cancel disabled={posting} onclick={() => void cancelAdd()} />
+            </span>
           </form>
         {:else}
-          <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} onclick={() => void openAdd()}>+ Add sequence</button>
+          <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} aria-disabled={posting ? 'true' : undefined} title={posting ? 'Wait for the request to finish' : undefined} onclick={() => void openAdd()}>+ Add sequence</button>
         {/if}
       {/if}
     </div>
@@ -439,8 +456,12 @@
     cursor: pointer;
   }
   .add-line:disabled { color: var(--muted); cursor: default; }
+  /* Blocked while a create from a closed form still posts. */
+  .add-line[aria-disabled='true'] { color: var(--muted); cursor: default; }
   .add-row { display: flex; align-items: flex-start; gap: 6px; }
   .add-field { flex: 1 1 auto; min-width: 0; }
+  /* VR-B: ✓ and ✕ centred on the field, as the rename row (D90). */
+  .add-acts { display: flex; align-items: center; gap: 6px; height: var(--control-h); }
   .add-input {
     box-sizing: border-box;
     width: 100%;

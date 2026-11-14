@@ -98,7 +98,15 @@
     const savedVid = vid;
     const check = stillOnVid;
     const savedSid = seq.id;
-    await api.patch(`/api/sequences/${savedSid}`, { title });
+    try {
+      await api.patch(`/api/sequences/${savedSid}`, { title });
+    } catch (e) {
+      // VR-B: a 403/409 reloads the tree so the version's rights re-derive.
+      if (e instanceof ApiError && (e.status === 403 || e.status === 409) && check(savedVid)) {
+        void loadAdminTree(savedVid, { force: true });
+      }
+      throw e;
+    }
     if (!check(savedVid)) return;
     const result = await loadAdminTree(savedVid, { force: true });
     if (result === 'error') pushToast('Saved (refresh failed — reload to see latest)', 'info');

@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3030
+EXPECTED_CHECKS=3041
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -3982,9 +3982,13 @@ echo
 add_row_common() {
   d '\.add-line' '' 'border:0' 'background:transparent' 'color:var\(--primary\)' 'font-size:14px' 'font-weight:600'
   chk "\.add-line\.${H}:disabled" 'color:var\(--muted\)'
+  # Blocked while a create from a closed form still posts (VR-B).
+  d '\.add-line\[aria-disabled=true\]' '' 'color:var\(--muted\)'
   d '\.add-row' '' 'display:flex'
   # Load-bearing layout (review T3): the field fills the row.
   d '\.add-field' '' 'flex:1 1 auto' 'min-width:0'
+  # VR-B: ✓ and ✕ sit in a field-high flex box, centred on the field as the rename row (D90).
+  d '\.add-acts' '' 'display:flex' 'align-items:center' 'gap:6px' 'height:var\(--control-h\)'
   d '\.add-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1\.5px solid var\(--primary\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)'
   # C3: an invalid title keeps a red edge, focused too ((0,3,0) beats base.css's focus rule).
   chk "\.add-input\[aria-invalid=\"?true\"?\]\.${H}" 'border:1\.5px solid var\(--danger\)'
@@ -5676,6 +5680,8 @@ uniq1 icon-btn
 if [[ -n $REPLY ]]; then
   N=IconButton; H=$REPLY
   d '\.danger' '' '--ring: var\(--danger\)'
+  # VR-B (call 10): a ✕ "Cancel" beside a ✓ rings gray, as InlineConfirm's Cancel.
+  d '\.cancel' '' '--ring: var\(--muted\)'
 fi
 uniq1 inline-confirm
 if [[ -n $REPLY ]]; then
@@ -5698,10 +5704,11 @@ if [[ -n $REPLY ]]; then
 fi
 # P116: --ring is set only on leaf controls. Another declaration (a card, a
 # wrapper) would silently recolour every ring inside it. The eleventh is the
-# superuser panel's nav pill (D23), AppHeader's nav amber.
+# superuser panel's nav pill (D23), AppHeader's nav amber. The twelfth is
+# IconButton's ✕ Cancel (VR-B, call 10).
 nring=$(grep -oE -- '--ring: ?var\(' $CSS | wc -l | tr -d ' ')
-if [[ $nring -eq 11 ]]; then echo "PASS  --ring is declared exactly eleven times, all on leaf controls (D60, D61, D23)"
-else echo "FAIL  --ring is declared exactly eleven times, all on leaf controls (D60, D61, D23) (found $nring)"; fail=1; fi
+if [[ $nring -eq 12 ]]; then echo "PASS  --ring is declared exactly twelve times, all on leaf controls (D60, D61, D23, VR-B)"
+else echo "FAIL  --ring is declared exactly twelve times, all on leaf controls (D60, D61, D23, VR-B) (found $nring)"; fail=1; fi
 
 # Task 2 — the page ground (D50) and the reading sheets (D56).
 # Disabled fills use --disabled-bg (the old #FBFBFC), so they stay a step above

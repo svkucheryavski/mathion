@@ -104,6 +104,15 @@ describe('Number answer (5d T6)', () => {
     expect(input(0, 'Decimals').hasAttribute('aria-invalid')).toBe(false);
   });
 
+  it('the ✕ Cancel rings gray in the number and the text key editors (VR-B, call 10)', async () => {
+    await renderQuiz(new QuizServer([num(), txt()]));
+    pencil().click(); await settle();
+    expect(byName(cards()[0], 'Cancel')!.classList.contains('cancel')).toBe(true);
+    byName(cards()[0], 'Cancel')!.click(); await settle();
+    pencil(1).click(); await settle();
+    expect(byName(cards()[1], 'Cancel')!.classList.contains('cancel')).toBe(true);
+  });
+
   it('while the key saves: the fields are read-only, ✕ waits, the other cards\' edit openers wait', async () => {
     const s = new QuizServer([num(), txt()]);
     const hold = s.hold('PATCH', /\/api\/questions\/1$/);

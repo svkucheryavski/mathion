@@ -35,6 +35,11 @@ function key(el: HTMLElement, k: string) {
 async function settle() { for (let i = 0; i < 6; i++) await Promise.resolve(); flushSync(); }
 
 describe('InlineName (handoff §4 Inline field editing)', () => {
+  it('the ✕ Cancel rings gray; ✓ does not (VR-B, call 10)', () => {
+    const { close, check } = render();
+    expect(close.classList.contains('cancel')).toBe(true);
+    expect(check.classList.contains('cancel')).toBe(false);
+  });
   it('takes focus, holds the value, is named by its label', () => {
     const { input } = render();
     expect(document.activeElement).toBe(input);
@@ -69,6 +74,23 @@ describe('InlineName (handoff §4 Inline field editing)', () => {
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true }));
     await settle();
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('Safari\'s IME-commit Enter (keyCode 229) does not save (VR-B)', async () => {
+    const { input, onSave } = render();
+    type(input, 'Gruppe');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, isComposing: false, bubbles: true, cancelable: true }));
+    await settle();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('an Escape that ends an IME composition does not cancel (VR-B)', async () => {
+    const { input, onCancel } = render();
+    type(input, 'Gruppe');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true, cancelable: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 229, isComposing: false, bubbles: true, cancelable: true }));
+    await settle();
+    expect(onCancel).not.toHaveBeenCalled();
   });
 
   it('✓ saves too', async () => {

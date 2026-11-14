@@ -18,10 +18,6 @@ Walked 2026-11-14 against main `1c904f9`: done and code-only items were dropped,
 - **A failed list reload leaves focus on `<body>`.** When a row action's reload fails, the page ErrorState replaces the frame; a focus parked on the `<h1>` (R54) or in the create form goes with it. Older than C8. Fix: in VersionsPage's error effect, repair a free focus to the ErrorState's "Back to courses" (Fable r2 M2).
 - **[open]** **A list error refuses the navigation whose question it withdraws.** The author clicked a link, the navigation question opened, and the reload failed: the form and its input are dropped, but that link resolves `false` (R55), so the author lands on "Couldn't load" and clicks again. A one-request window. Fix, if wanted: let the error effect settle an open navigation question as confirmed (Opus r2 m4).
 
-## Safari pass
-
-- **The create rows' ✓ and × sit 3px above the field's centre.** `.add-row` aligns to the top (`BlockAccordion.svelte`, `VersionEditPage.svelte`), and its 24px IconButtons are bare flex items, so they sit flush with the 30px field's top edge; since D90 the rename row centres them on the field. "+ Add sequence" and a rename of the sequence above it therefore show ✓/× at slightly different heights. Fix: wrap the add rows' buttons in a 30px `display:flex; align-items:center` span as the rename row does, with gate rows (D90 r1, Fable M1).
-
 ## Whole-branch review (71dd8cc..8bc9497)
 
 - **[open]** **Three offline sentences on one run page.** An offline title or date save on the Overview shows InlineName's "Could not save." (`InlineName.svelte:58-60`), while the groups switch and Publish/Unpublish toast `OFFLINE_MESSAGE`, and Delete says "Could not delete the run.". Spec rev 12 ("every offline write says the same thing") and its InlineName bullet disagree. Fix: InlineName maps a `TypeError` to `OFFLINE_MESSAGE` (Opus m1, Fable m2).

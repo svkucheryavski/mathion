@@ -166,7 +166,7 @@
         <IconButton glyph="check" size="sm"
                     title={numEdit.saving ? 'Saving…' : numEdit.canSave ? 'Save answer' : FORBIDDEN_TITLE}
                     disabled={!numEdit.canSave} onclick={() => void numEdit?.commit()} />
-        <IconButton glyph="close" size="sm" title="Cancel" disabled={numEdit.saving} onclick={() => numEdit?.cancel()} />
+        <IconButton glyph="close" size="sm" title="Cancel" cancel disabled={numEdit.saving} onclick={() => numEdit?.cancel()} />
       {/if}
     </div>
     {#if numInMsg}

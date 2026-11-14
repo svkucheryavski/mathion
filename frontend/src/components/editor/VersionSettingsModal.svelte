@@ -80,7 +80,7 @@
   // Enter in a one-line field saves, as the old card did: the footer Save sits
   // in the modal frame, so there is no form to submit (Info keeps its newline).
   function onEnter(e: KeyboardEvent) {
-    if (e.key !== 'Enter' || e.isComposing) return;
+    if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
     e.preventDefault();
     void save();
   }

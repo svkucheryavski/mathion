@@ -185,6 +185,36 @@ describe('SequenceAccordion — header (Slice-5c T2)', () => {
     expect(titleInput(target)).toBeNull();
   });
 
+  for (const status of [403, 409]) {
+    it(`a rename ${status} reloads the tree (VR-B)`, async () => {
+      serve((url, init) => (url === '/api/sequences/2' && init?.method === 'PATCH' ? jres({ detail: 'No' }, status) : undefined));
+      const { target } = mountAccordion();
+      await renameTo(target, 'Renamed');
+      expect(treeFetchPaths.length).toBe(1);
+    });
+  }
+  it('a rename 422 does not reload (VR-B)', async () => {
+    serve((url, init) => (url === '/api/sequences/2' && init?.method === 'PATCH' ? jres({ detail: 'Bad' }, 422) : undefined));
+    const { target } = mountAccordion();
+    await renameTo(target, 'Renamed');
+    expect(titleInput(target)).not.toBeNull();
+    expect(treeFetchPaths).toEqual([]);
+  });
+  it('a rename network failure does not reload (VR-B)', async () => {
+    serve((url, init) => (url === '/api/sequences/2' && init?.method === 'PATCH' ? Promise.reject(new TypeError('Failed to fetch')) : undefined));
+    const { target } = mountAccordion();
+    await renameTo(target, 'Renamed');
+    expect(titleInput(target)).not.toBeNull();
+    expect(treeFetchPaths).toEqual([]);
+  });
+  it('a rename 403 after a version change does not reload (VR-B)', async () => {
+    serve((url, init) => (url === '/api/sequences/2' && init?.method === 'PATCH' ? jres({ detail: 'No' }, 403) : undefined));
+    const { target, stillOnVid } = mountAccordion();
+    stillOnVid.mockReturnValue(false);
+    await renameTo(target, 'Renamed');
+    expect(treeFetchPaths).toEqual([]);
+  });
+
   it('a late rename after a version change does not reload', async () => {
     let release!: () => void;
     serve((url, init) => (url === '/api/sequences/2' && init?.method === 'PATCH'

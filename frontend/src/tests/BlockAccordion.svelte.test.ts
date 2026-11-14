@@ -300,6 +300,23 @@ describe('BlockAccordion — body (T5b)', () => {
     expect(treeFetchPaths).toEqual([]);
   });
 
+  it('a rename 403 after an unmount does not reload (VR-B)', async () => {
+    let release!: () => void;
+    serve((url, init) => (url === '/api/blocks/3' && init?.method === 'PATCH'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: 'No' }, 403))
+      : undefined));
+    await expand();
+    mountBlock();
+    await settle();
+    await dirtyBlockTitle();
+    enter(titleInput()!);
+    await settle();
+    teardown();
+    release();
+    await settle();
+    expect(treeFetchPaths).toEqual([]);
+  });
+
   it('a late delete after an unmount neither navigates nor reloads', async () => {
     const del = deferredDelete('/api/blocks/3');
     await expand();
@@ -397,6 +414,114 @@ describe('BlockAccordion — "+ Add sequence" (Slice-5c T3)', () => {
     expect(addInput()).toBeNull();
   });
 
+  it('Enter on + Add right after a create opens the form (VR-B)', async () => {
+    let releaseTree!: () => void;
+    serve((url) => (url.endsWith('/admin-tree')
+      ? new Promise<void>((r) => { releaseTree = r; }).then(() => jres(structuredClone(served)))
+      : undefined));
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    type(addInput()!, 'Span');
+    addInput()!.form!.requestSubmit(); await settle();
+    expect(document.activeElement).toBe(addLine());
+    addLine()!.click(); await settle();          // the reload is still held
+    expect(addInput()).not.toBeNull();
+    expect(addInput()!.readOnly).toBe(false);
+    expect(target.querySelector<HTMLButtonElement>('button[aria-label="Cancel new sequence"]')!.disabled).toBe(false);
+    expect(submitBtn()!.disabled).toBe(true);       // empty: a truly disabled ✓ never takes focus
+    type(addInput()!, 'Second');
+    expect(submitBtn()!.title).toBe('Wait for the request to finish');
+    addInput()!.form!.requestSubmit(); await settle();
+    const posts = () => fetchSpy.mock.calls.filter(([u, i]) => String(u) === '/api/blocks/3/sequences' && i?.method === 'POST');
+    expect(posts()).toHaveLength(1);              // ✓ waits for the reload
+    expect(submitBtn()!.getAttribute('aria-disabled')).toBe('true');
+    releaseTree(); await settle();
+    expect(addInput()!.value).toBe('Second');
+    expect(submitBtn()!.hasAttribute('aria-disabled')).toBe(false);
+    expect(submitBtn()!.title).toBe('Create');
+  });
+
+  it('a create whose reload lands after the author left the reopened form does not pull focus back (VR-B)', async () => {
+    let releaseTree!: () => void;
+    serve((url) => (url.endsWith('/admin-tree')
+      ? new Promise<void>((r) => { releaseTree = r; }).then(() => jres(structuredClone(served)))
+      : undefined));
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    type(addInput()!, 'Span');
+    addInput()!.form!.requestSubmit(); await settle();
+    addLine()!.click(); await settle();
+    (document.activeElement as HTMLElement).blur();
+    releaseTree(); await settle();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('+ Add is blocked while a create from a closed form still posts (VR-B)', async () => {
+    let release!: () => void;
+    serve((url, init) => (url === '/api/blocks/3/sequences' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: 'boom' }, 500))
+      : undefined));
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    type(addInput()!, 'Span');
+    addInput()!.form!.requestSubmit(); await settle();
+    await navigate('/courses/c/edit/v/1', { force: true });   // collapse closes the form
+    await settle();
+    await expand();
+    expect(addInput()).toBeNull();
+    expect(addLine()!.getAttribute('aria-disabled')).toBe('true');
+    expect(addLine()!.title).toBe('Wait for the request to finish');
+    addLine()!.click(); await settle();
+    expect(addInput()).toBeNull();
+    release(); await settle();
+    expect(addLine()!.hasAttribute('aria-disabled')).toBe(false);
+    expect(addLine()!.hasAttribute('title')).toBe(false);
+  });
+
+  it('✕ closes a form reopened while the create\'s reload is held (VR-B)', async () => {
+    let releaseTree!: () => void;
+    serve((url) => (url.endsWith('/admin-tree')
+      ? new Promise<void>((r) => { releaseTree = r; }).then(() => jres(structuredClone(served)))
+      : undefined));
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    type(addInput()!, 'Span');
+    addInput()!.form!.requestSubmit(); await settle();
+    addLine()!.click(); await settle();
+    target.querySelector<HTMLButtonElement>('button[aria-label="Cancel new sequence"]')!.click(); await settle();
+    expect(addInput()).toBeNull();
+    releaseTree(); await settle();
+  });
+
+  it('an IME-commit Escape (keyCode 229) keeps the add row (VR-B)', async () => {
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    type(addInput()!, 'Span');
+    addInput()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 229, isComposing: false, bubbles: true, cancelable: true }));
+    await settle();
+    expect(addInput()!.value).toBe('Span');
+  });
+
+  it('the add row centres ✓ and ✕ in one wrapper; ✕ rings gray (VR-B)', async () => {
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    const acts = target.querySelector('.add-row .add-acts')!;
+    expect([...acts.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))).toEqual(['Create sequence', 'Cancel new sequence']);
+    expect(acts.querySelector('button[aria-label="Cancel new sequence"]')!.classList.contains('cancel')).toBe(true);
+  });
+
   it('after a create, focus returns to the line for the next one', async () => {
     await expand();
     mountBlock();
@@ -428,6 +553,27 @@ describe('BlockAccordion — "+ Add sequence" (Slice-5c T3)', () => {
     release(); await settle();
     expect(submitBtn()!.hasAttribute('aria-disabled')).toBe(false);
     expect(document.activeElement).toBe(submitBtn());
+  });
+
+  it('a rejected create frees the field and ✕ again (VR-B)', async () => {
+    let release!: () => void;
+    serve((url, init) => (url === '/api/blocks/3/sequences' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: 'boom' }, 500))
+      : undefined));
+    await expand();
+    mountBlock();
+    await settle();
+    addLine()!.click(); await settle();
+    type(addInput()!, 'Span');
+    addInput()!.form!.requestSubmit(); await settle();
+    const cancel = () => target.querySelector<HTMLButtonElement>('button[aria-label="Cancel new sequence"]')!;
+    expect(addInput()!.readOnly).toBe(true);
+    expect(cancel().disabled).toBe(true);
+    release(); await settle();
+    expect(addInput()!.readOnly).toBe(false);
+    expect(cancel().disabled).toBe(false);
+    cancel().click(); await settle();
+    expect(addInput()).toBeNull();
   });
 
   it('a failed create repairs a focus the browser dropped from the disabled × (review r2)', async () => {
@@ -610,6 +756,41 @@ describe('BlockAccordion — header (Slice-5c T2)', () => {
     await settle();
     expect(titleInput()!.value).toBe('Changed');
     expect(target.querySelector('.acc-row .err')!.textContent).toBe('Title already taken');
+    expect(treeFetchPaths.length).toBe(1);   // VR-B: a 409 reloads the tree
+  });
+
+  for (const status of [403, 409]) {
+    it(`a rename ${status} reloads the tree (VR-B)`, async () => {
+      serve((url, init) => (url === '/api/blocks/3' && init?.method === 'PATCH' ? jres({ detail: 'No' }, status) : undefined));
+      await expand();
+      mountBlock();
+      await settle();
+      await dirtyBlockTitle();
+      enter(titleInput()!);
+      await settle();
+      expect(treeFetchPaths.length).toBe(1);
+    });
+  }
+  it('a rename network failure does not reload the tree (VR-B)', async () => {
+    serve((url, init) => (url === '/api/blocks/3' && init?.method === 'PATCH' ? Promise.reject(new TypeError('Failed to fetch')) : undefined));
+    await expand();
+    mountBlock();
+    await settle();
+    await dirtyBlockTitle();
+    enter(titleInput()!);
+    await settle();
+    expect(titleInput()).not.toBeNull();
+    expect(treeFetchPaths).toEqual([]);
+  });
+
+  it('a rename 422 does not reload the tree (VR-B)', async () => {
+    serve((url, init) => (url === '/api/blocks/3' && init?.method === 'PATCH' ? jres({ detail: 'Bad' }, 422) : undefined));
+    await expand();
+    mountBlock();
+    await settle();
+    await dirtyBlockTitle();
+    enter(titleInput()!);
+    await settle();
     expect(treeFetchPaths).toEqual([]);
   });
 

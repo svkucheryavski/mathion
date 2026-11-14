@@ -169,6 +169,13 @@ describe('VersionSettingsModal (Slice-5c T5, D12)', () => {
     await settle();
     expect(patches()).toEqual([['/api/versions/1', { label: 'L2', info_md: 'More' }]]);
   });
+  it('Safari\'s IME-commit Enter (keyCode 229) in Label does not save (VR-B)', async () => {
+    render();
+    type(input('Label'), 'L2');
+    input('Label').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, isComposing: false, bubbles: true, cancelable: true }));
+    await settle();
+    expect(patches()).toEqual([]);
+  });
   it('Enter in an out-of-range attempts field shows the error and sends nothing', async () => {
     render();
     type(input('Max quiz attempts'), '0');

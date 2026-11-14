@@ -2,28 +2,6 @@
 
 Walked 2026-11-14 against main `1c904f9`: done and code-only items were dropped, screen-reader items moved to `beta-voiceover-pass.md`, by-hand browser checks to `beta-browser-pass.md`. What is left goes into one fix round; **[open]** marks an item that needs the user's call first.
 
-## T2 — headers, inline title, header delete
-
-- **Safari IME on the inline title.** `AccordionHeader` bails on `e.isComposing`
-  only; WebKit's confirming Enter has `isComposing=false`, `keyCode=229`, so
-  a CJK author's Enter-to-convert commits a half-typed title (Esc can cancel
-  the rename). Fix: `if (e.isComposing || e.keyCode === 229) return;` — the
-  same debt exists in `InlineField` (Modal already guards it).
-  **Low priority (user, 2026-10-10):** Japanese/Chinese input is not planned in the near future; not tested in
-  the Safari pass.
-- **Read-only flip drops a dirty title silently.** InlineField toasted
-  "Editing closed — this version is no longer editable" and refocused its row;
-  the header closes the field without a message (focus may fall to `<body>`).
-- **✎ enabled-but-inert while a closed rename is still saving** (Back mid-save,
-  then Forward before the PATCH settles): `disabled={busy || saving}`.
-- **Guard prompt during an in-flight save.** The tracker stays dirty while
-  `saving`, so navigating prompts "Discard…", yet the PATCH still lands
-  (InlineField parity). Option: `renaming && !saving && …`.
-
-## T3
-
-- **Enter on "+ Add …" right after a create is swallowed.** Focus returns to the line, but `createBusy` stays true through the follow-up `loadAdminTree`. `openAdd` bails, and the line isn't disabled (disabling it would drop the returned focus). Fix: a separate "posting" flag, so `openAdd` is allowed once the POST itself is done. Keep `createBusy` on reorder/header gating. (BlockAccordion, VersionEditPage.)
-
 ## T4
 
 - **Type picker stays live while a create is posting** (both lanes). Switching Page→Video mid-POST lets a different type show than the one sent, and a 422 is mapped against the new type (a `video_url` error then reaches the alert, still visible). Fix: snapshot `sentType` in `submit()` for `known`, and freeze the picker (`<fieldset disabled>` via a `disabled` prop) while busy.
@@ -40,11 +18,3 @@ Walked 2026-11-14 against main `1c904f9`: done and code-only items were dropped,
 ## Mandatory version label, "v. N" chips, block numbers (2026-10-08)
 
 - **The modal shows one field error at a time (r1, Opus).** A blank Label and an invalid attempts value show only the label error; the attempts error appears on the next Save. Set both before returning.
-
-## Whole-branch review (29737f4..1ab391e, 2026-10-09) — minors, deferred
-
-- **5c header renames don't reload the tree on 403/409** (Opus): `BlockAccordion.renameBlock` and
-  `SequenceAccordion.renameSeq` pass the error to AccordionHeader without `loadAdminTree(…, { force: true })`,
-  unlike every 5d write. The ✓ stays enabled and every retry fails until a manual reload. Fix together with
-  "Read-only flip drops a dirty title silently" above: a reload would close the field through the
-  `!canEditTitle` effect and lose the typed text.

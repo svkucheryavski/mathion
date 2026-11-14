@@ -322,6 +322,110 @@ describe('VersionEditPage — "+ Add block" (Slice-5c T3)', () => {
     after();
   });
 
+  it('Enter on + Add right after a create opens the form (VR-B)', async () => {
+    let hold = false;
+    let releaseTree!: () => void;
+    serve((url) => (hold && url.endsWith('/admin-tree')
+      ? new Promise<void>((r) => { releaseTree = r; }).then(() => jres(structuredClone(tree)))
+      : undefined));
+    await render();
+    addLine()!.click(); await settle();
+    typeTitle('Matrices');
+    hold = true;
+    addInput()!.form!.requestSubmit(); await settle();
+    expect(document.activeElement).toBe(addLine());
+    addLine()!.click(); await settle();          // the reload is still held
+    expect(addInput()).not.toBeNull();
+    expect(addInput()!.readOnly).toBe(false);
+    const ok = () => target.querySelector<HTMLButtonElement>('button[aria-label="Create block"]')!;
+    expect(target.querySelector<HTMLButtonElement>('button[aria-label="Cancel new block"]')!.disabled).toBe(false);
+    expect(ok().disabled).toBe(true);               // empty: a truly disabled ✓ never takes focus
+    typeTitle('Second');
+    expect(ok().title).toBe('Wait for the request to finish');
+    addInput()!.form!.requestSubmit(); await settle();
+    const posts = () => fetchSpy.mock.calls.filter(([u, i]) => String(u) === '/api/versions/1/blocks' && (i as RequestInit)?.method === 'POST');
+    expect(posts()).toHaveLength(1);              // ✓ waits for the reload
+    expect(ok().getAttribute('aria-disabled')).toBe('true');
+    releaseTree(); await settle();
+    expect(addInput()!.value).toBe('Second');
+    expect(ok().hasAttribute('aria-disabled')).toBe(false);
+    expect(ok().title).toBe('Create');
+  });
+
+  it('a create whose reload lands after the author left the reopened form does not pull focus back (VR-B)', async () => {
+    let hold = false;
+    let releaseTree!: () => void;
+    serve((url) => (hold && url.endsWith('/admin-tree')
+      ? new Promise<void>((r) => { releaseTree = r; }).then(() => jres(structuredClone(tree)))
+      : undefined));
+    await render();
+    addLine()!.click(); await settle();
+    typeTitle('Matrices');
+    hold = true;
+    addInput()!.form!.requestSubmit(); await settle();
+    addLine()!.click(); await settle();
+    (document.activeElement as HTMLElement).blur();
+    releaseTree(); await settle();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('+ Add is blocked while a create from a discarded form still posts (VR-B)', async () => {
+    let release!: () => void;
+    serve((url, init) => (url === '/api/versions/1/blocks' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: 'boom' }, 500))
+      : undefined));
+    await render();
+    addLine()!.click(); await settle();
+    typeTitle('Matrices');
+    addInput()!.form!.requestSubmit(); await settle();
+    const nav = navigate('/courses/c/edit/v/1/blocks/10');   // the guard asks; Discard closes the form
+    await settle();
+    pageBtn('confirm')!.click();
+    await nav; await settle();
+    expect(addInput()).toBeNull();
+    expect(addLine()!.getAttribute('aria-disabled')).toBe('true');
+    expect(addLine()!.title).toBe('Wait for the request to finish');
+    addLine()!.click(); await settle();
+    expect(addInput()).toBeNull();
+    release(); await settle();
+    expect(addLine()!.hasAttribute('aria-disabled')).toBe(false);
+    expect(addLine()!.hasAttribute('title')).toBe(false);
+  });
+
+  it('✕ closes a form reopened while the create\'s reload is held (VR-B)', async () => {
+    let hold = false;
+    let releaseTree!: () => void;
+    serve((url) => (hold && url.endsWith('/admin-tree')
+      ? new Promise<void>((r) => { releaseTree = r; }).then(() => jres(structuredClone(tree)))
+      : undefined));
+    await render();
+    addLine()!.click(); await settle();
+    typeTitle('Matrices');
+    hold = true;
+    addInput()!.form!.requestSubmit(); await settle();
+    addLine()!.click(); await settle();
+    target.querySelector<HTMLButtonElement>('button[aria-label="Cancel new block"]')!.click(); await settle();
+    expect(addInput()).toBeNull();
+    releaseTree(); await settle();
+  });
+
+  it('an IME-commit Escape (keyCode 229) keeps the add row (VR-B)', async () => {
+    await render();
+    addLine()!.click(); await settle();
+    typeTitle('Matrices');
+    addInput()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 229, isComposing: false, bubbles: true, cancelable: true }));
+    await settle();
+    expect(addInput()!.value).toBe('Matrices');
+  });
+
+  it('the add row centres ✓ and ✕ in one wrapper; ✕ rings gray (VR-B)', async () => {
+    await render();
+    addLine()!.click(); await settle();
+    const acts = target.querySelector('.add-row .add-acts')!;
+    expect([...acts.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))).toEqual(['Create block', 'Cancel new block']);
+    expect(acts.querySelector('button[aria-label="Cancel new block"]')!.classList.contains('cancel')).toBe(true);
+  });
+
   it('an open row is not closed by a depth change (the line is not tied to the focus)', async () => {
     // Empty row: a typed one would go through the guard prompt on a real navigate.
     const props = await renderReactive();
@@ -366,6 +470,25 @@ describe('VersionEditPage — "+ Add block" (Slice-5c T3)', () => {
     await settle();
     expect(ok().hasAttribute('aria-disabled')).toBe(false);
     expect(document.activeElement).toBe(ok());
+  });
+
+  it('a rejected create frees the field and ✕ again (VR-B)', async () => {
+    let release!: () => void;
+    serve((url, init) => (url === '/api/versions/1/blocks' && init?.method === 'POST'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres({ detail: 'boom' }, 500))
+      : undefined));
+    await render();
+    addLine()!.click(); await settle();
+    typeTitle('Matrices');
+    addInput()!.form!.requestSubmit(); await settle();
+    const cancel = () => target.querySelector<HTMLButtonElement>('button[aria-label="Cancel new block"]')!;
+    expect(addInput()!.readOnly).toBe(true);
+    expect(cancel().disabled).toBe(true);
+    release(); await settle();
+    expect(addInput()!.readOnly).toBe(false);
+    expect(cancel().disabled).toBe(false);
+    cancel().click(); await settle();
+    expect(addInput()).toBeNull();
   });
 
   it('a failed create repairs a focus the browser dropped from the disabled × (review r2)', async () => {

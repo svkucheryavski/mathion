@@ -335,3 +335,96 @@ describe('AccordionHeader — inline title (D8)', () => {
     expect(toasts.list.map((t) => t.message)).toContain('Save failed');
   });
 });
+
+describe('AccordionHeader — backlog round (VR-B)', () => {
+  it('Enter mid-IME does not commit a title', async () => {
+    const p = render();
+    pencil()!.click(); await settle();
+    type('New');
+    input()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, isComposing: false, bubbles: true, cancelable: true }));
+    await settle();
+    expect(p.onRename).not.toHaveBeenCalled();
+    expect(input()).not.toBeNull();
+  });
+  it('a read-only flip under an edited title toasts and refocuses the row', async () => {
+    const p = render();
+    pencil()!.click(); await settle();
+    type('Changed');
+    p.canEditTitle = false; flushSync(); await settle();
+    expect(input()).toBeNull();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Editing closed — this version is no longer editable', 'info']]);
+    expect(document.activeElement).toBe(target.querySelector('#h'));
+  });
+  it('a read-only flip under an unchanged title closes without a toast', async () => {
+    const p = render();
+    pencil()!.click(); await settle();
+    p.canEditTitle = false; flushSync(); await settle();
+    expect(input()).toBeNull();
+    expect(toasts.list).toEqual([]);
+    expect(document.activeElement).toBe(target.querySelector('#h'));
+  });
+  it('a read-only flip mid-save leaves the message to the save', async () => {
+    let release!: () => void;
+    const p = render({ onRename: vi.fn(() => new Promise<void>((r) => { release = r; })) });
+    pencil()!.click(); await settle();
+    type('Changed'); key('Enter'); await settle();
+    p.canEditTitle = false; flushSync(); await settle();
+    expect(input()).toBeNull();
+    expect(toasts.list).toEqual([]);
+    expect(document.activeElement).toBe(target.querySelector('#h'));
+    release(); await settle();
+  });
+  it('a mode close of an edited title neither toasts nor moves focus to the row', async () => {
+    const p = render();
+    pencil()!.click(); await settle();
+    type('Changed');
+    p.mode = 'open-parent'; flushSync(); await settle();
+    expect(input()).toBeNull();
+    expect(toasts.list).toEqual([]);
+    expect(document.activeElement).not.toBe(target.querySelector('#h'));
+  });
+  it('a read-only flip that also brings a new title does not toast an untouched field', async () => {
+    const p = render();
+    pencil()!.click(); await settle();
+    p.title = 'Renamed elsewhere'; p.canEditTitle = false; flushSync(); await settle();
+    expect(input()).toBeNull();
+    expect(toasts.list).toEqual([]);
+  });
+  it('a read-only flip does not take focus the author moved elsewhere', async () => {
+    const p = render();
+    pencil()!.click(); await settle();
+    type('Changed');
+    const other = document.createElement('button');
+    document.body.appendChild(other);
+    other.focus();
+    p.canEditTitle = false; flushSync(); await settle();
+    expect(document.activeElement).toBe(other);
+    other.remove();
+  });
+  it('✎ is disabled while a closed rename still saves', async () => {
+    let release!: () => void;
+    const p = render({ onRename: vi.fn(() => new Promise<void>((r) => { release = r; })) });
+    pencil()!.click(); await settle();
+    type('New'); key('Enter'); await settle();
+    p.mode = 'open-parent'; flushSync();
+    p.mode = 'open-focus'; flushSync();
+    expect(pencil()!.disabled).toBe(true);
+    release(); await settle();
+    expect(pencil()!.disabled).toBe(false);
+  });
+  it('the leave guard does not ask while a rename is saving', async () => {
+    let reject!: (e: unknown) => void;
+    render({ onRename: vi.fn(() => new Promise<void>((_r, j) => { reject = j; })) });
+    pencil()!.click(); await settle();
+    type('New'); key('Enter'); await settle();
+    expect(registry.isAnyDirty()).toBe(false);
+    reject(new Error('x')); await settle();
+    expect(registry.isAnyDirty()).toBe(true);
+  });
+  it('the ✕ Cancel rings gray; ✓ does not', async () => {
+    render();
+    pencil()!.click(); await settle();
+    expect(btn('Cancel editing the sequence title')!.classList.contains('cancel')).toBe(true);
+    expect(btn('Save the sequence title')!.classList.contains('cancel')).toBe(false);
+  });
+});

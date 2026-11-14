@@ -367,7 +367,7 @@
     <IconButton glyph="check" size="sm"
                 title={titleEdit.saving ? 'Saving…' : titleEdit.canSave ? 'Save title' : FORBIDDEN_TITLE}
                 disabled={!titleEdit.canSave} bind:element={titleOkEl} onclick={() => void titleEdit?.commit()} />
-    <IconButton glyph="close" size="sm" title="Cancel" disabled={titleEdit.saving}
+    <IconButton glyph="close" size="sm" title="Cancel" cancel disabled={titleEdit.saving}
                 onclick={() => titleEdit?.cancel()} />
   {:else if isQuiz && canEditText}
     <IconButton glyph="pencil" size="sm" borderless id={titleEditId} bind:element={titleEditBtn}
