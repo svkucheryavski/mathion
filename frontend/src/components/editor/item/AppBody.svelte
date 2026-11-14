@@ -5,9 +5,9 @@
   // Save sends only the title. Previews the stored app in the real
   // strict-sandboxed frame (fetch → inline). NEVER renders a stored filename as
   // a link (security §6/§9).
-  import { onDestroy, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import AskSlot from '../../ui/AskSlot.svelte';
-  import { InPlaceAsk, firstUsable, focusAfter, settleTo, withdraw, type Ask } from '../../../lib/askInPlace.svelte';
+  import { InPlaceAsk, firstUsable, focusAfter, repairFocus, settleTo, withdraw, type Ask } from '../../../lib/askInPlace.svelte';
   import InteractiveFrame from '../../items/InteractiveFrame.svelte';
   import Button from '../../ui/Button.svelte';
   import { fetchAssetSource, uploadAsset, deleteAsset, type AssetResponse } from '../../../lib/assets';
@@ -85,6 +85,8 @@
   });
 
   let uploadBusy = $state(false);
+  // Set by this body's own refused request: its sentence outlives the read-only flip the reload brings.
+  let keepError = $state(false);
   let warnings = $state<string[]>([]);
   let uploadError = $state<string | null>(null);
   let fileEl = $state<HTMLInputElement>();
@@ -110,6 +112,7 @@
     input.value = ''; // allow re-choosing the same filename
     if (!file) return;
     uploadError = null;
+    keepError = false;
     warnings = [];
     // Settings D11b: the browser's check, before reading or sending the file;
     // the server's sentence still covers a limit this tab doesn't know.
@@ -131,16 +134,22 @@
       uploaded = await uploadAsset(savedVid, file);
       await api.patch(`/api/items/${itemId}`, { script_url: uploaded.filename });
       linked = true;
-      if (stillOnVid(savedVid)) await loadAdminTree(savedVid, { force: true });
-      pushToast('App uploaded', 'success');
+      const r = stillOnVid(savedVid) ? await loadAdminTree(savedVid, { force: true }) : 'ok';
+      if (r === 'error') pushToast('Uploaded (refresh failed — reload to see latest)', 'info');
+      else pushToast('App uploaded', 'success');
     } catch (err) {
       if (uploaded && !linked) {
         // Best-effort: a failed clean-up leaves the orphan removable in the
         // asset manager; never surface a clean-up error.
         try { await deleteAsset(uploaded.id); } catch { /* ignore */ }
       }
+      // VR-B: a 403, or a 409 on the link PATCH, means rights changed elsewhere; the reload catches up.
+      if (err instanceof ApiError && (err.status === 403 || (uploaded && err.status === 409)) && stillOnVid(savedVid)) {
+        keepError = true;
+        await loadAdminTree(savedVid, { force: true });
+      }
       if (!alive) return;
-      if (err instanceof ApiError && err.status === 409) {
+      if (!uploaded && err instanceof ApiError && err.status === 409) {
         uploadError = 'A file with that name already exists. Rename it or remove the old one first.';
       } else if (err instanceof ApiError && err.status === 413) {
         uploadError = tooLargeSentence(err); // Settings D11a
@@ -148,7 +157,11 @@
         uploadError = err instanceof ApiError ? err.displayMessage : 'Upload failed.';
       }
     } finally {
-      if (alive) uploadBusy = false;
+      if (alive) {
+        uploadBusy = false;
+        // Upload was disabled under focus (and a reload may have taken it away): never <body>.
+        void tick().then(() => { if (alive) void repairFocus(orModal(rowBtn('app-upload'))); });
+      }
     }
   }
 
@@ -171,12 +184,19 @@
     }
     uploadBusy = true;
     uploadError = null;
+    keepError = false;
     try {
       await api.patch(`/api/items/${itemId}`, { script_url: null });
-      if (stillOnVid(savedVid)) await loadAdminTree(savedVid, { force: true });
+      const r = stillOnVid(savedVid) ? await loadAdminTree(savedVid, { force: true }) : 'ok';
       if (alive) warnings = [];
-      pushToast('App removed', 'success');
+      if (r === 'error') pushToast('Removed (refresh failed — reload to see latest)', 'info');
+      else pushToast('App removed', 'success');
     } catch (err) {
+      // Awaited while busy, so the settle below sees the row the reload left.
+      if (err instanceof ApiError && (err.status === 403 || err.status === 409) && stillOnVid(savedVid)) {
+        keepError = true;
+        await loadAdminTree(savedVid, { force: true });
+      }
       if (alive) uploadError = err instanceof ApiError ? err.displayMessage : 'Remove failed.';
     } finally {
       if (alive) uploadBusy = false;
@@ -207,31 +227,35 @@
 {#if item}
   <div class="field-row">
     <span class="field-label">App script</span>
-    <div class="script-row" bind:this={rowEl}>
-      <span class="mono script-name" class:none={!item.script_url}>{item.script_url ?? 'No script'}</span>
-      {#if editable}
-        <input
-          bind:this={fileEl}
-          type="file"
-          accept=".js,application/javascript"
-          hidden
-          disabled={uploadBusy || frozen}
-          onchange={onFileChosen}
-        />
-        {#if removeAsk.open}
-          <AskSlot ask={removeAsk} />
-        {:else}
-          <Button variant="secondary" data-action="app-upload" disabled={uploadBusy || frozen} onclick={() => fileEl?.click()}>
-            {item.script_url ? 'Replace' : 'Upload'}
-          </Button>
-          {#if item.script_url}
-            <Button variant="ghost" data-action="app-remove" disabled={uploadBusy || frozen} onclick={() => void removeApp()}>Remove</Button>
+    <!-- The error sits under the value, as VideoBody's (D12). -->
+    <div class="field">
+      <div class="script-row" bind:this={rowEl}>
+        <span class="mono script-name" class:none={!item.script_url}>{item.script_url ?? 'No script'}</span>
+        {#if editable}
+          <input
+            bind:this={fileEl}
+            type="file"
+            accept=".js,application/javascript"
+            hidden
+            disabled={uploadBusy || frozen}
+            onchange={onFileChosen}
+          />
+          {#if removeAsk.open}
+            <AskSlot ask={removeAsk} />
+          {:else}
+            <Button variant="secondary" data-action="app-upload" disabled={uploadBusy || frozen} onclick={() => fileEl?.click()}>
+              {item.script_url ? 'Replace' : 'Upload'}
+            </Button>
+            {#if item.script_url}
+              <Button variant="ghost" data-action="app-remove" disabled={uploadBusy || frozen} onclick={() => void removeApp()}>Remove</Button>
+            {/if}
           {/if}
         {/if}
-      {/if}
+      </div>
+      <!-- Read-only, only a refusal's own sentence shows: it says why the change did not land. -->
+      {#if uploadError && (editable || keepError)}<p class="field-err" role="alert">{uploadError}</p>{/if}
     </div>
   </div>
-  {#if editable && uploadError}<p class="field-err" role="alert">{uploadError}</p>{/if}
   {#if editable && warnings.length}
     <ul class="warnings">
       {#each warnings as w}<li>{w}</li>{/each}
@@ -270,10 +294,11 @@
   .field-row {
     display: grid;
     grid-template-columns: 132px 1fr; /* ref 1808 — D4 borrows 3e's row; D2 drops the pencil slot */
-    align-items: center;
+    align-items: baseline;
     gap: 12px;
   }
   .field-label { font-size: 12.5px; color: var(--muted); }
+  .field { display: flex; flex-direction: column; gap: 4px; /* the 4px step */ min-width: 0; }
   .script-row { display: flex; align-items: center; gap: 9px; min-width: 0; /* ref 1750 — the dense button gap */ }
   .script-name {
     min-width: 0;

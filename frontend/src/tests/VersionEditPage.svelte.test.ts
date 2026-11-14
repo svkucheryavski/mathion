@@ -1257,6 +1257,66 @@ describe('VersionEditPage — the item modal (Slice-5b T3b)', () => {
     expect(currentRoute.path).toBe(SEQ);
   });
 
+  it('a late DELETE success does not steal focus from where the author moved it (VR-B)', async () => {
+    const release = holdDelete(30);
+    await openFromPage(30);
+    trashBtn().click();
+    await settle();
+    bodyAskBtn('confirm')!.click();
+    await settle();
+    history.back();
+    await waitPop();
+    expect(currentRoute.path).toBe(SEQ);
+    pencil(31)!.focus();
+    release();
+    await settle();
+    await settle();
+    expect(msgs()).toContain('Item deleted');
+    expect(document.activeElement).toBe(pencil(31));
+  });
+
+  it("B's trash is disabled while A's DELETE runs, with a reason title (VR-B)", async () => {
+    const release = holdDelete(30);
+    await openFromPage(30);
+    trashBtn().click();
+    await settle();
+    bodyAskBtn('confirm')!.click();
+    await settle();
+    history.back();
+    await waitPop();
+    pencil(31)!.focus();
+    pencil(31)!.click();
+    await settle();
+    expect(trashBtn().disabled).toBe(true);
+    expect(trashBtn().title).toBe('Wait for the request to finish');
+    release();
+    await settle();
+    await settle();
+    expect(trashBtn().disabled).toBe(false);
+    expect(trashBtn().title).toBe('Delete this item');
+  });
+
+  it('a DELETE that lands after a version switch still toasts Item deleted (VR-B)', async () => {
+    let release!: () => void;
+    serve((url, init) => {
+      if (url === '/api/items/30' && init?.method === 'DELETE') return new Promise<Response>((r) => { release = () => void jres({}).then(r); });
+      if (url.endsWith('/versions/2/admin-tree')) return jres({ ...structuredClone(tree), version: mkVersion({ id: 2, label: 'Second' }) });
+      return undefined;
+    });
+    await openFromPage(30);
+    trashBtn().click();
+    await settle();
+    bodyAskBtn('confirm')!.click();
+    await settle();
+    await navigate('/courses/c/edit/v/2', { force: true });
+    await settle();
+    release();
+    await settle();
+    await settle();
+    expect(currentRoute.path).toBe('/courses/c/edit/v/2');
+    expect(toasts.list.map((t) => [t.message, t.kind])).toContainEqual(['Item deleted', 'success']);
+  });
+
   it('the page behind cannot take focus while the modal is open', async () => {
     await openFromPage();
     target.querySelector<HTMLElement>('#seq-20-header')!.focus();

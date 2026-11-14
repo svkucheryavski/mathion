@@ -133,7 +133,7 @@ describe('Quiz header (5d T4)', () => {
     expect(esc.defaultPrevented).toBe(true);
     expect(r.onRequestClose).not.toHaveBeenCalled();
     expect(field()).not.toBeNull();
-    expect(trash().title).toBe('Delete this item — wait for the save to finish');
+    expect(trash().title).toBe('Wait for the save to finish');
     expect(trash().disabled).toBe(true);
     expect(r.anyDirty()).toBe('false');
     hold.release();
@@ -217,7 +217,7 @@ describe('Quiz header (5d T4)', () => {
     typeInto(field(), 'X');
     byName(panel(), 'Save title')!.click();
     await settle();
-    expect(trash().title).toBe('Delete this item — wait for the save to finish');
+    expect(trash().title).toBe('Wait for the save to finish');
     hold.release();
     await settle();
     expect(trash().title).toBe('Delete this item');

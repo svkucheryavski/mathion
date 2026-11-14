@@ -8,15 +8,16 @@
   import { createDirtyRegistry, DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../../lib/dirtyRegistry.svelte';
   import { PageAsk, PAGE_ASK_KEY } from '../../lib/askInPlace.svelte';
 
-  let { modal, onRegistry, withPage = false }: {
+  let { modal, onRegistry, withPage = false, onPage }: {
     modal: ComponentProps<typeof ItemEditorModal>;
     onRegistry?: (r: DirtyRegistry) => void;
     withPage?: boolean;
+    onPage?: (p: PageAsk) => void;
   } = $props();
   const registry = createDirtyRegistry();
   setContext(DIRTY_REGISTRY_KEY, registry);
   const page = untrack(() => withPage) ? new PageAsk() : null;
-  if (page) setContext(PAGE_ASK_KEY, page);
+  if (page) { setContext(PAGE_ASK_KEY, page); untrack(() => onPage)?.(page); }
   untrack(() => onRegistry)?.(registry);
   const anyDirty = $derived(registry.isAnyDirty());
 </script>

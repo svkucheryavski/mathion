@@ -284,7 +284,8 @@
       await tick();
       return;
     }
-    if (!stillOnVid(savedVid)) { deletingIid = null; return; }
+    // The DELETE landed: say so even when the page moved to another version.
+    if (!stillOnVid(savedVid)) { deletingIid = null; pushToast('Item deleted', 'success'); return; }
     if (routeIid === String(id)) {
       deletedIid = id;
       closing = true;
@@ -296,7 +297,8 @@
     await loadAdminTree(savedVid, { force: true });
     pushToast('Item deleted', 'success');
     if (routeIid === null && stillOnVid(savedVid) && routeSid === savedSid) {
-      document.getElementById(`seq-${savedSid}-header`)?.focus();
+      // D18: only a focus the closed modal dropped goes to the header.
+      void repairFocus(document.getElementById(`seq-${savedSid}-header`));
     }
     deletingIid = null;
   }
@@ -742,6 +744,7 @@
             onRequestClose={requestCloseItem}
             onDeleteItem={deleteOpenItem}
             deleting={deletingIid === it.id}
+            deleteBusy={deletingIid !== null && deletingIid !== it.id}
           />
         {/key}
       {/if}

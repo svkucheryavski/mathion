@@ -44,10 +44,12 @@
     onDeleteItem: () => Promise<void>;
     // D9: the page's DELETE for THIS item is in flight.
     deleting?: boolean;
+    // VR-B: the page's DELETE for ANOTHER item is in flight.
+    deleteBusy?: boolean;
   };
   let {
     vid, version, perms, blockTitle, seqTitle, item, itemIndex, itemCount,
-    stillOnVid, onRequestClose, onDeleteItem, deleting = false,
+    stillOnVid, onRequestClose, onDeleteItem, deleting = false, deleteBusy = false,
   }: Props = $props();
 
   const uid = $props.id();
@@ -96,8 +98,10 @@
   const saveAriaBlocked = $derived(!saving && (!canEditText || !saveDirty || bodyBusy));
   const discardAriaBlocked = $derived(!saveDirty || bodyBusy);
   let saveBtn = $state<HTMLButtonElement>();
+  // A page body is busy only while it uploads; an app body also while it removes its script.
+  const busyWait = $derived(item.type === 'interactive_app' ? 'Wait for the request to finish' : 'Wait for the upload to finish');
   const footTitle = (none: string) =>
-    (saving ? undefined : bodyBusy ? 'Wait for the upload to finish' : saveDirty ? undefined : none);
+    (saving ? undefined : bodyBusy ? busyWait : saveDirty ? undefined : none);
 
   let alive = true;
   onDestroy(() => { alive = false; });
@@ -276,14 +280,22 @@
       guardDirty
         ? (isQuiz ? 'Delete this item — finish or discard the open edit first'
                   : 'Delete this item — save or discard changes first')
-        : isQuiz && bodyBusy ? 'Delete this item — wait for the save to finish' : 'Delete this item'
+        : bodyBusy ? (isQuiz ? 'Wait for the save to finish' : busyWait)
+        : 'Delete this item'
     ),
   );
-  const trashDisabled = $derived(!!structReason || guardDirty || bodyBusy || frozen);
+  // VR-B: a running save or delete names its wait on the trash and ×.
+  const waitTitle = $derived(saving ? 'Wait for the save to finish' : deleting || deleteBusy ? 'Wait for the request to finish' : null);
+  const trashDisabled = $derived(!!structReason || guardDirty || bodyBusy || frozen || deleteBusy);
+  // R53: while an idle question asks, the trash stays clickable (aria-disabled) to send focus to its Cancel.
+  const trashToQuestion = $derived(asking && !frozen && !bodyAsk.busy);
   let trashEl = $state<HTMLButtonElement>();
   // #19: the delete asks in the body-top row; the page owns the DELETE (D9).
   async function askDelete() {
-    if (trashDisabled || asking) return;
+    // R53: while a question asks, the trash goes to its Cancel.
+    if (bodyAsk.open) { bodyAsk.focusCancel(); return; }
+    if (pageHere()) { page!.ask.focusCancel(); return; }
+    if (trashDisabled) return;
     const a = await bodyAsk.ask({
       warning: `Delete item "${item.title}"? This cannot be undone.`,
       confirmLabel: 'Delete', tone: 'danger', layout: 'row', confirmDataAction: 'confirm-delete-item',
@@ -312,6 +324,21 @@
       }
     }
   }
+
+  // A question that goes unanswered can disable the trash under focus: × takes it (read before the DOM updates).
+  let wasToQuestion = untrack(() => trashToQuestion);
+  $effect.pre(() => {
+    const now = trashToQuestion;
+    if (wasToQuestion && !now && trashEl && document.activeElement === trashEl) {
+      void tick().then(() => {
+        const a = document.activeElement;
+        if (alive && trashEl?.disabled && (!a || a === trashEl || a === document.body)) {
+          [modalClose(labelId), modalPanel(labelId)].find(usable)?.focus();
+        }
+      });
+    }
+    wasToQuestion = now;
+  });
 
   // × and Esc: while the body-top row asks, back to its Cancel (R48). The page
   // handles its own question (VersionEditPage.requestCloseItem).
@@ -376,19 +403,21 @@
                 disabled={!!quizEdits?.locked || deleting} onclick={openTitle} />
   {/if}
   <span class="item-ctx">{blockTitle} › {seqTitle} · item {itemIndex} of {itemCount}</span>
-  <span class="head-actions">
-    <IconButton
-      glyph="trash"
-      size="sm"
-      danger
-      title={asking ? 'Answer the question first' : trashTitle}
-      aria-label="Delete item"
-      aria-disabled={asking}
-      disabled={trashDisabled}
-      bind:element={trashEl}
-      onclick={() => void askDelete()}
-    />
-  </span>
+{/snippet}
+
+<!-- Call 8: Modal groups the trash with ×, 6px apart. -->
+{#snippet headActions()}
+  <IconButton
+    glyph="trash"
+    size="sm"
+    danger
+    title={trashToQuestion ? 'Answer the question first' : structReason ?? waitTitle ?? (asking ? 'Answer the question first' : trashTitle)}
+    aria-label="Delete item"
+    aria-disabled={asking}
+    disabled={trashDisabled && !trashToQuestion}
+    bind:element={trashEl}
+    onclick={() => void askDelete()}
+  />
 {/snippet}
 
 {#snippet foot()}
@@ -420,7 +449,9 @@
   autofocusSelector={`#${titleEditId}, [data-autofocus], header.modal-head button[aria-label="Close"]`}
   onRequestClose={requestClose}
   closeDisabled={deleting || saving}
+  closeTitle={waitTitle ?? undefined}
   header={head}
+  {headActions}
   footer={hasFoot ? foot : undefined}
 >
   {#if bodyAsk.open}
@@ -542,7 +573,6 @@
   /* Fills its slot and shrinks with it, so ✓ / ✕ never sit on top of it on a narrow window. */
   .title-input { box-sizing: border-box; width: 100%; min-width: 0; font-size: 14px; font-weight: 600; }
   .item-ctx { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-  .head-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; /* ref 1689 */ }
   .field-row {
     display: grid;
     grid-template-columns: 132px 1fr; /* ref 1696 — D2 drops the 54px pencil slot */

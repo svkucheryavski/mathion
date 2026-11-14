@@ -363,4 +363,28 @@ describe('Modal — focus on <body> (Polish 3 C7 point 4)', () => {
     expect(e.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(byId('save'));
   });
+
+  it('a modifier key alone does not focus the panel (VR-B)', async () => {
+    render();
+    await settle();
+    (document.activeElement as HTMLElement).blur();
+    for (const key of ['Shift', 'Control', 'Alt', 'AltGraph', 'Meta', 'CapsLock', 'Fn', 'FnLock', 'NumLock',
+      'ScrollLock', 'Hyper', 'Super', 'Symbol', 'SymbolLock', 'OS']) {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      expect(document.activeElement).toBe(document.body);
+    }
+  });
+
+  it('headActions sit with × in one 6px group; without them × is a direct child of the header (call 8)', async () => {
+    render({ withHeadActions: true });
+    await settle();
+    const group = closeBtn().parentElement!;
+    expect(group.classList.contains('head-actions')).toBe(true);
+    expect([...group.children]).toEqual([byId('head-act'), closeBtn()]);
+    unmount(cmp!); cmp = null; target!.remove(); target = null;
+    render();
+    await settle();
+    expect(closeBtn().parentElement!.tagName).toBe('HEADER');
+    expect(panel().querySelector('.head-actions')).toBeNull();
+  });
 });

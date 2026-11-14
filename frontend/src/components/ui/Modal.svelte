@@ -36,6 +36,8 @@
     placement?: 'center' | 'right';
     closeTitle?: string;
     header: Snippet;
+    // Call 8: controls grouped with × at the header's end, 6px apart (ref 1689).
+    headActions?: Snippet;
     children: Snippet;
     footer?: Snippet;
   };
@@ -59,6 +61,7 @@
     placement = 'center',
     closeTitle = undefined,
     header,
+    headActions = undefined,
     children,
     footer = undefined,
   }: Props = $props();
@@ -86,6 +89,9 @@
     panelEl.focus();
   }
   const isTop = () => isTopModal(panelEl);
+  // A modifier pressed alone is not a keystroke the panel needs to catch.
+  const MODIFIERS = new Set(['Shift', 'Control', 'Alt', 'AltGraph', 'Meta', 'CapsLock', 'Fn', 'FnLock', 'NumLock',
+    'ScrollLock', 'Hyper', 'Super', 'Symbol', 'SymbolLock', 'OS']);
 
   function onKeydown(e: KeyboardEvent) {
     if (!isTop()) return;
@@ -93,6 +99,7 @@
     // key brings it back to the panel first. From there (or from the panel
     // itself) a Tab goes straight to the first control, a Shift+Tab to the
     // last: from the panel the browser would step out of it backwards.
+    if (MODIFIERS.has(e.key)) return;
     const loose = !document.activeElement || document.activeElement === document.body;
     if (loose) panelEl?.focus();
     if (e.key === 'Tab') {
@@ -150,6 +157,18 @@
 
 <svelte:window onkeydown={onKeydown} />
 
+{#snippet closeButton()}
+  <IconButton
+    id={closeId}
+    glyph="close"
+    size="md"
+    title={closeDisabled && closeTitle ? closeTitle : 'Close'}
+    aria-label="Close"
+    disabled={closeDisabled}
+    onclick={onRequestClose}
+  />
+{/snippet}
+
 <div
   class="modal-backdrop"
   class:right={placement === 'right'}
@@ -174,15 +193,11 @@
     >
       <header class="modal-head">
         {@render header()}
-        <IconButton
-          id={closeId}
-          glyph="close"
-          size="md"
-          title={closeDisabled && closeTitle ? closeTitle : 'Close'}
-          aria-label="Close"
-          disabled={closeDisabled}
-          onclick={onRequestClose}
-        />
+        {#if headActions}
+          <span class="head-actions">{@render headActions()}{@render closeButton()}</span>
+        {:else}
+          {@render closeButton()}
+        {/if}
       </header>
       <!-- The attribute, not the property: Svelte compiles `inert={…}` to
            `el.inert = …`, which jsdom lacks, and candidates() reads [inert]. -->
@@ -245,6 +260,7 @@
     padding: 12px 14px 12px 16px;
     border-bottom: 1px solid var(--border); /* ref 1685 */
   }
+  .head-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; /* ref 1689 */ }
   .modal-body {
     flex: 1 1 auto;
     min-height: 0;

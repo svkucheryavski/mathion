@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mount, unmount, flushSync } from 'svelte';
+import { mount, unmount, flushSync, tick } from 'svelte';
 import Harness from './support/ItemEditorModalHarness.svelte';
 import AppBody from '../components/editor/item/AppBody.svelte';
 import * as editorStore from '../stores/currentEditorVersion.svelte';
@@ -8,7 +8,10 @@ import { clearEditorVersion } from '../stores/currentEditorVersion.svelte';
 import { versionPermissions } from '../lib/versionPermissions';
 import type { AdminTreeItem, AdminTreeVersion } from '../lib/types';
 import type { DirtyRegistry } from '../lib/dirtyRegistry.svelte';
+import type { PageAsk } from '../lib/askInPlace.svelte';
 import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
+import { navigate } from '../lib/router.svelte';
+import { structureReason } from '../lib/editorReasons';
 
 // Real store, real bodies; only fetch is stubbed.
 const fetchSpy = vi.fn();
@@ -70,10 +73,11 @@ function serve(extra: (url: string, init?: RequestInit) => Promise<Response> | u
 let target: HTMLDivElement;
 let cmp: ReturnType<typeof mount> | null = null;
 let registry: DirtyRegistry | null = null;
+let pageAsk: PageAsk | null = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let props: any;
 
-async function render(over: { item?: Partial<AdminTreeItem>; version?: Partial<AdminTreeVersion>; modal?: Record<string, unknown> } = {}) {
+async function render(over: { item?: Partial<AdminTreeItem>; version?: Partial<AdminTreeVersion>; modal?: Record<string, unknown>; page?: boolean } = {}) {
   const version = mkVersion(over.version);
   const p = $state({
     modal: {
@@ -83,6 +87,8 @@ async function render(over: { item?: Partial<AdminTreeItem>; version?: Partial<A
       ...over.modal,
     },
     onRegistry: (r: DirtyRegistry) => { registry = r; },
+    withPage: over.page ?? false,
+    onPage: (pa: PageAsk) => { pageAsk = pa; },
   });
   props = p;
   cmp = mount(Harness, { target, props });
@@ -103,6 +109,7 @@ afterEach(() => {
   clearEditorVersion();
   clearToasts();
   registry = null;
+  pageAsk = null;
   document.documentElement.style.overflow = '';
   vi.restoreAllMocks();
 });
@@ -1155,5 +1162,368 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     expect(() => { p.item = undefined; flushSync(); }).not.toThrow();
     unmount(c);
     host.remove();
+  });
+
+  // VR-B (slice5b §T4): the PATCH after an upload is not a name clash.
+  it('a 409 on the link PATCH after upload is not the duplicate-name message, and reloads the tree', async () => {
+    serveUpload((u, init) => (/\/api\/items\/7$/.test(u) && init?.method === 'PATCH'
+      ? jres({ detail: 'Only a created version can change its items' }, 409) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    chooseFile(jsFile("getElementById('app-root')"));
+    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await settle();
+    expect(panel().querySelector('.field-err')!.textContent).toBe('Only a created version can change its items');
+    expect(calls(/\/admin-tree$/).length).toBe(1);
+  });
+
+  it('a refused link PATCH keeps its sentence once the reload turns the body read-only', async () => {
+    serveUpload((u, init) => (/\/api\/items\/7$/.test(u) && init?.method === 'PATCH'
+      ? jres({ detail: 'You can no longer edit this course' }, 403) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    chooseFile(jsFile("getElementById('app-root')"));
+    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await settle();
+    expect(calls(/\/admin-tree$/).length).toBe(1);
+    const ro = mkVersion({ state: 'archived' });
+    props.modal.version = ro;
+    props.modal.perms = versionPermissions(ro);
+    flushSync();
+    expect(panel().querySelector('[data-action="app-upload"]')).toBeNull();
+    expect(panel().querySelector('.field-err')!.textContent).toBe('You can no longer edit this course');
+  });
+
+  it('a refused link PATCH after leaving the version does not reload', async () => {
+    serveUpload((u, init) => (/\/api\/items\/7$/.test(u) && init?.method === 'PATCH'
+      ? jres({ detail: 'No' }, 409) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: null }, modal: { stillOnVid: () => false } });
+    chooseFile(jsFile("getElementById('app-root')"));
+    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await settle();
+    expect(calls(/\/admin-tree$/).length).toBe(0);
+  });
+
+  it('a 403 on the upload itself reloads the tree', async () => {
+    serveUpload((u, init) => (/\/api\/versions\/1\/assets$/.test(u) && init?.method === 'POST'
+      ? jres({ detail: 'Forbidden' }, 403) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    chooseFile(jsFile("getElementById('app-root')"));
+    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await settle();
+    expect(panel().querySelector('.field-err')!.textContent).toBe('Forbidden');
+    expect(calls(/\/admin-tree$/).length).toBe(1);
+  });
+
+  for (const status of [403, 409]) {
+    it(`a Remove refused with ${status} reloads the tree`, async () => {
+      serve((u, init) => (u.includes('/assets/') ? Promise.resolve(resp("getElementById('app-root')"))
+        : /\/api\/items\/7$/.test(u) && init?.method === 'PATCH' ? jres({ detail: 'Refused' }, status) : undefined));
+      await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
+      scriptBtn('Remove').click();
+      await settle();
+      scriptAsk()!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+      await settle();
+      await settle();
+      expect(panel().querySelector('.field-err')!.textContent).toBe('Refused');
+      expect(calls(/\/admin-tree$/).length).toBe(1);
+    });
+  }
+
+  it('a Remove refused after leaving the version does not reload', async () => {
+    serve((u, init) => (u.includes('/assets/') ? Promise.resolve(resp("getElementById('app-root')"))
+      : /\/api\/items\/7$/.test(u) && init?.method === 'PATCH' ? jres({ detail: 'Refused' }, 403) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: 'app.js' }, modal: { stillOnVid: () => false } });
+    scriptBtn('Remove').click();
+    await settle();
+    scriptAsk()!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    await settle();
+    expect(panel().querySelector('.field-err')!.textContent).toBe('Refused');
+    expect(calls(/\/admin-tree$/).length).toBe(0);
+  });
+
+  // The reload that confirms the lost right turns the body read-only: Upload/Replace go.
+  // A real reload takes a round trip: it lands a macrotask later, after focus has settled.
+  const flipOnReload = (u: string) => (u.endsWith('/admin-tree')
+    ? new Promise((t) => setTimeout(t, 5)).then(() => jres({ course: { id: 1, name: 'C', slug: 'c' }, version: mkVersion({ state: 'archived' }), blocks: [] })).then((r) => {
+      const ro = mkVersion({ state: 'archived' });
+      props.modal.version = ro;
+      props.modal.perms = versionPermissions(ro);
+      return r;
+    })
+    : undefined);
+
+  it('an earlier local error goes when an unrelated reload turns the body read-only', async () => {
+    serveUpload();
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    chooseFile(jsFile('', 'empty.js'));
+    await waitUntil(() => !!panel().querySelector('.field-err'));
+    const ro = mkVersion({ state: 'archived' });
+    props.modal.version = ro;
+    props.modal.perms = versionPermissions(ro);
+    flushSync();
+    await settle();
+    expect(panel().querySelector('.field-err')).toBeNull();
+  });
+
+  it('a successful upload gives a dropped focus to Replace', async () => {
+    let release!: () => void;
+    serveUpload((u, init) => (/\/api\/versions\/1\/assets$/.test(u) && init?.method === 'POST'
+      ? new Promise<Response>((r) => { release = () => r(resp(APP_ASSET)); }) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    uploadBtn()!.focus();
+    chooseFile(jsFile("getElementById('app-root')"));
+    await waitUntil(() => uploadPosts().length > 0);
+    // A browser drops focus to <body> under the disabled button (jsdom keeps it there).
+    const tmp = document.createElement('input'); panel().appendChild(tmp); tmp.focus(); tmp.remove();
+    props.modal.item = { ...props.modal.item, script_url: 'new.js' };
+    release();
+    await waitUntil(() => toastTexts().includes('App uploaded'));
+    for (let i = 0; i < 3; i++) await settle();
+    expect(document.activeElement).toBe(uploadBtn());
+    expect(uploadBtn()!.textContent!.trim()).toBe('Replace');
+  });
+
+  it('a refused Remove whose reload turns the body read-only puts focus on ×', async () => {
+    serve((u, init) => (u.includes('/assets/') ? Promise.resolve(resp("getElementById('app-root')"))
+      : /\/api\/items\/7$/.test(u) && init?.method === 'PATCH' ? jres({ detail: 'Refused' }, 403) : flipOnReload(u)));
+    await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
+    scriptBtn('Remove').click();
+    await settle();
+    scriptAsk()!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await new Promise((t) => setTimeout(t, 20));
+    for (let i = 0; i < 4; i++) await settle();
+    expect(panel().querySelector('[data-action="app-upload"]')).toBeNull();
+    expect(document.activeElement).toBe(closeBtn());
+  });
+
+  it('a refused link PATCH whose reload turns the body read-only puts focus on ×', async () => {
+    serveUpload((u, init) => (/\/api\/items\/7$/.test(u) && init?.method === 'PATCH'
+      ? jres({ detail: 'Refused' }, 403) : flipOnReload(u)));
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    uploadBtn()!.focus();
+    chooseFile(jsFile("getElementById('app-root')"));
+    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await new Promise((t) => setTimeout(t, 20));
+    for (let i = 0; i < 4; i++) await settle();
+    expect(panel().querySelector('[data-action="app-upload"]')).toBeNull();
+    expect(document.activeElement).toBe(closeBtn());
+  });
+
+  it('while the Remove runs, the trash and the footer wait for the request', async () => {
+    serve((u, init) => (u.includes('/assets/') ? Promise.resolve(resp("getElementById('app-root')"))
+      : /\/api\/items\/7$/.test(u) && init?.method === 'PATCH' ? new Promise(() => {}) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
+    scriptBtn('Remove').click();
+    await settle();
+    scriptAsk()!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    expect(trash().title).toBe('Wait for the request to finish');
+    expect(footBtn('Save').title).toBe('Wait for the request to finish');
+  });
+
+  it('a 409 on the upload itself keeps the duplicate-name message and does not reload', async () => {
+    serveUpload((u, init) => (/\/api\/versions\/1\/assets$/.test(u) && init?.method === 'POST'
+      ? jres({ detail: 'exists' }, 409) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    chooseFile(jsFile("getElementById('app-root')"));
+    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await settle();
+    expect(panel().querySelector('.field-err')!.textContent).toBe('A file with that name already exists. Rename it or remove the old one first.');
+    expect(calls(/\/admin-tree$/).length).toBe(0);
+  });
+
+  it('App uploaded with a failed refresh toasts the refresh-failed info', async () => {
+    serveUpload((u) => (u.endsWith('/admin-tree') ? jres({ detail: 'down' }, 500) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    chooseFile(jsFile("getElementById('app-root')"));
+    await waitUntil(() => calls(/\/admin-tree$/).length > 0);
+    await settle();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Uploaded (refresh failed — reload to see latest)', 'info']]);
+  });
+
+  it('App removed with a failed refresh toasts the refresh-failed info', async () => {
+    serve((u) => (u.includes('/assets/') ? Promise.resolve(resp("getElementById('app-root')"))
+      : u.endsWith('/admin-tree') ? jres({ detail: 'down' }, 500) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
+    scriptBtn('Remove').click();
+    await settle();
+    scriptAsk()!.querySelector<HTMLButtonElement>('button.confirm')!.click();
+    await settle();
+    await settle();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Removed (refresh failed — reload to see latest)', 'info']]);
+  });
+
+  it('the AppBody error sits under the value, in the field column', async () => {
+    serveUpload();
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    chooseFile(jsFile('', 'empty.js'));
+    await waitUntil(() => !!panel().querySelector('.field-err'));
+    const err = panel().querySelector('.field-err')!;
+    const field = err.parentElement!;
+    expect(field.classList.contains('field')).toBe(true);
+    expect(field.querySelector('.script-row')).not.toBeNull();
+    expect(field.parentElement!.classList.contains('field-row')).toBe(true);
+  });
+});
+
+describe('ItemEditorModal — header actions and trash (VR-B)', () => {
+  it('trash and × sit in one header-actions group', async () => {
+    await render();
+    const group = closeBtn().parentElement!;
+    expect(group.classList.contains('head-actions')).toBe(true);
+    expect(group.contains(trash())).toBe(true);
+    expect([...group.children].indexOf(trash())).toBeLessThan([...group.children].indexOf(closeBtn()));
+  });
+
+  it('a busy trash and × give the wait reason while saving', async () => {
+    let release!: () => void;
+    serve((u, init) => (/\/api\/items\/7$/.test(u) && init?.method === 'PATCH'
+      ? new Promise<Response>((r) => { release = () => r(resp({ ...mkItem(), title: 'Eigen' })); })
+      : undefined));
+    await render();
+    type(titleInput(), 'Eigen');
+    footBtn('Save').click();
+    await settle();
+    expect(trash().title).toBe('Wait for the save to finish');
+    expect(closeBtn().title).toBe('Wait for the save to finish');
+    release();
+    await settle();
+    await settle();
+    expect(trash().title).toBe('Delete this item');
+    expect(closeBtn().title).toBe('Close');
+  });
+
+  it('a busy trash and × give the wait reason while deleting', async () => {
+    await render();
+    props.modal.deleting = true;
+    flushSync();
+    expect(trash().title).toBe('Wait for the request to finish');
+    expect(closeBtn().title).toBe('Wait for the request to finish');
+  });
+
+  it('an app upload in flight gives the trash its wait reason', async () => {
+    serve((u, init) => (/\/api\/versions\/1\/assets$/.test(u) && init?.method === 'POST' ? new Promise(() => {}) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: null } });
+    const input = panel().querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(input, 'files', { value: [new File(["getElementById('app-root')"], 'a.js', { type: 'application/javascript' })], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    for (let i = 0; i < 40 && !trash().disabled; i++) { await new Promise((r) => setTimeout(r)); flushSync(); }
+    expect(trash().disabled).toBe(true);
+    expect(trash().title).toBe('Wait for the request to finish');
+  });
+
+  it('a version that cannot change structure keeps its reason on the trash while another DELETE runs', async () => {
+    const pub = mkVersion({ state: 'published' });
+    await render({ version: { state: 'published' }, modal: { deleteBusy: true } });
+    expect(trash().disabled).toBe(true);
+    expect(trash().title).toBe(structureReason(pub));
+  });
+
+  it("another item's DELETE in flight disables the trash, with a reason title", async () => {
+    await render({ modal: { deleteBusy: true } });
+    expect(trash().disabled).toBe(true);
+    expect(trash().title).toBe('Wait for the request to finish');
+    props.modal.deleteBusy = false;
+    flushSync();
+    expect(trash().disabled).toBe(false);
+    expect(trash().title).toBe('Delete this item');
+  });
+
+  it('the trash of a dirty modal still reaches the page question (R53)', async () => {
+    await render({ page: true });
+    type(titleInput(), 'Eigen');                // the modal's own draft: the trash is otherwise disabled
+    const nav = navigate('/elsewhere-vrb2');
+    await settle();
+    const cancel = panel().querySelector<HTMLButtonElement>('footer.modal-foot .inline-confirm button.cancel')!;
+    expect(trash().disabled).toBe(false);
+    expect(trash().getAttribute('aria-disabled')).toBe('true');
+    trash().focus();
+    trash().click();
+    await settle();
+    expect(document.activeElement).toBe(cancel);
+    cancel.click();
+    await nav;
+    await settle();
+    expect(trash().disabled).toBe(true);
+  });
+
+  it('the trash returns to its own open question after the version locks under it (R53)', async () => {
+    await render();
+    trash().click();
+    await settle();
+    expect(bodyAsk()).not.toBeNull();
+    props.modal.version = mkVersion({ state: 'published' });
+    flushSync();
+    closeBtn().focus();
+    trash().click();
+    await settle();
+    expect(document.activeElement).toBe(bodyAskBtn('cancel'));
+  });
+
+  it('a DELETE that fails after the version locked leaves focus on ×, not the disabled trash', async () => {
+    await render({ modal: {
+      onDeleteItem: async () => {
+        props.modal.deleting = true;
+        await Promise.resolve();
+        const pub = mkVersion({ state: 'published' });
+        props.modal.version = pub;
+        props.modal.perms = versionPermissions(pub);
+        props.modal.deleting = false;
+        await tick();
+      },
+    } });
+    trash().click();
+    await settle();
+    let trashFocused = 0;
+    trash().addEventListener('focus', () => { trashFocused += 1; });
+    bodyAskBtn('confirm')!.click();
+    for (let i = 0; i < 3; i++) await settle();
+    expect(bodyAsk()).toBeNull();
+    expect(trash().disabled).toBe(true);
+    expect(trashFocused).toBe(0);          // straight to ×, never via the trash
+    expect(document.activeElement).toBe(closeBtn());
+  });
+
+  it('a page question that goes unanswered moves focus off the disabled trash to ×', async () => {
+    await render({ page: true });
+    type(titleInput(), 'Eigen');
+    void navigate('/elsewhere-vrb3');
+    await settle();
+    trash().focus();
+    expect(document.activeElement).toBe(trash());
+    pageAsk!.ask.dismiss();
+    await settle();
+    expect(trash().disabled).toBe(true);
+    expect(document.activeElement).toBe(closeBtn());
+  });
+
+  it('while another DELETE runs, a trash that leads to the question says so', async () => {
+    await render({ page: true, modal: { deleteBusy: true } });
+    registry!.register({ isDirty: true });
+    const nav = navigate('/elsewhere-vrb4');
+    await settle();
+    expect(trash().title).toBe('Answer the question first');
+    panel().querySelector<HTMLButtonElement>('footer.modal-foot .inline-confirm button.cancel')!.click();
+    await nav;
+    await settle();
+    expect(trash().title).toBe('Wait for the request to finish');
+  });
+
+  it('trash while the page question shows focuses its Cancel (R53)', async () => {
+    await render({ page: true });
+    registry!.register({ isDirty: true });   // unsaved work elsewhere on the page
+    const nav = navigate('/elsewhere-vrb');
+    await settle();
+    const cancel = panel().querySelector<HTMLButtonElement>('footer.modal-foot .inline-confirm button.cancel')!;
+    expect(cancel).not.toBeNull();
+    trash().focus();
+    trash().click();
+    await settle();
+    expect(document.activeElement).toBe(cancel);
+    expect(bodyAsk()).toBeNull();
+    cancel.click();
+    await nav;
+    await settle();
   });
 });

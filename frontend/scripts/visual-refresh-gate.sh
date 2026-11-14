@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3041
+EXPECTED_CHECKS=3047
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4250,6 +4250,8 @@ if [[ -n $REPLY ]]; then
   d '\.used' '' 'padding:3px 8px' 'border-radius:3px' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)' 'font-size:11px' 'font-weight:500'
   d '\.drop-zone' '' 'padding:11px 10px' 'border:2px dashed var\(--border-strong\)' 'border-radius:var\(--radius\)' 'font-size:12px' 'color:var\(--muted\)'
   d '\.drop-zone\.disabled' '' 'color:var\(--faint\)' 'border-color:var\(--border-faint\)'
+  # VR-B: a disabled row recedes (its name in --faint).
+  chk "\.row-click\.${H}:disabled \.name:where\(\.${H}\)" 'color:var\(--faint\)'
   none "AssetSidebar pre-5b .sidebar/.banner/.trash rules gone" "\.(sidebar|banner|trash)\.${H}[{ ,:.]"
   none "AssetSidebar no rem font sizes"                         "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
   sweep AssetSidebar $H
@@ -4267,6 +4269,8 @@ if [[ -n $REPLY ]]; then
   d '\.modal-backdrop' '' 'position:fixed' 'top:0' 'right:0' 'bottom:0' 'left:0' 'z-index:100' 'display:flex' 'justify-content:center' 'align-items:flex-start' 'padding-top:26px' 'background:color-mix\(in srgb,var\(--text\) 34%,transparent\)' 'backdrop-filter:blur\(1px\)'
   d '\.modal-panel' '' 'width:min\(var\(--modal-w\),100vw - 32px\)' 'max-height:min\(var\(--modal-h\),100vh - 52px\)' 'display:flex' 'flex-direction:column' 'overflow:hidden' 'background:var\(--surface\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius-lg\)' 'box-shadow:0 16px 44px #14182338'
   d '\.modal-head' '' 'display:flex' 'align-items:center' 'gap:10px' 'padding:12px 14px 12px 16px' 'border-bottom:1px solid var\(--border\)'
+  # Call 8: header actions sit with ×, 6px apart (ref 1689).
+  d '\.head-actions' '' 'margin-left:auto' 'display:flex' 'align-items:center' 'gap:6px'
   d '\.modal-body' '' 'flex:1 1 auto' 'min-height:0' 'overflow:auto' 'padding:14px 16px' 'display:flex' 'flex-direction:column' 'gap:12px'
   check "Modal .modal-body > * { flex:0 0 auto }" "\.modal-body\.${H}>\*\{flex:0 0 auto\}"
   d '\.modal-foot' '' 'display:flex' 'align-items:center' 'gap:9px' 'padding:12px 16px' 'border-top:1px solid var\(--border\)' 'background:var\(--surface-3\)'
@@ -4301,7 +4305,6 @@ if [[ -n $REPLY ]]; then
   d '\.title-input' '' 'font-weight:600'
   # 5c D11: the path ("Vectors › Linear combinations · item 1 of 2"), not mono.
   d '\.item-ctx' '' 'font-size:12px' 'color:var\(--muted\)' 'white-space:nowrap' 'text-overflow:ellipsis'
-  d '\.head-actions' '' 'margin-left:auto' 'display:flex' 'gap:6px'
   d '\.field-row' '' 'display:grid' 'grid-template-columns:132px 1fr' 'align-items:center' 'gap:12px'
   d '\.field-label' '' 'font-size:12\.5px' 'color:var\(--muted\)'
   d '\.plain-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:var\(--control-font\)' 'caret-color:var\(--primary\)'
@@ -4316,6 +4319,12 @@ if [[ -n $REPLY ]]; then
   none "ItemEditorModal dirty marker is not --gold-text" "\.dirty\.${H}\{[^}]*--gold-text"
   none "ItemEditorModal no rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
   sweep ItemEditorModal $H
+fi
+# Call 8: the trash rides Modal's header-actions spot beside ×.
+if grep -qE '^  \{headActions\}$' src/components/editor/ItemEditorModal.svelte; then
+  echo "PASS  ItemEditorModal trash sits in Modal's header actions (call 8)"
+else
+  echo "FAIL  ItemEditorModal trash sits in Modal's header actions (call 8)"; fail=1
 fi
 emoji_scan "ItemEditorModal / PageBody / itemBody" src/components/editor/ItemEditorModal.svelte src/components/editor/item/PageBody.svelte src/lib/itemBody.ts
 
@@ -4348,7 +4357,9 @@ own app-preview AppBody.svelte
 uniq1 app-preview
 if [[ -n $REPLY ]]; then
   N=AppBody; H=$REPLY
-  d '\.field-row' '' 'display:grid' 'grid-template-columns:132px 1fr' 'align-items:center' 'gap:12px'
+  d '\.field-row' '' 'display:grid' 'grid-template-columns:132px 1fr' 'align-items:baseline' 'gap:12px'
+  # VR-B: the error sits under the value, in a field column.
+  d '\.field' '' 'display:flex' 'flex-direction:column' 'gap:4px'
   d '\.script-row' '' 'display:flex' 'align-items:center' 'gap:9px'
   d '\.script-name' '' 'font-size:12\.5px' 'color:var\(--text\)' 'text-overflow:ellipsis'
   d '\.app-preview' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'overflow:hidden'
