@@ -13,6 +13,10 @@ Checks only a person in a real browser can settle, collected for one pass when t
 - Forced colours (15): Windows High Contrast on the student, authoring and teaching screens.
 - The Evaluation control (8i) on the run pages.
 
+## Superuser Settings (uploads)
+
+- **A too-big upload through an old proxy:** a proxy (HTTP/1.1 nginx) can drop the connection instead of sending its 413. Upload 40 MB through one and note which message the student gets: the network copy with Retry, or the limit sentence. If it is the network copy, adjust the README's D11c paragraph ("Upload limit", README.md) and `docs/release-notes/settings-release-order.md`, which quote the sentence.
+
 ## Slice 5a (authoring)
 
 - **Forced colors: the selected picker card grows by 1px.** `label.selected { border: 2px solid Highlight }`
