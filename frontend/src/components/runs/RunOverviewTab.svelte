@@ -12,7 +12,8 @@
   export type Readiness = { checks: ReadinessRow[] };
   export type PublishOutcome = 'published' | 'conflicts' | 'failed';
   export type UnpublishOutcome = 'unpublished' | 'draft-now' | 'failed';
-  export type DeleteOutcome = { kind: 'deleted' } | { kind: 'published-now' } | { kind: 'failed'; message: string };
+  // quiet: another caller of the same delete reports this failure.
+  export type DeleteOutcome = { kind: 'deleted' } | { kind: 'published-now' } | { kind: 'failed'; message: string; quiet?: boolean };
 </script>
 
 
@@ -23,6 +24,7 @@
   import { formatShortDate } from '../../lib/datetime';
   import { focusFirst } from '../../lib/focusFirst';
   import { repairFocus } from '../../lib/askInPlace.svelte';
+  import { WAIT_TITLE } from '../../lib/runTabs';
   import { pushToast } from '../../stores/toasts.svelte';
   import Button from '../ui/Button.svelte';
   import DangerConfirm from '../ui/DangerConfirm.svelte';
@@ -56,11 +58,11 @@
     onNavigateTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster', prefilter?: 'unassigned' | null) => void;
     onPublish: () => Promise<PublishOutcome>;
     onUnpublish: () => Promise<UnpublishOutcome>;
-    onDeleteRun: () => Promise<DeleteOutcome>;
+    onDeleteRun: (isAlive?: () => boolean) => Promise<DeleteOutcome>;
   } = $props();
 
   const uid = $props.id();
-  const WAIT = 'Wait for the current change to save';
+  const WAIT = WAIT_TITLE;
   // Run details: the row label, the field's name, and its noun for the titles.
   const FIELDS: { key: Field; label: string; name: string; noun: string; type: 'text' | 'date'; action: string }[] = [
     { key: 'title', label: 'Title', name: 'Title', noun: 'the title', type: 'text', action: 'edit-title' },
@@ -227,13 +229,14 @@
     localWrite = true;
     deleteBusy = true;
     deleteError = null;
-    const outcome = await onDeleteRun().finally(() => {
+    const outcome = await onDeleteRun(() => alive).finally(() => {
       localWrite = false;
       deleteBusy = false;
     });
     if (outcome.kind === 'failed') {
       // Left the Overview meanwhile: its card is gone, so the failure toasts.
       if (!alive) {
+        if (outcome.quiet) return;
         const m = outcome.message;
         // The page's own sentences (offline, the fallback) stand as they are.
         pushToast(m === OFFLINE_MESSAGE || m.startsWith('Could not delete') ? m : `Could not delete the run: ${m}`, 'error');

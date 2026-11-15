@@ -1,6 +1,6 @@
 <script lang="ts">
   import { requestPin, verifyPin, getAuthConfig } from '../lib/auth.svelte';
-  import { ApiError } from '../lib/api';
+  import { failureText } from '../lib/api';
   import { navigate, safeNext, defaultLandingPath } from '../lib/router.svelte';
   import type { User } from '../lib/types';
   import Button from '../components/ui/Button.svelte';
@@ -66,7 +66,7 @@
     if (sendPinEnabled === undefined) return;   // belt-and-suspenders: no request-pin before config lands
     error = ''; busy = true;
     try { await requestPin(email.trim()); step = 'pin'; }
-    catch (err: unknown) { error = err instanceof ApiError ? err.displayMessage : 'Could not send PIN. Try again.'; }
+    catch (err: unknown) { error = failureText(err, 'Could not send PIN. Try again.'); }
     finally { busy = false; }
   }
 
@@ -74,7 +74,7 @@
     e.preventDefault();
     error = ''; busy = true;
     try { afterLogin(await verifyPin(email.trim(), pin.trim(), duration)); }
-    catch (err: unknown) { error = err instanceof ApiError ? err.displayMessage : 'Could not verify PIN.'; }
+    catch (err: unknown) { error = failureText(err, 'Could not verify PIN.'); }
     finally { busy = false; }
   }
 </script>

@@ -1,7 +1,8 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { SvelteSet, SvelteMap } from 'svelte/reactivity';
-  import { ApiError, OFFLINE_MESSAGE } from '../../lib/api';
+  import { ApiError, failureText } from '../../lib/api';
+  import { WAIT_TITLE as BUSY_TITLE } from '../../lib/runTabs';
   import {
     addRunStudent,
     removeRunStudent,
@@ -10,7 +11,7 @@
     bulkDeleteRunStudents,
   } from '../../lib/runRoster';
   import { focusFirst } from '../../lib/focusFirst';
-  import { repairFocus } from '../../lib/askInPlace.svelte';
+  import { focusIsFree, repairFocus } from '../../lib/askInPlace.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
   import Button from '../ui/Button.svelte';
   import EmptyState from '../ui/EmptyState.svelte';
@@ -71,7 +72,6 @@
   // The draft banner's id: a test hook, and the description of every add
   // control a draft disables.
   const DRAFT_HINT_ID = 'roster-draft-publish-hint';
-  const BUSY_TITLE = 'Wait for the current change to finish';
   const draftTitle = $derived(
     isAdmin ? 'Publish this run before adding students' : 'A course admin must publish this run first',
   );
@@ -115,6 +115,8 @@
   let addInvalid = $state(false);
   let pendingDelete = $state<number | null>(null);
   let removing = $state(false);
+  // The student a Remove runs on: their group select waits too.
+  let removingId = $state<number | null>(null);
 
   // D25: + opens the add row under the toolbar. `adding` spans the POST and
   // its refetch: Add stays focusable but inert, the field read-only (6b R20).
@@ -236,7 +238,7 @@
   }
 
   function retryDelete() {
-    if (bulkInFlight) return;
+    if (bulkInFlight || removing) return;
     void dispatchBulkOp('delete', retryFailedIds);
   }
 
@@ -248,7 +250,7 @@
   }
 
   function retryCancelledDelete() {
-    if (bulkInFlight) return;
+    if (bulkInFlight || removing) return;
     void dispatchBulkOp('delete', [...retryCancelledIds, ...retryFailedIds]);
   }
 
@@ -366,7 +368,7 @@
   }
 
   function askBulkDelete() {
-    if (bulkInFlight) return;
+    if (bulkInFlight || removing) return;
     bulkDeleteConfirm = true;
   }
 
@@ -377,7 +379,7 @@
   }
 
   async function bulkDeleteSelected() {
-    if (bulkInFlight) return;
+    if (bulkInFlight || removing) return;
     bulkDeleteConfirm = false;
     const op = dispatchBulkOp('delete', Array.from(selected));
     // The confirm unmounts under focus: hold focus on the strip's 🗑
@@ -502,7 +504,7 @@
         newGroupId = '__unassigned';
       } catch (e) {
         // Every ApiError shows its displayMessage; a network failure says so (Polish 3).
-        addError = e instanceof ApiError ? e.displayMessage : OFFLINE_MESSAGE;
+        addError = failureText(e, 'Could not add the student.');
         addInvalid = e instanceof ApiError && (e.status === 422 || e.errorCode === 'student_already_active_in_course');
       }
       // The add stands even when the refetch fails (slice6c §3).
@@ -512,9 +514,10 @@
     } finally {
       adding = false;
     }
-    // Success: ready for the next student. Failure: back to the field.
+    // Success: ready for the next student. Failure: back to the field. Only
+    // while focus is still free or in the add row: never stolen from elsewhere.
     await tick();
-    emailEl?.focus();
+    if (focusIsFree(emailEl?.form)) emailEl?.focus();
   }
 
   function askRemove(userId: number) {
@@ -533,31 +536,34 @@
   async function confirmRemove(userId: number) {
     if (removing || bulkInFlight) return;
     removing = true;
+    removingId = userId;
     const idx = visible.findIndex((s) => s.user_id === userId);
     // `removing` clears before each focus move: focusFirst skips the aria-disabled 🗑.
     try {
       await removeRunStudent(runId, userId);
-      selected.delete(userId);
-      markFixed(userId);
-      pendingDelete = null;
-      // The remove stands even when the refetch fails (review r1).
-      try { await onRefetchRosterData(); } catch { pushToast('Removed (refresh failed — reload to see latest)', 'info'); }
-      removing = false;
-      await tick();
-      // A failed refetch leaves the removed row listed: skip it.
-      const rest = visible.filter((s) => s.user_id !== userId);
-      const next = rest[idx];
-      const prev = idx > 0 ? rest[idx - 1] : undefined;
-      focusFirst([next && trashEls[next.user_id], prev && trashEls[prev.user_id], toggleEl, searchEl]);
     } catch (e) {
       pendingDelete = null;
       removing = false;
-      pushToast(e instanceof ApiError ? e.displayMessage : OFFLINE_MESSAGE, 'error');
+      removingId = null;
+      pushToast(failureText(e, 'Could not remove the student.'), 'error');
       await tick();
-      focusFirst([trashEls[userId], toggleEl, searchEl]);
-    } finally {
-      removing = false;
+      if (focusIsFree()) focusFirst([trashEls[userId], toggleEl, searchEl]);
+      return;
     }
+    selected.delete(userId);
+    markFixed(userId);
+    // The remove stands even when the refetch fails (review r1).
+    try { await onRefetchRosterData(); } catch { pushToast('Removed (refresh failed — reload to see latest)', 'info'); }
+    pendingDelete = null;
+    removing = false;
+    removingId = null;
+    await tick();
+    // Only while focus is free; a failed refetch leaves the removed row listed: skip it.
+    if (!focusIsFree()) return;
+    const rest = visible.filter((s) => s.user_id !== userId);
+    const next = rest[idx];
+    const prev = idx > 0 ? rest[idx - 1] : undefined;
+    focusFirst([next && trashEls[next.user_id], prev && trashEls[prev.user_id], toggleEl, searchEl]);
   }
 
   // F8 + polish3 §4: focus goes back to the last changed select once its request settles.
@@ -583,20 +589,7 @@
       // Delete from pendingGroupId on EVERY error path (incl. network failures),
       // otherwise a TypeError thrown by fetch would leave the row permanently disabled.
       pendingGroupId.delete(s.user_id);
-      if (e instanceof ApiError) {
-        // Per-errorCode branches kept for future divergence (e.g. distinct toast
-        // kinds or copy). For now all 409 paths display the backend-supplied
-        // detail string via ApiError.displayMessage.
-        if (e.status === 409 && e.errorCode === 'capacity_reached') {
-          pushToast(e.displayMessage, 'error');
-        } else if (e.status === 409 && e.errorCode === 'group_disabled') {
-          pushToast(e.displayMessage, 'error');
-        } else {
-          pushToast(e.displayMessage, 'error');
-        }
-      } else {
-        pushToast(OFFLINE_MESSAGE, 'error');
-      }
+      pushToast(failureText(e, 'Could not change the group.'), 'error');
       repairGroupFocus();
       return;
     }
@@ -761,6 +754,7 @@
           warning={selected.size === 1 ? 'Remove 1 student from this run?' : `Remove ${selected.size} students from this run?`}
           confirmLabel="Remove"
           confirmDataAction="confirm-bulk-delete"
+          disabledReason={removing ? BUSY_TITLE : undefined}
           onConfirm={bulkDeleteSelected}
           onCancel={cancelBulkDelete}
         />
@@ -779,9 +773,9 @@
           glyph="trash"
           size="sm"
           danger
-          title={bulkInFlight ? BUSY_TITLE : 'Remove selected'}
+          title={bulkInFlight || removing ? BUSY_TITLE : 'Remove selected'}
           aria-label="Remove selected"
-          aria-disabled={bulkInFlight}
+          aria-disabled={bulkInFlight || removing}
           data-action="bulk-delete"
           bind:element={bulkTrashEl}
           onclick={askBulkDelete}
@@ -814,7 +808,9 @@
           {/each}
         </select>
       {:else if bulkOpResult.kind === 'partial'}
-        <button type="button" class="ro-retry" data-action="retry-delete" bind:this={retryDeleteEl} onclick={retryDelete}>Retry removing {retryFailedIds.length}</button>
+        <button type="button" class="ro-retry" data-action="retry-delete"
+                aria-disabled={removing ? 'true' : undefined} title={removing ? BUSY_TITLE : undefined}
+                bind:this={retryDeleteEl} onclick={retryDelete}>Retry removing {retryFailedIds.length}</button>
       {:else if bulkOpResult.kind === 'cancelled'}
         {@const m = retryCancelledIds.length + retryFailedIds.length}
         {#if bulkOpResult.lastOp === 'move'}
@@ -827,7 +823,9 @@
             {/each}
           </select>
         {:else}
-          <button type="button" class="ro-retry" data-action="retry-cancelled" bind:this={retryCancelledBtnEl} onclick={retryCancelledDelete}>Retry the {m} not processed</button>
+          <button type="button" class="ro-retry" data-action="retry-cancelled"
+                  aria-disabled={removing ? 'true' : undefined} title={removing ? BUSY_TITLE : undefined}
+                  bind:this={retryCancelledBtnEl} onclick={retryCancelledDelete}>Retry the {m} not processed</button>
         {/if}
       {/if}
       {#if bulkOpResult.kind !== 'in-flight'}
@@ -888,8 +886,8 @@
                     class="ro-select"
                     aria-label="Group for {s.user_email}"
                     value={selectValueFor(s)}
-                    disabled={pendingGroupId.has(s.user_id) || bulkInFlight}
-                    title={bulkInFlight ? BUSY_TITLE : undefined}
+                    disabled={pendingGroupId.has(s.user_id) || bulkInFlight || removingId === s.user_id}
+                    title={bulkInFlight || removingId === s.user_id ? BUSY_TITLE : undefined}
                     onchange={(e) => onGroupChange(s, e.currentTarget.value, e.currentTarget)}
                   >
                     <option value="__unassigned">Unassigned</option>
@@ -1124,6 +1122,8 @@
     text-decoration: underline;
     cursor: pointer;
   }
+  /* P23: a retry that waits looks disabled but keeps focus. */
+  .ro-retry[aria-disabled='true'] { color: var(--faint); text-decoration: none; cursor: not-allowed; }
   /* A select drawn as a link has no border to colour: it takes the ring (P97). */
   .ro-retry:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; box-shadow: none; }
   .ro-dismiss { color: inherit; }

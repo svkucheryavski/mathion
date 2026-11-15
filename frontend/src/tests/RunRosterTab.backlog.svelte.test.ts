@@ -450,3 +450,206 @@ describe('RunRosterTab — review r7', () => {
     unmount(cmp);
   });
 });
+
+describe('RunRosterTab — whole-branch review', () => {
+  it('a slow add does not pull focus back from where the teacher moved', async () => {
+    let finish: (r: Response) => void = () => {};
+    fetchSpy.mockImplementation(() => new Promise<Response>((r) => { finish = r; }));
+    const { target, cmp } = mountTab();
+    await openAddAndType(target, 'new@x.com');
+    q<HTMLButtonElement>(target, '[data-action="add-student"]').click();
+    await settle();
+    const search = q<HTMLInputElement>(target, 'input[name="roster-search"]');
+    search.focus();
+    finish(jres(stu(3), 201));
+    await settle();
+    expect(document.activeElement).toBe(search);
+    unmount(cmp);
+  });
+});
+
+describe('RunRosterTab — Remove (fix-pass review)', () => {
+  it('the confirm stays busy while the refetch after a Remove runs', async () => {
+    fetchSpy.mockImplementation(() => Promise.resolve(jres(null, 204)));
+    let done: () => void = () => {};
+    const onRefetchRosterData = vi.fn(() => new Promise<void>((r) => { done = r; }));
+    const { target, cmp } = mountTab({ onRefetchRosterData });
+    rowTrash(target, 1).click();
+    await settle();
+    q<HTMLButtonElement>(target, '[data-action="confirm-delete-student"]').click();
+    await settle();
+    expect(onRefetchRosterData).toHaveBeenCalled();
+    expect(q<HTMLButtonElement>(target, '[data-action="confirm-delete-student"]')?.getAttribute('aria-busy')).toBe('true');
+    done();
+    await settle();
+    expect(q(target, '[data-action="confirm-delete-student"]')).toBeNull();
+    unmount(cmp);
+  });
+
+  it('a slow Remove does not pull focus from the search field', async () => {
+    let finish: (r: Response) => void = () => {};
+    fetchSpy.mockImplementation(() => new Promise<Response>((r) => { finish = r; }));
+    const { target, cmp } = mountTab();
+    rowTrash(target, 1).click();
+    await settle();
+    q<HTMLButtonElement>(target, '[data-action="confirm-delete-student"]').click();
+    await settle();
+    const search = q<HTMLInputElement>(target, 'input[name="roster-search"]');
+    search.focus();
+    finish(jres(null, 204));
+    await settle();
+    expect(document.activeElement).toBe(search);
+    unmount(cmp);
+  });
+});
+
+describe('RunRosterTab — failed Remove focus (fix-pass review r2)', () => {
+  it('a slow Remove that fails does not pull focus from the search field', async () => {
+    let finish: (r: Response) => void = () => {};
+    fetchSpy.mockImplementation(() => new Promise<Response>((r) => { finish = r; }));
+    const { target, cmp } = mountTab();
+    rowTrash(target, 1).click();
+    await settle();
+    q<HTMLButtonElement>(target, '[data-action="confirm-delete-student"]').click();
+    await settle();
+    const search = q<HTMLInputElement>(target, 'input[name="roster-search"]');
+    search.focus();
+    finish(jres({ detail: 'Boom' }, 500));
+    await settle();
+    expect(document.activeElement).toBe(search);
+    unmount(cmp);
+  });
+});
+
+describe('RunRosterTab — fix-pass review r3', () => {
+  it('a failed add with focus left on Add puts focus back in the e-mail field', async () => {
+    fetchSpy.mockImplementation(() => Promise.resolve(jres({ detail: 'Boom' }, 500)));
+    const { target, cmp } = mountTab();
+    await openAddAndType(target, 'new@x.com');
+    const add = q<HTMLButtonElement>(target, '[data-action="add-student"]');
+    add.focus();
+    add.click();
+    await settle();
+    expect(document.activeElement).toBe(q(target, 'input[name="new-email"]'));
+    unmount(cmp);
+  });
+
+  it("while a Remove runs, that row's group select and the strip's Remove selected wait", async () => {
+    let finish: (r: Response) => void = () => {};
+    fetchSpy.mockImplementation(() => new Promise<Response>((r) => { finish = r; }));
+    const { target, cmp } = mountTab();
+    (row(target, 2).querySelector('input[data-row-checkbox]') as HTMLInputElement).click();
+    flushSync();
+    rowTrash(target, 1).click();
+    await settle();
+    q<HTMLButtonElement>(target, '[data-action="confirm-delete-student"]').click();
+    await settle();
+    expect(rowSelect(target, 1).disabled).toBe(true);
+    expect(rowSelect(target, 1).title).toBe(BUSY);
+    expect(rowSelect(target, 2).disabled).toBe(false);
+    const bulk = q<HTMLButtonElement>(target, '[data-action="bulk-delete"]');
+    expect(bulk.getAttribute('aria-disabled')).toBe('true');
+    expect(bulk.title).toBe(BUSY);
+    bulk.click();
+    await settle();
+    expect(q(target, '[data-action="confirm-bulk-delete"]')).toBeNull();
+    finish(jres(null, 204));
+    await settle();
+    expect(q<HTMLButtonElement>(target, '[data-action="bulk-delete"]').getAttribute('aria-disabled')).not.toBe('true');
+    unmount(cmp);
+  });
+});
+
+describe('RunRosterTab — the strip during a single Remove (fix-pass review r4)', () => {
+  const bulkCalls = () => fetchSpy.mock.calls.filter((c) => String(c[0]).endsWith('/bulk-delete')).length;
+
+  it('a strip confirm opened before a row Remove waits with the title and sends nothing', async () => {
+    let finish: (r: Response) => void = () => {};
+    fetchSpy.mockImplementation(() => new Promise<Response>((r) => { finish = r; }));
+    const { target, cmp } = mountTab();
+    (row(target, 2).querySelector('input[data-row-checkbox]') as HTMLInputElement).click();
+    flushSync();
+    q<HTMLButtonElement>(target, '[data-action="bulk-delete"]').click();
+    await settle();
+    rowTrash(target, 1).click();
+    await settle();
+    q<HTMLButtonElement>(target, '[data-action="confirm-delete-student"]').click();
+    await settle();
+    const strip = q<HTMLButtonElement>(target, '[data-action="confirm-bulk-delete"]');
+    expect(strip.getAttribute('aria-disabled')).toBe('true');
+    expect(strip.title).toBe(BUSY);
+    strip.click();
+    await settle();
+    expect(bulkCalls()).toBe(0);
+    finish(jres(null, 204));
+    await settle();
+    unmount(cmp);
+  });
+
+  it('"Retry removing N" waits during a row Remove and sends nothing', async () => {
+    let finish: (r: Response) => void = () => {};
+    let n = 0;
+    fetchSpy.mockImplementation((url: string) => {
+      if (String(url).endsWith('/bulk-delete')) {
+        n += 1;
+        return Promise.resolve(jres({ results: [{ user_id: 1, status: 'ok' }, { user_id: 2, status: 'error', error_code: 'not_in_run', detail: null }], summary: { total: 2, ok: 1, error: 1 } }));
+      }
+      return new Promise<Response>((r) => { finish = r; });
+    });
+    const { target, cmp } = mountTab({ students: [stu(1), stu(2), stu(3)] });
+    (row(target, 1).querySelector('input[data-row-checkbox]') as HTMLInputElement).click();
+    (row(target, 2).querySelector('input[data-row-checkbox]') as HTMLInputElement).click();
+    flushSync();
+    q<HTMLButtonElement>(target, '[data-action="bulk-delete"]').click();
+    await settle();
+    q<HTMLButtonElement>(target, '[data-action="confirm-bulk-delete"]').click();
+    await settle(); await settle();
+    expect(q(target, '[data-action="retry-delete"]')).not.toBeNull();
+    rowTrash(target, 3).click();
+    await settle();
+    q<HTMLButtonElement>(target, '[data-action="confirm-delete-student"]').click();
+    await settle();
+    const retry = q<HTMLButtonElement>(target, '[data-action="retry-delete"]');
+    expect(retry.getAttribute('aria-disabled')).toBe('true');
+    expect(retry.title).toBe(BUSY);
+    retry.click();
+    await settle();
+    expect(n).toBe(1);
+    finish(jres(null, 204));
+    await settle();
+    unmount(cmp);
+  });
+});
+
+describe('RunRosterTab — the cancelled retry during a single Remove (fix-pass review r5)', () => {
+  it('"Retry the N not processed" waits during a row Remove and sends nothing', async () => {
+    let finish: (r: Response) => void = () => {};
+    let n = 0;
+    fetchSpy.mockImplementation((url: string) => {
+      if (String(url).endsWith('/bulk-delete')) { n += 1; return Promise.resolve(jres({ detail: 'Server error' }, 500)); }
+      return new Promise<Response>((r) => { finish = r; });
+    });
+    const { target, cmp } = mountTab({ students: [stu(1), stu(2), stu(3)] });
+    (row(target, 1).querySelector('input[data-row-checkbox]') as HTMLInputElement).click();
+    (row(target, 2).querySelector('input[data-row-checkbox]') as HTMLInputElement).click();
+    flushSync();
+    q<HTMLButtonElement>(target, '[data-action="bulk-delete"]').click();
+    await settle();
+    q<HTMLButtonElement>(target, '[data-action="confirm-bulk-delete"]').click();
+    await settle(); await settle();
+    expect(q(target, '[data-action="retry-cancelled"]')).not.toBeNull();
+    rowTrash(target, 3).click();
+    await settle();
+    q<HTMLButtonElement>(target, '[data-action="confirm-delete-student"]').click();
+    await settle();
+    const retry = q<HTMLButtonElement>(target, '[data-action="retry-cancelled"]');
+    expect(retry.getAttribute('aria-disabled')).toBe('true');
+    expect(retry.title).toBe(BUSY);
+    retry.click();
+    await settle();
+    expect(n).toBe(1);
+    finish(jres(null, 204));
+    await settle();
+    unmount(cmp);
+  });
+});

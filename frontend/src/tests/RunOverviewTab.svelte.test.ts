@@ -252,7 +252,7 @@ describe('Run details (10a, R31, R32)', () => {
     await settle();
     for (const f of ['title', 'start-date', 'end-date'] as const) {
       expect(edit(target, f).disabled).toBe(true);
-      expect(edit(target, f).title).toBe('Wait for the current change to save');
+      expect(edit(target, f).title).toBe('Wait for the current change to finish');
     }
     toggle.release(okRes(makeRun({ title: 'Summer', groups_enabled: true })));
     await settle();
@@ -276,7 +276,7 @@ describe('Run details (10a, R31, R32)', () => {
     await settle();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     // Call 16: a neutral hint, not an error; it clears when the switch settles.
-    expect(target.querySelector('p.in-hint')?.textContent).toBe('Wait for the current change to save');
+    expect(target.querySelector('p.in-hint')?.textContent).toBe('Wait for the current change to finish');
     expect(target.querySelector('p.in-err')).toBeNull();
     expect(field(target)!.getAttribute('aria-invalid')).toBeNull();
     expect(document.activeElement).toBe(field(target));
@@ -411,7 +411,7 @@ describe('role gating', () => {
 });
 
 describe('R32 across the run writes', () => {
-  const WAIT = 'Wait for the current change to save';
+  const WAIT = 'Wait for the current change to finish';
 
   async function startTitleSave(target: HTMLElement) {
     const save = held();

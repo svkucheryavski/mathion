@@ -1,6 +1,8 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { ApiError, OFFLINE_MESSAGE } from '../../lib/api';
+  import { ApiError, failureText } from '../../lib/api';
+  import { focusIsFree } from '../../lib/askInPlace.svelte';
+  import { WAIT_TITLE as WAIT } from '../../lib/runTabs';
   import { createGroup, deleteGroup, getCapacityClass, updateGroup } from '../../lib/runGroups';
   import { focusFirst } from '../../lib/focusFirst';
   import { pushToast } from '../../stores/toasts.svelte';
@@ -35,6 +37,9 @@
   let editor = $state<Editor>(null);
   let addKey = $state(0);
   let pendingDelete: number | null = $state(null);
+  // A delete in flight: its confirm shows busy, the other 🗑 and its own ✎ wait.
+  let deletingId = $state<number | null>(null);
+  const deleting = $derived(deletingId !== null);
 
   let headingEl = $state<HTMLElement>();
   let toggleEl = $state<HTMLButtonElement>();
@@ -78,6 +83,7 @@
   }
 
   function startRename(id: number) {
+    if (id === deletingId) return;
     pendingDelete = null;
     editor = { kind: 'rename', id };
   }
@@ -90,11 +96,13 @@
 
   async function saveRename(id: number, name: string) {
     await updateGroup(id, { name });
-    await onRefetchGroups();
+    // The rename stands even when the refetch fails.
+    try { await onRefetchGroups(); } catch { pushToast('Saved (refresh failed — reload to see latest)', 'info'); }
     await endRename(id);
   }
 
   function askDelete(id: number) {
+    if (deleting) return;
     editor = null;
     pendingDelete = id;
   }
@@ -106,31 +114,37 @@
   }
 
   // §Focus: on success the next row's trash, the previous row's, the + toggle,
-  // the h2; on failure this row's trash, else its ✎.
+  // the h2; on failure this row's trash, else its ✎; only while focus is free.
   async function confirmDelete(groupId: number) {
     const idx = sorted.findIndex((g) => g.id === groupId);
+    deletingId = groupId;
     try {
       await deleteGroup(groupId);
-      pendingDelete = null;
-      await onRefetchGroups();
-      await tick();
-      const next = sorted[idx];
-      const prev = idx > 0 ? sorted[idx - 1] : undefined;
-      focusFirst([next && trashEls[next.id], prev && trashEls[prev.id], toggleEl, headingEl]);
     } catch (e) {
+      pushToast(failureText(e, 'Could not delete the group.'), 'error');
+      const msg = e instanceof ApiError && e.status === 409 && typeof e.detail === 'string' ? e.detail : '';
+      try {
+        if (/students/i.test(msg)) await onRefetchGroupsAndStudents();
+        else if (/submission/i.test(msg)) await onRefetchGroups();
+      } catch { /* the list stays as it was */ }
       pendingDelete = null;
-      if (e instanceof ApiError) {
-        const msg = typeof e.detail === 'string' ? e.detail : '';
-        pushToast(e.displayMessage, 'error');
-        if (e.status === 409 && /students/i.test(msg)) await onRefetchGroupsAndStudents();
-        else if (e.status === 409 && /submission/i.test(msg)) await onRefetchGroups();
-      } else {
-        pushToast(OFFLINE_MESSAGE, 'error');
-      }
+      deletingId = null;
       await tick();
       // A "has students" refetch disables this row's trash: fall back to its ✎.
-      focusFirst([trashEls[groupId], pencilEls[groupId], toggleEl, headingEl]);
+      if (focusIsFree()) focusFirst([trashEls[groupId], pencilEls[groupId], toggleEl, headingEl]);
+      return;
     }
+    // The delete stands even when the refetch fails.
+    try { await onRefetchGroups(); } catch { pushToast('Deleted (refresh failed — reload to see latest)', 'info'); }
+    pendingDelete = null;
+    deletingId = null;
+    await tick();
+    if (!focusIsFree()) return;
+    // A failed refetch leaves the removed row listed: skip it.
+    const rest = sorted.filter((g) => g.id !== groupId);
+    const next = rest[idx];
+    const prev = idx > 0 ? rest[idx - 1] : undefined;
+    focusFirst([next && trashEls[next.id], prev && trashEls[prev.id], toggleEl, headingEl]);
   }
 </script>
 
@@ -187,14 +201,15 @@
               <span class="g-actions">
                 {#if pendingDelete === g.id}
                   <InlineConfirm takeFocus label="Delete {g.name}?" confirmLabel="Delete" confirmDataAction="confirm-delete-group"
+                                 busy={deleting}
                                  onConfirm={() => confirmDelete(g.id)} onCancel={() => cancelDelete(g.id)} />
                 {:else}
-                  <IconButton glyph="pencil" size="sm" title="Rename" aria-label="Rename {g.name}"
-                              data-action="rename-group" bind:element={pencilEls[g.id]}
+                  <IconButton glyph="pencil" size="sm" title={deletingId === g.id ? WAIT : 'Rename'} aria-label="Rename {g.name}"
+                              aria-disabled={deletingId === g.id} data-action="rename-group" bind:element={pencilEls[g.id]}
                               onclick={() => startRename(g.id)} />
                   <IconButton glyph="trash" size="sm" danger aria-label="Delete group {g.name}"
-                              title={g.student_count > 0 ? 'Move students out before deleting.' : 'Delete'}
-                              disabled={g.student_count > 0} data-action="delete-group"
+                              title={g.student_count > 0 ? 'Move students out before deleting.' : deleting ? WAIT : 'Delete'}
+                              disabled={g.student_count > 0} aria-disabled={deleting} data-action="delete-group"
                               bind:element={trashEls[g.id]} onclick={() => askDelete(g.id)} />
                 {/if}
               </span>

@@ -9,7 +9,7 @@
   import TreeAskRow from './TreeAskRow.svelte';
   import { useTreeAsk, settleTo, moveOn, withdraw, firstUsable, focusAfter, repairFocus, type Ask } from '../../lib/askInPlace.svelte';
   import { navigate } from '../../lib/router.svelte';
-  import { api, ApiError } from '../../lib/api';
+  import { api, ApiError, failureText } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
   import IconButton from '../ui/IconButton.svelte';
@@ -172,7 +172,7 @@
         if (interim && nextId === undefined) await moveOn(interim, () => document.querySelector('[data-action="add-block"]'));
       }
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
+      pushToast(failureText(e, 'Delete failed'), 'error');
       if (stillOnVid(savedVid)) {
         await loadAdminTree(savedVid, { force: true });
       }
@@ -205,7 +205,7 @@
         await loadAdminTree(savedVid, { force: true });
       }
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
+      pushToast(failureText(e, 'Reorder failed'), 'error');
       if (stillOnVid(savedVid)) {
         await loadAdminTree(savedVid, { force: true });
       }

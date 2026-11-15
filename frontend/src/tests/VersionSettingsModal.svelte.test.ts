@@ -283,6 +283,43 @@ describe('VersionSettingsModal — backlog round (VR-B)', () => {
     expect(panel().querySelector('dl.ro')).not.toBeNull();
     expect(panel().querySelector('[role="alert"]')?.textContent).toBe('No');
   });
+  it('an offline Save error does not follow the modal into read-only (whole-branch review)', async () => {
+    fetchSpy.mockImplementation((_u: string, i?: RequestInit) => (i?.method === 'PATCH' ? Promise.reject(new TypeError('Failed to fetch')) : jres({})));
+    target = document.createElement('div'); document.body.appendChild(target);
+    registry = createDirtyRegistry();
+    const props = $state({ vid: 1, version: mkVersion(), editable: true, stillOnVid: () => true, onClose: vi.fn() });
+    cmp = mount(VersionSettingsModal, { target, props, context: new Map([[DIRTY_REGISTRY_KEY, registry]]) });
+    flushSync(); await settle();
+    type(input('Label'), 'L2');
+    footBtn('Save')!.click(); await settle();
+    expect(panel().querySelector('[role="alert"]')?.textContent).toBe('Could not reach server. Check your connection.');
+    props.version = mkVersion({ state: 'published' }); props.editable = false;
+    flushSync(); await settle();
+    expect(panel().querySelector('dl.ro')).not.toBeNull();
+    expect(panel().querySelector('[role="alert"]')).toBeNull();
+  });
+  it('a 409 Save then an offline Save: the flip to read-only clears the offline error (fix-pass review)', async () => {
+    let n = 0;
+    fetchSpy.mockImplementation((_u: string, i?: RequestInit) => {
+      if (i?.method !== 'PATCH') return jres({});
+      n += 1;
+      return n === 1 ? jres({ detail: 'Changed' }, 409) : Promise.reject(new TypeError('Failed to fetch'));
+    });
+    target = document.createElement('div'); document.body.appendChild(target);
+    registry = createDirtyRegistry();
+    const props = $state({ vid: 1, version: mkVersion(), editable: true, stillOnVid: () => false, onClose: vi.fn() });
+    cmp = mount(VersionSettingsModal, { target, props, context: new Map([[DIRTY_REGISTRY_KEY, registry]]) });
+    flushSync(); await settle();
+    type(input('Label'), 'L2');
+    footBtn('Save')!.click(); await settle();
+    expect(panel().querySelector('[role="alert"]')?.textContent).toBe('Changed');
+    footBtn('Save')!.click(); await settle();
+    expect(panel().querySelector('[role="alert"]')?.textContent).toBe('Could not reach server. Check your connection.');
+    props.version = mkVersion({ state: 'published' }); props.editable = false;
+    flushSync(); await settle();
+    expect(panel().querySelector('dl.ro')).not.toBeNull();
+    expect(panel().querySelector('[role="alert"]')).toBeNull();
+  });
   it('a Save 422 does not reload', async () => {
     fetchSpy.mockImplementation((_u: string, i?: RequestInit) => (i?.method === 'PATCH' ? jres({ detail: 'Bad' }, 422) : jres({})));
     render();

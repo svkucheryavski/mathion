@@ -2,7 +2,7 @@
   import { tick } from 'svelte';
   import { parseCsv } from '../../lib/csv';
   import type { CsvParseResult } from '../../lib/csv';
-  import { ApiError } from '../../lib/api';
+  import { ApiError, failureText } from '../../lib/api';
   import { batchAddRunStudents } from '../../lib/runRoster';
   import { buildBatchRow } from '../../lib/buildBatchRow';
   import { pushToast } from '../../stores/toasts.svelte';
@@ -125,12 +125,8 @@
     } catch (e) {
       // Surface submit-step errors via the separate submitError slot, NOT via
       // parsed.error (the client-side CSV parse-error channel).
-      if (e instanceof ApiError) {
-        submitError = e.displayMessage;
-      } else {
-        submitError = 'Import failed — please retry.';
-        console.error(e);
-      }
+      submitError = failureText(e, 'Import failed — please retry.');
+      if (!(e instanceof ApiError) && !(e instanceof TypeError)) console.error(e);
     } finally {
       submitting = false;
     }

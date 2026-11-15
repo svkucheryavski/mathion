@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { QuizItem, Question, QuizSubmitResponse, QuizRevealResponse } from '../../lib/types';
-  import { api, ApiError } from '../../lib/api';
+  import { api, ApiError, failureText } from '../../lib/api';
   import { recordQuizAttempt, recordQuizExhausted, currentCourse } from '../../stores/currentCourse.svelte';
   import { getDraft, setDraft, clearDraft, takeDraft, restoreDraft, endSend, sendStillOwned, holdsAnswers } from '../../stores/quizDrafts.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
@@ -171,7 +171,7 @@
           clearDraft(id);
         }
       } else if (!exhausted(id)) restoreDraft(id, held);
-      const msg = e instanceof ApiError ? e.displayMessage : 'Submit failed.';
+      const msg = failureText(e, 'Submit failed.');
       // No toast for another student's send or a 401.
       const signedOut = e instanceof ApiError && e.status === 401;
       if (sendStillOwned(held) && !signedOut) pushToast(msg, 'error');

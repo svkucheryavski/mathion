@@ -1063,6 +1063,105 @@ describe('Delete this run from the page (D24, D28, P24)', () => {
     unmount(cmp);
   });
 
+  it('a second Delete from a remounted Overview while the first runs toasts Run deleted. once (whole-branch review)', async () => {
+    const hold = held();
+    let n = 0;
+    const { target, cmp } = mountWith((_url, init) => {
+      if (init?.method !== 'DELETE') return null;
+      n += 1;
+      return n === 1 ? hold.p : jres({ detail: 'Run not found' }, 404);
+    });
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    const tab = (name: string) => (Array.from(target.querySelectorAll('[role="tab"]')).find((b) => b.textContent?.trim().startsWith(name)) as HTMLElement);
+    tab('Roster').click();
+    await settle();
+    tab('Overview').click();
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    hold.release({ ok: true, status: 204, json: () => Promise.resolve(null), headers: new Headers() } as unknown as Response);
+    await settle();
+    await settle();
+    expect(vi.mocked(pushToast).mock.calls.filter((c) => c[0] === 'Run deleted.')).toHaveLength(1);
+    expect(n).toBe(1);
+    unmount(cmp);
+  });
+
+  it('a shared delete that fails is reported once: inline in the live Overview, no toast (fix-pass review r3)', async () => {
+    const hold = held();
+    const { target, cmp } = mountWith((_url, init) => (init?.method === 'DELETE' ? hold.p : null));
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    const tab = (name: string) => (Array.from(target.querySelectorAll('[role="tab"]')).find((b) => b.textContent?.trim().startsWith(name)) as HTMLElement);
+    tab('Roster').click();
+    await settle();
+    tab('Overview').click();
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    hold.release(resp({ detail: 'Boom' }, 500));
+    await settle();
+    await settle();
+    expect(vi.mocked(pushToast).mock.calls.filter((c) => String(c[0]).includes('Boom'))).toHaveLength(0);
+    expect(target.querySelector('.ov-err')?.textContent).toBe('Boom');
+    unmount(cmp);
+  });
+
+  it('a shared delete that fails after both Overviews left toasts once (fix-pass review r4)', async () => {
+    const hold = held();
+    const { target, cmp } = mountWith((_url, init) => (init?.method === 'DELETE' ? hold.p : null));
+    await settle();
+    const tab = (name: string) => (Array.from(target.querySelectorAll('[role="tab"]')).find((b) => b.textContent?.trim().startsWith(name)) as HTMLElement);
+    (await arm(target)).click();
+    await settle();
+    tab('Roster').click();
+    await settle();
+    tab('Overview').click();
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    tab('Roster').click();
+    await settle();
+    hold.release(resp({ detail: 'Boom' }, 500));
+    await settle();
+    await settle();
+    const boom = vi.mocked(pushToast).mock.calls.filter((c) => String(c[0]).includes('Boom'));
+    expect(boom).toHaveLength(1);
+    expect(boom[0]![0]).toBe('Could not delete the run: Boom');
+    unmount(cmp);
+  });
+
+  it('a delete of another run in between does not let a second Delete of the first through (fix-pass review)', async () => {
+    const holds: Record<string, ReturnType<typeof held>> = {};
+    const sent: string[] = [];
+    const { target, cmp, props } = mountWith((url, init) => {
+      if (init?.method !== 'DELETE') return null;
+      sent.push(url);
+      const h = held();
+      holds[url + sent.length] = h;
+      return h.p;
+    });
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    props.runId = '11';
+    await settle(); await settle();
+    (await arm(target)).click();
+    await settle();
+    props.runId = '10';
+    await settle(); await settle();
+    (await arm(target)).click();
+    await settle();
+    expect(sent.filter((u) => u.includes('/api/runs/10?'))).toHaveLength(1);
+    expect(sent.filter((u) => u.includes('/api/runs/11?'))).toHaveLength(1);
+    for (const h of Object.values(holds)) h.release({ ok: true, status: 204, json: () => Promise.resolve(null), headers: new Headers() } as unknown as Response);
+    await settle(); await settle();
+    unmount(cmp);
+  });
+
   it('a delete that lands after the page unmounted does not navigate', async () => {
     const hold = held();
     const { target, cmp } = mountWith((_url, init) => (init?.method === 'DELETE' ? hold.p : null));

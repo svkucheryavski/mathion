@@ -3,7 +3,7 @@
   import IconButton from '../ui/IconButton.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import { SvelteSet } from 'svelte/reactivity';
-  import { ApiError } from '../../lib/api';
+  import { ApiError, failureText } from '../../lib/api';
   import { formatRef } from '../../lib/assets';
   import type { AssetContext, AssetItem } from '../../lib/assetContext';
   import { assetDropRefusal } from '../../lib/assetDrop';
@@ -163,7 +163,7 @@
       await assetContext.remove(id);
       ok = true;
     } catch (e) {
-      deleteErrorMsg = e instanceof ApiError ? e.displayMessage : 'Delete failed';
+      deleteErrorMsg = failureText(e, 'Delete failed');
     } finally {
       const closing = confirmId === id;
       if (closing) confirmId = null;

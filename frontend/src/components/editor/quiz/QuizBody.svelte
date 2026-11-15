@@ -11,7 +11,7 @@
   import Skeleton from '../../ui/Skeleton.svelte';
   import QuestionCard from './QuestionCard.svelte';
   import NewQuestionModal from './NewQuestionModal.svelte';
-  import { ApiError } from '../../../lib/api';
+  import { ApiError, failureText } from '../../../lib/api';
   import { QuizEdits, WAIT_TITLE } from '../../../lib/quizEdits.svelte';
   import { InPlaceAsk, firstUsable, focusAfter, settleTo, withdraw, type Ask } from '../../../lib/askInPlace.svelte';
   import { QUIZ_CTX, type QuizCtx } from '../../../lib/quizContext';
@@ -126,7 +126,7 @@
         if (a === null || a === document.body) void focusFallback(qid);
       });
     }
-    return e instanceof ApiError ? e.displayMessage : 'Save failed';
+    return failureText(e, 'Save failed');
   }
 
   function fallbackTarget(qid: number | null): HTMLElement | null {

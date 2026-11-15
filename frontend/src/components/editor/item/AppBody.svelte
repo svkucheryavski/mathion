@@ -12,7 +12,7 @@
   import Button from '../../ui/Button.svelte';
   import { fetchAssetSource, uploadAsset, deleteAsset, type AssetResponse } from '../../../lib/assets';
   import { scanAppSource } from '../../../lib/appSourceScan';
-  import { api, ApiError } from '../../../lib/api';
+  import { api, ApiError, failureText } from '../../../lib/api';
   import { overUploadLimit, overLimitSentence, tooLargeSentence } from '../../../lib/uploadLimit.svelte';
   import { patchItem, reportSaveFailure, type SaveOutcome } from '../../../lib/itemBody';
   import { loadAdminTree } from '../../../stores/currentEditorVersion.svelte';
@@ -154,7 +154,7 @@
       } else if (err instanceof ApiError && err.status === 413) {
         uploadError = tooLargeSentence(err); // Settings D11a
       } else {
-        uploadError = err instanceof ApiError ? err.displayMessage : 'Upload failed.';
+        uploadError = failureText(err, 'Upload failed.');
       }
     } finally {
       if (alive) {
@@ -197,7 +197,7 @@
         keepError = true;
         await loadAdminTree(savedVid, { force: true });
       }
-      if (alive) uploadError = err instanceof ApiError ? err.displayMessage : 'Remove failed.';
+      if (alive) uploadError = failureText(err, 'Remove failed.');
     } finally {
       if (alive) uploadBusy = false;
       // R54: the question leaves once the request settles; then the first

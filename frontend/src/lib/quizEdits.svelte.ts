@@ -3,7 +3,7 @@
 // slot while it is open, and any other action asks first — at the open edit,
 // in place (Polish 1 #14). The quiz body owns one instance and exposes it as
 // ItemBodyApi.edits.
-import { ApiError } from './api';
+import { failureText } from './api';
 import { pushToast } from '../stores/toasts.svelte';
 import { DISCARD_CONTINUE } from './editorReasons';
 import {
@@ -243,7 +243,7 @@ export class InlineEdit<T> {
       await o.edits.track(o.send(this.value));
       ok = true;
     } catch (e) {
-      const m = e instanceof ApiError ? e.displayMessage : 'Save failed';
+      const m = failureText(e, 'Save failed');
       // A save always reports its failure: inline while the field is open on
       // this version, otherwise as a toast (spec §While a request runs).
       this.saving = false;   // never left "Saving…" (a field that outlived its version can still cancel)

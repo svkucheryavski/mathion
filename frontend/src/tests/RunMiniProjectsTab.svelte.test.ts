@@ -268,6 +268,8 @@ describe('RunMiniProjectsTab', () => {
     expect(target.textContent).toContain('Force delete will permanently remove');
     expect(target.querySelector('input[type="checkbox"]')).toBeTruthy();
     expect(target.querySelector('button[data-action="force-delete"]')).toBeTruthy();
+    // Fix-pass review r6: the danger box takes focus once the delete settles.
+    expect(document.activeElement).toBe(target.querySelector('input[data-role="danger-ack"]'));
 
     unmount(cmp);
   });
@@ -1172,5 +1174,250 @@ describe('RunMiniProjectsTab — focus after a mouse-opened editor (F13)', () =>
     await settle();
     expect(target.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(pencil);
+  });
+});
+
+// Whole-branch review fix pass.
+describe('RunMiniProjectsTab — deletes (whole-branch review)', () => {
+  const OFFLINE = 'Could not reach server. Check your connection.';
+  const mp1 = mkMp({ id: 1, block_id: 1 });
+  const mp2 = mkMp({ id: 2, block_id: 2, title: 'Mini project for Block 1' });
+  const locked = mkMp({ id: 1, block_id: 1, is_published: true, first_submitted_at: '2026-05-22T00:00:00Z' });
+  const trash = (t: HTMLElement, n: number) =>
+    t.querySelector(`button[aria-label="Delete mini-project for Block ${n}"]`) as HTMLButtonElement;
+
+  it('an offline force delete says OFFLINE_MESSAGE, not the browser text', async () => {
+    fetchSpy.mockImplementation((_url, init) =>
+      ((init as RequestInit | undefined)?.method === 'DELETE' ? Promise.reject(new TypeError('Failed to fetch')) : jres([locked])));
+    const { target, cmp } = mountMpTab({ miniProjects: [locked] });
+    await settle();
+    byAction(target, 'delete')!.click();
+    await settle();
+    const box = target.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    box.checked = true;
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    byAction(target, 'force-delete')!.click();
+    await settle();
+    expect(target.querySelector('[data-role="delete-error-banner"] span')?.textContent).toBe(OFFLINE);
+    unmount(cmp);
+  });
+
+  it('an offline plain delete says OFFLINE_MESSAGE, not the browser text', async () => {
+    fetchSpy.mockImplementation(() => Promise.reject(new TypeError('Failed to fetch')));
+    const { target, cmp } = mountMpTab({ miniProjects: [mp1] });
+    await settle();
+    byAction(target, 'delete')!.click();
+    await settle();
+    byAction(target, 'confirm-delete')!.click();
+    await settle();
+    expect(target.querySelector('[data-role="delete-error-banner"] span')?.textContent).toBe(OFFLINE);
+    unmount(cmp);
+  });
+
+  it('the plain confirm shows busy; Cancel and the other trash buttons wait', async () => {
+    let finish: (r: Response) => void = () => {};
+    fetchSpy.mockImplementation(() => new Promise<Response>((r) => { finish = r; }));
+    const { target, cmp } = mountMpTab({ miniProjects: [mp1, mp2] });
+    await settle();
+    trash(target, 1).click();
+    await settle();
+    byAction(target, 'confirm-delete')!.click();
+    await settle();
+    expect(byAction(target, 'confirm-delete')!.getAttribute('aria-busy')).toBe('true');
+    (target.querySelector('.inline-confirm .cancel') as HTMLButtonElement).click();
+    await settle();
+    expect(byAction(target, 'confirm-delete')).not.toBeNull();
+    expect(trash(target, 2).getAttribute('aria-disabled')).toBe('true');
+    expect(trash(target, 2).getAttribute('title')).toBe('Wait for the current change to finish');
+    trash(target, 2).click();
+    await settle();
+    expect(target.querySelectorAll('button[data-action="confirm-delete"]').length).toBe(1);
+    expect(byAction(target, 'confirm-delete')!.closest('tr')!.previousElementSibling).toBe(trash(target, 1).closest('tr'));
+    finish({ ok: false, status: 500, json: () => Promise.resolve({ detail: 'Boom' }), headers: new Headers({ 'content-type': 'application/json' }) } as unknown as Response);
+    await settle();
+    expect(document.activeElement).toBe(trash(target, 1));
+    expect(trash(target, 2).hasAttribute('aria-disabled')).toBe(false);
+    unmount(cmp);
+  });
+
+  it('a delete whose refetch fails toasts Deleted (refresh failed — reload to see latest) and moves focus on', async () => {
+    fetchSpy.mockImplementation(() => jres(null, 204));
+    const { target, cmp } = mountMpTab({
+      miniProjects: [mp1, mp2],
+      onRefetchMiniProjects: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
+    });
+    await settle();
+    trash(target, 1).click();
+    await settle();
+    byAction(target, 'confirm-delete')!.click();
+    await settle();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toContainEqual(['Deleted (refresh failed — reload to see latest)', 'info']);
+    expect(target.querySelector('[data-role="delete-error-banner"]')).toBeNull();
+    expect(byAction(target, 'confirm-delete')).toBeNull();
+    expect(document.activeElement).toBe(trash(target, 2));
+    unmount(cmp);
+  });
+});
+
+describe('RunMiniProjectsTab — deletes (fix-pass review)', () => {
+  const mp1 = mkMp({ id: 1, block_id: 1 });
+  const mp2 = mkMp({ id: 2, block_id: 2, title: 'Mini project for Block 1' });
+  const trash = (t: HTMLElement, n: number) =>
+    t.querySelector(`button[aria-label="Delete mini-project for Block ${n}"]`) as HTMLButtonElement;
+
+  it('the confirm stays busy and the other trash buttons wait through the refetch after a 409', async () => {
+    fetchSpy.mockImplementation(() => Promise.resolve({
+      ok: false, status: 409, json: () => Promise.resolve({ detail: 'Has submissions' }), headers: new Headers({ 'content-type': 'application/json' }),
+    } as unknown as Response));
+    let done: () => void = () => {};
+    const onRefetchMiniProjects = vi.fn(() => new Promise<void>((r) => { done = r; }));
+    const { target, cmp } = mountMpTab({ miniProjects: [mp1, mp2], onRefetchMiniProjects });
+    await settle();
+    trash(target, 1).click();
+    await settle();
+    byAction(target, 'confirm-delete')!.click();
+    await settle();
+    expect(onRefetchMiniProjects).toHaveBeenCalled();
+    expect(byAction(target, 'confirm-delete')?.getAttribute('aria-busy')).toBe('true');
+    expect(trash(target, 2).getAttribute('aria-disabled')).toBe('true');
+    done();
+    await settle();
+    expect(trash(target, 2).hasAttribute('aria-disabled')).toBe(false);
+    expect(document.activeElement).toBe(trash(target, 1));
+    unmount(cmp);
+  });
+
+  it('a slow delete does not pull focus from where the user moved it', async () => {
+    let finish: (r: Response) => void = () => {};
+    fetchSpy.mockImplementation((_url, init) =>
+      ((init as RequestInit | undefined)?.method === 'DELETE' ? new Promise<Response>((r) => { finish = r; }) : jres([mp2])));
+    const { target, cmp } = mountMpTab({ miniProjects: [mp1, mp2] });
+    await settle();
+    trash(target, 1).click();
+    await settle();
+    byAction(target, 'confirm-delete')!.click();
+    await settle();
+    const elsewhere = document.body.appendChild(document.createElement('input'));
+    elsewhere.focus();
+    finish({ ok: true, status: 204, json: () => Promise.resolve(null), headers: new Headers() } as unknown as Response);
+    await settle();
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+    unmount(cmp);
+  });
+});
+
+describe('RunMiniProjectsTab — failed delete focus (fix-pass review r2)', () => {
+  it('a slow delete that fails does not pull focus from where the user moved it', async () => {
+    let finish: (r: Response) => void = () => {};
+    fetchSpy.mockImplementation(() => new Promise<Response>((r) => { finish = r; }));
+    const { target, cmp } = mountMpTab({ miniProjects: [mkMp({ id: 1, block_id: 1 })] });
+    await settle();
+    byAction(target, 'delete')!.click();
+    await settle();
+    byAction(target, 'confirm-delete')!.click();
+    await settle();
+    const elsewhere = document.body.appendChild(document.createElement('input'));
+    elsewhere.focus();
+    finish({ ok: false, status: 500, json: () => Promise.resolve({ detail: 'Boom' }), headers: new Headers({ 'content-type': 'application/json' }) } as unknown as Response);
+    await settle();
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+    unmount(cmp);
+  });
+});
+
+describe('RunMiniProjectsTab — the row being deleted (fix-pass review r3)', () => {
+  const trash = (t: HTMLElement, n: number) =>
+    t.querySelector(`button[aria-label="Delete mini-project for Block ${n}"]`) as HTMLButtonElement;
+  const pencil = (t: HTMLElement, n: number) => trash(t, n).closest('tr')!.querySelector('button[data-action="edit"]') as HTMLButtonElement;
+
+  it('the ✎ of the row being deleted waits; the others do not', async () => {
+    let finish: (r: Response) => void = () => {};
+    fetchSpy.mockImplementation(() => new Promise<Response>((r) => { finish = r; }));
+    const { target, cmp } = mountMpTab({ miniProjects: [mkMp({ id: 1, block_id: 1 }), mkMp({ id: 2, block_id: 2, title: 'Mini project for Block 1' })] });
+    await settle();
+    trash(target, 1).click();
+    await settle();
+    byAction(target, 'confirm-delete')!.click();
+    await settle();
+    expect(pencil(target, 1).getAttribute('aria-disabled')).toBe('true');
+    expect(pencil(target, 1).getAttribute('title')).toBe('Wait for the current change to finish');
+    expect(pencil(target, 2).getAttribute('aria-disabled')).not.toBe('true');
+    pencil(target, 1).click();
+    await settle();
+    expect(document.querySelector('.modal-panel')).toBeNull();
+    finish({ ok: false, status: 500, json: () => Promise.resolve({ detail: 'Boom' }), headers: new Headers({ 'content-type': 'application/json' }) } as unknown as Response);
+    await settle();
+    expect(pencil(target, 1).getAttribute('aria-disabled')).not.toBe('true');
+    unmount(cmp);
+  });
+
+  it('during a force delete the other trash buttons wait and open nothing', async () => {
+    const locked = mkMp({ id: 1, block_id: 1, is_published: true, first_submitted_at: '2026-05-22T00:00:00Z' });
+    let finish: (r: Response) => void = () => {};
+    fetchSpy.mockImplementation((_url, init) =>
+      ((init as RequestInit | undefined)?.method === 'DELETE' ? new Promise<Response>((r) => { finish = r; }) : jres([locked])));
+    const { target, cmp } = mountMpTab({ miniProjects: [locked, mkMp({ id: 2, block_id: 2, title: 'Mini project for Block 1' })] });
+    await settle();
+    trash(target, 1).click();
+    await settle();
+    const box = target.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    box.checked = true;
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    byAction(target, 'force-delete')!.click();
+    await settle();
+    expect(trash(target, 2).getAttribute('aria-disabled')).toBe('true');
+    expect(trash(target, 2).getAttribute('title')).toBe('Wait for the current change to finish');
+    expect(pencil(target, 1).getAttribute('aria-disabled')).toBe('true');
+    trash(target, 2).click();
+    await settle();
+    expect(byAction(target, 'confirm-delete')).toBeNull();
+    expect(byAction(target, 'force-delete')).not.toBeNull();
+    finish({ ok: true, status: 204, json: () => Promise.resolve(null), headers: new Headers() } as unknown as Response);
+    await settle();
+    unmount(cmp);
+  });
+});
+
+describe('RunMiniProjectsTab — plain and force lock each other (fix-pass review r5)', () => {
+  it('a row that turns locked during a plain delete shows a busy danger panel and sends no second DELETE', async () => {
+    let finish: (r: Response) => void = () => {};
+    let deletes = 0;
+    fetchSpy.mockImplementation((_url, init) => {
+      if ((init as RequestInit | undefined)?.method === 'DELETE') { deletes += 1; return new Promise<Response>((r) => { finish = r; }); }
+      return jres([]);
+    });
+    const target = document.body.appendChild(document.createElement('div'));
+    const props = $state({
+      runId: 10, runIsPublished: true, runGroupsEnabled: true, runEndDate: '2026-06-30', versionIsDisabled: false,
+      pinnedAvailable: true, blocks, miniProjects: [mkMp({ id: 1, block_id: 1 })] as MiniProjectResponse[],
+      onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined), onNavigateToTab: vi.fn(), course: baseCourse,
+    });
+    const cmp = mount(RunMiniProjectsTab, { target, props });
+    mountedTabs.push(cmp);
+    await settle();
+    byAction(target, 'delete')!.click();
+    await settle();
+    byAction(target, 'confirm-delete')!.click();
+    await settle();
+    props.miniProjects = [mkMp({ id: 1, block_id: 1, is_published: true, first_submitted_at: '2026-05-22T00:00:00Z' })];
+    await settle();
+    const box = target.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect(box.disabled).toBe(true);
+    box.checked = true;
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    byAction(target, 'force-delete')?.click();
+    await settle();
+    expect(deletes).toBe(1);
+    finish({ ok: false, status: 409, json: () => Promise.resolve({ detail: 'Has submissions' }), headers: new Headers({ 'content-type': 'application/json' }) } as unknown as Response);
+    await settle();
+    // Fix-pass review r6: the 409 leaves the panel armed-able with focus on its box.
+    const after = target.querySelector('input[data-role="danger-ack"]') as HTMLInputElement;
+    expect(after.disabled).toBe(false);
+    expect(document.activeElement).toBe(after);
   });
 });

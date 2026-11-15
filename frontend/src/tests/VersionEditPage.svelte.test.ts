@@ -711,6 +711,16 @@ describe('VersionEditPage — state bar (T4)', () => {
     expect(document.activeElement).toBe(trigger('archive'));
   });
 
+  it('an offline publish toasts OFFLINE_MESSAGE (fix-pass review)', async () => {
+    serve((url, init) => (url === '/api/versions/1/publish' && init?.method === 'POST' ? Promise.reject(new TypeError('Failed to fetch')) : undefined));
+    await render();
+    trigger('publish')!.click();
+    await settle();
+    barBtn('confirm').click();
+    await settle();
+    expect(toasts.list.map((t) => t.message)).toContain('Could not reach server. Check your connection.');
+  });
+
   it('#20: a failed publish returns focus to the trigger', async () => {
     serve((url, init) => (url === '/api/versions/1/publish' && init?.method === 'POST' ? jres({ detail: 'Conflict' }, 409) : undefined));
     await render();

@@ -29,7 +29,12 @@
   let pending = false;
   let boxEl = $state<HTMLInputElement>();
   let forceEl = $state<HTMLButtonElement>();
-  onMount(() => boxEl?.focus());
+  // Opened while busy, the box cannot take focus yet: it takes it once busy clears.
+  let focusWhenFree = false;
+  onMount(() => {
+    if (busy) focusWhenFree = true;
+    else boxEl?.focus();
+  });
 
   const blocked = $derived(busy || disabledReason !== undefined);
   const forceTitle = $derived(disabledReason ?? (armed ? undefined : 'Tick “I understand” first'));
@@ -38,7 +43,13 @@
   // <body> or on the disabled button; after the request it goes back to the box.
   let busySeen = false;
   $effect(() => {
-    if (busy) busySeen = true;
+    if (busy) { busySeen = true; return; }
+    if (!focusWhenFree) return;
+    focusWhenFree = false;
+    void tick().then(() => {
+      const active = document.activeElement;
+      if (boxEl?.isConnected && (active === null || active === document.body)) boxEl.focus();
+    });
   });
 
   async function force() {

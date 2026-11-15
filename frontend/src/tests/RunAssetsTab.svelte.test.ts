@@ -668,9 +668,7 @@ describe('RunAssetsTab — upload via file picker', () => {
   });
 
   it('upload 500 backend error surfaces as banner (not unhandled rejection)', async () => {
-    (uploadRunAsset as any).mockRejectedValue(
-      Object.assign(new Error('Failed to write asset file'), { status: 500 }),
-    );
+    (uploadRunAsset as any).mockRejectedValue(new ApiError(500, 'Failed to write asset file'));
     component = mount(RunAssetsTab, { target, props: baseProps() });
     flushSync();
 
@@ -681,6 +679,19 @@ describe('RunAssetsTab — upload via file picker', () => {
     await settle();
 
     expect(target.textContent).toMatch(/Failed to write asset file/i);
+  });
+
+  it('an upload that fails with a non-API error says the fallback, not the raw message (fix-pass review r3)', async () => {
+    (uploadRunAsset as any).mockRejectedValue(new Error('x is undefined'));
+    component = mount(RunAssetsTab, { target, props: baseProps() });
+    flushSync();
+    const hiddenInput = target.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['data'], 'doc.pdf', { type: 'application/pdf' });
+    Object.defineProperty(hiddenInput, 'files', { value: [file], configurable: true });
+    hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(target.textContent).toContain("Failed to upload 'doc.pdf'.");
+    expect(target.textContent).not.toContain('x is undefined');
   });
 
   it("upload 413 shows the server's sentence, never \"storage quota\" for a too-big file (D11a)", async () => {
@@ -741,7 +752,7 @@ describe('RunAssetsTab — upload via file picker', () => {
       callCount++;
       if (callCount === 1) return Promise.resolve(mkAsset(99, file.name));
       return Promise.reject(
-        Object.assign(new Error('Failed to write asset file'), { status: 500 }),
+        new ApiError(500, 'Failed to write asset file'),
       );
     });
     const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
@@ -1583,10 +1594,21 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
     expect(onRefetchMiniProjects).not.toHaveBeenCalled();
   });
 
-  it('generic 500 error → banner shows error message', async () => {
-    (deleteRunAsset as any).mockRejectedValue(
-      Object.assign(new Error('Server boom'), { status: 500 }),
-    );
+  it('an offline delete says OFFLINE_MESSAGE, not the browser text (fix-pass review r2)', async () => {
+    (deleteRunAsset as any).mockRejectedValue(new TypeError('Failed to fetch'));
+    const assets = [{ ...mkAsset(1, 'orphan.pdf'), is_referenced: false }];
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets }) });
+    flushSync();
+    findDeleteBtn('orphan.pdf').click();
+    flushSync();
+    findButton(target, /^(Delete|Replace)$/)!.click();
+    await settle();
+    expect(target.textContent).toContain('Could not reach server. Check your connection.');
+    expect(target.textContent).not.toContain('Failed to fetch');
+  });
+
+  it('generic 500 error → banner shows the server message', async () => {
+    (deleteRunAsset as any).mockRejectedValue(new ApiError(500, 'Server boom'));
     const assets = [{ ...mkAsset(1, 'orphan.pdf'), is_referenced: false }];
     component = mount(RunAssetsTab, {
       target,
@@ -1599,7 +1621,7 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
     findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
 
-    expect(target.textContent).toMatch(/Server boom|Delete failed/i);
+    expect(target.textContent).toContain('Server boom');
   });
 
   it('double-click on Confirm fires deleteRunAsset only once', async () => {
@@ -1881,7 +1903,7 @@ describe('RunAssetsTab — bulk delete execution', () => {
 
   it('switching filter pill clears the error banner', async () => {
     (deleteRunAsset as any).mockRejectedValue(
-      Object.assign(new Error('Delete failed: backend on fire'), { status: 500 }),
+      new ApiError(500, 'Delete failed: backend on fire'),
     );
     const orphans = [{ ...mkAsset(1, 'a.pdf'), is_referenced: false }];
     component = mount(RunAssetsTab, {
@@ -1909,7 +1931,7 @@ describe('RunAssetsTab — bulk delete execution', () => {
     vi.useFakeTimers();
     try {
       (deleteRunAsset as any).mockRejectedValue(
-        Object.assign(new Error('Delete failed: backend on fire'), { status: 500 }),
+        new ApiError(500, 'Delete failed: backend on fire'),
       );
       const orphans = [{ ...mkAsset(1, 'a.pdf'), is_referenced: false }];
       component = mount(RunAssetsTab, {

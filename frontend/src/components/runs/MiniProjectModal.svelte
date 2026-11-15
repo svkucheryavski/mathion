@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
-  import { ApiError } from '../../lib/api';
+  import { ApiError, failureText } from '../../lib/api';
   import { runAssetContext } from '../../lib/assetContext';
   import { localInputToISO, isoToLocalInput, localTzLabel } from '../../lib/datetime';
   import { createMiniProject, updateMiniProject, publishMiniProject } from '../../lib/miniProjects';
@@ -412,12 +412,7 @@
       await publishMiniProject(initial!.id);
     } catch (e: unknown) {
       if (!mounted) return;
-      if (e instanceof ApiError) {
-        serverError = e.displayMessage;
-      } else {
-        const eo = e as { message?: unknown } | null | undefined;
-        serverError = typeof eo?.message === 'string' ? eo.message : 'Publish failed';
-      }
+      serverError = failureText(e, 'Publish failed');
       submitting = false;
       publishing = false;
       return;
@@ -475,11 +470,8 @@
         const details = e.validationErrors();
         if (details) fieldErrors = mapValidationErrors(details);
         serverError = e.displayMessage;
-      } else if (e instanceof ApiError) {
-        serverError = e.displayMessage;
       } else {
-        const eo = e as { message?: unknown } | null | undefined;
-        serverError = typeof eo?.message === 'string' ? eo.message : 'Save failed';
+        serverError = failureText(e, 'Save failed');
       }
       // R20: un-freeze, then focus the first errored field, or stay on Save.
       submitting = false;

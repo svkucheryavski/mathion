@@ -376,11 +376,29 @@
     }
   }
 
-  // D24 / D28 / P24: a forced delete; a 409 means the run was published meanwhile.
-  async function onDeleteRun(): Promise<DeleteOutcome> {
-    if (runIdInt === null) return { kind: 'failed', message: 'Invalid run.' };
-    const myToken = loadToken;
+  // A second Delete of the same run while one runs (a remounted Overview) waits for the first.
+  type InFlight = { p: Promise<DeleteOutcome>; callers: (() => boolean)[] };
+  const deletesInFlight: Record<number, InFlight | undefined> = {};
+  async function onDeleteRun(isAlive: () => boolean = () => true): Promise<DeleteOutcome> {
     const rid = runIdInt;
+    if (rid === null) return { kind: 'failed', message: 'Invalid run.' };
+    const running = deletesInFlight[rid];
+    const entry: InFlight = running ?? { p: deleteRunOnce(rid), callers: [] };
+    if (!running) deletesInFlight[rid] = entry;
+    entry.callers.push(isAlive);
+    try {
+      const out = await entry.p;
+      // A failure shows once: in a live Overview, else as the first caller's toast.
+      if (out.kind === 'failed' && !isAlive() && (running || entry.callers.some((a) => a()))) return { ...out, quiet: true };
+      return out;
+    } finally {
+      if (deletesInFlight[rid] === entry) delete deletesInFlight[rid];
+    }
+  }
+
+  // D24 / D28 / P24: a forced delete; a 409 means the run was published meanwhile.
+  async function deleteRunOnce(rid: number): Promise<DeleteOutcome> {
+    const myToken = loadToken;
     const deleted = (): DeleteOutcome => {
       pushToast('Run deleted.', 'success');
       // Only while the page still shows this run (a reload of it counts).

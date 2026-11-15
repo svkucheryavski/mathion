@@ -39,7 +39,7 @@
   import { focusFirst } from '../../lib/focusFirst';
   import { type EvaluationResult, createEvaluation, patchEvaluation, type Evaluation } from '../../lib/evaluations';
   import { uploadLimit, overUploadLimit, overLimitSentence, tooLargeSentence } from '../../lib/uploadLimit.svelte';
-  import { ApiError } from '../../lib/api';
+  import { ApiError, failureText } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
   import { tick, untrack } from 'svelte';
 
@@ -508,10 +508,8 @@
         if (reason === 'timeout') serverError = 'Upload timed out. Try again.';
       } else if (e instanceof ApiError && e.status === 413) {
         serverError = tooLargeSentence(e); // Settings D11a
-      } else if (e instanceof ApiError) {
-        serverError = e.displayMessage;
       } else {
-        serverError = 'Unexpected error';
+        serverError = failureText(e, 'Unexpected error');
       }
     } finally {
       submitting = false;

@@ -9,7 +9,7 @@
   import ChoiceRow from './ChoiceRow.svelte';
   import InlineInput from './InlineInput.svelte';
   import { keyAsk } from './KeyQuestion.svelte';
-  import { ApiError } from '../../../lib/api';
+  import { failureText } from '../../../lib/api';
   import { InPlaceAsk, firstUsable, focusAfter, settleTo, withdraw } from '../../../lib/askInPlace.svelte';
   import { InlineEdit, WAIT_TITLE } from '../../../lib/quizEdits.svelte';
   import { QUIZ_CTX, type QuizCtx } from '../../../lib/quizContext';
@@ -142,7 +142,7 @@
     try {
       return await locked(key, run);
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
+      pushToast(failureText(e, 'Save failed'), 'error');
       return undefined;
     }
   }

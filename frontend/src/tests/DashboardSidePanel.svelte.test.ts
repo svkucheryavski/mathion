@@ -809,6 +809,26 @@ describe('DashboardSidePanel', () => {
     expect(onRefetch).toHaveBeenCalledTimes(1);
   });
 
+  it('an offline evaluation edit says OFFLINE_MESSAGE (fix-pass review r2)', async () => {
+    const initialEval = { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true };
+    const base = routedFetch();
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) =>
+      ((init?.method ?? 'GET').toUpperCase() === 'PATCH' ? Promise.reject(new TypeError('Failed to fetch')) : base(url, init))));
+    mountPanel({
+      target: submissionTarget({ status: 'needs_revision', is_resubmission: false, latest_evaluation: initialEval, submissionId: 100 }),
+      isAdmin: true,
+    });
+    await settle();
+    (host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement).click();
+    await settle();
+    pickResult('accepted');
+    flushSync();
+    const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect((host.querySelector('[role="alert"].form-error') as HTMLElement).textContent).toContain('Could not reach server. Check your connection.');
+  });
+
   // T22: PATCH happy — JSON body, no file key, URL
   it('T22: PATCH happy — JSON body, no file key, URL /api/evaluations/{eid}', async () => {
     const initialEval = { id: 42, evaluated_at: '2026-06-01T10:00:00Z', evaluated_by: { user_id: 1, full_name: 'Prof' }, result: 'major_revision', score: 60, feedback_text: 'Needs work', has_feedback_file: true };

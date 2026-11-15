@@ -246,3 +246,38 @@ it("D10b: with email off, the page says to ask the person who runs this site for
     "Email isn't set up on this server, so PINs aren't emailed. Ask the person who runs this site for one.");
   expect(target.textContent).not.toContain('server terminal');
 });
+
+it('an offline Send PIN says OFFLINE_MESSAGE (whole-branch review)', async () => {
+  const f = vi.fn((url: string) => {
+    const s = String(url);
+    if (s.includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: true, longest_sign_in_days: 30, max_file_mb: 20 }));
+    if (s.includes('/request-pin')) return Promise.reject(new TypeError('Failed to fetch'));
+    return Promise.resolve(jsonResponse(200, {}));
+  });
+  vi.stubGlobal('fetch', f);
+  component = mount(Login, { target });
+  await settle();
+  setValue(target.querySelector('input[name="email"]')!, 'a@b.com');
+  await settle();
+  submitForm(target);
+  await settle();
+  expect(target.textContent).toContain('Could not reach server. Check your connection.');
+});
+
+it('an offline PIN check says OFFLINE_MESSAGE (whole-branch review)', async () => {
+  const f = vi.fn((url: string) => {
+    const s = String(url);
+    if (s.includes('/api/auth/config')) return Promise.resolve(jsonResponse(200, { send_pin_enabled: false, longest_sign_in_days: 30, max_file_mb: 20 }));
+    if (s.includes('/verify-pin')) return Promise.reject(new TypeError('Failed to fetch'));
+    return Promise.resolve(jsonResponse(200, {}));
+  });
+  vi.stubGlobal('fetch', f);
+  component = mount(Login, { target });
+  await settle();
+  setValue(target.querySelector('input[name="email"]')!, 'a@b.com');
+  setValue(target.querySelector('input[name="pin"]')!, '123456');
+  await settle();
+  submitForm(target);
+  await settle();
+  expect(target.textContent).toContain('Could not reach server. Check your connection.');
+});

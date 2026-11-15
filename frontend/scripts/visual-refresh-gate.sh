@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3055
+EXPECTED_CHECKS=3058
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4873,6 +4873,38 @@ if grep -q 'disabled-row' src/components/runs/RunProgressTab.svelte; then
   echo "FAIL  RunProgressTab still has a .disabled-row rule"; fail=1
 else
   echo "PASS  RunProgressTab has no .disabled-row (6a)"
+fi
+# Whole-branch review: a failed write's sentence goes through failureText (offline says so);
+# only the load fallbacks below keep the ApiError-or-literal form. Each file on one line,
+# so a ternary split over lines is seen too.
+# The ternary (with or without parentheses), the if/else forms, and an Error.message fallback.
+wl="(['\"\`][^'\"\`]*['\"\`]|OFFLINE_MESSAGE)"; ws="[[:space:]]*"
+wre="instanceof ApiError\)?${ws}\?${ws}[A-Za-z]+\.displayMessage${ws}:${ws}${wl}"
+wre="$wre|instanceof ApiError${ws}\)${ws}\{?${ws}[A-Za-z_.]+${ws}=${ws}[A-Za-z]+\.displayMessage;?${ws}\}?${ws}else${ws}\{?${ws}[A-Za-z_.]+${ws}=${ws}${wl}"
+wre="$wre|instanceof ApiError${ws}\)${ws}\{?${ws}pushToast\(${ws}[A-Za-z]+\.displayMessage${ws},${ws}'error'${ws}\);?${ws}\}?${ws}else${ws}\{?${ws}pushToast\(${ws}${wl}"
+wre="$wre|typeof [A-Za-z]+\??\.message === 'string' \? [A-Za-z]+\.message|\?\.message \?\? ['\"\`]|instanceof Error${ws}\?${ws}[A-Za-z]+\.message"
+wfl=$(grep -rlE "instanceof ApiError|\.message" src/components src/pages src/lib src/stores | grep -v '\.test\.' \
+  | while IFS= read -r f; do
+      tr '\n' ' ' < "$f" | grep -oE "$wre" | sed "s|^|$f: |"
+    done \
+  | grep -vE "'(Could not load answers\.|Could not load assets\.|Could not render preview\.|Failed to load runs\.|Could not contact server\.|Could not load version\.)'" || true)
+if [[ -z "$wfl" ]]; then
+  echo "PASS  write failures say their sentence through failureText (whole-branch review)"
+else
+  echo "FAIL  write failures with an ApiError-or-literal fallback: $wfl"; fail=1
+fi
+# Fix-pass review r5: a waiting roster retry looks disabled (P23).
+if sed -n '/<style>/,/<\/style>/p' src/components/runs/RunRosterTab.svelte | tr '\n' ' ' \
+    | grep -qE "\.ro-retry\[aria-disabled='true'\][^{]*\{[^}]*color: var\(--faint\)[^}]*cursor: not-allowed"; then
+  echo "PASS  a waiting roster retry looks disabled (fix-pass review r5)"
+else
+  echo "FAIL  RunRosterTab has no disabled look for a waiting .ro-retry"; fail=1
+fi
+# Fix-pass review: the run tabs' wait sentence lives once, in lib/runTabs.ts.
+if grep -rn "Wait for the current change to finish" src/components src/pages >/dev/null; then
+  echo "FAIL  a component spells out the wait sentence instead of WAIT_TITLE"; fail=1
+else
+  echo "PASS  the wait sentence comes from WAIT_TITLE (fix-pass review)"
 fi
 # Call 15: the block and sequence headers never stuck (no scroll box height); the rule is gone.
 # The style block on one line, so a rule split over lines is seen too.

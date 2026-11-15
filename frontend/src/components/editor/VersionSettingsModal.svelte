@@ -37,6 +37,8 @@
   let attemptsError = $state<string | null>(null);
   let labelError = $state<string | null>(null);
   let globalError = $state<string | null>(null);
+  // Only a refusal's own error (403/409) stays once the modal turns read-only.
+  let keepError = false;
   let saving = $state(false);
   let alive = true;
   let saveEl = $state<HTMLButtonElement>();
@@ -79,7 +81,7 @@
   $effect(() => {
     const now = editable;
     if (wasEditable && !now) {
-      untrack(() => footAsk.dismiss());
+      untrack(() => { footAsk.dismiss(); if (!keepError) globalError = null; });
       void repairFocus(modalClose(labelId));
     }
     wasEditable = now;
@@ -113,13 +115,15 @@
     if (attempts !== initial.attempts) body.max_quiz_attempts = n;
     const savedVid = vid;
     globalError = null;
+    keepError = false;
     saving = true;
     try {
       await api.patch(`/api/versions/${savedVid}`, body);
     } catch (e) {
       // VR-B: rights changed elsewhere; the reload turns the modal read-only.
-      if (e instanceof ApiError && (e.status === 403 || e.status === 409) && stillOnVid(savedVid)) {
-        void loadAdminTree(savedVid, { force: true });
+      if (e instanceof ApiError && (e.status === 403 || e.status === 409)) {
+        keepError = true;
+        if (stillOnVid(savedVid)) void loadAdminTree(savedVid, { force: true });
       }
       const message = e instanceof ApiError ? (e.validationErrors()?.[0]?.msg ?? e.displayMessage) : failureText(e, 'Save failed');
       if (alive) {

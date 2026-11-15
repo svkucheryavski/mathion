@@ -21,6 +21,8 @@
   import { pushToast } from '../../stores/toasts.svelte';
   import { failureText } from '../../lib/api';
   import { repairFocus } from '../../lib/askInPlace.svelte';
+  // "Delete N selected" and each row's ↻ and 🗑 wait while a bulk delete runs.
+  import { WAIT_TITLE as BULK_WAIT } from '../../lib/runTabs';
   import Button from '../ui/Button.svelte';
   import DangerConfirm from '../ui/DangerConfirm.svelte';
   import FilterPills from '../ui/FilterPills.svelte';
@@ -108,8 +110,6 @@
   // error slot so a partial-fail summary persists alongside any newer error).
   let summaryBanner = $state<string | null>(null);
   let bulkController = $state.raw<AbortController | null>(null);
-  // "Delete N selected" and each row's ↻ and 🗑 wait while a bulk delete runs.
-  const BULK_WAIT = 'Wait for the current change to finish';
 
   // 404 storm coalescer (spec L213): first 404 starts a 500ms timer;
   // subsequent 404s within the window are coalesced into ONE banner +
@@ -209,7 +209,7 @@
           anySuccess = true;
           uploadProgress = { current: i + 1, total: files.length };
         } catch (e: unknown) {
-          const err = e as { name?: string; status?: number; message?: string } | null;
+          const err = e as { name?: string; status?: number } | null;
           if (!mounted) return;
           if (err?.name === 'AbortError') {
             if (anySuccess) await onRefetchAssets();
@@ -222,7 +222,7 @@
             // saved limit), or the proxy sentence for a 413 without one.
             banner = `Couldn't upload '${files[i]!.name}': ${tooLargeSentence(e)}`;
           } else {
-            banner = err?.message ?? `Failed to upload '${files[i]!.name}'.`;
+            banner = failureText(e, `Failed to upload '${files[i]!.name}'.`);
           }
           if (anySuccess && mounted) await onRefetchAssets();
           return;
@@ -447,7 +447,7 @@
     try {
       await deleteRunAsset(runId, assetId, { force });
     } catch (e: unknown) {
-      const err = e as { name?: string; status?: number; message?: string } | null;
+      const err = e as { name?: string; status?: number } | null;
       if (err?.name === 'AbortError' || !mounted) return;
       if (err?.status === 403) {
         // The page stays: a toast, and the course's rights again (Force delete greys out).
@@ -458,7 +458,7 @@
         // refetch happen at the 500ms flush.
         note404();
       } else {
-        banner = err?.message ?? 'Delete failed.';
+        banner = failureText(e, 'Delete failed.');
       }
       // Only if focus fell to <body>: the user may have moved on (or a bulk holds it).
       await repairFocus(trashEls[assetId], uploadEl, headingEl);
@@ -493,7 +493,7 @@
     try {
       await replaceRunAsset(runId, assetId, file, controller.signal);
     } catch (e: unknown) {
-      const err = e as { name?: string; status?: number; message?: string } | null;
+      const err = e as { name?: string; status?: number } | null;
       if (err?.name === 'AbortError' || !mounted) return;
       if (err?.status === 404) {
         banner = 'This asset was deleted by another user.';
@@ -504,7 +504,7 @@
       } else if (err?.status === 413) {
         banner = tooLargeSentence(e);
       } else {
-        banner = err?.message ?? 'Replace failed.';
+        banner = failureText(e, 'Replace failed.');
       }
       return;
     } finally {

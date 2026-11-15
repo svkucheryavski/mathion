@@ -1,6 +1,6 @@
 <script lang="ts">
   import { setContext, onDestroy, tick, untrack } from 'svelte';
-  import { api, ApiError } from '../../lib/api';
+  import { api, failureText } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
   import { routeClick } from '../../lib/routeClick';
   import { currentEditorVersion, loadAdminTree, clearEditorVersion } from '../../stores/currentEditorVersion.svelte';
@@ -277,7 +277,7 @@
     try {
       await api.delete(`/api/items/${id}`);
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
+      pushToast(failureText(e, 'Delete failed'), 'error');
       // A 403/409 from a state change mid-confirm: perms must catch up.
       if (stillOnVid(savedVid)) await loadAdminTree(savedVid, { force: true });
       deletingIid = null;   // the modal refocuses its trash (or ×)
@@ -486,7 +486,7 @@
       if (!stillOnVid(savedVid)) return;
       await loadAdminTree(savedVid, { force: true });
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
+      pushToast(failureText(e, 'Reorder failed'), 'error');
       if (stillOnVid(savedVid)) {
         await loadAdminTree(savedVid, { force: true });
       }
@@ -548,7 +548,7 @@
       pushToast(`Version ${past[action]}`, 'success');
       ok = true;
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : `Could not ${action}`, 'error');
+      pushToast(failureText(e, `Could not ${action}`), 'error');
     } finally {
       busy = false;
       // R54: the question settles once the reload has landed. Success: the
@@ -585,7 +585,7 @@
         void navigate(`/courses/${savedSlug}/edit`, { replace: true, force: true });
       }
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
+      pushToast(failureText(e, 'Delete failed'), 'error');
     } finally {
       busy = false;
       // A failure: back to the trigger once the bar is back (R54).

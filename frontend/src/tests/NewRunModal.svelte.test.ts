@@ -138,6 +138,24 @@ describe('NewRunModal', () => {
     unmount(cmp);
   });
 
+  it('an offline create says OFFLINE_MESSAGE (fix-pass review r2)', async () => {
+    fetchSpy.mockImplementation(() => Promise.reject(new TypeError('Failed to fetch')));
+
+    const { target, cmp, onClose } = mountModal();
+    await settle();
+    (target.querySelector('input[name="title"]') as HTMLInputElement).value = 'Spring';
+    target.querySelector('input[name="title"]')!.dispatchEvent(new Event('input', { bubbles: true }));
+    (target.querySelector('input[name="start_date"]') as HTMLInputElement).value = '2026-06-01';
+    target.querySelector('input[name="start_date"]')!.dispatchEvent(new Event('input', { bubbles: true }));
+    (target.querySelector('input[name="end_date"]') as HTMLInputElement).value = '2026-06-30';
+    target.querySelector('input[name="end_date"]')!.dispatchEvent(new Event('input', { bubbles: true }));
+    (target.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(target.textContent).toContain('Could not reach server. Check your connection.');
+    expect(onClose).not.toHaveBeenCalled();
+    unmount(cmp);
+  });
+
   // Polish 3 C18 (slice6b Task 2).
   it('a new submit clears the old server banner before validation', async () => {
     fetchSpy.mockImplementation(() => Promise.resolve({

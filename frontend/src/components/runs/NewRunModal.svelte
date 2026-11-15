@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { ApiError } from '../../lib/api';
+  import { failureText } from '../../lib/api';
   import { createRun } from '../../lib/runs';
   import { navigate } from '../../lib/router.svelte';
   import Button from '../ui/Button.svelte';
@@ -87,8 +87,7 @@
       onClose();
       navigate(`/teaching/${course.slug}/runs/${run.id}`);
     } catch (e) {
-      if (e instanceof ApiError) submitError = e.displayMessage;
-      else submitError = 'Unable to create run.';
+      submitError = failureText(e, 'Unable to create run.');
     } finally {
       submitting = false;
     }

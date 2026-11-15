@@ -356,7 +356,7 @@ describe('RosterImportModal submit', () => {
   });
 
   it('Non-ApiError rejection surfaces a generic banner (no silent swallow)', async () => {
-    const refetch = vi.fn().mockRejectedValue(new TypeError('network down'));
+    const refetch = vi.fn().mockRejectedValue(new Error('bug'));
     const { target, cmp, onClose } = mountModal({ onRefetchBeforeSubmit: refetch });
     await settle();
     const ta = target.querySelector('textarea') as HTMLTextAreaElement;
@@ -369,6 +369,24 @@ describe('RosterImportModal submit', () => {
     await settle();
     // Generic error message should be visible; non-ApiError is re-thrown (not silent swallow).
     expect(target.querySelector('p.error')?.textContent).toMatch(/Import failed/);
+    expect(onClose).not.toHaveBeenCalled();
+    unmount(cmp);
+  });
+
+  it('an offline import says OFFLINE_MESSAGE (fix-pass review r2)', async () => {
+    const refetch = vi.fn().mockRejectedValue(new TypeError('network down'));
+    const { target, cmp, onClose } = mountModal({ onRefetchBeforeSubmit: refetch });
+    await settle();
+    const ta = target.querySelector('textarea') as HTMLTextAreaElement;
+    ta.value = 'a@x.com';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    vi.advanceTimersByTime(210);
+    flushSync();
+    (target.querySelector('button[data-action="import"]') as HTMLButtonElement).click();
+    vi.useRealTimers();
+    await settle();
+    // Generic error message should be visible; non-ApiError is re-thrown (not silent swallow).
+    expect(target.querySelector('p.error')?.textContent).toBe('Could not reach server. Check your connection.');
     expect(onClose).not.toHaveBeenCalled();
     unmount(cmp);
   });

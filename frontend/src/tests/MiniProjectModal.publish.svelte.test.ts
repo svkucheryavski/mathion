@@ -469,6 +469,24 @@ describe('MiniProjectModal publish — preconditions', () => {
 });
 
 describe('MiniProjectModal publish — error mapping', () => {
+  it('an offline publish says OFFLINE_MESSAGE, not the browser text (fix-pass review r2)', async () => {
+    fetchSpy.mockImplementation((url, init) => {
+      if (String(url).includes('/publish') && (init as RequestInit | undefined)?.method === 'POST') {
+        return Promise.reject(new TypeError('Failed to fetch'));
+      }
+      return jres([]);
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    trackedMount(MiniProjectModal, { target, props: defaultProps() as ModalProps });
+    await settle();
+    (target.querySelector('button[data-action="publish"]') as HTMLButtonElement).click();
+    await settle();
+    (target.querySelector('button[data-action="confirm-publish"]') as HTMLButtonElement).click();
+    await settle();
+    expect((target.querySelector('.banner-error') as HTMLElement).textContent).toContain('Could not reach server. Check your connection.');
+  });
+
   it('409 on publish: inline banner with displayMessage', async () => {
     fetchSpy.mockImplementation((url, init) => {
       if (String(url).includes('/publish') && (init as RequestInit | undefined)?.method === 'POST') {

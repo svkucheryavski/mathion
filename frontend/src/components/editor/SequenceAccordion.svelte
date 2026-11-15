@@ -9,7 +9,7 @@
   import { versionPermissions } from '../../lib/versionPermissions';
   import { unsavedSuffix } from '../../lib/editorReasons';
   import { navigate } from '../../lib/router.svelte';
-  import { api, ApiError } from '../../lib/api';
+  import { api, ApiError, failureText } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
   import type { AdminTreeBlock, AdminTreeSequence } from '../../lib/types';
@@ -150,7 +150,7 @@
       }
       if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
+      pushToast(failureText(e, 'Delete failed'), 'error');
       if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
@@ -178,7 +178,7 @@
       await api.post(`/api/sequences/${savedSid}/items/reorder`, { order });
       if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
+      pushToast(failureText(e, 'Reorder failed'), 'error');
       if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
@@ -217,7 +217,7 @@
       if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
       pushToast('Item deleted', 'success');
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
+      pushToast(failureText(e, 'Delete failed'), 'error');
       if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;

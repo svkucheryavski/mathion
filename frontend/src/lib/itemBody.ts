@@ -1,7 +1,7 @@
 // The item-body contract (Slice-5b §2). ItemEditorModal owns the Title and the
 // footer; each type body (PageBody, VideoBody, AppBody, quiz/QuizBody) implements
 // this API, exported from the component and reached via bind:this.
-import { api, ApiError } from './api';
+import { api, ApiError, failureText } from './api';
 import { loadAdminTree } from '../stores/currentEditorVersion.svelte';
 import { pushToast } from '../stores/toasts.svelte';
 import type { QuizEdits } from './quizEdits.svelte';
@@ -41,7 +41,7 @@ export const patchItem = (id: number, body: Record<string, unknown>) =>
 // The failure half of every body's save: toast the server's message; on 403/409
 // (the version changed state under us) force a tree reload so perms catch up.
 export function reportSaveFailure(e: unknown, vid: number, stillOnVid: (v: number) => boolean): void {
-  pushToast(e instanceof ApiError ? e.displayMessage : 'Save failed', 'error');
+  pushToast(failureText(e, 'Save failed'), 'error');
   if (e instanceof ApiError && (e.status === 403 || e.status === 409) && stillOnVid(vid)) {
     void loadAdminTree(vid, { force: true });
   }

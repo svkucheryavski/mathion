@@ -1566,4 +1566,18 @@ describe('QuizItem submit in flight (VR backlog)', () => {
     expect(host.querySelector('.result')).not.toBeNull();
     expect(document.activeElement).toBe(document.body);
   });
+
+  it('an offline submit says OFFLINE_MESSAGE (whole-branch review)', async () => {
+    clearToasts();
+    session.user = student;
+    seed({ 1: 0 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().click();
+    flushSync();
+    h.reject(new TypeError('Failed to fetch'));
+    await settle();
+    expect(toasts.list.map((t) => t.message)).toEqual(['Could not reach server. Check your connection.']);
+  });
 });
