@@ -1,7 +1,11 @@
+# VR-B12 (user, 2026-11-14): stored content_html re-renders only on save, publish
+# and clone. From the beta on, a renderer change that alters stored output ships
+# an Alembic data migration that re-renders it. Before the beta: no backfill.
 import html
 import re
 import unicodedata
 
+import markdown_it.rules_block.list as _list_rule
 import nh3
 from markdown_it import MarkdownIt
 from markdown_it.rules_core import StateCore
@@ -28,6 +32,16 @@ _NON_SPACE = re.compile(r"\S*")
 
 def _runs_into_word(ch: str) -> bool:
     return bool(ch) and (_WORD_CHAR.match(ch) is not None or unicodedata.category(ch).startswith("M"))
+
+
+def _nests(url: str, c: str, o: str) -> bool:
+    """Whether every closer c in url follows its own opener o."""
+    depth = 0
+    for ch in url:
+        depth += (ch == o) - (ch == c)
+        if depth < 0:
+            return False
+    return True
 
 
 def _trim_url(url: str) -> str:
@@ -82,11 +96,16 @@ def _split_text(state: StateCore, tok: Token, glued: bool, next_glues: bool) -> 
     for m in _BARE_URL.finditer(content):
         if m.start() < skip_to:
             continue
-        if _runs_into_word(content[m.end()]) if m.end() < len(content) else next_glues:
+        url = _trim_url(m.group())   # trimming never reaches the "://"
+        cut = m.group()[len(url):]
+        before = content[m.start() - 1] if m.start() else ""
+        # VR-B: (url) or [url] ends at its closer; a trimmed "." still glues (object.__init__).
+        if not any(c in cut and before == o and _nests(url, c, o) for c, o in _PAIRS.items()) and (
+            _runs_into_word(content[m.end()]) if m.end() < len(content) else next_glues
+        ):
             skip_to = _NON_SPACE.match(content, m.end()).end()
             skipping = True
             continue
-        url = _trim_url(m.group())   # trimming never reaches the "://"
         link = _link_tokens(state, url, tok.level)
         if link is None:
             continue
@@ -112,7 +131,8 @@ def _glues(kids: list[Token], i: int) -> bool:
     whole, while in *https://x.org/caf*é the letter after them glues.
     """
     i += 1
-    while i < len(kids) and kids[i].nesting == -1:
+    # VR-B: an empty text token (a spent delimiter, dollarmath's) is looked past too.
+    while i < len(kids) and (kids[i].nesting == -1 or (kids[i].type == "text" and not kids[i].content)):
         i += 1
     tok = kids[i] if i < len(kids) else None
     if tok is None or tok.type in _BREAKS:
@@ -184,7 +204,27 @@ def _drop_bad_links(state: StateCore) -> None:
         block.children = children
 
 
+_mark_tight = _list_rule.markTightParagraphs
+
+
+def _mark_tight_list(state, idx: int) -> None:
+    # VR-B: record markdown-it's own tight call; the list rule has no other output for it.
+    state.tokens[idx].meta["tight"] = True
+    _mark_tight(state, idx)
+
+
+_list_rule.markTightParagraphs = _mark_tight_list
+
+
+def _loose_lists(state: StateCore) -> None:
+    """VR-B: a loose list gets class="loose", seen even with no paragraph inside."""
+    for tok in state.tokens:
+        if tok.type in ("bullet_list_open", "ordered_list_open") and not tok.meta.get("tight"):
+            tok.attrSet("class", "loose")
+
+
 _md = MarkdownIt("commonmark", {"html": False})
+_md.core.ruler.push("loose_lists", _loose_lists)
 _md.core.ruler.before("text_join", "bare_url", _bare_urls)
 _md.core.ruler.after("bare_url", "drop_bad_links", _drop_bad_links)
 dollarmath_plugin(_md)
@@ -215,6 +255,7 @@ _ALLOWED_ATTRS = {
 }
 
 _URL_SCHEMES = {"http", "https", "mailto"}
+_ALLOWED_CLASSES = {"ul": {"loose"}, "ol": {"loose"}}
 
 
 def render_markdown(text: str | None) -> str:
@@ -227,12 +268,16 @@ def render_markdown(text: str | None) -> str:
     """
     if not text:
         return ""
-    rendered = _md.render(text)
+    return _clean(_md.render(text))
+
+
+def _clean(rendered: str) -> str:
     return nh3.clean(
         rendered,
         tags=_ALLOWED_TAGS,
         attributes=_ALLOWED_ATTRS,
         url_schemes=_URL_SCHEMES,
+        allowed_classes=_ALLOWED_CLASSES,
         link_rel="noopener noreferrer",
         strip_comments=True,
     )
@@ -241,7 +286,16 @@ def render_markdown(text: str | None) -> str:
 _TITLE = r'(?:\s+(?:"[^"]*"|\'[^\']*\'|\([^)]*\)))?'
 _IMG_REF = re.compile(r'!\[[^\]]*\]\(\s*([^)\s]+)' + _TITLE + r'\s*\)')
 _LINK_REF = re.compile(r'(?<!!)\[[^\]]*\]\(\s*([^)\s]+)' + _TITLE + r'\s*\)')
-_SKIP_PREFIXES = ("http://", "https://", "mailto:", "#")
+_SKIP_PREFIXES = ("http://", "https://", "mailto:", "#", "//")
+_ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
+# VR-B: a root-relative link is a Mathion page, unless it points at a file.
+_FILE_PATHS = ("/assets/", "/api/")
+
+
+def _is_asset_target(ref: str, is_link: bool) -> bool:
+    if ref.startswith(_SKIP_PREFIXES):
+        return False
+    return not (is_link and ref.startswith("/") and not ref.startswith(_FILE_PATHS))
 
 
 def extract_asset_filenames(text: str) -> set[str]:
@@ -249,10 +303,13 @@ def extract_asset_filenames(text: str) -> set[str]:
     if not text:
         return set()
     filenames: set[str] = set()
-    for pattern in (_IMG_REF, _LINK_REF):
+    for pattern, is_link in ((_IMG_REF, False), (_LINK_REF, True)):
         for m in pattern.finditer(text):
             ref = m.group(1)
-            if not ref.startswith(_SKIP_PREFIXES):
+            if len(ref) > 1 and ref[0] == "<" and ref[-1] == ">":
+                ref = ref[1:-1]   # VR-B: markdown's <...> wrapper
+            ref = _ESCAPE.sub(r"\1", ref)   # VR-B: markdown's \ escapes
+            if ref and _is_asset_target(ref, is_link):
                 filenames.add(ref)
     return filenames
 

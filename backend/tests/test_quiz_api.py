@@ -165,7 +165,9 @@ def test_submit_quiz_max_attempts_reached(admin_client, db):
                            json={"answers": answers},
                            headers={"X-Requested-With": "mathion"})
         assert response.status_code == 409
-        assert "max attempts" in response.json()["detail"].lower()
+        # Exact: the student's QuizItem reads this text to tell the attempts
+        # 409 from the endpoint's other 409s (VR-B).
+        assert response.json()["detail"] == "Max attempts reached"
 
 
 def test_submit_quiz_not_enrolled(auth_client):

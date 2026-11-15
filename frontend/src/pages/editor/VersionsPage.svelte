@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, tick, untrack } from 'svelte';
-  import { api, ApiError } from '../../lib/api';
+  import { api, failureText } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
   import { routeClick } from '../../lib/routeClick';
   import Button from '../../components/ui/Button.svelte';
@@ -53,6 +53,10 @@
   const createAsk = new InPlaceAsk();
   const rowAsk = new InPlaceAsk();
   let h1El = $state<HTMLHeadingElement>();
+  let backEl = $state<HTMLButtonElement>();
+  // The frame has shown once: a later error took it away.
+  let framed = false;
+  $effect(() => { if (h1El) framed = true; });
   const toggleBtn = (id: number) => document.getElementById(`v-${id}-toggle`);
   const dupBtn = (id: number) => document.getElementById(`v-${id}-duplicate`);
   const trashBtn = (id: number) => document.getElementById(`v-${id}-delete`);
@@ -116,9 +120,13 @@
   $effect(() => {
     if (!error || loading) return;
     untrack(() => {
-      createAsk.dismiss();
+      // Call 6: a navigation question withdrawn here lets its navigation go.
+      if (createAsk.current === DISCARD_NAV_ASK) createAsk.answer('confirm');
+      else createAsk.dismiss();
       resetCreateForm();
       creating = false;
+      // VR-B: a focus lost with the frame goes to the ErrorState's way out.
+      if (framed) void repairFocus(backEl);
     });
   });
 
@@ -166,7 +174,7 @@
   // in place of Cancel/Create (#16). Cancel returns to the field.
   const createDirty = () => newLabel !== '' || info_md !== '' || max_quiz_attempts !== 3;
   async function escCancels(e: KeyboardEvent) {
-    if (e.key !== 'Escape' || e.isComposing || busy) return;
+    if (e.key !== 'Escape' || e.isComposing || e.keyCode === 229 || busy) return;
     e.preventDefault();
     if (!createDirty()) { void closeCreate(); return; }
     const field = e.currentTarget as HTMLElement;
@@ -223,7 +231,7 @@
       creating = false;
       navigate(`/courses/${savedSlug}/edit/v/${v.id}`);
     } catch (e) {
-      const msg = e instanceof ApiError ? e.displayMessage : 'Failed to create version';
+      const msg = failureText(e, 'Failed to create version');
       pushToast(msg, 'error');
     } finally {
       busy = false;
@@ -267,7 +275,7 @@
       // the render guard, and a later enable must not spuriously re-open it.
       if (duplicatingId === id) duplicatingId = null;
     } catch (e) {
-      const msg = e instanceof ApiError ? e.displayMessage : `Could not ${action}`;
+      const msg = failureText(e, `Could not ${action}`);
       pushToast(msg, 'error');
     } finally {
       busy = false;
@@ -307,7 +315,7 @@
       interim = await settleTo(rowAsk, q, () => h1El, { preventScroll: true });
       await load();
     } catch (e) {
-      const msg = e instanceof ApiError ? e.displayMessage : 'Could not delete';
+      const msg = failureText(e, 'Could not delete');
       pushToast(msg, 'error');
     } finally {
       busy = false;
@@ -343,7 +351,7 @@
       pushToast('Version duplicated', 'success');
       navigate(`/courses/${savedSlug}/edit/v/${nv.id}`);
     } catch (e) {
-      const msg = e instanceof ApiError ? e.displayMessage : 'Failed to duplicate version';
+      const msg = failureText(e, 'Failed to duplicate version');
       pushToast(msg, 'error');
     } finally {
       busy = false;
@@ -354,7 +362,7 @@
 </script>
 
 {#snippet backToCourses()}
-  <Button variant="secondary" onclick={() => navigate('/courses')}>Back to courses</Button>
+  <Button variant="secondary" bind:element={backEl} onclick={() => navigate('/courses')}>Back to courses</Button>
 {/snippet}
 
 <DirtyGuard isDirty={navDirty} ask={askNav} />

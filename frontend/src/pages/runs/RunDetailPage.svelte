@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { tick, untrack } from 'svelte';
-  import { api, ApiError, OFFLINE_MESSAGE } from '../../lib/api';
+  import { onDestroy, tick, untrack } from 'svelte';
+  import { api, ApiError, OFFLINE_MESSAGE, failureText } from '../../lib/api';
   import { deleteRun, getRun, listVersions, publishRun, unpublishRun } from '../../lib/runs';
   import { listRunTeachers } from '../../lib/runTeachers';
   import { listGroups } from '../../lib/runGroups';
@@ -100,10 +100,13 @@
   }
 
   let loadToken = 0;
+  // A delete that lands after the page is gone navigates nowhere.
+  let gone = false;
+  onDestroy(() => { gone = true; });
 
   async function loadAll(slug: string, rid: number) {
     const myToken = ++loadToken;
-    // R33: a run change, a course change or reloadRun() frees a stuck publish.
+    // R33: a run change or a course change frees a stuck publish.
     publishing = false; unpublishing = false;
     course = null; run = null; versions = null; teachers = null;
     groups = null; students = null; blocks = null; miniProjects = null;
@@ -166,9 +169,13 @@
     assets = fetched;
   }
 
-  async function reloadRun(): Promise<void> {
-    if (runIdInt === null) return;
-    await loadAll(courseSlug, runIdInt);
+  // Assets' 403: the course's rights again, without reloading the page.
+  async function refetchCourse(): Promise<void> {
+    const slug = courseSlug;
+    const myToken = loadToken;
+    const c = await api.get<Course>(`/api/courses/by-slug/${slug}`);
+    if (myToken !== loadToken || slug !== courseSlug) return;
+    course = c;
   }
 
   async function refetchRosterData(): Promise<{ students: RunStudentResponse[]; groups: GroupResponse[] }> {
@@ -369,17 +376,41 @@
     }
   }
 
-  // D24 / D28 / P24: a forced delete; a 409 means the run was published meanwhile.
-  async function onDeleteRun(): Promise<DeleteOutcome> {
-    if (runIdInt === null) return { kind: 'failed', message: 'Invalid run.' };
-    const myToken = loadToken;
+  // A second Delete of the same run while one runs (a remounted Overview) waits for the first.
+  type InFlight = { p: Promise<DeleteOutcome>; callers: (() => boolean)[] };
+  const deletesInFlight: Record<number, InFlight | undefined> = {};
+  async function onDeleteRun(isAlive: () => boolean = () => true): Promise<DeleteOutcome> {
     const rid = runIdInt;
+    if (rid === null) return { kind: 'failed', message: 'Invalid run.' };
+    const running = deletesInFlight[rid];
+    const entry: InFlight = running ?? { p: deleteRunOnce(rid), callers: [] };
+    if (!running) deletesInFlight[rid] = entry;
+    entry.callers.push(isAlive);
+    try {
+      const out = await entry.p;
+      // A failure shows once: in a live Overview, else as the first caller's toast.
+      if (out.kind === 'failed' && !isAlive() && (running || entry.callers.some((a) => a()))) return { ...out, quiet: true };
+      return out;
+    } finally {
+      if (deletesInFlight[rid] === entry) delete deletesInFlight[rid];
+    }
+  }
+
+  // D24 / D28 / P24: a forced delete; a 409 means the run was published meanwhile.
+  async function deleteRunOnce(rid: number): Promise<DeleteOutcome> {
+    const myToken = loadToken;
+    const deleted = (): DeleteOutcome => {
+      pushToast('Run deleted.', 'success');
+      // Only while the page still shows this run (a reload of it counts).
+      if (!gone && rid === runIdInt) void navigate(`/teaching/${encodeURIComponent(courseSlug)}`);
+      return { kind: 'deleted' };
+    };
     try {
       await deleteRun(rid, { force: true });
-      pushToast('Run deleted.', 'success');
-      void navigate(`/teaching/${encodeURIComponent(courseSlug)}`);
-      return { kind: 'deleted' };
+      return deleted();
     } catch (e) {
+      // Deleted elsewhere meanwhile: the same end.
+      if (e instanceof ApiError && e.status === 404) return deleted();
       if (e instanceof ApiError && e.status === 409) {
         try {
           const r = await getRun(rid);
@@ -388,7 +419,7 @@
         pushToast('This run was published in the meantime. Unpublish it before deleting.', 'error');
         return { kind: 'published-now' };
       }
-      return { kind: 'failed', message: e instanceof ApiError ? e.displayMessage : 'Could not delete the run.' };
+      return { kind: 'failed', message: failureText(e, 'Could not delete the run.') };
     }
   }
 </script>
@@ -511,7 +542,7 @@
           onRefetchAssets={refetchAssets}
           onRefetchMiniProjects={refetchMiniProjects}
           onEditMiniProject={(mp) => void setTab('mini-projects', { editTarget: mp, focusTab: true })}
-          onReloadRun={reloadRun}
+          onRefetchCourse={refetchCourse}
           blocks={blocks ?? []}
         />
       {:else if activeTab === 'teachers'}

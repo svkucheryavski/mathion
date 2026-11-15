@@ -226,6 +226,71 @@ describe('CourseView header and course summary', () => {
     expect(target.querySelector('.summary')).toBeNull();
   });
 
+  // VR-B (call 2): no check beside a 0% quiz score on the summary card.
+  it('the summary shows no check beside Quiz score 0%', async () => {
+    seedCourse(twoBlocks, { '2': entry(true, [0, 4]) });
+    component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
+    await settle();
+    const sq = target.querySelector('.summary .sq') as HTMLElement;
+    expect(sq.textContent!.replace(/\s+/g, ' ').trim()).toBe('Quiz score 0%');
+    expect(sq.querySelector('svg')).toBeNull();
+  });
+
+  // VR-B (call 3): a course whose blocks hold no items has nothing to measure:
+  // no summary card and no course meter; the phone row keeps its chevron.
+  it('blocks with no items: no summary and no course meter, the chevron stays', async () => {
+    seedCourse([{ ...twoBlocks[0], sequences: [] }], {});
+    component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
+    await settle();
+    expect(target.querySelector('.summary')).toBeNull();
+    expect(target.querySelector('.cv-meter')).toBeNull();
+    expect(target.querySelector('.cv-strip .sr-only')).toBeNull();
+    expect(target.querySelector('.cv-strip button')).not.toBeNull();
+  });
+
+  // VR-B (slice5c): a load the page moved on from must not touch `open` or
+  // `loading` when it settles late.
+  it('an aborted load leaves loading and the open blocks to the new one', async () => {
+    let resolveA!: () => void;
+    let resolveB!: () => void;
+    vi.mocked(loadCourse)
+      .mockReturnValueOnce(new Promise<void>((r) => { resolveA = r; }))
+      .mockReturnValueOnce(new Promise<void>((r) => { resolveB = r; }));
+    const props = $state({ courseSlug: 'course-a' });
+    component = mount(CourseView, { target, props });
+    flushSync();
+    props.courseSlug = 'course-x';
+    flushSync();
+    seedCourse(twoBlocks, {});
+    resolveA();
+    await settle();
+    expect(target.querySelector('.skeleton')).not.toBeNull();
+    resolveB();
+    await settle();
+    expect(target.querySelector('.skeleton')).toBeNull();
+    expect(panels()).toEqual([true, false]);
+  });
+
+  it('an aborted load that fails leaves no error once the new one loads', async () => {
+    let rejectA!: (e: unknown) => void;
+    let resolveB!: () => void;
+    vi.mocked(loadCourse)
+      .mockReturnValueOnce(new Promise<void>((_, rej) => { rejectA = rej; }))
+      .mockReturnValueOnce(new Promise<void>((r) => { resolveB = r; }));
+    const props = $state({ courseSlug: 'course-a' });
+    component = mount(CourseView, { target, props });
+    flushSync();
+    props.courseSlug = 'course-x';
+    flushSync();
+    rejectA(new ApiError(500, 'Server exploded.'));
+    await settle();
+    seedCourse(twoBlocks, {});
+    resolveB();
+    await settle();
+    expect(target.querySelector('.error-state')).toBeNull();
+    expect(target.querySelectorAll('section.block').length).toBe(2);
+  });
+
   // Collapse/expand all + the current block (user, 2026-10-08): with every block
   // open the page read too busy, so only the first unfinished block opens on
   // load and one small button closes or opens them all.
@@ -233,6 +298,31 @@ describe('CourseView header and course summary', () => {
     Array.from(target.querySelectorAll('section.block [role="region"]')).map((e) => !(e as HTMLElement).hidden);
   const toggle = () => target.querySelector('.all-toggle button') as HTMLButtonElement;
   const header = (i: number) => target.querySelectorAll('section.block button.acc')[i] as HTMLButtonElement;
+
+  // Review r2: the `.then` guard. A load the page moved on from must not reset
+  // the blocks the student opened after the new one loaded.
+  it('a late load the page moved on from keeps the blocks the student opened', async () => {
+    let resolveA!: () => void;
+    let resolveB!: () => void;
+    vi.mocked(loadCourse)
+      .mockReturnValueOnce(new Promise<void>((r) => { resolveA = r; }))
+      .mockReturnValueOnce(new Promise<void>((r) => { resolveB = r; }));
+    const props = $state({ courseSlug: 'course-a' });
+    component = mount(CourseView, { target, props });
+    flushSync();
+    props.courseSlug = 'course-x';
+    flushSync();
+    seedCourse(twoBlocks, {});
+    resolveB();
+    await settle();
+    expect(panels()).toEqual([true, false]);
+    header(1).click();
+    flushSync();
+    expect(panels()).toEqual([true, true]);
+    resolveA();
+    await settle();
+    expect(panels()).toEqual([true, true]);
+  });
   async function mountWith(items: Record<string, unknown>) {
     seedCourse(twoBlocks, items);
     component = mount(CourseView, { target, props: { courseSlug: 'course-x' } });
@@ -393,7 +483,9 @@ describe('CourseView 9d states (Slice-4 T2)', () => {
 describe('CourseView side cards (D80)', () => {
   const NOW = new Date(2026, 9, 30, 12, 0);
   const at = (day: number, h = 23, m = 59) => new Date(2026, 9, day, h, m).toISOString();
-  const block = (id: number, title: string) => ({ id, title, slug: `b${id}`, order: id, info: '', info_html: '', sequences: [] });
+  // One page item per block, so the progress card has something to measure (VR-B call 3).
+  const block = (id: number, title: string) => ({ id, title, slug: `b${id}`, order: id, info: '', info_html: '',
+    sequences: [{ id: id * 10, title: 'S', slug: `s${id}`, order: 1, items: [{ id: id * 100, sequence_id: id * 10, title: 'P', slug: `p${id}`, order: 1, type: 'static_page', content_md: '', content_html: '' }] }] });
   const mp = (block_id: number, title: string, latest_status: StudentMiniProjectListItem['latest_status'],
     d: { at: string; kind?: 'due' | 'resubmit'; open?: boolean }): StudentMiniProjectListItem => ({
     mp_id: block_id * 10, block_id, block_slug: `b${block_id}`, block_order: block_id, block_title: title,

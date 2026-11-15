@@ -79,7 +79,7 @@
     footer={foot}
   >
     {#if layout === 'single-sentence'}
-      <p class="pc-lead">{conflicts[0].email} is already active in <strong>{conflicts[0].run_title}</strong>.</p>
+      <p class="pc-lead"><span class="mono" title={conflicts[0].email}>{conflicts[0].email}</span> is already active in <strong>{conflicts[0].run_title}</strong>.</p>
     {:else if layout === 'single-group'}
       <div class="pc-run">
         <p class="pc-lead">They are already active in <strong>{groupedByRun[0].run_title}</strong>:</p>
@@ -88,7 +88,7 @@
     {:else}
       <!-- grouped: covers I4 single-user-multi-run AND N≥2 across distinct runs -->
       {#if studentCount === 1}
-        <p class="pc-lead">{conflicts[0].email} is already active in:</p>
+        <p class="pc-lead"><span class="mono" title={conflicts[0].email}>{conflicts[0].email}</span> is already active in:</p>
       {:else}
         <p class="pc-lead">They are already active in other runs:</p>
       {/if}

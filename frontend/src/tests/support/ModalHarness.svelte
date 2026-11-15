@@ -14,6 +14,7 @@
     withHiddenFile = false,
     placement = 'center',
     closeTitle = undefined,
+    withHeadActions = false,
   }: {
     onRequestClose: () => void;
     closeOnBackdrop?: boolean;
@@ -28,12 +29,16 @@
     withHiddenFile?: boolean;
     placement?: 'center' | 'right';
     closeTitle?: string;
+    withHeadActions?: boolean;
   } = $props();
 </script>
 
 {#snippet head()}
   <h2 id="mh-title">Edit thing</h2>
   <button type="button" data-testid="head-trash" disabled={headDisabled}>Trash</button>
+{/snippet}
+{#snippet acts()}
+  <button type="button" data-testid="head-act">Act</button>
 {/snippet}
 {#snippet foot()}
   <button type="button" data-testid="save" disabled={saveDisabled}>Save</button>
@@ -49,6 +54,7 @@
   {placement}
   {closeTitle}
   header={head}
+  headActions={withHeadActions ? acts : undefined}
   footer={withFooter ? foot : undefined}
 >
   <input data-testid="title" data-autofocus={autofocusTitle ? '' : undefined} />

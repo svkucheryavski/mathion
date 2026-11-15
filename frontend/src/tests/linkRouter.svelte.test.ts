@@ -235,6 +235,20 @@ describe('the app-wide link handler (C6)', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  it('a root-relative content link routes in-app', async () => {
+    go('/courses/algebra');
+    const prose = document.createElement('div');
+    prose.className = 'prose';
+    prose.innerHTML = '<p><a href="/courses">All courses</a></p>';
+    document.body.append(prose);
+    const e = click(prose.querySelector('a')!);
+    expect(e.defaultPrevented).toBe(true);
+    await settle();
+    expect(left).toEqual([false]);
+    expect(navigate).toHaveBeenCalledWith('/courses');
+    expect(currentRoute.path).toBe('/courses');
+  });
+
   it('the mini-project row and a Coming deadlines link route', async () => {
     const item: StudentMiniProjectListItem = {
       mp_id: 1, block_id: 7, block_slug: 'intro', block_order: 0, block_title: 'Introduction',

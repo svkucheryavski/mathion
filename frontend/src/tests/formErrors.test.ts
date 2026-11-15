@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { ApiError } from '../lib/api';
-import { mapCreateError } from '../lib/formErrors';
+import { ApiError, OFFLINE_MESSAGE, failureText } from '../lib/api';
+import { mapCreateError, createErrorText } from '../lib/formErrors';
 
 describe('mapCreateError', () => {
   const known = ['title', 'slug'] as const;
@@ -88,14 +88,14 @@ describe('mapCreateError', () => {
   it('plain Error → generic globalMessage', () => {
     const r = mapCreateError(new Error('network'), known);
     expect(r.fieldErrors).toEqual({});
-    expect(r.globalMessage).toBe('Save failed');
+    expect(r.globalMessage).toBe('Create failed');   // VR-B: a create's own word
   });
 
   it('null/undefined → generic globalMessage', () => {
     const r1 = mapCreateError(null, known);
-    expect(r1.globalMessage).toBe('Save failed');
+    expect(r1.globalMessage).toBe('Create failed');
     const r2 = mapCreateError(undefined, known);
-    expect(r2.globalMessage).toBe('Save failed');
+    expect(r2.globalMessage).toBe('Create failed');
   });
 
   it('422 with empty validationErrors falls back to globalMessage', () => {
@@ -105,5 +105,28 @@ describe('mapCreateError', () => {
     expect(r.fieldErrors).toEqual({});
     // displayMessage on ApiError-array detail is the generic prompt.
     expect(r.globalMessage).toBe('Please correct the highlighted fields.');
+  });
+});
+
+describe('VR-B: offline and the closed-form toast', () => {
+  it('a fetch TypeError says OFFLINE_MESSAGE', () => {
+    expect(mapCreateError(new TypeError('Failed to fetch'), ['title'])).toEqual({ fieldErrors: {}, globalMessage: OFFLINE_MESSAGE });
+  });
+  it('createErrorText joins the field messages and the unmapped part', () => {
+    const e = new ApiError(422, [
+      { loc: ['body', 'title'], msg: 'Too long', type: 'x' },
+      { loc: ['body', 'info'], msg: 'Bad info', type: 'x' },
+    ]);
+    expect(createErrorText(mapCreateError(e, ['title']))).toBe('Too long; Bad info');
+    expect(createErrorText({ fieldErrors: {}, globalMessage: 'Server exploded' })).toBe('Server exploded');
+    expect(createErrorText({ fieldErrors: { title: '' }, globalMessage: null })).toBe('Create failed');
+  });
+});
+
+describe('VR-B: failureText', () => {
+  it('ApiError → its sentence; TypeError → OFFLINE_MESSAGE; else the fallback', () => {
+    expect(failureText(new ApiError(403, 'forbidden'), 'Could not delete')).toBe('forbidden');
+    expect(failureText(new TypeError('Failed to fetch'), 'Could not delete')).toBe(OFFLINE_MESSAGE);
+    expect(failureText(new Error('x'), 'Could not delete')).toBe('Could not delete');
   });
 });

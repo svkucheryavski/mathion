@@ -223,3 +223,30 @@ describe('PublishConflictsModal — on ui/Modal (10l)', () => {
     expect(target.querySelector('[role="dialog"]')).not.toBeNull();
   });
 });
+
+describe('PublishConflictsModal — e-mails in the single-student leads (slice 6b backlog)', () => {
+  it('single-student publish conflict e-mails are mono', () => {
+    component = mount(PublishConflictsModal, {
+      target,
+      props: { open: true, conflicts: [{ ...BASE_CONFLICT }], onClose: () => {} },
+    });
+    flushSync();
+    const one = target.querySelector('.pc-lead .mono');
+    expect(one?.textContent).toBe('a@example.com');
+    expect(one?.getAttribute('title')).toBe('a@example.com');
+    unmount(component);
+    // One student in two runs: the grouped lead names them too.
+    component = mount(PublishConflictsModal, {
+      target,
+      props: {
+        open: true,
+        conflicts: [{ ...BASE_CONFLICT }, { ...BASE_CONFLICT, run_id: 11, run_title: 'Fall 2025' }],
+        onClose: () => {},
+      },
+    });
+    flushSync();
+    const grouped = target.querySelector('.pc-lead .mono');
+    expect(grouped?.textContent).toBe('a@example.com');
+    expect(grouped?.getAttribute('title')).toBe('a@example.com');
+  });
+});

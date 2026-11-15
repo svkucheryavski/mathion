@@ -44,10 +44,12 @@
     onDeleteItem: () => Promise<void>;
     // D9: the page's DELETE for THIS item is in flight.
     deleting?: boolean;
+    // VR-B: the page's DELETE for ANOTHER item is in flight.
+    deleteBusy?: boolean;
   };
   let {
     vid, version, perms, blockTitle, seqTitle, item, itemIndex, itemCount,
-    stillOnVid, onRequestClose, onDeleteItem, deleting = false,
+    stillOnVid, onRequestClose, onDeleteItem, deleting = false, deleteBusy = false,
   }: Props = $props();
 
   const uid = $props.id();
@@ -62,7 +64,8 @@
   // ---- Polish 1: the body-top row (#19) and the page question while this is
   //      the top modal (R46). Without a footer (a quiz, a read-only item) the
   //      page question asks in the body-top row too; R53 keeps the two apart.
-  const { own: bodyAsk, page, here: pageHere } = useModalAsk(labelId);
+  // A quiz edit's own question counts too (R53); quizEdits is read only once mounted.
+  const { own: bodyAsk, page, here: pageHere } = useModalAsk(labelId, () => quizEdits?.question ?? null);
   const hasFoot = $derived(canEditText && !isQuiz);
   const asking = $derived(bodyAsk.open || pageHere());
   // Memoised per vid (as ItemEditPage did): bodies compare it by identity.
@@ -96,8 +99,10 @@
   const saveAriaBlocked = $derived(!saving && (!canEditText || !saveDirty || bodyBusy));
   const discardAriaBlocked = $derived(!saveDirty || bodyBusy);
   let saveBtn = $state<HTMLButtonElement>();
+  // A page body is busy only while it uploads; an app body also while it removes its script.
+  const busyWait = $derived(item.type === 'interactive_app' ? 'Wait for the request to finish' : 'Wait for the upload to finish');
   const footTitle = (none: string) =>
-    (saving ? undefined : bodyBusy ? 'Wait for the upload to finish' : saveDirty ? undefined : none);
+    (saving ? undefined : bodyBusy ? busyWait : saveDirty ? undefined : none);
 
   let alive = true;
   onDestroy(() => { alive = false; });
@@ -108,10 +113,11 @@
   let shownTitle = $state(untrack(() => item.title));   // the last server echo
   let titleEdit = $state<InlineEdit<string> | null>(null);
   let titleEditBtn = $state<HTMLButtonElement>();
-  // A tree reload (renamed elsewhere) shows through while no edit is open.
+  // A tree reload (renamed elsewhere) shows through; while the edit is open it waits for the close.
+  let pendingTitle: string | null = null;
   $effect(() => {
     const t = item.title;
-    untrack(() => { if (!titleEdit) shownTitle = t; });
+    untrack(() => { if (titleEdit) pendingTitle = t; else shownTitle = t; });
   });
 
   async function openTitle() {
@@ -133,7 +139,7 @@
       send: async (v) => {
         try {
           const echo = await renameItem(item.id, v.trim());
-          if (alive && stillOnVid(savedVid)) shownTitle = echo.title;
+          if (alive && stillOnVid(savedVid)) { shownTitle = echo.title; pendingTitle = null; }
           if (stillOnVid(savedVid)) void loadAdminTree(savedVid, { force: true });
         } catch (e) {
           if (e instanceof ApiError && (e.status === 403 || e.status === 409) && stillOnVid(savedVid)) {
@@ -144,6 +150,7 @@
       },
       close: (refocus) => {
         titleEdit = null;
+        if (pendingTitle !== null) { shownTitle = pendingTitle; pendingTitle = null; }
         if (!refocus) return;
         // Back to ✎ — or to × when a 403/409 reload removed it.
         void tick().then(() => {
@@ -276,14 +283,22 @@
       guardDirty
         ? (isQuiz ? 'Delete this item — finish or discard the open edit first'
                   : 'Delete this item — save or discard changes first')
-        : isQuiz && bodyBusy ? 'Delete this item — wait for the save to finish' : 'Delete this item'
+        : bodyBusy ? (isQuiz ? 'Wait for the save to finish' : busyWait)
+        : 'Delete this item'
     ),
   );
-  const trashDisabled = $derived(!!structReason || guardDirty || bodyBusy || frozen);
+  // VR-B: a running save or delete names its wait on the trash and ×.
+  const waitTitle = $derived(saving ? 'Wait for the save to finish' : deleting || deleteBusy ? 'Wait for the request to finish' : null);
+  const trashDisabled = $derived(!!structReason || guardDirty || bodyBusy || frozen || deleteBusy);
+  // R53: while an idle question asks, the trash stays clickable (aria-disabled) to send focus to its Cancel.
+  const trashToQuestion = $derived(asking && !frozen && !bodyAsk.busy);
   let trashEl = $state<HTMLButtonElement>();
   // #19: the delete asks in the body-top row; the page owns the DELETE (D9).
   async function askDelete() {
-    if (trashDisabled || asking) return;
+    // R53: while a question asks, the trash goes to its Cancel.
+    if (bodyAsk.open) { bodyAsk.focusCancel(); return; }
+    if (pageHere()) { page!.ask.focusCancel(); return; }
+    if (trashDisabled) return;
     const a = await bodyAsk.ask({
       warning: `Delete item "${item.title}"? This cannot be undone.`,
       confirmLabel: 'Delete', tone: 'danger', layout: 'row', confirmDataAction: 'confirm-delete-item',
@@ -312,6 +327,21 @@
       }
     }
   }
+
+  // A question that goes unanswered can disable the trash under focus: × takes it (read before the DOM updates).
+  let wasToQuestion = untrack(() => trashToQuestion);
+  $effect.pre(() => {
+    const now = trashToQuestion;
+    if (wasToQuestion && !now && trashEl && document.activeElement === trashEl) {
+      void tick().then(() => {
+        const a = document.activeElement;
+        if (alive && trashEl?.disabled && (!a || a === trashEl || a === document.body)) {
+          [modalClose(labelId), modalPanel(labelId)].find(usable)?.focus();
+        }
+      });
+    }
+    wasToQuestion = now;
+  });
 
   // × and Esc: while the body-top row asks, back to its Cancel (R48). The page
   // handles its own question (VersionEditPage.requestCloseItem).
@@ -367,7 +397,7 @@
     <IconButton glyph="check" size="sm"
                 title={titleEdit.saving ? 'Saving…' : titleEdit.canSave ? 'Save title' : FORBIDDEN_TITLE}
                 disabled={!titleEdit.canSave} bind:element={titleOkEl} onclick={() => void titleEdit?.commit()} />
-    <IconButton glyph="close" size="sm" title="Cancel" disabled={titleEdit.saving}
+    <IconButton glyph="close" size="sm" title="Cancel" cancel disabled={titleEdit.saving}
                 onclick={() => titleEdit?.cancel()} />
   {:else if isQuiz && canEditText}
     <IconButton glyph="pencil" size="sm" borderless id={titleEditId} bind:element={titleEditBtn}
@@ -376,19 +406,21 @@
                 disabled={!!quizEdits?.locked || deleting} onclick={openTitle} />
   {/if}
   <span class="item-ctx">{blockTitle} › {seqTitle} · item {itemIndex} of {itemCount}</span>
-  <span class="head-actions">
-    <IconButton
-      glyph="trash"
-      size="sm"
-      danger
-      title={asking ? 'Answer the question first' : trashTitle}
-      aria-label="Delete item"
-      aria-disabled={asking}
-      disabled={trashDisabled}
-      bind:element={trashEl}
-      onclick={() => void askDelete()}
-    />
-  </span>
+{/snippet}
+
+<!-- Call 8: Modal groups the trash with ×, 6px apart. -->
+{#snippet headActions()}
+  <IconButton
+    glyph="trash"
+    size="sm"
+    danger
+    title={trashToQuestion ? 'Answer the question first' : structReason ?? waitTitle ?? (asking ? 'Answer the question first' : trashTitle)}
+    aria-label="Delete item"
+    aria-disabled={asking}
+    disabled={trashDisabled && !trashToQuestion}
+    bind:element={trashEl}
+    onclick={() => void askDelete()}
+  />
 {/snippet}
 
 {#snippet foot()}
@@ -420,7 +452,9 @@
   autofocusSelector={`#${titleEditId}, [data-autofocus], header.modal-head button[aria-label="Close"]`}
   onRequestClose={requestClose}
   closeDisabled={deleting || saving}
+  closeTitle={waitTitle ?? undefined}
   header={head}
+  {headActions}
   footer={hasFoot ? foot : undefined}
 >
   {#if bodyAsk.open}
@@ -542,7 +576,6 @@
   /* Fills its slot and shrinks with it, so ✓ / ✕ never sit on top of it on a narrow window. */
   .title-input { box-sizing: border-box; width: 100%; min-width: 0; font-size: 14px; font-weight: 600; }
   .item-ctx { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-  .head-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; /* ref 1689 */ }
   .field-row {
     display: grid;
     grid-template-columns: 132px 1fr; /* ref 1696 — D2 drops the 54px pencil slot */

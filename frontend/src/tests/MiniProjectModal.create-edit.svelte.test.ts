@@ -691,6 +691,47 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     expect((target.querySelector('button[data-action="save"]') as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('an offline Save says OFFLINE_MESSAGE, not the browser text (fix-pass review r2)', async () => {
+    // Codex T6a r1 catch: 409 banner suffix is implemented but had no test.
+    // Spec table row "409 on PATCH | locked-after-open OR concurrent state
+    // change | inline banner with e.displayMessage and 'Refresh the page to
+    // see latest.' Modal stays open so the user can copy markdown manually."
+    fetchSpy.mockImplementation((url, init) => {
+      if (String(url).includes('/api/mini-projects/99') && (init as RequestInit | undefined)?.method === 'PATCH') {
+        return Promise.reject(new TypeError('Failed to fetch'));
+      }
+      return jres([]);
+    });
+    const onClose = vi.fn();
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    trackedMount(MiniProjectModal, {
+      target,
+      props: {
+        runId: 10,
+        mode: 'edit',
+        initial,
+        availableBlocks: [],
+        currentBlock: blocks[0],
+        runIsPublished: true,
+        versionIsDisabled: false,
+        runEndDate: '2026-06-30',
+        course: baseCourse,
+        onClose,
+        onSaved: vi.fn().mockResolvedValue(undefined),
+        onNavigateToTab: vi.fn(),
+      },
+    });
+    await settle();
+    const edited = target.querySelector('textarea') as HTMLTextAreaElement;
+    edited.value = 'changed';
+    edited.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    (target.querySelector('button[data-action="save"]') as HTMLButtonElement).click();
+    await settle();
+    expect((target.querySelector('.banner-error') as HTMLElement).textContent).toContain('Could not reach server. Check your connection.');
+  });
+
   // ---- Slice-5b T2 review (lane-2 I1): the run-asset sidebar's inline delete
   // confirm owns Escape (default-prevented); the modal must not also close.
   describe('MiniProjectModal — Escape inside the asset delete confirm', () => {

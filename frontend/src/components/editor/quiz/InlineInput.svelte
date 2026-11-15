@@ -56,7 +56,7 @@
     {:else}
       <IconButton glyph="check" size="sm" title={edit.saving ? 'Saving…' : edit.canSave ? saveTitle : FORBIDDEN_TITLE}
                   disabled={!edit.canSave} onclick={() => void edit.commit()} />
-      <IconButton glyph="close" size="sm" title="Cancel" disabled={edit.saving} onclick={() => edit.cancel()} />
+      <IconButton glyph="close" size="sm" title="Cancel" cancel disabled={edit.saving} onclick={() => edit.cancel()} />
     {/if}
   </span>
   {#if asksInMsg}

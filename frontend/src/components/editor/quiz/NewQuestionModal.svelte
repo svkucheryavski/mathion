@@ -10,7 +10,7 @@
   import { DISCARD_ASK, focusAfter, modalClose, modalPanel, useModalAsk } from '../../../lib/askInPlace.svelte';
   import MarkdownEditor from '../MarkdownEditor.svelte';
   import QuestionTypePicker from '../QuestionTypePicker.svelte';
-  import { ApiError } from '../../../lib/api';
+  import { failureText } from '../../../lib/api';
   import { FORBIDDEN_TITLE, type EditHandle } from '../../../lib/quizEdits.svelte';
   import { QUIZ_CTX, type QuizCtx } from '../../../lib/quizContext';
   import { pushToast } from '../../../stores/toasts.svelte';
@@ -101,7 +101,7 @@
       await onCreate(body());
       saving = false;   // on success the quiz body unmounts this; a stale one must not stay locked
     } catch (e) {
-      const m = e instanceof ApiError ? e.displayMessage : 'Add failed';
+      const m = failureText(e, 'Add failed');
       if (!alive()) { saving = false; pushToast(m, 'error'); return; }
       saving = false;
       error = m;

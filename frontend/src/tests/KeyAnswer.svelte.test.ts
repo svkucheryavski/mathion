@@ -4,6 +4,7 @@ import {
 } from './support/quizHarness.svelte';
 import { KEY_CONFIRM, DISCARD_PROMPT, FORBIDDEN_TITLE, WAIT_TITLE } from '../lib/quizEdits.svelte';
 import { versionPermissions } from '../lib/versionPermissions';
+import { navigate } from '../lib/router.svelte';
 
 afterEach(cleanup);
 
@@ -51,6 +52,22 @@ describe('Number answer (5d T6)', () => {
     await settle();
     expect(qWrites(s)).toEqual([]);
     expect(cards()[0].querySelector('.key-edit')).toBeNull();
+  });
+
+  it('Number key 5.0 over a stored 5 is unchanged', async () => {
+    const s = new QuizServer([num(), txt()]);
+    await renderQuiz(s);
+    pencil(0).click();
+    await settle();
+    typeInto(input(0, 'Answer'), '5.0');
+    typeInto(input(0, 'Decimals'), '02');
+    pencil(1).click();
+    await settle();
+    // Not unsaved work: no D10 question; the Text editor opens at once.
+    expect(cards()[0].querySelector('.inline-confirm')).toBeNull();
+    expect(cards()[0].querySelector('.key-edit')).toBeNull();
+    expect(document.activeElement).toBe(input(1, 'Answer'));
+    expect(qWrites(s)).toEqual([]);
   });
 
   it('an unset precision is a change: Enter on the pre-filled 0 sends it', async () => {
@@ -102,6 +119,15 @@ describe('Number answer (5d T6)', () => {
     await settle();
     expect(input(0, 'Answer').getAttribute('aria-invalid')).toBe('true');
     expect(input(0, 'Decimals').hasAttribute('aria-invalid')).toBe(false);
+  });
+
+  it('the ✕ Cancel rings gray in the number and the text key editors (VR-B, call 10)', async () => {
+    await renderQuiz(new QuizServer([num(), txt()]));
+    pencil().click(); await settle();
+    expect(byName(cards()[0], 'Cancel')!.classList.contains('cancel')).toBe(true);
+    byName(cards()[0], 'Cancel')!.click(); await settle();
+    pencil(1).click(); await settle();
+    expect(byName(cards()[1], 'Cancel')!.classList.contains('cancel')).toBe(true);
   });
 
   it('while the key saves: the fields are read-only, ✕ waits, the other cards\' edit openers wait', async () => {
@@ -263,6 +289,24 @@ describe('Answer key in a published version (5d T6)', () => {
     expect(text(cards()[0].querySelector('.inline-err'))).toBe('Nope');
     expect(input(0, 'Answer').value).toBe('basis');
     expect(document.activeElement).toBe(input(0, 'Answer'));   // never a disabled ✓, never <body>
+  });
+
+  it('R53: while the key question asks, a navigation is refused and focus returns to it', async () => {
+    await renderQuiz(new QuizServer([num()]), { version: { state: 'published' }, page: true });
+    pencil(0).click();
+    await settle();
+    typeInto(input(0, 'Answer'), '9');
+    press(input(0, 'Answer'), 'Enter');
+    await settle();
+    const key = () => cards()[0].querySelector<HTMLElement>('.inline-confirm');
+    expect(text(key()!.querySelector('.warning strong'))).toBe('Change the answer key?');
+    const before = location.pathname;
+    panel().querySelector<HTMLElement>('header.modal-head button[aria-label="Close"]')!.focus();
+    await navigate('/key-refused');
+    await settle();
+    expect(location.pathname).toBe(before);
+    expect(panel().querySelector('.modal-body > .ask-slot')).toBeNull();
+    expect(document.activeElement).toBe(key()!.querySelector('button.cancel'));
   });
 
   it('archived: no pencil', async () => {

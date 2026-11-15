@@ -1,6 +1,8 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { ApiError, OFFLINE_MESSAGE } from '../../lib/api';
+  import { ApiError, failureText } from '../../lib/api';
+  import { focusIsFree } from '../../lib/askInPlace.svelte';
+  import { WAIT_TITLE as WAIT } from '../../lib/runTabs';
   import { addRunTeacher, removeRunTeacher } from '../../lib/runTeachers';
   import { focusFirst } from '../../lib/focusFirst';
   import { pushToast } from '../../stores/toasts.svelte';
@@ -19,10 +21,15 @@
   const uid = $props.id();
   let email = $state('');
   let addError: string | null = $state(null);
+  // Only a 409 or 422 is about the address; anything else leaves the field unmarked.
+  let addInvalid = $state(false);
   let busy = $state(false);
   let pendingRemove: number | null = $state(null);
+  // A Remove in flight: its confirm shows busy and the other 🗑 wait.
+  let removing = $state(false);
 
   let emailInput = $state<HTMLInputElement>();
+  let plusEl = $state<HTMLButtonElement>();
   let headingEl = $state<HTMLElement>();
   const trashEls: Record<number, HTMLButtonElement | undefined> = $state({});
 
@@ -35,24 +42,28 @@
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     addError = null;
+    addInvalid = false;
     busy = true;
     try {
       await addRunTeacher(runId, email.trim());
       email = '';
-      await onRefetch();
-    } catch (e) {
-      if (e instanceof ApiError) {
-        addError = e.status === 409 ? 'Teacher already assigned to this run.' : e.displayMessage;
-      } else {
-        addError = OFFLINE_MESSAGE;
+      // The teacher is added now: a failed refetch is not a failed add.
+      try {
+        await onRefetch();
+      } catch {
+        pushToast('Added (refresh failed — reload to see latest)', 'info');
       }
+    } catch (e) {
+      addError = e instanceof ApiError && e.status === 409 ? 'Teacher already assigned to this run.' : failureText(e, 'Could not add the teacher.');
+      addInvalid = e instanceof ApiError && (e.status === 409 || e.status === 422);
     } finally {
       busy = false;
     }
     // The + went disabled while busy, which drops a click's focus to <body>:
-    // put it back in the field either way, ready for a correction.
+    // put it back in the field, unless the user has moved on.
     await tick();
-    emailInput?.focus();
+    const a = document.activeElement;
+    if (!a || a === document.body || a === plusEl) emailInput?.focus();
   }
 
   async function cancelRemove(userId: number) {
@@ -61,23 +72,32 @@
     trashEls[userId]?.focus();
   }
 
-  // §Focus: the next row's trash, the previous row's, the email field, the h2.
+  // §Focus: the next row's trash, the previous row's, the email field, the h2;
+  // only while focus is free (the user may have moved on).
   async function confirmRemove(userId: number) {
     const idx = sortedTeachers.findIndex((t) => t.user_id === userId);
+    removing = true;
     try {
       await removeRunTeacher(runId, userId);
-      pendingRemove = null;
-      await onRefetch();
-      await tick();
-      const next = sortedTeachers[idx];
-      const prev = idx > 0 ? sortedTeachers[idx - 1] : undefined;
-      focusFirst([next && trashEls[next.user_id], prev && trashEls[prev.user_id], emailInput, headingEl]);
     } catch (e) {
       pendingRemove = null;
-      pushToast(e instanceof ApiError ? e.displayMessage : OFFLINE_MESSAGE, 'error');
+      removing = false;
+      pushToast(failureText(e, 'Could not remove the teacher.'), 'error');
       await tick();
-      trashEls[userId]?.focus();
+      if (focusIsFree()) trashEls[userId]?.focus();
+      return;
     }
+    // The remove stands even when the refetch fails.
+    try { await onRefetch(); } catch { pushToast('Removed (refresh failed — reload to see latest)', 'info'); }
+    pendingRemove = null;
+    removing = false;
+    await tick();
+    if (!focusIsFree()) return;
+    // A failed refetch leaves the removed row listed: skip it.
+    const rest = sortedTeachers.filter((t) => t.user_id !== userId);
+    const next = rest[idx];
+    const prev = idx > 0 ? rest[idx - 1] : undefined;
+    focusFirst([next && trashEls[next.user_id], prev && trashEls[prev.user_id], emailInput, headingEl]);
   }
 </script>
 
@@ -94,12 +114,13 @@
           type="email"
           maxlength="254"
           placeholder="teacher@example.com"
-          aria-invalid={addError ? 'true' : undefined}
+          aria-invalid={addInvalid ? 'true' : undefined}
           aria-describedby={addError ? `${uid}-err` : undefined}
           bind:this={emailInput}
           bind:value={email}
         />
-        <IconButton glyph="plus" primary size="md" type="submit" title="Add teacher" disabled={busy || !email.trim()} />
+        <IconButton glyph="plus" primary size="md" type="submit" title="Add teacher" disabled={busy || !email.trim()}
+                    bind:element={plusEl} />
       </form>
     {/if}
   </div>
@@ -120,11 +141,12 @@
             <span class="t-actions">
               {#if pendingRemove === t.user_id}
                 <InlineConfirm takeFocus label="Remove {t.user_email}?" confirmLabel="Remove" confirmDataAction="confirm-remove"
+                               busy={removing}
                                onConfirm={() => confirmRemove(t.user_id)} onCancel={() => cancelRemove(t.user_id)} />
               {:else}
-                <IconButton glyph="trash" size="sm" danger title="Remove" aria-label="Remove {t.user_email}"
-                            data-action="remove" bind:element={trashEls[t.user_id]}
-                            onclick={() => (pendingRemove = t.user_id)} />
+                <IconButton glyph="trash" size="sm" danger title={removing ? WAIT : 'Remove'} aria-label="Remove {t.user_email}"
+                            aria-disabled={removing} data-action="remove" bind:element={trashEls[t.user_id]}
+                            onclick={() => { if (!removing) pendingRemove = t.user_id; }} />
               {/if}
             </span>
           {/if}

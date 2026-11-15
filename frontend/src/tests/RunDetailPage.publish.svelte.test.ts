@@ -678,8 +678,9 @@ describe('PublishConflictsModal wiring (E3)', () => {
 // A response the test releases by hand.
 function held() {
   let release!: (r: Response) => void;
-  const p = new Promise<Response>((r) => { release = r; });
-  return { p, release };
+  let fail!: (e: unknown) => void;
+  const p = new Promise<Response>((r, j) => { release = r; fail = j; });
+  return { p, release, fail };
 }
 function resp(body: unknown, status = 200): Response {
   return {
@@ -767,6 +768,19 @@ describe('Publish and Unpublish live in the Overview (R33, R44)', () => {
     await settle();
     expect(document.activeElement).toBe(q(target, 'unpublish'));
     unmount(cmp);
+  });
+
+  it('a publish that fails after the page unmounted still toasts', async () => {
+    const hold = held();
+    const { target, cmp } = mountWith((url, init) => (isPost(url, init, '/publish') ? hold.p : null));
+    await settle();
+    q(target, 'publish')!.click();
+    await settle();
+    unmount(cmp);
+    hold.release(resp({ detail: 'Database is busy' }, 503));
+    await settle();
+    await settle();
+    expect(vi.mocked(pushToast)).toHaveBeenCalledWith('Database is busy', 'error');
   });
 
   it('a 409 that is not a conflicts response refetches; a run found published counts as published', async () => {
@@ -988,6 +1002,196 @@ describe('Delete this run from the page (D24, D28, P24)', () => {
     expect(q(target, 'delete-run')!.disabled).toBe(true);
     expect(q(target, 'delete-run')!.title).toBe('Unpublish the run before deleting it');
     expect((document.activeElement as HTMLElement).textContent).toBe('Delete this run');
+    unmount(cmp);
+  });
+
+  it('the run Delete offline says OFFLINE_MESSAGE', async () => {
+    const { target, cmp } = mountWith((_url, init) => (init?.method === 'DELETE' ? Promise.reject(new TypeError('Failed to fetch')) : null));
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    await settle();
+    expect(target.querySelector('.ov-err')?.textContent).toBe('Could not reach server. Check your connection.');
+    unmount(cmp);
+  });
+
+  it('a delete that 404s takes the Run deleted path', async () => {
+    const { target, cmp } = mountWith((_url, init) => (init?.method === 'DELETE' ? jres({ detail: 'Run not found' }, 404) : null));
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    await settle();
+    expect(vi.mocked(pushToast)).toHaveBeenCalledWith('Run deleted.', 'success');
+    expect(target.querySelector('.ov-err')).toBeNull();
+    expect(currentRoute.path).toBe('/teaching/algebra');
+    unmount(cmp);
+  });
+
+  it('a delete that lands after moving to another run does not navigate', async () => {
+    const hold = held();
+    const { target, cmp, props } = mountWith((_url, init) => (init?.method === 'DELETE' ? hold.p : null));
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    history.replaceState(null, '', '/teaching/algebra/runs/11');
+    currentRoute.path = location.pathname;
+    props.runId = '11';
+    await settle();
+    await settle();
+    hold.release({ ok: true, status: 204, json: () => Promise.resolve(null), headers: new Headers() } as unknown as Response);
+    await settle();
+    await settle();
+    expect(vi.mocked(pushToast)).toHaveBeenCalledWith('Run deleted.', 'success');
+    expect(currentRoute.path).toBe('/teaching/algebra/runs/11');
+    unmount(cmp);
+  });
+
+  it('a failed forced delete after leaving the Overview says its fallback once', async () => {
+    const hold = held();
+    const { target, cmp } = mountWith((_url, init) => (init?.method === 'DELETE' ? hold.p : null));
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    (Array.from(target.querySelectorAll('[role="tab"]')).find((b) => b.textContent?.trim().startsWith('Roster')) as HTMLElement).click();
+    await settle();
+    hold.fail(new DOMException('The operation was aborted.', 'AbortError'));
+    await settle();
+    await settle();
+    const calls = vi.mocked(pushToast).mock.calls.filter((c) => c[1] === 'error').map((c) => c[0]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).not.toMatch(/Could not delete the run: Could not delete the run/);
+    unmount(cmp);
+  });
+
+  it('a second Delete from a remounted Overview while the first runs toasts Run deleted. once (whole-branch review)', async () => {
+    const hold = held();
+    let n = 0;
+    const { target, cmp } = mountWith((_url, init) => {
+      if (init?.method !== 'DELETE') return null;
+      n += 1;
+      return n === 1 ? hold.p : jres({ detail: 'Run not found' }, 404);
+    });
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    const tab = (name: string) => (Array.from(target.querySelectorAll('[role="tab"]')).find((b) => b.textContent?.trim().startsWith(name)) as HTMLElement);
+    tab('Roster').click();
+    await settle();
+    tab('Overview').click();
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    hold.release({ ok: true, status: 204, json: () => Promise.resolve(null), headers: new Headers() } as unknown as Response);
+    await settle();
+    await settle();
+    expect(vi.mocked(pushToast).mock.calls.filter((c) => c[0] === 'Run deleted.')).toHaveLength(1);
+    expect(n).toBe(1);
+    unmount(cmp);
+  });
+
+  it('a shared delete that fails is reported once: inline in the live Overview, no toast (fix-pass review r3)', async () => {
+    const hold = held();
+    const { target, cmp } = mountWith((_url, init) => (init?.method === 'DELETE' ? hold.p : null));
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    const tab = (name: string) => (Array.from(target.querySelectorAll('[role="tab"]')).find((b) => b.textContent?.trim().startsWith(name)) as HTMLElement);
+    tab('Roster').click();
+    await settle();
+    tab('Overview').click();
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    hold.release(resp({ detail: 'Boom' }, 500));
+    await settle();
+    await settle();
+    expect(vi.mocked(pushToast).mock.calls.filter((c) => String(c[0]).includes('Boom'))).toHaveLength(0);
+    expect(target.querySelector('.ov-err')?.textContent).toBe('Boom');
+    unmount(cmp);
+  });
+
+  it('a shared delete that fails after both Overviews left toasts once (fix-pass review r4)', async () => {
+    const hold = held();
+    const { target, cmp } = mountWith((_url, init) => (init?.method === 'DELETE' ? hold.p : null));
+    await settle();
+    const tab = (name: string) => (Array.from(target.querySelectorAll('[role="tab"]')).find((b) => b.textContent?.trim().startsWith(name)) as HTMLElement);
+    (await arm(target)).click();
+    await settle();
+    tab('Roster').click();
+    await settle();
+    tab('Overview').click();
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    tab('Roster').click();
+    await settle();
+    hold.release(resp({ detail: 'Boom' }, 500));
+    await settle();
+    await settle();
+    const boom = vi.mocked(pushToast).mock.calls.filter((c) => String(c[0]).includes('Boom'));
+    expect(boom).toHaveLength(1);
+    expect(boom[0]![0]).toBe('Could not delete the run: Boom');
+    unmount(cmp);
+  });
+
+  it('a delete of another run in between does not let a second Delete of the first through (fix-pass review)', async () => {
+    const holds: Record<string, ReturnType<typeof held>> = {};
+    const sent: string[] = [];
+    const { target, cmp, props } = mountWith((url, init) => {
+      if (init?.method !== 'DELETE') return null;
+      sent.push(url);
+      const h = held();
+      holds[url + sent.length] = h;
+      return h.p;
+    });
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    props.runId = '11';
+    await settle(); await settle();
+    (await arm(target)).click();
+    await settle();
+    props.runId = '10';
+    await settle(); await settle();
+    (await arm(target)).click();
+    await settle();
+    expect(sent.filter((u) => u.includes('/api/runs/10?'))).toHaveLength(1);
+    expect(sent.filter((u) => u.includes('/api/runs/11?'))).toHaveLength(1);
+    for (const h of Object.values(holds)) h.release({ ok: true, status: 204, json: () => Promise.resolve(null), headers: new Headers() } as unknown as Response);
+    await settle(); await settle();
+    unmount(cmp);
+  });
+
+  it('a delete that lands after the page unmounted does not navigate', async () => {
+    const hold = held();
+    const { target, cmp } = mountWith((_url, init) => (init?.method === 'DELETE' ? hold.p : null));
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    unmount(cmp);
+    history.replaceState(null, '', '/courses');
+    currentRoute.path = location.pathname;
+    hold.release({ ok: true, status: 204, json: () => Promise.resolve(null), headers: new Headers() } as unknown as Response);
+    await settle();
+    await settle();
+    expect(vi.mocked(pushToast)).toHaveBeenCalledWith('Run deleted.', 'success');
+    expect(currentRoute.path).toBe('/courses');
+  });
+
+  it('a failed forced delete after leaving the Overview toasts', async () => {
+    const hold = held();
+    const { target, cmp } = mountWith((_url, init) => (init?.method === 'DELETE' ? hold.p : null));
+    await settle();
+    (await arm(target)).click();
+    await settle();
+    // Leave the Overview while the DELETE runs.
+    (Array.from(target.querySelectorAll('[role="tab"]')).find((b) => b.textContent?.trim().startsWith('Roster')) as HTMLElement).click();
+    await settle();
+    expect(target.querySelector('button[data-action="force-delete"]')).toBeNull();
+    hold.release({ ok: false, status: 503, json: () => Promise.resolve({ detail: 'Database is busy' }), headers: new Headers({ 'content-type': 'application/json' }) } as unknown as Response);
+    await settle();
+    await settle();
+    expect(vi.mocked(pushToast)).toHaveBeenCalledWith('Could not delete the run: Database is busy', 'error');
     unmount(cmp);
   });
 

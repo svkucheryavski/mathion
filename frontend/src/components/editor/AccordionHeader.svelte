@@ -15,11 +15,12 @@
   // stays visible, disabled, with its reason as the title. The accessible
   // toggle is the title button inside the section heading; the chevron is a
   // pointer convenience only (5a D14).
-  import { getContext, onDestroy, tick } from 'svelte';
+  import { getContext, onDestroy, tick, untrack } from 'svelte';
   import { labelFor } from '../../lib/labelFor';
-  import { ApiError } from '../../lib/api';
+  import { ApiError, failureText } from '../../lib/api';
   import { mapCreateError } from '../../lib/formErrors';
   import { pushToast } from '../../stores/toasts.svelte';
+  import { repairFocus } from '../../lib/askInPlace.svelte';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
   import IconButton from '../ui/IconButton.svelte';
 
@@ -81,18 +82,21 @@
   // or server failure shows the same line under a valid title.
   let errorIsTitle = $state(false);
   let saving = $state(false);
+  // The title the field opened with; the flip toast compares the draft to it.
+  let opened = '';
   let inputEl = $state<HTMLInputElement>();
   let pencilEl = $state<HTMLButtonElement>();
   let alive = true;
   onDestroy(() => { alive = false; });
 
   function msg(e: unknown): string {
-    return e instanceof ApiError ? (e.validationErrors()?.[0]?.msg ?? e.displayMessage) : 'Save failed';
+    return e instanceof ApiError ? (e.validationErrors()?.[0]?.msg ?? e.displayMessage) : failureText(e, 'Save failed');
   }
 
   async function startRename() {
     if (!canEditTitle || busy || saving) return;
     draft = title ?? '';
+    opened = draft;
     error = null;
     renaming = true;
     await tick();
@@ -133,7 +137,7 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    if (e.isComposing) return;
+    if (e.isComposing || e.keyCode === 229) return;   // VR-B: WebKit's IME confirm
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation(); // an enclosing handler (a modal, a guard) must not see it
@@ -145,10 +149,13 @@
     void commitRename();
   }
 
+  const changed = () => draft.trim() !== (title ?? '').trim();
+
   // Unsaved registration: optional outside the editor.
   const registry = getContext<DirtyRegistry | undefined>(DIRTY_REGISTRY_KEY);
   const tracker: RegisteredTracker = {
-    get isDirty() { return renaming && draft.trim() !== (title ?? '').trim(); },
+    // VR-B: no prompt while the save is in flight; it lands anyway.
+    get isDirty() { return renaming && !saving && changed(); },
     discard() { renaming = false; error = null; },
   };
   $effect(() => {
@@ -161,7 +168,15 @@
   // was already confirmed by the guard, or the version went read-only. Even
   // mid-save: a late failure then toasts (commitRename) instead of vanishing.
   $effect(() => {
-    if (renaming && (mode !== 'open-focus' || !canEditTitle)) { renaming = false; error = null; }
+    if (!renaming || (mode === 'open-focus' && canEditTitle)) return;
+    const readOnly = !canEditTitle;
+    untrack(() => {
+      // VR-B: a read-only flip says what happened to an edited title and gives focus back to the row.
+      const lost = readOnly && !saving && draft.trim() !== opened.trim();
+      renaming = false; error = null;
+      if (lost) pushToast('Editing closed — this version is no longer editable', 'info');
+      if (readOnly) void tick().then(() => repairFocus(document.getElementById(headerId)));
+    });
   });
 </script>
 
@@ -205,7 +220,7 @@
     </div>
     <span class="actions">
       <IconButton size="sm" glyph="check" primary title="Save" aria-label={`Save the ${level} title`} disabled={saving} onclick={() => void commitRename()} />
-      <IconButton size="sm" glyph="close" title="Cancel" aria-label={`Cancel editing the ${level} title`} disabled={saving} onclick={() => void cancelRename()} />
+      <IconButton size="sm" glyph="close" title="Cancel" aria-label={`Cancel editing the ${level} title`} cancel disabled={saving} onclick={() => void cancelRename()} />
     </span>
   {:else}
     {#if level === 'block'}
@@ -220,7 +235,7 @@
           glyph="pencil"
           title={`Edit the ${level} title`}
           aria-label={`Edit the ${level} title`}
-          disabled={busy}
+          disabled={busy || saving}
           bind:element={pencilEl}
           onclick={() => void startRename()}
         />

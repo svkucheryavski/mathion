@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest';
 
 import { extractAssetRefs } from '../lib/extractAssetRefs';
 
-// Parity contract: this file MUST mirror backend/mathion/markdown.py:52-68
+// Parity contract: this file MUST mirror backend/mathion/markdown.py
 // (extract_asset_filenames) exactly. Any divergence breaks the spec's
 // "Reference resolution split" guarantee. See plan T5 + spec rev 3.5.
 
-describe('extractAssetRefs — parity with backend/mathion/markdown.py:52-68', () => {
+describe('extractAssetRefs — parity with backend/mathion/markdown.py', () => {
   it('extracts image syntax: ![alt](foo.pdf)', () => {
     expect(extractAssetRefs('![alt](foo.pdf)')).toEqual(new Set(['foo.pdf']));
   });
@@ -41,6 +41,16 @@ describe('extractAssetRefs — parity with backend/mathion/markdown.py:52-68', (
 
   it('skips # anchor target', () => {
     expect(extractAssetRefs('[x](#anchor)')).toEqual(new Set());
+  });
+
+  it('skips a root-relative link and a protocol-relative target (VR-B)', () => {
+    expect(extractAssetRefs('[a](/courses) [x](//host/a) ![p](//host/p.png)')).toEqual(new Set());
+  });
+
+  it('keeps a root-relative image and /assets/ or /api/ links (VR-B)', () => {
+    expect(extractAssetRefs('![p](/logo.png) [f](/assets/7/x.pdf) [d](/api/runs/3/assets/x.csv)')).toEqual(
+      new Set(['/logo.png', '/assets/7/x.pdf', '/api/runs/3/assets/x.csv']),
+    );
   });
 
   it('case-sensitive prefix skip: [x](HTTP://foo.pdf) is captured (not skipped)', () => {
@@ -86,10 +96,18 @@ describe('extractAssetRefs — parity with backend/mathion/markdown.py:52-68', (
     expect(extractAssetRefs('\\[x\\](foo.pdf)')).toEqual(new Set(['foo.pdf']));
   });
 
-  it('angle-bracket targets captured verbatim: [x](<foo.pdf>) -> {<foo.pdf>}', () => {
-    // Backend's [^)\s]+ target group captures `<foo.pdf>` literally. Frontend
-    // must NOT strip the angle brackets.
-    expect(extractAssetRefs('[x](<foo.pdf>)')).toEqual(new Set(['<foo.pdf>']));
+  it('angle-bracket targets are unwrapped, as the backend does (VR-B)', () => {
+    expect(extractAssetRefs('[x](<foo.pdf>) [a](</courses>) ![p](<https://x.org/p.png>)')).toEqual(
+      new Set(['foo.pdf']),
+    );
+  });
+
+  it('backslash escapes are removed, as the backend does (VR-B)', () => {
+    expect(extractAssetRefs('[x](my\\_file.pdf) [a](\\/courses)')).toEqual(new Set(['my_file.pdf']));
+  });
+
+  it('only /assets/ and /api/ links are file paths (VR-B)', () => {
+    expect(extractAssetRefs('[a](/assets) [b](/api) [c](/Assets/x)')).toEqual(new Set());
   });
 
   it('empty input returns empty set', () => {

@@ -13,7 +13,7 @@
   import AskSlot from '../ui/AskSlot.svelte';
   import { DISCARD_ASK, focusAfter, modalClose, repairFocus, useModalAsk } from '../../lib/askInPlace.svelte';
   import ItemTypePicker from './ItemTypePicker.svelte';
-  import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
+  import { createErrorText, mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import { pushToast } from '../../stores/toasts.svelte';
   import { focusFirst } from '../../lib/focusFirst';
   import { DIRTY_REGISTRY_KEY, type DirtyRegistry, type RegisteredTracker } from '../../lib/dirtyRegistry.svelte';
@@ -90,9 +90,13 @@
 
   async function submit() {
     if (busy || !ready) return;
-    const body: Record<string, unknown> = { title, type };
-    if (type === 'static_page') body.content_md = `# ${title.trim()}\n`;
-    if (type === 'video') body.video_url = normalisedUrl;
+    // The picker is frozen while it posts; errors map against what was sent.
+    const sentType = type;
+    // A radio that held focus: the frozen picker may drop it.
+    const radio = (document.activeElement as HTMLElement | null)?.closest('fieldset.type-picker') ? document.activeElement as HTMLElement : null;
+    const body: Record<string, unknown> = { title: title.trim(), type: sentType };
+    if (sentType === 'static_page') body.content_md = `# ${title.trim()}\n`;
+    if (sentType === 'video') body.video_url = normalisedUrl;
     errors = {};
     globalError = null;
     busy = true;
@@ -101,10 +105,10 @@
     } catch (e) {
       // Only the fields shown here; anything else (content_md, type) goes to
       // the alert rather than onto a field nobody can see.
-      const known = type === 'video' ? ['title', 'video_url'] : ['title'];
+      const known = sentType === 'video' ? ['title', 'video_url'] : ['title'];
       const mapped = mapCreateError(e, known);
       if (!alive) {
-        pushToast(mapped.globalMessage ?? Object.values(mapped.fieldErrors)[0] ?? 'Create failed', 'error');
+        pushToast(createErrorText(mapped), 'error');
         return;
       }
       errors = mapped.fieldErrors;
@@ -113,7 +117,7 @@
       focusFirst([errors.title ? titleEl : null, errors.video_url ? videoEl : null]);
     } finally {
       // F4: Cancel and × are disabled while busy; a focus the browser dropped there comes back.
-      if (alive) { busy = false; void repairFocus(createEl, titleEl); }
+      if (alive) { busy = false; void repairFocus(radio, createEl, titleEl); }
     }
   }
 </script>
@@ -141,7 +145,7 @@
   bodyInert={footAsk.open || here()} header={head} footer={foot}>
   <!-- novalidate: `ready` is the check; type="url" would block Enter on "youtu.be/x". -->
   <form class="form" novalidate onsubmit={(e) => { e.preventDefault(); void submit(); }}>
-    <ItemTypePicker bind:value={type} />
+    <ItemTypePicker bind:value={type} disabled={busy} />
     <div class="field-row">
       <span class="field-label">Title</span>
       <div class="field">

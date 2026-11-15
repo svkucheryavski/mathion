@@ -9,7 +9,7 @@
   import { versionPermissions } from '../../lib/versionPermissions';
   import { unsavedSuffix } from '../../lib/editorReasons';
   import { navigate } from '../../lib/router.svelte';
-  import { api, ApiError } from '../../lib/api';
+  import { api, ApiError, failureText } from '../../lib/api';
   import { pushToast } from '../../stores/toasts.svelte';
   import { currentEditorVersion, loadAdminTree } from '../../stores/currentEditorVersion.svelte';
   import type { AdminTreeBlock, AdminTreeSequence } from '../../lib/types';
@@ -98,7 +98,15 @@
     const savedVid = vid;
     const check = stillOnVid;
     const savedSid = seq.id;
-    await api.patch(`/api/sequences/${savedSid}`, { title });
+    try {
+      await api.patch(`/api/sequences/${savedSid}`, { title });
+    } catch (e) {
+      // VR-B: a 403/409 reloads the tree so the version's rights re-derive.
+      if (e instanceof ApiError && (e.status === 403 || e.status === 409) && check(savedVid)) {
+        void loadAdminTree(savedVid, { force: true });
+      }
+      throw e;
+    }
     if (!check(savedVid)) return;
     const result = await loadAdminTree(savedVid, { force: true });
     if (result === 'error') pushToast('Saved (refresh failed — reload to see latest)', 'info');
@@ -142,7 +150,7 @@
       }
       if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
+      pushToast(failureText(e, 'Delete failed'), 'error');
       if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
@@ -170,7 +178,7 @@
       await api.post(`/api/sequences/${savedSid}/items/reorder`, { order });
       if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
+      pushToast(failureText(e, 'Reorder failed'), 'error');
       if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
@@ -209,7 +217,7 @@
       if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
       pushToast('Item deleted', 'success');
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
+      pushToast(failureText(e, 'Delete failed'), 'error');
       if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
     } finally {
       busy = false;
@@ -230,6 +238,8 @@
   // "+ Add item" (5c D10): the line opens the New item modal. `creating` = the
   // modal is open; the modal owns the form and its guard tracker.
   let creating = $state(false);
+  // Counts opens: a late create only closes and follows the modal it came from.
+  let opens = 0;
   let addLineEl = $state<HTMLButtonElement>();
 
   // The modal owns the form; this owns the request, the reload and the
@@ -241,15 +251,18 @@
     const savedBid = block.id;
     const savedSid = seq.id;
     const savedSlug = courseSlug;
+    const mine = opens;
     const item = await api.post<{ id: number }>(`/api/sequences/${savedSid}/items`, body);
     if (check(savedVid)) await loadAdminTree(savedVid, { force: true });
+    // VR-B: its modal closed meanwhile (discard, collapse): say so and stay.
+    if (!alive || !creating || opens !== mine) { pushToast('Item created', 'success'); return; }
     creating = false;
     // Let the modal unmount first: its guard tracker (dirty — the typed
     // title) unregisters on teardown; navigating before that would prompt.
     await tick();
     // Gated like the reload: a late success must not pull the author back
     // into the old version's item editor.
-    if (!check(savedVid)) return;
+    if (!check(savedVid)) { pushToast('Item created', 'success'); return; }
     // 5b D18: closing the new item's editor focuses its ✎. The modal's
     // teardown just handed focus back to its opener ("+ Add item" in Chrome,
     // where a click focuses buttons; whatever held focus before in Safari);
@@ -324,7 +337,7 @@
 
       {#if canStructure}
         <!-- After the list: new items land at the end (user, T3). -->
-        <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} onclick={() => (creating = true)}>+ Add item</button>
+        <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} onclick={() => { opens++; creating = true; }}>+ Add item</button>
       {/if}
       {#if creating}
         <NewItemModal

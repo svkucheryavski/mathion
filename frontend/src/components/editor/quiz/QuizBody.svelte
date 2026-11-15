@@ -11,7 +11,7 @@
   import Skeleton from '../../ui/Skeleton.svelte';
   import QuestionCard from './QuestionCard.svelte';
   import NewQuestionModal from './NewQuestionModal.svelte';
-  import { ApiError } from '../../../lib/api';
+  import { ApiError, failureText } from '../../../lib/api';
   import { QuizEdits, WAIT_TITLE } from '../../../lib/quizEdits.svelte';
   import { InPlaceAsk, firstUsable, focusAfter, settleTo, withdraw, type Ask } from '../../../lib/askInPlace.svelte';
   import { QUIZ_CTX, type QuizCtx } from '../../../lib/quizContext';
@@ -109,7 +109,8 @@
       if (my === loadToken && live()) questions = sorted(list);
     } catch {
       if (my === loadToken && live()) {
-        pushToast("Couldn't reload the questions — reload the page to see the latest.", 'error');
+        // A secondary notice under the write's own error toast.
+        pushToast("Couldn't reload the questions — reload the page to see the latest.", 'info');
       }
     }
   }
@@ -125,7 +126,7 @@
         if (a === null || a === document.body) void focusFallback(qid);
       });
     }
-    return e instanceof ApiError ? e.displayMessage : 'Save failed';
+    return failureText(e, 'Save failed');
   }
 
   function fallbackTarget(qid: number | null): HTMLElement | null {
@@ -285,6 +286,14 @@
     const a = await cardAsk.ask(q);                 // … then the delete question (#12)
     if (a === 'cancel') { void focusAfter(back); return; }
     if (a !== 'confirm') return;
+    // R49: an edit opened while it asked closes first; a changed one asks D10 in place of this question.
+    if (edits.active && !edits.locked) {
+      const gaveWay = edits.dirty;
+      if (gaveWay && cardAsk.current === q) cardAsk.dismiss();
+      if (!(await edits.requestStructure())) return;
+      // The D10 question took focus with it: back to the trash, never <body>.
+      if (gaveWay) await focusAfter(back);
+    }
     // R49: re-checked, and the index recomputed, after the question.
     idx = questions.findIndex((x) => x.id === qid);
     if (quizLock || busyQuestions.has(qid) || !live() || idx < 0 || !perms.canEditStructure) {

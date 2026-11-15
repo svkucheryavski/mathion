@@ -4,6 +4,7 @@ import VersionSettingsModal from '../components/editor/VersionSettingsModal.svel
 import { createDirtyRegistry, DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../lib/dirtyRegistry.svelte';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
 import type { AdminTreeVersion } from '../lib/types';
+import { PageAsk, PAGE_ASK_KEY } from '../lib/askInPlace.svelte';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -169,6 +170,13 @@ describe('VersionSettingsModal (Slice-5c T5, D12)', () => {
     await settle();
     expect(patches()).toEqual([['/api/versions/1', { label: 'L2', info_md: 'More' }]]);
   });
+  it('Safari\'s IME-commit Enter (keyCode 229) in Label does not save (VR-B)', async () => {
+    render();
+    type(input('Label'), 'L2');
+    input('Label').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, isComposing: false, bubbles: true, cancelable: true }));
+    await settle();
+    expect(patches()).toEqual([]);
+  });
   it('Enter in an out-of-range attempts field shows the error and sends nothing', async () => {
     render();
     type(input('Max quiz attempts'), '0');
@@ -233,5 +241,207 @@ describe('VersionSettingsModal (Slice-5c T5, D12)', () => {
     expect([...panel().querySelectorAll('dd')].map((d) => d.textContent)).toEqual(['Not set', 'Not set', '3']);
     // Muted, as the old card's placeholder, so it doesn't read as a real value.
     expect([...panel().querySelectorAll('dd .not-set')].map((x) => x.textContent)).toEqual(['Not set', 'Not set']);
+  });
+});
+
+describe('VersionSettingsModal — backlog round (VR-B)', () => {
+  it('the leave guard does not ask while a Save runs', async () => {
+    let release!: () => void;
+    fetchSpy.mockImplementation((_u: string, i?: RequestInit) => (i?.method === 'PATCH'
+      ? new Promise<void>((r) => { release = r; }).then(() => jres(mkVersion()))
+      : jres({ course: { id: 1, name: 'C', slug: 'c' }, version: mkVersion(), blocks: [] })));
+    render();
+    type(input('Label'), 'L2');
+    expect(registry.isAnyDirty()).toBe(true);
+    footBtn('Save')!.click(); await settle();
+    expect(registry.isAnyDirty()).toBe(false);
+    release(); await settle();
+  });
+  for (const status of [403, 409]) {
+    it(`a Save ${status} reloads the tree and shows the message`, async () => {
+      fetchSpy.mockImplementation((_u: string, i?: RequestInit) => (i?.method === 'PATCH'
+        ? jres({ detail: 'Only a created version can change its info' }, status)
+        : jres({ course: { id: 1, name: 'C', slug: 'c' }, version: mkVersion({ state: 'published' }), blocks: [] })));
+      render();
+      type(input('Label'), 'L2');
+      footBtn('Save')!.click(); await settle();
+      expect(reloads()).toBe(1);
+      expect(panel().querySelector('[role="alert"]')!.textContent).toBe('Only a created version can change its info');
+    });
+  }
+  it('a refused Save keeps its message once the modal turns read-only', async () => {
+    fetchSpy.mockImplementation((_u: string, i?: RequestInit) => (i?.method === 'PATCH' ? jres({ detail: 'No' }, 409) : jres({})));
+    target = document.createElement('div'); document.body.appendChild(target);
+    registry = createDirtyRegistry();
+    const props = $state({ vid: 1, version: mkVersion(), editable: true, stillOnVid: () => false, onClose: vi.fn() });
+    cmp = mount(VersionSettingsModal, { target, props, context: new Map([[DIRTY_REGISTRY_KEY, registry]]) });
+    flushSync(); await settle();
+    type(input('Label'), 'L2');
+    footBtn('Save')!.click(); await settle();
+    props.version = mkVersion({ state: 'published' }); props.editable = false;
+    flushSync(); await settle();
+    expect(panel().querySelector('dl.ro')).not.toBeNull();
+    expect(panel().querySelector('[role="alert"]')?.textContent).toBe('No');
+  });
+  it('an offline Save error does not follow the modal into read-only (whole-branch review)', async () => {
+    fetchSpy.mockImplementation((_u: string, i?: RequestInit) => (i?.method === 'PATCH' ? Promise.reject(new TypeError('Failed to fetch')) : jres({})));
+    target = document.createElement('div'); document.body.appendChild(target);
+    registry = createDirtyRegistry();
+    const props = $state({ vid: 1, version: mkVersion(), editable: true, stillOnVid: () => true, onClose: vi.fn() });
+    cmp = mount(VersionSettingsModal, { target, props, context: new Map([[DIRTY_REGISTRY_KEY, registry]]) });
+    flushSync(); await settle();
+    type(input('Label'), 'L2');
+    footBtn('Save')!.click(); await settle();
+    expect(panel().querySelector('[role="alert"]')?.textContent).toBe('Could not reach server. Check your connection.');
+    props.version = mkVersion({ state: 'published' }); props.editable = false;
+    flushSync(); await settle();
+    expect(panel().querySelector('dl.ro')).not.toBeNull();
+    expect(panel().querySelector('[role="alert"]')).toBeNull();
+  });
+  it('a 409 Save then an offline Save: the flip to read-only clears the offline error (fix-pass review)', async () => {
+    let n = 0;
+    fetchSpy.mockImplementation((_u: string, i?: RequestInit) => {
+      if (i?.method !== 'PATCH') return jres({});
+      n += 1;
+      return n === 1 ? jres({ detail: 'Changed' }, 409) : Promise.reject(new TypeError('Failed to fetch'));
+    });
+    target = document.createElement('div'); document.body.appendChild(target);
+    registry = createDirtyRegistry();
+    const props = $state({ vid: 1, version: mkVersion(), editable: true, stillOnVid: () => false, onClose: vi.fn() });
+    cmp = mount(VersionSettingsModal, { target, props, context: new Map([[DIRTY_REGISTRY_KEY, registry]]) });
+    flushSync(); await settle();
+    type(input('Label'), 'L2');
+    footBtn('Save')!.click(); await settle();
+    expect(panel().querySelector('[role="alert"]')?.textContent).toBe('Changed');
+    footBtn('Save')!.click(); await settle();
+    expect(panel().querySelector('[role="alert"]')?.textContent).toBe('Could not reach server. Check your connection.');
+    props.version = mkVersion({ state: 'published' }); props.editable = false;
+    flushSync(); await settle();
+    expect(panel().querySelector('dl.ro')).not.toBeNull();
+    expect(panel().querySelector('[role="alert"]')).toBeNull();
+  });
+  it('a Save 422 does not reload', async () => {
+    fetchSpy.mockImplementation((_u: string, i?: RequestInit) => (i?.method === 'PATCH' ? jres({ detail: 'Bad' }, 422) : jres({})));
+    render();
+    type(input('Label'), 'L2');
+    footBtn('Save')!.click(); await settle();
+    expect(reloads()).toBe(0);
+  });
+  it('a Save 403 after a version change does not reload', async () => {
+    fetchSpy.mockImplementation((_u: string, i?: RequestInit) => (i?.method === 'PATCH' ? jres({ detail: 'No' }, 403) : jres({})));
+    render({ stillOnVid: () => false });
+    type(input('Label'), 'L2');
+    footBtn('Save')!.click(); await settle();
+    expect(reloads()).toBe(0);
+  });
+  it('an offline Save says OFFLINE_MESSAGE', async () => {
+    fetchSpy.mockImplementation((_u: string, i?: RequestInit) => (i?.method === 'PATCH' ? Promise.reject(new TypeError('Failed to fetch')) : jres({})));
+    render();
+    type(input('Label'), 'L2');
+    footBtn('Save')!.click(); await settle();
+    expect(panel().querySelector('[role="alert"]')!.textContent).toBe('Could not reach server. Check your connection.');
+  });
+  it('a read-only modal shows the reason', () => {
+    render({ editable: false, version: mkVersion({ state: 'published' }) });
+    expect(panel().querySelector('.reason')!.textContent).toBe('Only a created version can change its info');
+  });
+  it('an editable modal shows no reason', () => {
+    render();
+    expect(panel().querySelector('.reason')).toBeNull();
+  });
+  it('a blank label and bad attempts show both errors on one Save', async () => {
+    render();
+    type(input('Label'), '');
+    type(input('Max quiz attempts'), '0');
+    footBtn('Save')!.click(); await settle();
+    expect(panel().querySelectorAll('small.field-err').length).toBe(2);
+    expect(input('Label').getAttribute('aria-invalid')).toBe('true');
+    expect(input('Max quiz attempts').getAttribute('aria-invalid')).toBe('true');
+    expect(patches()).toEqual([]);
+  });
+  for (const [name, fail, msg] of [
+    ['a 403 with its reason', () => jres({ detail: 'Only a created version can change its info' }, 403), 'Only a created version can change its info'],
+    ['an offline Save', () => Promise.reject(new TypeError('Failed to fetch')), 'Could not reach server. Check your connection.'],
+  ] as const) {
+    it(`${name} that fails after the modal closed toasts its message`, async () => {
+      let reject!: () => void;
+      fetchSpy.mockImplementation((_u: string, i?: RequestInit) => (i?.method === 'PATCH'
+        ? new Promise<void>((r) => { reject = r; }).then(fail)
+        : jres({ course: { id: 1, name: 'C', slug: 'c' }, version: mkVersion(), blocks: [] })));
+      render();
+      type(input('Label'), 'L2');
+      footBtn('Save')!.click(); await settle();
+      unmount(cmp!); cmp = null;
+      reject(); await settle();
+      expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([[msg, 'error']]);
+    });
+  }
+  it('a flip to read-only gives a lost focus to the modal\'s ×', async () => {
+    target = document.createElement('div'); document.body.appendChild(target);
+    registry = createDirtyRegistry();
+    const props = $state({ vid: 1, version: mkVersion(), editable: true, stillOnVid: () => true, onClose: vi.fn() });
+    cmp = mount(VersionSettingsModal, { target, props, context: new Map([[DIRTY_REGISTRY_KEY, registry]]) });
+    flushSync(); await settle();                     // the mount's autofocus has run
+    expect(footBtn('Discard')).toBeDefined();
+    input('Label').focus();
+    input('Label').blur();                          // a browser drops focus to <body> when the form goes
+    props.version = mkVersion({ state: 'published' }); props.editable = false;
+    flushSync(); await settle();
+    expect(document.activeElement).toBe(panel().querySelector('header.modal-head button[aria-label="Close"]'));
+  });
+  it('a flip to read-only under the modal\'s own question withdraws it, so × closes', async () => {
+    target = document.createElement('div'); document.body.appendChild(target);
+    registry = createDirtyRegistry();
+    const props = $state({ vid: 1, version: mkVersion(), editable: true, stillOnVid: () => true, onClose: vi.fn() });
+    cmp = mount(VersionSettingsModal, { target, props, context: new Map([[DIRTY_REGISTRY_KEY, registry]]) });
+    flushSync(); await settle();
+    type(input('Label'), 'L2');
+    const close = () => panel().querySelector<HTMLButtonElement>('header.modal-head button[aria-label="Close"]')!;
+    close().click(); await settle();
+    expect(panel().querySelector('.inline-confirm')).not.toBeNull();
+    props.version = mkVersion({ state: 'published' }); props.editable = false;
+    flushSync(); await settle();
+    close().click(); await settle();
+    expect(props.onClose).toHaveBeenCalledTimes(1);
+  });
+  it('a Save that fails after a flip to read-only gives focus to ×', async () => {
+    let reject!: () => void;
+    fetchSpy.mockImplementation((_u: string, i?: RequestInit) => (i?.method === 'PATCH'
+      ? new Promise<void>((r) => { reject = r; }).then(() => jres({ detail: 'No' }, 409))
+      : jres({})));
+    target = document.createElement('div'); document.body.appendChild(target);
+    registry = createDirtyRegistry();
+    const props = $state({ vid: 1, version: mkVersion(), editable: true, stillOnVid: () => false, onClose: vi.fn() });
+    cmp = mount(VersionSettingsModal, { target, props, context: new Map([[DIRTY_REGISTRY_KEY, registry]]) });
+    flushSync(); await settle();
+    type(input('Label'), 'L2');
+    footBtn('Save')!.focus();
+    footBtn('Save')!.click(); await settle();
+    props.version = mkVersion({ state: 'published' }); props.editable = false;
+    flushSync(); await settle();
+    // A browser drops focus to <body> with the footer (jsdom keeps it on the removed button).
+    const tmp = document.createElement('input'); panel().appendChild(tmp); tmp.focus(); tmp.remove();
+    reject(); await settle();
+    expect(document.activeElement).toBe(panel().querySelector('header.modal-head button[aria-label="Close"]'));
+  });
+  it('a flip to read-only under the page question keeps focus on its Cancel', async () => {
+    target = document.createElement('div'); document.body.appendChild(target);
+    registry = createDirtyRegistry();
+    const pageAsk = new PageAsk();
+    const props = $state({ vid: 1, version: mkVersion(), editable: true, stillOnVid: () => true, onClose: vi.fn() });
+    cmp = mount(VersionSettingsModal, { target, props,
+      context: new Map<unknown, unknown>([[DIRTY_REGISTRY_KEY, registry], [PAGE_ASK_KEY, pageAsk]]) });
+    flushSync(); await settle();
+    type(input('Label'), 'L2');
+    void pageAsk.guard().promise;
+    flushSync(); await settle();
+    const cancel = () => panel().querySelector<HTMLButtonElement>('.inline-confirm button.cancel');
+    expect(cancel()).not.toBeNull();
+    cancel()!.focus();
+    props.version = mkVersion({ state: 'published' }); props.editable = false;
+    flushSync(); await settle();
+    expect(pageAsk.ask.open).toBe(true);
+    expect(document.activeElement).toBe(cancel());
+    pageAsk.ask.dismiss();
   });
 });

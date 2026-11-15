@@ -9,7 +9,7 @@
   // Canonical Svelte 5 form: `$bindable()` without a type argument; the
   // prop type `value: ItemType` constrains it. Every call site
   // (NewItemModal) binds `value`, so no default is needed.
-  let { value = $bindable() }: { value: ItemType } = $props();
+  let { value = $bindable(), disabled = false }: { value: ItemType; disabled?: boolean } = $props();
 
   const TYPES: { value: ItemType; label: string }[] = [
     { value: 'static_page', label: 'Page' },
@@ -19,7 +19,7 @@
   ];
 </script>
 
-<fieldset class="type-picker">
+<fieldset class="type-picker" {disabled}>
   <legend>Item type</legend>
   <div class="cards">
     {#each TYPES as t (t.value)}
@@ -51,6 +51,7 @@
     cursor: pointer;
   }
   label.selected { border-color: var(--primary); background: var(--primary-soft); }
+  .type-picker:disabled label { cursor: default; }
   /* D12 exception — the established sr-only-radio focus idiom (Login .segment,
      quiz .opt): --primary is visible on both --surface and --primary-soft. */
   label:has(input:focus-visible) { box-shadow: inset 0 0 0 2px var(--primary); }

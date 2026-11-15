@@ -12,12 +12,13 @@
   export type Readiness = { checks: ReadinessRow[] };
   export type PublishOutcome = 'published' | 'conflicts' | 'failed';
   export type UnpublishOutcome = 'unpublished' | 'draft-now' | 'failed';
-  export type DeleteOutcome = { kind: 'deleted' } | { kind: 'published-now' } | { kind: 'failed'; message: string };
+  // quiet: another caller of the same delete reports this failure.
+  export type DeleteOutcome = { kind: 'deleted' } | { kind: 'published-now' } | { kind: 'failed'; message: string; quiet?: boolean };
 </script>
 
 
 <script lang="ts">
-  import { tick, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import { ApiError, OFFLINE_MESSAGE } from '../../lib/api';
   import { updateRun } from '../../lib/runs';
   import { formatShortDate } from '../../lib/datetime';
@@ -56,10 +57,11 @@
     onNavigateTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster', prefilter?: 'unassigned' | null) => void;
     onPublish: () => Promise<PublishOutcome>;
     onUnpublish: () => Promise<UnpublishOutcome>;
-    onDeleteRun: () => Promise<DeleteOutcome>;
+    onDeleteRun: (isAlive?: () => boolean) => Promise<DeleteOutcome>;
   } = $props();
 
   const uid = $props.id();
+  // Overview's own wait sentence (call 16).
   const WAIT = 'Wait for the current change to save';
   // Run details: the row label, the field's name, and its noun for the titles.
   const FIELDS: { key: Field; label: string; name: string; noun: string; type: 'text' | 'date'; action: string }[] = [
@@ -75,6 +77,8 @@
   // An open field is not a write.
   let localWrite = $state(false);
   const runWrite = $derived(localWrite || publishing);
+  let alive = true;
+  onDestroy(() => { alive = false; });
   const editEls: Partial<Record<Field, HTMLButtonElement>> = $state({});
 
   let unpublishConfirmOpen = $state(false);
@@ -134,9 +138,8 @@
 
   // InlineName shows a rejection under the field, so this only rethrows.
   async function saveField(field: Field, value: string): Promise<void> {
-    // R32: an open field is not a write, so the switch stays live; its ✓ /
-    // Enter must wait for the switch's request (the reason shows under it).
-    if (runWrite) throw new Error(WAIT);
+    // R32: one write at a time; InlineName's `wait` hint stops ✓ / Enter first.
+    if (runWrite) return;
     localWrite = true;
     const updated = await updateRun(run.id, { [field]: value } as RunUpdateRequest)
       .finally(() => { localWrite = false; });
@@ -201,11 +204,13 @@
   }
 
   function toggleDelete() {
+    // R44: aria-disabled while a write runs, so it does nothing, closing included.
+    if (runWrite) return;
     if (deleteOpen) {
       void cancelDelete();
       return;
     }
-    if (runWrite || run.is_published) return;
+    if (run.is_published) return;
     deleteError = null;
     deleteOpen = true;
   }
@@ -224,12 +229,19 @@
     localWrite = true;
     deleteBusy = true;
     deleteError = null;
-    const outcome = await onDeleteRun().finally(() => {
+    const outcome = await onDeleteRun(() => alive).finally(() => {
       localWrite = false;
       deleteBusy = false;
     });
     if (outcome.kind === 'failed') {
-      deleteError = outcome.message;
+      // Left the Overview meanwhile: its card is gone, so the failure toasts.
+      if (!alive) {
+        if (outcome.quiet) return;
+        const m = outcome.message;
+        // The page's own sentences (offline, the fallback) stand as they are.
+        pushToast(m === OFFLINE_MESSAGE || m.startsWith('Could not delete') ? m : `Could not delete the run: ${m}`, 'error');
+      }
+      else deleteError = outcome.message;
     } else if (outcome.kind === 'published-now') {
       deleteOpen = false;
       await tick();
@@ -257,6 +269,7 @@
                   maxlength={f.key === 'title' ? 200 : undefined}
                   saveTitle="Save {f.name.toLowerCase()}"
                   emptyTitle={f.type === 'date' ? 'Choose a date' : undefined}
+                  wait={runWrite ? WAIT : null}
                   onSave={(v) => saveField(f.key, v)}
                   onCancel={() => cancelField(f.key)}
                 />
@@ -355,6 +368,8 @@
             warning="Students lose access immediately; their progress is kept."
             confirmLabel="Unpublish"
             confirmDataAction="confirm-unpublish"
+            busy={publishing}
+            disabledReason={runWrite && !publishing ? WAIT : undefined}
             onConfirm={() => void confirmUnpublish()}
             onCancel={() => void cancelUnpublish()}
           />

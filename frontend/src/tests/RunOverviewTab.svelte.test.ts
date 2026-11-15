@@ -190,7 +190,7 @@ describe('Run details (10a, R31, R32)', () => {
     unmount(cmp);
   });
 
-  it('a 422 field list shows "Please correct the highlighted fields." and the field stays open (Review Focus 2)', async () => {
+  it('a 422 field list shows its first msg and the field stays open (Review Focus 2)', async () => {
     fetchSpy.mockImplementation(() =>
       jres({ detail: [{ loc: ['body', 'title'], msg: 'String too long', type: 'value_error' }] }, 422));
     const { target, cmp } = mountOverview();
@@ -200,7 +200,7 @@ describe('Run details (10a, R31, R32)', () => {
     key(field(target)!, 'Enter');
     await settle();
     expect(field(target)).not.toBeNull();
-    expect(target.querySelector('p.in-err')?.textContent).toBe('Please correct the highlighted fields.');
+    expect(target.querySelector('p.in-err')?.textContent).toBe('String too long');
     expect(pushToast).not.toHaveBeenCalled();
     unmount(cmp);
   });
@@ -275,10 +275,14 @@ describe('Run details (10a, R31, R32)', () => {
     key(field(target)!, 'Enter');
     await settle();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(target.querySelector('p.in-err')?.textContent).toBe('Wait for the current change to save');
+    // Call 16: a neutral hint, not an error; it clears when the switch settles.
+    expect(target.querySelector('p.in-hint')?.textContent).toBe('Wait for the current change to save');
+    expect(target.querySelector('p.in-err')).toBeNull();
+    expect(field(target)!.getAttribute('aria-invalid')).toBeNull();
     expect(document.activeElement).toBe(field(target));
     toggle.release(okRes(makeRun({ groups_enabled: true })));
     await settle();
+    expect(target.querySelector('p.in-hint')).toBeNull();
     fetchSpy.mockImplementationOnce(() => jres(makeRun({ title: 'Summer', groups_enabled: true })));
     key(field(target)!, 'Enter');
     await settle();
@@ -452,6 +456,68 @@ describe('R32 across the run writes', () => {
     expect(target.querySelector('button[data-action="confirm-unpublish"]')).toBeNull();
     save.release(okRes(makeRun({ title: 'Summer', is_published: true })));
     await settle();
+    unmount(cmp);
+  });
+
+  it("the Unpublish confirm's button gives the wait reason during a field save", async () => {
+    const { target, cmp, props } = mountOverview({ run: { is_published: true } });
+    (target.querySelector('button[data-action="unpublish"]') as HTMLButtonElement).click();
+    flushSync();
+    const save = await startTitleSave(target);
+    const confirm = target.querySelector('button[data-action="confirm-unpublish"]') as HTMLButtonElement;
+    expect(confirm.getAttribute('aria-disabled')).toBe('true');
+    expect(confirm.title).toBe(WAIT);
+    confirm.click();
+    await settle();
+    expect(props.onUnpublish).not.toHaveBeenCalled();
+    save.release(okRes(makeRun({ title: 'Summer', is_published: true })));
+    await settle();
+    expect(confirm.getAttribute('aria-disabled')).toBeNull();
+    expect(confirm.title).toBe('');
+    unmount(cmp);
+  });
+
+  it('Cancel on the Unpublish confirm still works during a field save', async () => {
+    const { target, cmp } = mountOverview({ run: { is_published: true } });
+    (target.querySelector('button[data-action="unpublish"]') as HTMLButtonElement).click();
+    flushSync();
+    const save = await startTitleSave(target);
+    const cancel = target.querySelector('.ov-foot .inline-confirm button.cancel') as HTMLButtonElement;
+    cancel.click();
+    await settle();
+    expect(target.querySelector('button[data-action="confirm-unpublish"]')).toBeNull();
+    save.release(okRes(makeRun({ title: 'Summer', is_published: true })));
+    await settle();
+    unmount(cmp);
+  });
+
+  it('the Unpublish confirm is busy while the page unpublishes', async () => {
+    const { target, cmp, props } = mountOverview({ run: { is_published: true } });
+    (target.querySelector('button[data-action="unpublish"]') as HTMLButtonElement).click();
+    flushSync();
+    props.publishing = true;
+    flushSync();
+    const confirm = target.querySelector('button[data-action="confirm-unpublish"]') as HTMLButtonElement;
+    expect(confirm.getAttribute('aria-busy')).toBe('true');
+    expect(confirm.title).toBe('Wait for the request to finish');
+    unmount(cmp);
+  });
+
+  it('🗑 does not close the panel while a write runs', async () => {
+    const { target, cmp } = mountOverview();
+    const trash = target.querySelector('button[data-action="delete-run"]') as HTMLButtonElement;
+    trash.click();
+    flushSync();
+    expect(target.querySelector('.danger-confirm')).not.toBeNull();
+    const save = await startTitleSave(target);
+    trash.click();
+    flushSync();
+    expect(target.querySelector('.danger-confirm')).not.toBeNull();
+    save.release(okRes(makeRun({ title: 'Summer' })));
+    await settle();
+    trash.click();
+    await settle();
+    expect(target.querySelector('.danger-confirm')).toBeNull();
     unmount(cmp);
   });
 

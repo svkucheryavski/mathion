@@ -160,3 +160,64 @@ describe('parseCsv — validation, duplicates, already-enrolled, willCreateGroup
     if (r.ok) expect(r.willCreateGroups).toEqual(['Beta']);
   });
 });
+
+describe('parseCsv — paste quirks (slice 6b backlog)', () => {
+  it('an e-mail-first paste whose first row has a blank e-mail stays e-mail-first', () => {
+    const r = parseCsv('\tG1\nb@x.com\tG2', [], []);
+    if (!r.ok) throw new Error('expected ok');
+    expect(r.rows.map((x) => x.parsed)).toEqual([
+      { name: null, email: '', group: 'G1' },
+      { name: null, email: 'b@x.com', group: 'G2' },
+    ]);
+    expect(r.rows[1].valid).toBe(true);
+  });
+
+  it('a line that is just a comma is skipped', () => {
+    const r = parseCsv('a@x.com,G1\n,\nb@x.com,G2', [], []);
+    if (!r.ok) throw new Error('expected ok');
+    expect(r.rows.map((x) => x.parsed.email)).toEqual(['a@x.com', 'b@x.com']);
+    expect(r.invalidCount).toBe(0);
+  });
+
+  it('an e-mail-first row with an empty middle cell keeps its group', () => {
+    const r = parseCsv('a@x.com\t\tG1', [], []);
+    if (!r.ok) throw new Error('expected ok');
+    expect(r.rows[0].parsed).toEqual({ name: null, email: 'a@x.com', group: 'G1' });
+  });
+});
+
+describe('parseCsv — paste quirks, review r1', () => {
+  it('a name-first paste whose first row has a blank name stays name-first', () => {
+    const r = parseCsv('\ta@x.com\nb@x.com', [], []);
+    if (!r.ok) throw new Error('expected ok');
+    expect(r.rows.map((x) => x.parsed.email)).toEqual(['a@x.com', 'b@x.com']);
+    expect(r.validCount).toBe(2);
+  });
+
+  it('a header paste whose data lines are only delimiters reads as a header-only paste', () => {
+    expect(parseCsv('email,group\n,', [], [])).toEqual(parseCsv('email,group', [], []));
+  });
+});
+
+describe('parseCsv — paste quirks, the group column', () => {
+  it('when any row has a group in cell 2, cell 2 is the group column for the whole paste', () => {
+    const r = parseCsv('a@x.com\t\tG1\tX\nb@x.com\tG2\t12345', [], []);
+    if (!r.ok) throw new Error('expected ok');
+    expect(r.rows.map((x) => x.parsed.group)).toEqual([null, 'G2']);
+  });
+});
+
+describe('parseCsv — paste quirks, review r5', () => {
+  it('a later row with an empty group cell does not take a third column as its group', () => {
+    const r = parseCsv('a@x.com,G1,1001\nb@x.com,,1002', [], []);
+    if (!r.ok) throw new Error('expected ok');
+    expect(r.rows.map((x) => x.parsed.group)).toEqual(['G1', null]);
+    expect(r.willCreateGroups).toEqual(['G1']);
+  });
+
+  it('a comma paste with an empty trailing column keeps the group after an empty middle', () => {
+    const r = parseCsv('a@x.com,,G1,', [], []);
+    if (!r.ok) throw new Error('expected ok');
+    expect(r.rows[0].parsed.group).toBe('G1');
+  });
+});

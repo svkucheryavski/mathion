@@ -10,6 +10,7 @@
   import Button from '../ui/Button.svelte';
   import SortMark from '../ui/SortMark.svelte';
   import DashboardSidePanel from './DashboardSidePanel.svelte';
+  import { loadFailureText as loadText } from '../../lib/api';
 
   let {
     runId,
@@ -60,7 +61,7 @@
       .then((res) => { data = res; loading = false; })
       .catch((err) => {
         if (err.name === 'AbortError') return;
-        error = String(err?.message ?? err);
+        error = loadText(err);
         loading = false;
       });
     return () => ctl.abort();             // closes over THIS controller, not the latest one
@@ -80,7 +81,7 @@
       .then((res) => { data = res; loading = false; })
       .catch((err) => {
         if (err.name === 'AbortError') return;
-        error = String(err?.message ?? err);
+        error = loadText(err);
         loading = false;
       });
   }
@@ -571,7 +572,6 @@
     z-index: 2;
   }
   tbody .sticky-name, tbody .sticky-group { padding: 6px 12px; font-size: 13px; font-weight: 400; color: var(--text); }
-  .block-header, .seq-header { position: sticky; top: 0; z-index: 1; }
   .block-row .sticky-name, .block-row .sticky-group { top: 0; z-index: 3; }
   /* Qualified by .progress-grid so these outrank `.progress-grid thead th`
      and `.progress-grid th` (padding 0) above. */

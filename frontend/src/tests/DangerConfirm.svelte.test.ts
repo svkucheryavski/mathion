@@ -192,3 +192,36 @@ describe('DangerConfirm after a request (R45)', () => {
     expect(document.activeElement).toBe(force);
   });
 });
+
+describe('DangerConfirm — opened busy (fix-pass review r6)', () => {
+  it('a panel opened while busy focuses its box once busy clears, if focus is free', async () => {
+    const props = $state({ message: createRawSnippet(() => ({ render: () => '<span>m</span>' })), onConfirm: vi.fn(), onCancel: vi.fn(), busy: true });
+    const target = document.body.appendChild(document.createElement('div'));
+    const cmp = mount(DangerConfirm, { target, props });
+    flushSync();
+    const box = target.querySelector('input[data-role="danger-ack"]') as HTMLInputElement;
+    expect(document.activeElement).not.toBe(box);
+    props.busy = false;
+    flushSync();
+    await Promise.resolve(); await Promise.resolve();
+    expect(document.activeElement).toBe(box);
+    unmount(cmp);
+    target.remove();
+  });
+
+  it('it leaves focus alone when the user moved it meanwhile', async () => {
+    const props = $state({ message: createRawSnippet(() => ({ render: () => '<span>m</span>' })), onConfirm: vi.fn(), onCancel: vi.fn(), busy: true });
+    const target = document.body.appendChild(document.createElement('div'));
+    const cmp = mount(DangerConfirm, { target, props });
+    flushSync();
+    const elsewhere = document.body.appendChild(document.createElement('input'));
+    elsewhere.focus();
+    props.busy = false;
+    flushSync();
+    await Promise.resolve(); await Promise.resolve();
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+    unmount(cmp);
+    target.remove();
+  });
+});

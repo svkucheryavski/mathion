@@ -32,7 +32,8 @@ function normalize(text: string): string[] {
     // Trim the end only: a leading tab is an empty first cell (a sheet row with
     // no name). The cells are trimmed one by one after the split.
     .map((l) => l.replace(/\s+$/, ''))
-    .filter((l) => l.trim().length > 0);
+    // A line of only delimiters (a bare `,`) is blank too.
+    .filter((l) => l.replace(/[,\t]/g, '').trim().length > 0);
 }
 
 function detectDelimiter(line: string): ',' | '\t' {
@@ -76,11 +77,18 @@ export function parseCsv(
   const hasHeader = header !== null;
   const dataRows = hasHeader ? split.slice(1) : split;
 
-  // Positional fallback: peek first row to decide [email, group?] vs [name, email, group?]
+  // Positional fallback: [email, group?] vs [name, email, group?]. A first row with
+  // a blank first cell and an e-mail second is a blank name; otherwise the first
+  // row with a first cell decides.
   let positional: 'email-first' | 'name-first' = 'name-first';
   if (!hasHeader && dataRows.length > 0) {
-    positional = EMAIL_RE.test(dataRows[0][0] || '') ? 'email-first' : 'name-first';
+    const r0 = dataRows[0];
+    const first = r0[0] || EMAIL_RE.test(r0[1] || '') ? r0 : dataRows.find((r) => (r[0] || '') !== '');
+    if (first && EMAIL_RE.test(first[0] || '')) positional = 'email-first';
   }
+
+  // E-mail-first: the group is cell 3 only when cell 2 is blank on every row.
+  const groupCol = positional === 'email-first' && dataRows.every((r) => !r[1]) ? 2 : 1;
 
   // No email column → all rows blank? signal pre-row error.
   if (hasHeader && header.email !== null) {
@@ -106,7 +114,7 @@ export function parseCsv(
       if (header.group !== null) group = cells[header.group] || '';
     } else if (positional === 'email-first') {
       email = cells[0] || '';
-      group = cells[1] ?? null;
+      group = cells[groupCol] || null;
     } else {
       if (cells.length === 1) {
         // Single-cell row in name-first mode: treat the cell as email if it matches.

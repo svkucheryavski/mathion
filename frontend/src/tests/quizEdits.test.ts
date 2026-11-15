@@ -240,6 +240,13 @@ describe('InlineEdit', () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
+  it('an offline failure says OFFLINE_MESSAGE (fix-pass review)', async () => {
+    const { ed } = make({ send: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')) });
+    ed.value = 'new';
+    await ed.commit();
+    expect(ed.error).toBe('Could not reach server. Check your connection.');
+  });
+
   it('a failure stays open with the server message and the typed text', async () => {
     const { ed, close } = make({ send: vi.fn().mockRejectedValue(new ApiError(422, 'Nope')) });
     ed.value = 'new';

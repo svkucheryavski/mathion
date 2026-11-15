@@ -2,13 +2,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunGroupsTab from '../components/runs/RunGroupsTab.svelte';
 import type { Course } from '../lib/types';
-import { toasts } from '../stores/toasts.svelte';
+import { toasts, clearToasts } from '../stores/toasts.svelte';
 
 const baseCourse: Course = { id: 1, slug: 'c', name: 'C', description: '', is_admin: true };
 
 const fetchSpy = vi.fn();
 
 beforeEach(() => {
+  clearToasts();
   fetchSpy.mockReset();
   (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
   document.body.innerHTML = '';
@@ -108,6 +109,25 @@ describe('RunGroupsTab', () => {
     const again = target.querySelector('input[aria-label="New group name"]') as HTMLInputElement;
     expect(again.value).toBe('');
     expect(document.activeElement).toBe(again);
+    unmount(cmp);
+  });
+
+  it('addGroup: a failed refetch after create clears the field and toasts Created (refresh failed — reload to see latest)', async () => {
+    fetchSpy.mockImplementation(() => jres({ id: 5, name: 'Alpha' }, 201));
+    const refetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    const { target, cmp } = mountTab({ onRefetchGroups: refetch });
+    await settle();
+    byAction(target, 'toggle-add-group')[0]!.click();
+    flushSync();
+    const input = target.querySelector('input[aria-label="New group name"]') as HTMLInputElement;
+    type(input, 'Alpha');
+    key(input, 'Enter');
+    await settle();
+    expect(refetch).toHaveBeenCalled();
+    const again = target.querySelector('input[aria-label="New group name"]') as HTMLInputElement;
+    expect(again.value).toBe('');
+    expect(target.querySelector('.in-err')).toBeNull();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toContainEqual(['Created (refresh failed — reload to see latest)', 'info']);
     unmount(cmp);
   });
 
@@ -406,6 +426,193 @@ describe('RunGroupsTab — offline failures', () => {
     (target.querySelector('button[data-action="confirm-delete-group"]') as HTMLButtonElement).click();
     await settle();
     expect(toasts.list.map((t) => t.message)).toContain('Could not reach server. Check your connection.');
+    unmount(cmp);
+  });
+});
+
+// Whole-branch review fix pass.
+describe('RunGroupsTab — delete and rename (whole-branch review)', () => {
+  const trash = (root: HTMLElement, name: string) =>
+    root.querySelector(`button[aria-label="Delete group ${name}"]`) as HTMLButtonElement;
+
+  it('the delete confirm shows busy; Cancel and the other trash buttons wait', async () => {
+    let finish: (r: Response) => void = () => {};
+    fetchSpy.mockImplementation(() => new Promise<Response>((r) => { finish = r; }));
+    const { target, cmp } = mountTab({ groups: [group(1, 'Alpha'), group(2, 'Beta')] });
+    await settle();
+    trash(target, 'Alpha').click();
+    await settle();
+    byAction(target, 'confirm-delete-group')[0]!.click();
+    await settle();
+    expect(byAction(target, 'confirm-delete-group')[0]!.getAttribute('aria-busy')).toBe('true');
+    (target.querySelector('.inline-confirm .cancel') as HTMLButtonElement).click();
+    await settle();
+    expect(byAction(target, 'confirm-delete-group')).toHaveLength(1);
+    expect(trash(target, 'Beta').getAttribute('aria-disabled')).toBe('true');
+    expect(trash(target, 'Beta').getAttribute('title')).toBe('Wait for the current change to finish');
+    trash(target, 'Beta').click();
+    await settle();
+    expect(target.querySelector('button[aria-label="Delete group Alpha"]')).toBeNull();
+    finish({ ok: false, status: 500, json: () => Promise.resolve({ detail: 'Boom' }), headers: new Headers({ 'content-type': 'application/json' }) } as unknown as Response);
+    await settle();
+    expect(document.activeElement).toBe(trash(target, 'Alpha'));
+    expect(trash(target, 'Beta').hasAttribute('aria-disabled')).toBe(false);
+    unmount(cmp);
+  });
+
+  it('a delete whose refetch fails toasts Deleted (refresh failed — reload to see latest) and moves focus on', async () => {
+    fetchSpy.mockImplementation(() => jres(null, 204));
+    const refetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    const { target, cmp } = mountTab({ groups: [group(1, 'Alpha'), group(2, 'Beta')], onRefetchGroups: refetch });
+    await settle();
+    trash(target, 'Alpha').click();
+    await settle();
+    byAction(target, 'confirm-delete-group')[0]!.click();
+    await settle();
+    const msgs = toasts.list.map((t) => [t.message, t.kind]);
+    expect(msgs).toContainEqual(['Deleted (refresh failed — reload to see latest)', 'info']);
+    expect(msgs.map((m) => m[0])).not.toContain('Could not reach server. Check your connection.');
+    expect(document.activeElement).toBe(trash(target, 'Beta'));
+    unmount(cmp);
+  });
+
+  it('a rename whose refetch fails closes the field and toasts Saved (refresh failed — reload to see latest)', async () => {
+    fetchSpy.mockImplementation(() => jres(group(1, 'Gamma')));
+    const refetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    const { target, cmp } = mountTab({ groups: [group(1, 'Alpha')], onRefetchGroups: refetch });
+    await settle();
+    byAction(target, 'rename-group')[0]!.click();
+    flushSync();
+    const input = target.querySelector('input[aria-label="Group name"]') as HTMLInputElement;
+    type(input, 'Gamma');
+    key(input, 'Enter');
+    await settle();
+    expect(target.querySelector('input[aria-label="Group name"]')).toBeNull();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toContainEqual(['Saved (refresh failed — reload to see latest)', 'info']);
+    expect(document.activeElement).toBe(byAction(target, 'rename-group')[0]);
+    unmount(cmp);
+  });
+});
+
+describe('RunGroupsTab — delete (fix-pass review)', () => {
+  const trash = (root: HTMLElement, name: string) =>
+    root.querySelector(`button[aria-label="Delete group ${name}"]`) as HTMLButtonElement;
+  const conflict = (detail: string) =>
+    ({ ok: false, status: 409, json: () => Promise.resolve({ detail }), headers: new Headers({ 'content-type': 'application/json' }) } as unknown as Response);
+
+  it('the other trash buttons wait through the refetch after a 409', async () => {
+    fetchSpy.mockImplementation(() => Promise.resolve(conflict('Group has students')));
+    let done: () => void = () => {};
+    const both = vi.fn(() => new Promise<void>((r) => { done = r; }));
+    const { target, cmp } = mountTab({ groups: [group(1, 'Alpha'), group(2, 'Beta')], onRefetchGroupsAndStudents: both });
+    await settle();
+    trash(target, 'Alpha').click();
+    await settle();
+    byAction(target, 'confirm-delete-group')[0]!.click();
+    await settle();
+    expect(both).toHaveBeenCalled();
+    expect(trash(target, 'Beta').getAttribute('aria-disabled')).toBe('true');
+    done();
+    await settle();
+    expect(trash(target, 'Beta').hasAttribute('aria-disabled')).toBe(false);
+    expect(document.activeElement).toBe(trash(target, 'Alpha'));
+    unmount(cmp);
+  });
+
+  it('a 409 whose refetch fails still puts focus back on the row', async () => {
+    fetchSpy.mockImplementation(() => Promise.resolve(conflict('Group has students')));
+    const both = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    const { target, cmp } = mountTab({ groups: [group(1, 'Alpha'), group(2, 'Beta')], onRefetchGroupsAndStudents: both });
+    await settle();
+    trash(target, 'Alpha').click();
+    await settle();
+    byAction(target, 'confirm-delete-group')[0]!.click();
+    await settle();
+    expect(both).toHaveBeenCalled();
+    expect(document.activeElement).toBe(trash(target, 'Alpha'));
+    unmount(cmp);
+  });
+
+  it('the confirm stays busy while the refetch after a delete runs', async () => {
+    fetchSpy.mockImplementation(() => jres(null, 204));
+    let done: () => void = () => {};
+    const refetch = vi.fn(() => new Promise<void>((r) => { done = r; }));
+    const { target, cmp } = mountTab({ groups: [group(1, 'Alpha'), group(2, 'Beta')], onRefetchGroups: refetch });
+    await settle();
+    trash(target, 'Alpha').click();
+    await settle();
+    byAction(target, 'confirm-delete-group')[0]!.click();
+    await settle();
+    expect(refetch).toHaveBeenCalled();
+    expect(byAction(target, 'confirm-delete-group')[0]?.getAttribute('aria-busy')).toBe('true');
+    done();
+    await settle();
+    expect(byAction(target, 'confirm-delete-group')).toHaveLength(0);
+    unmount(cmp);
+  });
+
+  it('a slow delete does not pull focus from a rename field opened meanwhile', async () => {
+    let finish: (r: Response) => void = () => {};
+    fetchSpy.mockImplementation(() => new Promise<Response>((r) => { finish = r; }));
+    const { target, cmp } = mountTab({ groups: [group(1, 'Alpha'), group(2, 'Beta')] });
+    await settle();
+    trash(target, 'Alpha').click();
+    await settle();
+    byAction(target, 'confirm-delete-group')[0]!.click();
+    await settle();
+    expect(byAction(target, 'rename-group')).toHaveLength(1); // Beta's; Alpha shows its confirm
+    byAction(target, 'rename-group')[0]!.click();
+    await settle();
+    const input = target.querySelector('input[aria-label="Group name"]') as HTMLInputElement;
+    input.focus();
+    finish({ ok: true, status: 204, json: () => Promise.resolve(null), headers: new Headers() } as unknown as Response);
+    await settle();
+    expect(document.activeElement).toBe(input);
+    unmount(cmp);
+  });
+});
+
+describe('RunGroupsTab — delete (fix-pass review r2)', () => {
+  const trash = (root: HTMLElement, name: string) =>
+    root.querySelector(`button[aria-label="Delete group ${name}"]`) as HTMLButtonElement;
+
+  it('a slow delete that fails does not pull focus from where the user moved it', async () => {
+    let finish: (r: Response) => void = () => {};
+    fetchSpy.mockImplementation(() => new Promise<Response>((r) => { finish = r; }));
+    const { target, cmp } = mountTab({ groups: [group(1, 'Alpha'), group(2, 'Beta')] });
+    await settle();
+    trash(target, 'Alpha').click();
+    await settle();
+    byAction(target, 'confirm-delete-group')[0]!.click();
+    await settle();
+    const elsewhere = document.body.appendChild(document.createElement('input'));
+    elsewhere.focus();
+    finish({ ok: false, status: 500, json: () => Promise.resolve({ detail: 'Boom' }), headers: new Headers({ 'content-type': 'application/json' }) } as unknown as Response);
+    await settle();
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+    unmount(cmp);
+  });
+
+  it('the row being deleted keeps its ✎ waiting when the confirm closes mid-delete', async () => {
+    let finish: (r: Response) => void = () => {};
+    fetchSpy.mockImplementation(() => new Promise<Response>((r) => { finish = r; }));
+    const { target, cmp } = mountTab({ groups: [group(1, 'Alpha'), group(2, 'Beta')] });
+    await settle();
+    trash(target, 'Alpha').click();
+    await settle();
+    byAction(target, 'confirm-delete-group')[0]!.click();
+    await settle();
+    byAction(target, 'toggle-add-group')[0]!.click();
+    await settle();
+    const pencil = target.querySelector('button[aria-label="Rename Alpha"]') as HTMLButtonElement;
+    expect(pencil.getAttribute('aria-disabled')).toBe('true');
+    expect(pencil.getAttribute('title')).toBe('Wait for the current change to finish');
+    pencil.click();
+    await settle();
+    expect(target.querySelector('input[aria-label="Group name"]')).toBeNull();
+    finish({ ok: true, status: 204, json: () => Promise.resolve(null), headers: new Headers() } as unknown as Response);
+    await settle();
     unmount(cmp);
   });
 });

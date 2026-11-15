@@ -7,6 +7,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import TeacherRunListPage from '../pages/teaching/TeacherRunListPage.svelte';
+import TeachingCrumbs from '../components/runs/TeachingCrumbs.svelte';
+import TeachingRouteHarness from './support/TeachingRouteHarness.svelte';
 import * as router from '../lib/router.svelte';
 import { expectRoutesInApp } from './support/routeClickProbe';
 import { runStatus } from '../lib/runStatus';
@@ -497,6 +499,60 @@ describe('TeacherRunListPage', () => {
     await router.navigate('/teaching?status=bogus', { force: true });
     await settle();
     expect(buttonByText(target, /^Active/)!.getAttribute('aria-pressed')).toBe('true');
+    await router.navigate('/', { force: true });
+  });
+
+  it('the Teaching crumb keeps the status filter', async () => {
+    const up = row({ run: makeRun({ id: 3, title: 'UP_ROW', start_date: '2099-01-01', end_date: '2099-02-01' }) });
+    vi.stubGlobal('fetch', mockFetch(200, [up]));
+    await router.navigate('/teaching', { force: true });
+    component = mount(TeacherRunListPage, { target });
+    await settle();
+    buttonByText(target, /^Upcoming/)!.click();
+    await settle();
+    // Open a run: the run page's crumb goes back to the filtered list.
+    unmount(component); component = null;
+    await router.navigate('/teaching/c/runs/3');
+    const crumbHref = () => {
+      const host = document.createElement('div');
+      document.body.appendChild(host);
+      const c = mount(TeachingCrumbs, { target: host, props: { course: { slug: 'c', name: 'C' }, runTitle: 'UP_ROW' } });
+      flushSync();
+      const href = host.querySelector('a')!.getAttribute('href');
+      unmount(c); host.remove();
+      return href;
+    };
+    expect(crumbHref()).toBe('/teaching?status=upcoming');
+    // A click routes in-app to that address, query included.
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const c = mount(TeachingCrumbs, { target: host, props: { course: { slug: 'c', name: 'C' }, runTitle: 'UP_ROW' } });
+    flushSync();
+    host.querySelector('a')!.click();
+    await settle();
+    expect(router.currentRoute.path + router.currentRoute.search).toBe('/teaching?status=upcoming');
+    unmount(c); host.remove();
+    // Back on Active, the crumb is the bare address again.
+    await router.navigate('/teaching', { force: true });
+    component = mount(TeacherRunListPage, { target });
+    await settle();
+    unmount(component); component = null;
+    expect(crumbHref()).toBe('/teaching');
+    await router.navigate('/', { force: true });
+  });
+
+  it('the crumb keeps the filter when the route swaps the list for a run page while mounted', async () => {
+    const up = row({ run: makeRun({ id: 3, title: 'UP_ROW', start_date: '2099-01-01', end_date: '2099-02-01' }) });
+    vi.stubGlobal('fetch', mockFetch(200, [up]));
+    await router.navigate('/teaching', { force: true });
+    component = mount(TeachingRouteHarness, { target });
+    await settle();
+    buttonByText(target, /^Upcoming/)!.click();
+    await settle();
+    await router.navigate('/teaching/c/runs/3');
+    await settle();
+    expect(target.querySelector('nav a')!.getAttribute('href')).toBe('/teaching?status=upcoming');
+    unmount(component); component = null;
     await router.navigate('/', { force: true });
   });
 

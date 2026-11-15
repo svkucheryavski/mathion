@@ -143,10 +143,10 @@ describe('RunRosterTab single-add — offline and typing (Polish 3)', () => {
 
   it('the add error clears on typing', async () => {
     fetchSpy.mockImplementation((url: string) =>
-      (/\/api\/runs\/\d+\/students$/.test(url) ? jres({ detail: 'Group capacity reached' }, 409) : jres({}, 200)));
+      (/\/api\/runs\/\d+\/students$/.test(url) ? jres({ detail: 'Invalid email' }, 422) : jres({}, 200)));
     mountTab({});
     await clickAdd('bob@x.com');
-    expect(errorText()).toBe('Group capacity reached');
+    expect(errorText()).toBe('Invalid email');
     const input = getTarget().querySelector('input[name="new-email"]') as HTMLInputElement;
     expect(input.getAttribute('aria-invalid')).toBe('true');
     input.value = 'bob2@x.com';

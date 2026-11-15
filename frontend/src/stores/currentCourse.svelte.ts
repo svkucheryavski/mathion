@@ -112,8 +112,8 @@ export function markItemCovered(itemId: number): void {
 // shows the right attempts left, or loads the reveal once they are used up.
 // D89: the answers sent go in too, so it can show that result again, as the
 // backend's own `last_answers` does after a reload.
-// A page load straight onto a never-visited quiz records the visit before the
-// course is loaded, so the entry may be missing: create it, as a visit does.
+// A never-visited quiz may have no entry yet (the state lists only items with
+// a record, and the visit write may not have landed): create it, as a visit does.
 export function recordQuizAttempt(
   res: QuizSubmitResponse,
   answers: Record<string, number[] | string>,
@@ -121,6 +121,9 @@ export function recordQuizAttempt(
   if (currentCourse.value === null) return;
   const items = currentCourse.value.state.items;
   const key = String(res.item_id);
+  // VR-B: a late answer to an older submit never overwrites a newer attempt.
+  const had = items[key];
+  if (had !== undefined && res.attempt_count < had.attempt_count) return;
   items[key] ??= {
     is_covered: true,
     time_spent: 0,
@@ -136,6 +139,29 @@ export function recordQuizAttempt(
   entry.max_attempts = res.max_attempts;
   entry.last_score = { correct: res.score_correct, total: res.score_total };
   entry.last_answers = answers;
+  entry.is_covered = true;
+}
+
+// VR-B: a submit refused with 409 (the attempts were used up elsewhere) marks
+// the quiz exhausted, so it loads the reveal instead of reopening the form,
+// and counts it done, as a submit does (the server counts it: it has attempts).
+// No course snapshot means no player around the quiz, so nothing to mark.
+export function recordQuizExhausted(itemId: number): void {
+  if (currentCourse.value === null) return;
+  const max = currentCourse.value.version.max_quiz_attempts;
+  const items = currentCourse.value.state.items;
+  const key = String(itemId);
+  items[key] ??= {
+    is_covered: true,
+    time_spent: 0,
+    last_visited_at: new Date().toISOString(),
+    attempt_count: 0,
+    max_attempts: max,
+    last_score: null,
+    last_answers: null,
+  };
+  const entry = items[key]!;
+  entry.attempt_count = Math.max(entry.attempt_count, max);
   entry.is_covered = true;
 }
 

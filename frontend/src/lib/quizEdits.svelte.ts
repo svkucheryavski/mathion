@@ -3,11 +3,11 @@
 // slot while it is open, and any other action asks first — at the open edit,
 // in place (Polish 1 #14). The quiz body owns one instance and exposes it as
 // ItemBodyApi.edits.
-import { ApiError } from './api';
+import { failureText } from './api';
 import { pushToast } from '../stores/toasts.svelte';
 import { DISCARD_CONTINUE } from './editorReasons';
 import {
-  InPlaceAsk, DISCARD_NAV_ASK, focusAfter, settleTo, withdraw, type Ask, type Answer,
+  InPlaceAsk, DISCARD_NAV_ASK, focusAfter, settleTo, withdraw, type Ask, type Answer, type AskView,
 } from './askInPlace.svelte';
 
 // R51: the D10 question asks with the navigation text.
@@ -29,6 +29,8 @@ export type EditHandle = {
   // D10 in place (#14): asks at the edit. Absent on the level-3 modals: they
   // sit on top, so no other action can ask past them.
   ask?(q: Ask): Promise<Answer>;
+  // The edit's own questions (D10 at it, the key question), for R53.
+  readonly asking?: AskView;
 };
 
 export class QuizEdits {
@@ -77,6 +79,12 @@ export class QuizEdits {
     if (this.active?.saving) return true;
     const ok = await this.request();
     return ok || (this.active?.saving ?? false);
+  }
+
+  /** The open edit's question, if one shows: the modal's R53 refuses past it. */
+  get question(): AskView | null {
+    const q = this.active?.asking;
+    return q?.open ? q : null;
   }
 
   open(h: EditHandle): void { this.active = h; }
@@ -164,6 +172,7 @@ export class InlineEdit<T> {
       get dirty() { return !o.same(self.value, o.initial); },
       get saving() { return self.saving; },
       close: (refocus) => o.close(refocus),
+      asking: this.asking,
       ask: async (q) => {
         const a = await self.ask(q);
         // D10's Discard sends nothing: it settles at once (R54).
@@ -234,7 +243,7 @@ export class InlineEdit<T> {
       await o.edits.track(o.send(this.value));
       ok = true;
     } catch (e) {
-      const m = e instanceof ApiError ? e.displayMessage : 'Save failed';
+      const m = failureText(e, 'Save failed');
       // A save always reports its failure: inline while the field is open on
       // this version, otherwise as a toast (spec §While a request runs).
       this.saving = false;   // never left "Saving…" (a field that outlived its version can still cancel)

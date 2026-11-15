@@ -1,10 +1,12 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
-  import { ApiError } from '../../lib/api';
+  import { ApiError, failureText } from '../../lib/api';
   import { deadlinesHeader, formatLocalWithTz, formatShortDeadline } from '../../lib/datetime';
   import { deleteMiniProject } from '../../lib/miniProjects';
   import { blockPositions } from '../../lib/blockNumbers';
   import { focusFirst } from '../../lib/focusFirst';
+  import { focusIsFree } from '../../lib/askInPlace.svelte';
+  import { WAIT_TITLE as WAIT } from '../../lib/runTabs';
   import { pushToast } from '../../stores/toasts.svelte';
   import MiniProjectModal from './MiniProjectModal.svelte';
   import Button from '../ui/Button.svelte';
@@ -99,6 +101,10 @@
   let editTarget = $state<MiniProjectResponse | null>(null);
   let deleteConfirmId = $state<number | null>(null);
   let forceBusy = $state(false);
+  // A plain delete in flight: its confirm shows busy and the other 🗑 wait.
+  let deleteBusy = $state(false);
+  // The row a delete runs on: its ✎ waits too.
+  const deletingMpId = $derived(deleteBusy || forceBusy ? deleteConfirmId : null);
   let deleteError = $state<string | null>(null);
 
   let headingEl = $state<HTMLElement>();
@@ -165,17 +171,31 @@
     return '';
   });
 
+  // Only while focus is free (the user may have moved on).
   async function focusTrash(mpId: number) {
     await tick();
-    trashEls[mpId]?.focus();
+    if (focusIsFree()) trashEls[mpId]?.focus();
   }
 
   // §Focus after a removal: the next row's trash, the previous row's, +, the h2.
-  async function focusAfterRemoval(idx: number) {
+  // A failed refetch leaves the removed row listed: skip it.
+  async function focusAfterRemoval(idx: number, removedId: number) {
     await tick();
-    const next = rows[idx];
-    const prev = idx > 0 ? rows[idx - 1] : undefined;
+    if (!focusIsFree()) return;
+    const rest = rows.filter((r) => r.mp.id !== removedId);
+    const next = rest[idx];
+    const prev = idx > 0 ? rest[idx - 1] : undefined;
     focusFirst([next && trashEls[next.mp.id], prev && trashEls[prev.mp.id], newEl, headingEl]);
+  }
+
+  // The delete stands even when the refetch fails.
+  async function refetchAfterDelete() {
+    try { await refetchAll(); } catch { pushToast('Deleted (refresh failed — reload to see latest)', 'info'); }
+  }
+
+  function askDelete(mpId: number) {
+    if (deleteBusy || forceBusy) return;
+    deleteConfirmId = mpId;
   }
 
   function cancelDelete(mpId: number) {
@@ -184,61 +204,65 @@
   }
 
   async function handleForceDelete(mpId: number) {
+    if (deleteBusy || forceBusy) return;
     const idx = rows.findIndex((r) => r.mp.id === mpId);
     deleteError = null;
     forceBusy = true;
     try {
       await deleteMiniProject(mpId, { force: true });
-      await refetchAll();
+      await refetchAfterDelete();
       deleteConfirmId = null;
       forceBusy = false;
-      await focusAfterRemoval(idx);
+      await focusAfterRemoval(idx, mpId);
     } catch (e) {
-      deleteError =
-        e instanceof ApiError
-          ? e.displayMessage
-          : e instanceof Error
-            ? e.message
-            : 'Force delete failed';
+      deleteError = failureText(e, 'Could not force-delete the mini-project.');
+      // The panel stays; DangerConfirm puts focus back on its box (R45).
       forceBusy = false;
-      await focusTrash(mpId);
     }
   }
 
   async function handleDeleteConfirm(mp: MiniProjectResponse) {
+    if (deleteBusy || forceBusy) return;
     const idx = rows.findIndex((r) => r.mp.id === mp.id);
     deleteError = null;
+    deleteBusy = true;
     try {
       await deleteMiniProject(mp.id);
-      await refetchAll();
+      await refetchAfterDelete();
       deleteConfirmId = null;
-      await focusAfterRemoval(idx);
+      deleteBusy = false;
+      await focusAfterRemoval(idx, mp.id);
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
-        try {
-          await onRefetchMiniProjects();
-          // Teachers cannot force-delete; close the inline-confirm and
-          // surface a banner so they see *some* feedback instead of a
-          // silent no-op (admins keep the row open so the refetch can
-          // reveal the danger panel).
-          if (!course.is_admin) {
+        let refetched = true;
+        try { await onRefetchMiniProjects(); } catch { refetched = false; }
+        deleteBusy = false;
+        if (refetched) {
+          const row = miniProjects.find((m) => m.id === mp.id);
+          if (!row) {
+            // Someone else deleted it: the row is gone, focus moves on.
+            deleteConfirmId = null;
+            await focusAfterRemoval(idx, mp.id);
+          } else if (!row.first_submitted_at) {
+            // Still not locked: no danger panel comes, so say the server's reason.
+            pushToast(e.displayMessage, 'error');
+            deleteConfirmId = null;
+            await focusTrash(mp.id);
+          } else if (!course.is_admin) {
+            // Locked: a teacher gets a banner; an admin's row stays open for the danger panel.
             deleteConfirmId = null;
             deleteError =
               'This mini-project now has submissions and cannot be deleted. Ask a course admin to force-delete.';
             await focusTrash(mp.id);
           }
-        } catch {
+        } else {
           deleteError = 'Could not refresh. Please retry.';
           deleteConfirmId = null;
           await focusTrash(mp.id);
         }
       } else {
-        deleteError =
-          e instanceof ApiError
-            ? e.displayMessage
-            : e instanceof Error
-              ? e.message
-              : 'Delete failed';
+        deleteBusy = false;
+        deleteError = failureText(e, 'Could not delete the mini-project.');
         deleteConfirmId = null;
         await focusTrash(mp.id);
       }
@@ -318,12 +342,13 @@
                 <td><span class="mp-chip chip-{status}">{status}</span></td>
                 <td class="mp-actions">
                   <span class="row-icons">
-                    <IconButton glyph="pencil" size="sm" aria-label="Edit {r.aria}" title={reason ?? 'Edit'}
-                                disabled={reason !== undefined} data-action="edit" bind:element={pencilEls[r.mp.id]}
-                                onclick={() => { editTarget = r.mp; modalMode = 'edit'; }} />
-                    <IconButton glyph="trash" size="sm" danger aria-label="Delete {r.aria}" title="Delete"
+                    <IconButton glyph="pencil" size="sm" aria-label="Edit {r.aria}" title={reason ?? (deletingMpId === r.mp.id ? WAIT : 'Edit')}
+                                disabled={reason !== undefined} aria-disabled={deletingMpId === r.mp.id} data-action="edit" bind:element={pencilEls[r.mp.id]}
+                                onclick={() => { if (deletingMpId !== r.mp.id) { editTarget = r.mp; modalMode = 'edit'; } }} />
+                    <IconButton glyph="trash" size="sm" danger aria-label="Delete {r.aria}"
+                                title={deleteBusy || forceBusy ? WAIT : 'Delete'} aria-disabled={deleteBusy || forceBusy}
                                 data-action="delete" bind:element={trashEls[r.mp.id]}
-                                onclick={() => (deleteConfirmId = r.mp.id)} />
+                                onclick={() => askDelete(r.mp.id)} />
                   </span>
                 </td>
               </tr>
@@ -333,12 +358,12 @@
                 <tr class="mp-panel-row">
                   <td colspan="4">
                     {#if status === 'locked'}
-                      <DangerConfirm message={forceMessage} busy={forceBusy}
+                      <DangerConfirm message={forceMessage} busy={forceBusy || deleteBusy}
                                      disabledReason={course.is_admin ? undefined : 'Only a course admin can force delete.'}
                                      onConfirm={() => handleForceDelete(r.mp.id)} onCancel={() => cancelDelete(r.mp.id)} />
                     {:else}
                       <InlineConfirm row align="end" takeFocus warning="Delete this mini-project?" confirmLabel="Delete"
-                                     confirmDataAction="confirm-delete"
+                                     confirmDataAction="confirm-delete" busy={deleteBusy || forceBusy}
                                      onCancel={() => cancelDelete(r.mp.id)} onConfirm={() => handleDeleteConfirm(r.mp)} />
                     {/if}
                   </td>

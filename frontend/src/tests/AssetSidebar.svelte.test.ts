@@ -781,6 +781,108 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
     expect(document.activeElement).toBe(panel.querySelector('[data-testid="drop-zone"]'));
   });
 
+  it('Escape on a row with an open question cancels it (call 7)', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
+    const { panel } = mountInPanel();
+    await settleAll();
+    panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
+    await settleAll();
+    const insert = panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] .row-click')!;
+    insert.focus();
+    const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    insert.dispatchEvent(ev);
+    await settleAll();
+    expect(ev.defaultPrevented).toBe(true);          // the enclosing modal stays open
+    expect(panel.querySelector('.inline-confirm')).toBeNull();
+    expect(document.activeElement).toBe(panel.querySelector('[data-testid="asset-row-1"] [data-testid="delete-trash"] button'));
+  });
+
+  it('an IME Escape on the row neither cancels the question nor is swallowed (call 7)', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
+    const { panel } = mountInPanel();
+    await settleAll();
+    panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
+    await settleAll();
+    const insert = panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] .row-click')!;
+    insert.focus();
+    const ev = new KeyboardEvent('keydown', { key: 'Escape', keyCode: 229, bubbles: true, cancelable: true });
+    insert.dispatchEvent(ev);
+    await settleAll();
+    expect(ev.defaultPrevented).toBe(false);
+    expect(panel.querySelector('.inline-confirm')).not.toBeNull();
+  });
+
+  it('Escape on a row without a question is left to the modal', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' }), mkAsset({ id: 2, filename: 'b.png' })]);
+    const { panel } = mountInPanel();
+    await settleAll();
+    panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-2"] [data-testid="delete-trash"] button')!.click();
+    await settleAll();
+    const insert = panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] .row-click')!;
+    insert.focus();
+    const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    insert.dispatchEvent(ev);
+    await settleAll();
+    expect(ev.defaultPrevented).toBe(false);
+    expect(panel.querySelector('[data-testid="asset-row-2"] .inline-confirm')).not.toBeNull();
+  });
+
+  it('Escape on a busy question is held: the question stays and the modal stays open', async () => {
+    let releaseDel!: () => void;
+    (stubCtx.remove as ReturnType<typeof vi.fn>).mockReturnValue(new Promise<void>((r) => { releaseDel = r; }));
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' }), mkAsset({ id: 2, filename: 'b.png' })]);
+    const { panel } = mountInPanel();
+    await settleAll();
+    panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
+    await settleAll();
+    panel.querySelector<HTMLButtonElement>('.inline-confirm button.confirm')!.click();
+    await settleAll();
+    // P60: another row's question opens while row 1's stays busy.
+    panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-2"] [data-testid="delete-trash"] button')!.click();
+    await settleAll();
+    expect(panel.querySelector('[data-testid="asset-row-2"] .inline-confirm')).not.toBeNull();
+    for (const sel of ['.inline-confirm button.cancel', '.row-click']) {
+      const el = panel.querySelector<HTMLButtonElement>(`[data-testid="asset-row-1"] ${sel}`)!;
+      el.focus();
+      const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      el.dispatchEvent(ev);
+      await settleAll();
+      expect(ev.defaultPrevented).toBe(true);
+      expect(panel.querySelector('[data-testid="asset-row-1"] .inline-confirm')).not.toBeNull();
+      expect(document.activeElement).toBe(el);
+    }
+    releaseDel();
+    await settleAll();
+  });
+
+  it('a busy question remounted after a failed reload does not take focus', async () => {
+    let releaseDel!: () => void;
+    (stubCtx.remove as ReturnType<typeof vi.fn>).mockReturnValue(new Promise<void>((r) => { releaseDel = r; }));
+    (stubCtx.list as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([mkAsset({ id: 1, filename: 'a.png' })])
+      .mockRejectedValueOnce(new Error('down'))
+      .mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
+    const { panel, props } = mountInPanel();
+    await settleAll();
+    panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
+    await settleAll();
+    panel.querySelector<HTMLButtonElement>('.inline-confirm button.confirm')!.click();
+    await settleAll();
+    props.refreshKey = 1;                    // fails: the rows go, the busy question waits
+    await settleAll();
+    expect(panel.querySelector('[data-testid="asset-row-1"]')).toBeNull();
+    const text = document.createElement('textarea');
+    panel.append(text);
+    text.focus();
+    props.refreshKey = 2;                    // the row and its busy question come back
+    await settleAll();
+    expect(panel.querySelector('[data-testid="asset-row-1"] .inline-confirm')).not.toBeNull();
+    expect(document.activeElement).toBe(text);
+    releaseDel();
+    await settleAll();
+    text.remove();
+  });
+
   it('a failed reload closes an idle question; a later good reload neither re-opens it nor takes focus (review r1)', async () => {
     (stubCtx.list as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce([mkAsset({ id: 1, filename: 'a.png' })])

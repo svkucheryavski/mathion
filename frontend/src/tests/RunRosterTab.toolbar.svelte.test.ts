@@ -271,7 +271,8 @@ describe('RunRosterTab — the add toggle and the add row (D25)', () => {
     await settle();
     await settle();
     expect(text(target.querySelector('p.ro-err'))).toBe('Group capacity reached');
-    expect(field.getAttribute('aria-invalid')).toBe('true');
+    // Not about the address: the field stays unmarked (polish3 WBR).
+    expect(field.getAttribute('aria-invalid')).toBeNull();
     expect(document.activeElement).toBe(field);
 
     // Closing the row clears the error; the typed e-mail stays for next time.

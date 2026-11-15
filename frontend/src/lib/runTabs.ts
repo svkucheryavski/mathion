@@ -1,6 +1,9 @@
 // The run page's tabs (R2 order) and the ?tab= address helpers (R1, R10).
 // Overview is the address without ?tab (P18).
 
+// The run tabs' title on a control that waits for another change.
+export const WAIT_TITLE = 'Wait for the current change to finish';
+
 export type ActiveTab =
   | 'overview' | 'progress' | 'submissions' | 'roster'
   | 'groups' | 'mini-projects' | 'assets' | 'teachers';

@@ -3,7 +3,7 @@
   import IconButton from '../ui/IconButton.svelte';
   import InlineConfirm from '../ui/InlineConfirm.svelte';
   import { SvelteSet } from 'svelte/reactivity';
-  import { ApiError } from '../../lib/api';
+  import { ApiError, failureText } from '../../lib/api';
   import { formatRef } from '../../lib/assets';
   import type { AssetContext, AssetItem } from '../../lib/assetContext';
   import { assetDropRefusal } from '../../lib/assetDrop';
@@ -131,6 +131,13 @@
     confirmId = null;
     if (inside) void refocusAfterDelete(id, idx);
   });
+  // Call 7: while a row asks, Escape anywhere on it cancels (a busy question just holds), and the modal stays open.
+  function onRowKeydown(e: KeyboardEvent, id: number) {
+    if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
+    if (confirmId !== id && !deletingIds.has(id)) return;
+    e.preventDefault();
+    if (!deletingIds.has(id)) void cancelDelete();
+  }
   function questionHasFocus(): boolean {
     return confirmId !== null
       && (asideEl?.querySelector(`[data-testid="asset-row-${confirmId}"] .inline-confirm`)?.contains(document.activeElement) ?? false);
@@ -156,7 +163,7 @@
       await assetContext.remove(id);
       ok = true;
     } catch (e) {
-      deleteErrorMsg = e instanceof ApiError ? e.displayMessage : 'Delete failed';
+      deleteErrorMsg = failureText(e, 'Delete failed');
     } finally {
       const closing = confirmId === id;
       if (closing) confirmId = null;
@@ -318,7 +325,8 @@
   {:else}
     <ul class="list">
       {#each assets as a (a.id)}
-        <li class="row" data-testid={`asset-row-${a.id}`}>
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <li class="row" data-testid={`asset-row-${a.id}`} onkeydown={(e) => onRowKeydown(e, a.id)}>
           <button
             type="button"
             class="row-click"
@@ -348,7 +356,8 @@
             <!-- The row's own click (insert) must not run under the question. -->
             <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
             <span onclick={(e) => e.stopPropagation()}>
-              <InlineConfirm takeFocus label="Delete {a.filename}?" confirmLabel="Delete"
+              <!-- A busy question that remounts (after a failed reload) leaves focus where it is. -->
+              <InlineConfirm takeFocus={!deletingIds.has(a.id)} label="Delete {a.filename}?" confirmLabel="Delete"
                              busy={deletingIds.has(a.id)}
                              onConfirm={() => void confirmDelete(a.id)} onCancel={() => void cancelDelete()} />
             </span>
@@ -462,6 +471,7 @@
     cursor: pointer;
   }
   .row-click:disabled { cursor: not-allowed; }
+  .row-click:disabled .name { color: var(--faint); }
   .thumb {
     flex: 0 0 32px;
     width: 32px;

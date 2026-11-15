@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3029
+EXPECTED_CHECKS=3058
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -535,6 +535,8 @@ else:
 # --space-2 below it, items are --space-3 apart (li+li ca5345b0 -> dc00e0ee);
 # the compact scale has its own pair (--space-1 / --space-2), written in full so
 # it beats the page pair. +3 rules (49 -> 52).
+# VR-B (2026-11-14): the four D85 selectors also match the renderer's ul/ol.loose
+# (:is(.loose,:has(>li>p))); declarations, hashes and order unchanged.
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
     ('', '.prose', '115422ed'),
@@ -542,8 +544,8 @@ WANT_FULL = [
     ('', '.prose :where(h1,h2,h3,h4,h5,h6)', '8f770fc2'),
     ('', '.prose :where(p,ul,ol,pre,blockquote,hr,div.math)', '13af6f60'),
     ('', '.prose :where(ul,ol)', '17bebee9'),
-    ('', '.prose :where(ul,ol):has(>li>p)>li+li', 'dc00e0ee'),
-    ('', '.prose :where(ul,ol):has(>li>p)>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)', 'd9f228dd'),
+    ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li+li', 'dc00e0ee'),
+    ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)', 'd9f228dd'),
     ('', '.prose a', '0be0b8c6'),
     ('', '.prose a:hover', '98e62ed4'),
     ('', '.prose blockquote', '5fe22df0'),
@@ -560,8 +562,8 @@ WANT_FULL = [
     ('', '.prose pre code', 'f4859c1f'),
     ('', '.prose ul>li', '20d7366f'),
     ('', '.prose.compact :where(p,ul,ol,pre,blockquote,hr,div.math)', 'e291811a'),
-    ('', '.prose.compact :where(ul,ol):has(>li>p)>li+li', 'ca5345b0'),
-    ('', '.prose.compact :where(ul,ol):has(>li>p)>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)', '4a789cab'),
+    ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li+li', 'ca5345b0'),
+    ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)', '4a789cab'),
     ('', '.prose.compact h1', 'a5b38d68'),
     ('', '.prose.compact h2', 'c2943c7b'),
     ('', '.prose>:first-child,.prose :where(li,blockquote)>:first-child', 'd462248a'),
@@ -601,10 +603,10 @@ WANT_ORDER = [
     ('', '.prose.compact :where(p,ul,ol,pre,blockquote,hr,div.math)'),
     ('', '.prose>:first-child,.prose :where(li,blockquote)>:first-child'),
     ('', '.prose>:last-child,.prose :where(li,blockquote)>:last-child'),
-    ('', '.prose :where(ul,ol):has(>li>p)>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)'),
-    ('', '.prose :where(ul,ol):has(>li>p)>li+li'),
-    ('', '.prose.compact :where(ul,ol):has(>li>p)>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)'),
-    ('', '.prose.compact :where(ul,ol):has(>li>p)>li+li'),
+    ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)'),
+    ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li+li'),
+    ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)'),
+    ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li+li'),
     ('', '.prose :where(ul,ol)'), ('', '.prose ul>li'), ('', '.prose ol>li'),
     ('', '.prose blockquote'), ('', '.prose hr'), ('', '.prose code'),
     ('', '.prose pre'), ('', '.prose pre code'), ('', '.prose a'), ('', '.prose a:hover'),
@@ -1534,13 +1536,15 @@ const SIG = {
   "SequenceLink.svelte":
     ["a:row[class=\"row\" href aria-label onclick]",
      "span:seq-glyph[class=\"seq-glyph\" aria-hidden]", "ItemMark:[type=\"sequence\"]",
-     "span:row-title[class=\"row-title\"]", "ProgressMeter:[{p}]"],
+     // VR-B (user, after call 3): no meter for a sequence with no items.
+     "span:row-title[class=\"row-title\"]", "#if:", "ProgressMeter:[{p}]"],
   "ProgressMeter.svelte":
     ["span:progress[class=\"progress\" aria-hidden]",
      "span:track[class=\"track\"]", "span:fill.class:done[class=\"fill\"]",
      "span:pct.mono[class=\"pct mono\"]",
      "span:quiz-chip.class:on-strip.class:none.class:empty[class=\"quiz-chip\" aria-hidden]", "#if:",
-     "svg:[width=\"10\" height=\"10\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
+     // VR-B (call 2): the check only above 0%.
+     "#if:", "svg:[width=\"10\" height=\"10\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:"],
   "CourseProgress.svelte":
     ["div:summary[class=\"summary\"]", "p:sl[class=\"sl\" aria-hidden]",
@@ -1574,7 +1578,7 @@ const SIG = {
      // D93: the bottom bar -- round Previous, the item count, round Next (or
      // Finish in its pointer-events wrapper); icon-only, the glyph hidden.
      "footer:player-nav[class=\"player-nav\"]",
-     "button:nav-btn.prev[type=\"button\" class=\"nav-btn prev\" onclick disabled={flatIndex <= 0} aria-label title]",
+     "button:nav-btn.prev[type=\"button\" class=\"nav-btn prev\" onclick disabled={flatIndex < 0} aria-disabled={flatIndex === 0} aria-label title]",
      "svg:[viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"10,3.5 5.5,8 10,12.5\"]", "span:counter[class=\"counter\"]", "#if:",
      "span:finish[class=\"finish\"]", "Button:[variant=\"primary\" onclick]", "#else:",
@@ -1586,20 +1590,22 @@ const SIG = {
      "article:quiz[class=\"quiz\"]", "h2:", "#each:", "#if:", "hr:q-sep[class=\"q-sep\"]",
      "div:q-block[class=\"q-block\"]",
      "span:q-counter.mono[class=\"q-counter mono\"]", "#if:",
-     "SingleChoice:[question={q} value={valueFor(q.id)} onanswer disabled={locked} correctOptionIds={r?.correct_option_ids ?? null}]",
+     "SingleChoice:[question={q} value={valueFor(q.id)} onanswer disabled={frozen} correctOptionIds={r?.correct_option_ids ?? null}]",
      "#else:", "#if:",
-     "MultiChoice:[question={q} value={valueFor(q.id)} onanswer disabled={locked} correctOptionIds={r?.correct_option_ids ?? null}]",
+     "MultiChoice:[question={q} value={valueFor(q.id)} onanswer disabled={frozen} correctOptionIds={r?.correct_option_ids ?? null}]",
      "#else:", "#if:",
-     "Numeric:[question={q} value={valueFor(q.id)} onanswer disabled={locked} correctValue={r?.correct_numeric ?? null}]",
+     "Numeric:[question={q} value={valueFor(q.id)} onanswer disabled={frozen} correctValue={r?.correct_numeric ?? null}]",
      "#else:", "#if:",
-     "Text:[question={q} value={valueFor(q.id)} onanswer disabled={locked} correctValue={r?.correct_text ?? null}]",
+     "Text:[question={q} value={valueFor(q.id)} onanswer disabled={frozen} correctValue={r?.correct_text ?? null}]",
      "#if:", "div:exp.prose.compact[class=\"exp prose compact\"]", "@html:r.explanation_html", "#if:",
-     "div:submit-row[class=\"submit-row\"]",
+     "div:submit-row[class=\"submit-row\"]", "#if:",
+     "Button:[variant=\"secondary\" loading={revealing} aria-disabled={revealing} onclick]", "#else:",
      "Button:[onclick loading={inflight !== null} disabled={!allAnswered || inflight !== null} title]",
      "#if:", "p:hint[class=\"hint\"]", "span:mono[class=\"mono\"]", "#else:", "#if:",
-     "div:result[class=\"result\"]", "p:", "strong:", "span:mono[class=\"mono\"]",
+     "div:result[class=\"result\" tabindex=\"-1\"]", "p:", "strong:", "span:mono[class=\"mono\"]",
      "p:meta[class=\"meta\"]", "span:mono[class=\"mono\"]", "span:mono[class=\"mono\"]", "#if:",
-     "Button:[onclick]", "#else:", "#if:", "Button:[variant=\"secondary\" onclick]"],
+     "Button:[onclick]", "#else:", "#if:",
+     "Button:[variant=\"secondary\" loading={revealing} aria-disabled={revealing} onclick]"],
   // The two choice components differ in their CONTROL markup exactly as they
   // differ in their control CSS (the divergence set in section (n)): the radio
   // has a `span:dot`, the checkbox an `svg:check`. Everything else is one shape.
@@ -1680,7 +1686,8 @@ const SIG = {
     ["section:block.class:collapsed[class=\"block\"]", "header:", "h2:",
      "button:acc[id class=\"acc\" aria-expanded aria-controls aria-label onclick]",
      "span:num[class=\"num\" aria-hidden]", "span:acc-title[class=\"acc-title\"]",
-     "ProgressMeter:[{p} onStrip={expanded}]",
+     // VR-B (call 3): no meter for a block with no items.
+     "#if:", "ProgressMeter:[{p} onStrip={expanded}]",
      "svg:chev.class:collapsed[class=\"chev\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"4.6,6.6 8,10 11.4,6.6\"]", "div:[id role=\"region\" aria-labelledby]",
      "ul:", "#each:", "li:",
@@ -1735,7 +1742,8 @@ const TEXT = {
   "QuizItem.svelte":
     ["h2::{expr}", "h2::{expr}",
      "span:q-counter.mono:Question", "span:q-counter.mono:{expr}", "span:q-counter.mono:of",
-     "span:q-counter.mono:{expr}", "Button::Submit answer", "span:mono:{expr}", "p:hint:{expr}",
+     "span:q-counter.mono:{expr}", "Button::Show correct answers", "Button::Submit answer",
+     "span:mono:{expr}", "p:hint:{expr}",
      "p:hint:left", "strong::Score:", "span:mono:{expr}", "span:mono:/", "span:mono:{expr}",
      "p:meta:Attempt", "span:mono:{expr}", "p:meta:of", "span:mono:{expr}", "Button::Try again",
      "Button::Show correct answers"],
@@ -2852,6 +2860,10 @@ WANT = [
     ('.nav-btn%s:disabled' % W,
      'background:var(--disabled-bg);border-color:var(--border-faint);color:var(--faint);'
      'box-shadow:none;cursor:not-allowed'),
+    # VR-B: ← on the first item is blocked (aria-disabled) and looks disabled.
+    ('.nav-btn[aria-disabled=true]' + W,
+     'background:var(--disabled-bg);border-color:var(--border-faint);color:var(--faint);'
+     'box-shadow:none;cursor:not-allowed'),
 ]
 
 got = sorted((' >> '.join(a), s) for s, b, a in ALL if h in s)
@@ -3636,7 +3648,7 @@ fi
 # toggle), the course meter (white chip, onStrip), then ONE borderless chevron
 # IconButton that collapses or expands every block.
 if [[ $(print -r -- "$cv" | grep -cF 'onclick={() => setAll(!anyOpen)} />') -eq 1 ]] \
-   && print -r -- "$cv" | perl -0ne 'exit(m{<div class="cv-strip">\s*<p class="sr-only">Your progress: \{progressPhrase\(courseP\)\}\.</p>\s*<span class="cv-meter"><ProgressMeter p=\{courseP\} onStrip /></span>\s*<IconButton borderless glyph=\{anyOpen \? .chevron. : .chevron-right.\} title=\{anyOpen \? .Collapse all. : .Expand all.\} onclick=\{\(\) => setAll\(!anyOpen\)\} />} ? 0 : 1)'; then
+   && print -r -- "$cv" | perl -0ne 'exit(m{<div class="cv-strip">\s*\{#if courseP\.total > 0\}\s*<p class="sr-only">Your progress: \{progressPhrase\(courseP\)\}\.</p>\s*<span class="cv-meter"><ProgressMeter p=\{courseP\} onStrip /></span>\s*\{/if\}\s*<IconButton borderless glyph=\{anyOpen \? .chevron. : .chevron-right.\} title=\{anyOpen \? .Collapse all. : .Expand all.\} onclick=\{\(\) => setAll\(!anyOpen\)\} />} ? 0 : 1)'; then
   echo "PASS  CourseView phone row is the course meter plus one chevron IconButton (D78)"
 else
   echo "FAIL  CourseView phone row is not the pinned meter + chevron IconButton (D78)"; fail=1
@@ -3645,7 +3657,7 @@ fi
 # below the deadlines card: the deadlines block closes, then the row in its own
 # `{#if courseP}`, then the blocks ($cv has its comments stripped, so the
 # comment above the row needs no allowance).
-if print -r -- "$cv" | perl -0ne 'exit(m{<CourseDeadlines [^\n]*/></div>\s*\{/if\}\s*\{#if courseP\}\s*<div class="cv-strip">(?:(?!\{/if\}).)*\{/if\}\s*<div class="cv-blocks">}s ? 0 : 1)'; then
+if print -r -- "$cv" | perl -0ne 'exit(m{<CourseDeadlines [^\n]*/></div>\s*\{/if\}\s*\{#if courseP\}\s*<div class="cv-strip">(?:(?!</div>).)*</div>\s*\{/if\}\s*<div class="cv-blocks">}s ? 0 : 1)'; then
   echo "PASS  CourseView phone row follows the deadlines card, right before the blocks (D92)"
 else
   echo "FAIL  CourseView phone row is not between the deadlines card and the blocks (D92)"; fail=1
@@ -3973,9 +3985,13 @@ echo
 add_row_common() {
   d '\.add-line' '' 'border:0' 'background:transparent' 'color:var\(--primary\)' 'font-size:14px' 'font-weight:600'
   chk "\.add-line\.${H}:disabled" 'color:var\(--muted\)'
+  # Blocked while a create from a closed form still posts (VR-B).
+  d '\.add-line\[aria-disabled=true\]' '' 'color:var\(--muted\)'
   d '\.add-row' '' 'display:flex'
   # Load-bearing layout (review T3): the field fills the row.
   d '\.add-field' '' 'flex:1 1 auto' 'min-width:0'
+  # VR-B: ✓ and ✕ sit in a field-high flex box, centred on the field as the rename row (D90).
+  d '\.add-acts' '' 'display:flex' 'align-items:center' 'gap:6px' 'height:var\(--control-h\)'
   d '\.add-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1\.5px solid var\(--primary\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)'
   # C3: an invalid title keeps a red edge, focused too ((0,3,0) beats base.css's focus rule).
   chk "\.add-input\[aria-invalid=\"?true\"?\]\.${H}" 'border:1\.5px solid var\(--danger\)'
@@ -4237,6 +4253,8 @@ if [[ -n $REPLY ]]; then
   d '\.used' '' 'padding:3px 8px' 'border-radius:3px' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)' 'font-size:11px' 'font-weight:500'
   d '\.drop-zone' '' 'padding:11px 10px' 'border:2px dashed var\(--border-strong\)' 'border-radius:var\(--radius\)' 'font-size:12px' 'color:var\(--muted\)'
   d '\.drop-zone\.disabled' '' 'color:var\(--faint\)' 'border-color:var\(--border-faint\)'
+  # VR-B: a disabled row recedes (its name in --faint).
+  chk "\.row-click\.${H}:disabled \.name:where\(\.${H}\)" 'color:var\(--faint\)'
   none "AssetSidebar pre-5b .sidebar/.banner/.trash rules gone" "\.(sidebar|banner|trash)\.${H}[{ ,:.]"
   none "AssetSidebar no rem font sizes"                         "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
   sweep AssetSidebar $H
@@ -4254,6 +4272,8 @@ if [[ -n $REPLY ]]; then
   d '\.modal-backdrop' '' 'position:fixed' 'top:0' 'right:0' 'bottom:0' 'left:0' 'z-index:100' 'display:flex' 'justify-content:center' 'align-items:flex-start' 'padding-top:26px' 'background:color-mix\(in srgb,var\(--text\) 34%,transparent\)' 'backdrop-filter:blur\(1px\)'
   d '\.modal-panel' '' 'width:min\(var\(--modal-w\),100vw - 32px\)' 'max-height:min\(var\(--modal-h\),100vh - 52px\)' 'display:flex' 'flex-direction:column' 'overflow:hidden' 'background:var\(--surface\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius-lg\)' 'box-shadow:0 16px 44px #14182338'
   d '\.modal-head' '' 'display:flex' 'align-items:center' 'gap:10px' 'padding:12px 14px 12px 16px' 'border-bottom:1px solid var\(--border\)'
+  # Call 8: header actions sit with ×, 6px apart (ref 1689).
+  d '\.head-actions' '' 'margin-left:auto' 'display:flex' 'align-items:center' 'gap:6px'
   d '\.modal-body' '' 'flex:1 1 auto' 'min-height:0' 'overflow:auto' 'padding:14px 16px' 'display:flex' 'flex-direction:column' 'gap:12px'
   check "Modal .modal-body > * { flex:0 0 auto }" "\.modal-body\.${H}>\*\{flex:0 0 auto\}"
   d '\.modal-foot' '' 'display:flex' 'align-items:center' 'gap:9px' 'padding:12px 16px' 'border-top:1px solid var\(--border\)' 'background:var\(--surface-3\)'
@@ -4288,7 +4308,6 @@ if [[ -n $REPLY ]]; then
   d '\.title-input' '' 'font-weight:600'
   # 5c D11: the path ("Vectors › Linear combinations · item 1 of 2"), not mono.
   d '\.item-ctx' '' 'font-size:12px' 'color:var\(--muted\)' 'white-space:nowrap' 'text-overflow:ellipsis'
-  d '\.head-actions' '' 'margin-left:auto' 'display:flex' 'gap:6px'
   d '\.field-row' '' 'display:grid' 'grid-template-columns:132px 1fr' 'align-items:center' 'gap:12px'
   d '\.field-label' '' 'font-size:12\.5px' 'color:var\(--muted\)'
   d '\.plain-input' '' 'height:var\(--control-h\)' 'padding:0 var\(--control-pad-x\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:var\(--control-font\)' 'caret-color:var\(--primary\)'
@@ -4303,6 +4322,12 @@ if [[ -n $REPLY ]]; then
   none "ItemEditorModal dirty marker is not --gold-text" "\.dirty\.${H}\{[^}]*--gold-text"
   none "ItemEditorModal no rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+rem"
   sweep ItemEditorModal $H
+fi
+# Call 8: the trash rides Modal's header-actions spot beside ×.
+if grep -qE '^  \{headActions\}$' src/components/editor/ItemEditorModal.svelte; then
+  echo "PASS  ItemEditorModal trash sits in Modal's header actions (call 8)"
+else
+  echo "FAIL  ItemEditorModal trash sits in Modal's header actions (call 8)"; fail=1
 fi
 emoji_scan "ItemEditorModal / PageBody / itemBody" src/components/editor/ItemEditorModal.svelte src/components/editor/item/PageBody.svelte src/lib/itemBody.ts
 
@@ -4335,7 +4360,9 @@ own app-preview AppBody.svelte
 uniq1 app-preview
 if [[ -n $REPLY ]]; then
   N=AppBody; H=$REPLY
-  d '\.field-row' '' 'display:grid' 'grid-template-columns:132px 1fr' 'align-items:center' 'gap:12px'
+  d '\.field-row' '' 'display:grid' 'grid-template-columns:132px 1fr' 'align-items:baseline' 'gap:12px'
+  # VR-B: the error sits under the value, in a field column.
+  d '\.field' '' 'display:flex' 'flex-direction:column' 'gap:4px'
   d '\.script-row' '' 'display:flex' 'align-items:center' 'gap:9px'
   d '\.script-name' '' 'font-size:12\.5px' 'color:var\(--text\)' 'text-overflow:ellipsis'
   d '\.app-preview' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'overflow:hidden'
@@ -4539,6 +4566,8 @@ uniq1 inline-confirm
 if [[ -n $REPLY ]]; then
   N=InlineConfirm; H=$REPLY
   d '\.inline-confirm\.row' '' 'flex-direction:row' 'align-items:center' 'gap:12px'
+  # VR backlog T7: a confirm held by its disabledReason takes the blocked look.
+  chk "\.confirm\[aria-disabled=true\]\.${H}:not\(\[aria-busy=true\]\)" 'background:var\(--disabled-bg\)' 'color:var\(--faint\)' 'cursor:not-allowed'
 fi
 if grep -rqE 'max-width:[[:space:]]*960px' src --include='*.svelte' --include='*.css'; then
   echo "FAIL  no hard-coded 960px page width left"; fail=1
@@ -4612,6 +4641,9 @@ if [[ -n $REPLY ]]; then
   N=ChoiceRow; H=$REPLY
   d '\.ans-row' '' 'display:flex' 'align-items:center' 'gap:8px' 'padding:4px 8px' 'border-radius:var\(--radius\)' 'font-size:13\.5px' 'color:var\(--text-2\)'
   d '\.ans-row\.ok' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
+  # Call 9: an answer row keeps its height when its field opens (30px field + 1px each side).
+  d '\.ans-row' '' 'min-height:calc\(var\(--control-h\) \+ 2px\)'
+  d '\.ans-row\.editing' '' 'padding-block:1px'
   d '\.ans-mark' '' 'width:15px' 'height:15px' 'border:1\.5px solid var\(--muted\)' 'border-radius:50%'
   d '\.ans-ok' '' 'font-size:11px' 'font-weight:500'
   none "ChoiceRow no --success leftovers (the theme has none)" "\.${H}[^{]*\{[^}]*var\(--success"
@@ -4845,6 +4877,46 @@ if grep -q 'disabled-row' src/components/runs/RunProgressTab.svelte; then
 else
   echo "PASS  RunProgressTab has no .disabled-row (6a)"
 fi
+# Whole-branch review: a failed write's sentence goes through failureText (offline says so);
+# only the load fallbacks below keep the ApiError-or-literal form. Each file on one line,
+# so a ternary split over lines is seen too.
+# The ternary (with or without parentheses), the if/else forms, and an Error.message fallback.
+wl="(['\"\`][^'\"\`]*['\"\`]|OFFLINE_MESSAGE)"; ws="[[:space:]]*"
+wre="instanceof ApiError\)?${ws}\?${ws}[A-Za-z]+\.displayMessage${ws}:${ws}${wl}"
+wre="$wre|instanceof ApiError${ws}\)${ws}\{?${ws}[A-Za-z_.]+${ws}=${ws}[A-Za-z]+\.displayMessage;?${ws}\}?${ws}else${ws}\{?${ws}[A-Za-z_.]+${ws}=${ws}${wl}"
+wre="$wre|instanceof ApiError${ws}\)${ws}\{?${ws}pushToast\(${ws}[A-Za-z]+\.displayMessage${ws},${ws}'error'${ws}\);?${ws}\}?${ws}else${ws}\{?${ws}pushToast\(${ws}${wl}"
+wre="$wre|typeof [A-Za-z]+\??\.message === 'string' \? [A-Za-z]+\.message|\?\.message \?\? ['\"\`]|instanceof Error${ws}\?${ws}[A-Za-z]+\.message"
+wfl=$(grep -rlE "instanceof ApiError|\.message" src/components src/pages src/lib src/stores | grep -v '\.test\.' \
+  | while IFS= read -r f; do
+      tr '\n' ' ' < "$f" | grep -oE "$wre" | sed "s|^|$f: |"
+    done \
+  | grep -vE "'(Could not load answers\.|Could not load assets\.|Could not render preview\.|Failed to load runs\.|Could not contact server\.|Could not load version\.)'" || true)
+if [[ -z "$wfl" ]]; then
+  echo "PASS  write failures say their sentence through failureText (whole-branch review)"
+else
+  echo "FAIL  write failures with an ApiError-or-literal fallback: $wfl"; fail=1
+fi
+# Fix-pass review r5: a waiting roster retry looks disabled (P23).
+if sed -n '/<style>/,/<\/style>/p' src/components/runs/RunRosterTab.svelte | tr '\n' ' ' \
+    | grep -qE "\.ro-retry\[aria-disabled='true'\][^{]*\{[^}]*color: var\(--faint\)[^}]*cursor: not-allowed"; then
+  echo "PASS  a waiting roster retry looks disabled (fix-pass review r5)"
+else
+  echo "FAIL  RunRosterTab has no disabled look for a waiting .ro-retry"; fail=1
+fi
+# Fix-pass review: the run tabs' wait sentence lives once, in lib/runTabs.ts.
+if grep -rn "Wait for the current change to finish" src/components src/pages >/dev/null; then
+  echo "FAIL  a component spells out the wait sentence instead of WAIT_TITLE"; fail=1
+else
+  echo "PASS  the wait sentence comes from WAIT_TITLE (fix-pass review)"
+fi
+# Call 15: the block and sequence headers never stuck (no scroll box height); the rule is gone.
+# The style block on one line, so a rule split over lines is seen too.
+if sed -n '/<style>/,/<\/style>/p' src/components/runs/RunProgressTab.svelte | tr '\n' ' ' \
+    | grep -qE '\.(block|seq)-header[^{]*\{[^}]*sticky'; then
+  echo "FAIL  RunProgressTab still has the inert sticky header rule"; fail=1
+else
+  echo "PASS  RunProgressTab has no sticky block/sequence header rule (call 15)"
+fi
 own heat-legend RunProgressTab.svelte
 uniq1 heat-legend
 if [[ -n $REPLY ]]; then
@@ -4921,6 +4993,8 @@ if [[ -n $REPLY ]]; then
   N=InlineName; H=$REPLY
   d '\.in-input' '' 'height:var\(--control-h-sm\)' 'border:1px solid var\(--border-strong\)' 'caret-color:var\(--primary\)'
   d '\.in-err' '' 'font-size:12px' 'color:var\(--danger\)'
+  # Call 16: the wait line is a muted hint, not an error.
+  d '\.in-hint' '' 'font-size:12px' 'color:var\(--muted\)'
   sweep InlineName $H
 fi
 
@@ -5667,6 +5741,8 @@ uniq1 icon-btn
 if [[ -n $REPLY ]]; then
   N=IconButton; H=$REPLY
   d '\.danger' '' '--ring: var\(--danger\)'
+  # VR-B (call 10): a ✕ "Cancel" beside a ✓ rings gray, as InlineConfirm's Cancel.
+  d '\.cancel' '' '--ring: var\(--muted\)'
 fi
 uniq1 inline-confirm
 if [[ -n $REPLY ]]; then
@@ -5689,10 +5765,11 @@ if [[ -n $REPLY ]]; then
 fi
 # P116: --ring is set only on leaf controls. Another declaration (a card, a
 # wrapper) would silently recolour every ring inside it. The eleventh is the
-# superuser panel's nav pill (D23), AppHeader's nav amber.
+# superuser panel's nav pill (D23), AppHeader's nav amber. The twelfth is
+# IconButton's ✕ Cancel (VR-B, call 10).
 nring=$(grep -oE -- '--ring: ?var\(' $CSS | wc -l | tr -d ' ')
-if [[ $nring -eq 11 ]]; then echo "PASS  --ring is declared exactly eleven times, all on leaf controls (D60, D61, D23)"
-else echo "FAIL  --ring is declared exactly eleven times, all on leaf controls (D60, D61, D23) (found $nring)"; fail=1; fi
+if [[ $nring -eq 12 ]]; then echo "PASS  --ring is declared exactly twelve times, all on leaf controls (D60, D61, D23, VR-B)"
+else echo "FAIL  --ring is declared exactly twelve times, all on leaf controls (D60, D61, D23, VR-B) (found $nring)"; fail=1; fi
 
 # Task 2 — the page ground (D50) and the reading sheets (D56).
 # Disabled fills use --disabled-bg (the old #FBFBFC), so they stay a step above
@@ -5753,6 +5830,9 @@ if [[ -n $REPLY ]]; then
   d '\.cv-body' '' 'display:grid' 'grid-template-columns:minmax\(0,1fr\) 300px' 'grid-template-rows:auto auto auto 1fr' 'gap:14px' 'align-items:start'
   chk "\.cv-prog\.${H},\.cv-dl\.${H},\.cv-tch\.${H},\.cv-body\.${H}>\.info:where\(\.${H}\)" 'grid-column:2'
   d '\.cv-blocks' '' 'grid-column:1' 'grid-row:1 / span 4' 'min-width:0'
+  # VR-B (call 3): nothing for the right column (no items, deadlines, teachers
+  # or info), so the blocks take the full width.
+  chk "\.cv-body\.${H}:not\(:has\(> ?\.cv-prog, ?> ?\.cv-dl, ?> ?\.cv-tch, ?> ?\.info\)\)" 'grid-template-columns:minmax\(0,1fr\)'
   chk "\.cv-body\.${H}>\.info:where\(\.${H}\)" 'margin:0'
   none "CourseView: no grid areas or .has-info left (D80)" "grid-template-areas:\"blocks|\.has-info\.${H}"
   chk "@media \(max-width: ?880px\)\{\.cv-body\.${H}" 'display:flex' 'flex-direction:column' 'align-items:stretch'

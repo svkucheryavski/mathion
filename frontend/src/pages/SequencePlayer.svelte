@@ -3,6 +3,7 @@
   import { currentCourse, loadCourse, recordItemVisit } from '../stores/currentCourse.svelte';
   import { currentRoute, navigate } from '../lib/router.svelte';
   import { routeClick } from '../lib/routeClick';
+  import { repairFocus } from '../lib/askInPlace.svelte';
   import ItemRouter from '../components/items/ItemRouter.svelte';
   import ItemIcon from '../components/course/ItemIcon.svelte';
   import Skeleton from '../components/ui/Skeleton.svelte';
@@ -20,12 +21,16 @@
     if (currentCourse.value?.slug !== courseSlug) {
       loading = true;
       error = null;
+      // VR-B: an outdated load leaves `loading` and `error` alone.
+      let cancelled = false;
       loadCourse(courseSlug)
         .catch((e: unknown) => {
+          if (cancelled) return;
           if (e instanceof ApiError) error = { status: e.status, message: e.displayMessage };
           else error = { status: 500, message: 'Could not load course.' };
         })
-        .finally(() => { loading = false; });
+        .finally(() => { if (!cancelled) loading = false; });
+      return () => { cancelled = true; };
     } else {
       loading = false;
     }
@@ -69,16 +74,18 @@
 
   let currentItemId = $state<number | null>(null);
 
-  // C6: an in-app link to another sequence without #item= keeps this player
-  // (same route), so the previous sequence's item must not stay selected.
+  // C6, VR-B: an item outside this sequence, or a bad #item=, is replaced.
   $effect(() => {
-    const stale = currentItemId !== null && !currentRoute.hash.startsWith('#item=')
+    const stale = currentItemId !== null
       && !sequence?.items.some((it) => it.id === currentItemId);
+    const malformed = currentRoute.hash.startsWith('#item=') && !/^#item=\d+$/.test(currentRoute.hash);
     if (sequence && (currentItemId === null || stale)) {
       const initial = resolveInitialItemId(sequence);
       if (initial !== null) {
-        navigate(`/courses/${courseSlug}/seq/${sequenceId}#item=${initial}`, { replace: true });
+        void navigate(`/courses/${courseSlug}/seq/${sequenceId}#item=${initial}`, { replace: true });
       }
+    } else if (sequence && malformed) {
+      void navigate(`/courses/${courseSlug}/seq/${sequenceId}#item=${currentItemId}`, { replace: true });
     }
   });
 
@@ -87,11 +94,16 @@
     const m = currentRoute.hash.match(/^#item=(\d+)$/);
     if (m) {
       const newId = Number(m[1]);
-      if (newId !== currentItemId) {
-        currentItemId = newId;
-        recordItemVisit(newId);
-      }
+      if (newId !== currentItemId) currentItemId = newId;
     }
+  });
+  // VR-B: visits only for items of this sequence.
+  let lastVisitId: number | null = null;
+  $effect(() => {
+    const id = sequence?.items.some((it) => it.id === currentItemId) ? currentItemId : null;
+    if (id === null || id === lastVisitId) return;
+    lastVisitId = id;
+    recordItemVisit(id);
   });
 
   const currentItem = $derived<Item | null>(
@@ -123,15 +135,8 @@
     currentItemId === null ? -1 : flatItems.findIndex((x) => x.itemId === currentItemId),
   );
 
-  function gotoFlat(target: FlatRef): void {
-    navigate(`/courses/${courseSlug}/seq/${target.sequenceId}#item=${target.itemId}`, { replace: true });
-  }
-
-  function previous(): void {
-    if (flatIndex > 0) gotoFlat(flatItems[flatIndex - 1]);
-  }
-  function next(): void {
-    if (flatIndex >= 0 && flatIndex < flatItems.length - 1) gotoFlat(flatItems[flatIndex + 1]);
+  function gotoFlat(target: FlatRef): Promise<boolean> {
+    return navigate(`/courses/${courseSlug}/seq/${target.sequenceId}#item=${target.itemId}`, { replace: true });
   }
 
   // D4 footer: three-way primary predicate.
@@ -139,6 +144,31 @@
   const nextRef = $derived<FlatRef | null>(
     flatIndex >= 0 && flatIndex < flatItems.length - 1 ? flatItems[flatIndex + 1] : null,
   );
+
+  // VR-B: ← on the first item is aria-disabled, so it keeps focus.
+  function previous(): void {
+    if (flatIndex > 0) void gotoFlat(flatItems[flatIndex - 1]);
+  }
+  // VR-B: → onto the last item moves focus to Finish once that item shows.
+  let finishFor: { itemId: number; nav: Element | null } | null = null;
+  function next(e: MouseEvent): void {
+    if (flatIndex < 0 || flatIndex >= flatItems.length - 1) return;
+    const target = flatItems[flatIndex + 1];
+    const nav = (e.currentTarget as Element).closest('footer.player-nav');
+    const wish = flatIndex + 1 === flatItems.length - 1 ? { itemId: target.itemId, nav } : null;
+    finishFor = wish;
+    // A refused move drops it.
+    void gotoFlat(target).then((moved) => { if (!moved && wish !== null && finishFor === wish) finishFor = null; });
+  }
+  $effect(() => {
+    const id = currentItemId;
+    if (finishFor === null || id !== finishFor.itemId) return;
+    const nav = finishFor.nav;
+    finishFor = null;
+    // Defensive.
+    if (isAtFlatEnd) void repairFocus(nav?.querySelector('.finish button'));
+  });
+
   // Blank whitespace-only titles fall back to a plain "Next item" (D93: the
   // round Next button's name).
   const nextTitle = $derived(nextRef && nextRef.title.trim() !== '' ? nextRef.title : '');
@@ -228,7 +258,8 @@
         type="button"
         class="nav-btn prev"
         onclick={previous}
-        disabled={flatIndex <= 0}
+        disabled={flatIndex < 0}
+        aria-disabled={flatIndex === 0}
         aria-label="Previous item"
         title={flatIndex < 0 ? 'Loading…' : flatIndex === 0 ? "You're on the first item" : 'Previous item'}
       >
@@ -421,4 +452,6 @@
   .nav-btn svg { width: 15px; height: 15px; }
   .nav-btn.next { background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
   .nav-btn:disabled { background: var(--disabled-bg); border-color: var(--border-faint); color: var(--faint); box-shadow: none; cursor: not-allowed; }
+  /* VR-B: ← on the first item is blocked, not disabled (it keeps focus). */
+  .nav-btn[aria-disabled='true'] { background: var(--disabled-bg); border-color: var(--border-faint); color: var(--faint); box-shadow: none; cursor: not-allowed; }
 </style>

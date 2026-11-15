@@ -5,7 +5,7 @@
   // Save disabled. A failed
   // save keeps the field open with the error under it. Nothing saves on blur.
   import { onMount, untrack, type Snippet } from 'svelte';
-  import { ApiError } from '../../lib/api';
+  import { ApiError, OFFLINE_MESSAGE } from '../../lib/api';
   import IconButton from './IconButton.svelte';
 
   let {
@@ -19,6 +19,7 @@
     subject = undefined,
     type = 'text',
     emptyTitle = undefined,
+    wait = null,
   }: {
     label: string;
     value?: string;
@@ -33,29 +34,36 @@
     type?: 'text' | 'date';
     // ✓'s title while the field is empty ("Choose a date"); else saveTitle.
     emptyTitle?: string;
+    // While set, ✓ and Enter send nothing and show it as a muted hint (call 16).
+    wait?: string | null;
   } = $props();
 
   const uid = $props.id();
   const errId = `${uid}-err`;
+  const hintId = `${uid}-hint`;
   let text = $state(untrack(() => value));
   let saving = $state(false);
   let error = $state<string | null>(null);
   let inputEl = $state<HTMLInputElement>();
   const trimmed = $derived(text.trim());
+  // A save tried during the wait; resets whenever `wait` changes, so the hint goes once it ends.
+  let waited = $derived.by(() => { void wait; return false; });
+  const hint = $derived(waited && wait ? wait : null);
   onMount(() => inputEl?.focus());
 
   async function save() {
     if (saving || !trimmed) return;
     if (trimmed === value.trim()) { onCancel(); return; }
+    if (wait) { waited = true; error = null; return; }
     saving = true;
     error = null;
     try {
       await onSave(trimmed);
     } catch (e) {
-      // Polish 3: only a caller's own plain Error speaks; a network failure (a
-      // fetch TypeError) or a parse error never shows the browser's raw text,
-      // and an empty message never shows at all.
-      error = e instanceof ApiError ? e.displayMessage || 'Could not save.'
+      // Polish 3: only a caller's own plain Error speaks; offline says OFFLINE_MESSAGE
+      // (call 13), a 422 list its first msg, and an empty message never shows.
+      error = e instanceof ApiError ? e.validationErrors()?.[0]?.msg?.replace(/^Value error, /, '') || e.displayMessage || 'Could not save.'
+        : e instanceof TypeError ? OFFLINE_MESSAGE
         : e instanceof Error && e.constructor === Error && e.message ? e.message
         : 'Could not save.';
       inputEl?.focus();
@@ -69,9 +77,9 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    // A key that ends an IME composition is neither a save nor a cancel (Safari: keyCode 229).
+    if (e.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter') {
-      // Enter that ends an IME composition is not a save.
-      if (e.isComposing) return;
       e.preventDefault();
       void save();
     } else if (e.key === 'Escape') {
@@ -91,20 +99,21 @@
       {maxlength}
       readonly={saving}
       aria-invalid={error ? 'true' : undefined}
-      aria-describedby={error ? errId : undefined}
+      aria-describedby={error ? errId : hint ? hintId : undefined}
       bind:this={inputEl}
       bind:value={text}
-      oninput={() => { error = null; }}
+      oninput={() => { error = null; waited = false; }}
       onkeydown={onKeydown}
     />
     {@render aside?.()}
-    <IconButton glyph="close" size="sm" title="Cancel" disabled={saving} onclick={cancel}
+    <IconButton glyph="close" size="sm" title="Cancel" cancel disabled={saving} onclick={cancel}
                 aria-label={subject ? `Cancel renaming ${subject}` : undefined} />
     <IconButton glyph="check" size="sm" primary title={saving ? 'Saving…' : !trimmed ? (emptyTitle ?? saveTitle) : saveTitle}
                 aria-label={subject ? `${saving ? 'Saving' : saveTitle} ${subject}` : undefined}
                 disabled={!trimmed || saving} onclick={() => void save()} />
   </div>
-  {#if error}<p class="in-err" id={errId} role="alert">{error}</p>{/if}
+  {#if error}<p class="in-err" id={errId} role="alert">{error}</p>
+  {:else if hint}<p class="in-hint" id={hintId} role="status">{hint}</p>{/if}
 </div>
 
 <style>
@@ -127,4 +136,5 @@
   .in-input:focus-visible { outline: none; border: 1.5px solid var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
   .in-input[aria-invalid='true'] { border: 1.5px solid var(--danger); }
   .in-err { margin: 0; font-size: 12px; color: var(--danger); }
+  .in-hint { margin: 0; font-size: 12px; color: var(--muted); }
 </style>

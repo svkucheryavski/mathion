@@ -1,6 +1,6 @@
 <script lang="ts">
   import { setContext, onDestroy, tick, untrack } from 'svelte';
-  import { api, ApiError } from '../../lib/api';
+  import { api, failureText } from '../../lib/api';
   import { navigate } from '../../lib/router.svelte';
   import { routeClick } from '../../lib/routeClick';
   import { currentEditorVersion, loadAdminTree, clearEditorVersion } from '../../stores/currentEditorVersion.svelte';
@@ -9,7 +9,7 @@
   import { createDirtyRegistry, DIRTY_REGISTRY_KEY } from '../../lib/dirtyRegistry.svelte';
   import { deriveExpansion } from '../../lib/deriveExpansion';
   import { handleStaleIdFallback } from '../../lib/handleStaleIdFallback';
-  import { mapCreateError, type FieldErrors } from '../../lib/formErrors';
+  import { createErrorText, mapCreateError, type FieldErrors } from '../../lib/formErrors';
   import { externalLinks } from '../../lib/externalLinks';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
   import AskSlot from '../../components/ui/AskSlot.svelte';
@@ -277,14 +277,15 @@
     try {
       await api.delete(`/api/items/${id}`);
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
+      pushToast(failureText(e, 'Delete failed'), 'error');
       // A 403/409 from a state change mid-confirm: perms must catch up.
       if (stillOnVid(savedVid)) await loadAdminTree(savedVid, { force: true });
       deletingIid = null;   // the modal refocuses its trash (or ×)
       await tick();
       return;
     }
-    if (!stillOnVid(savedVid)) { deletingIid = null; return; }
+    // The DELETE landed: say so even when the page moved to another version.
+    if (!stillOnVid(savedVid)) { deletingIid = null; pushToast('Item deleted', 'success'); return; }
     if (routeIid === String(id)) {
       deletedIid = id;
       closing = true;
@@ -296,7 +297,8 @@
     await loadAdminTree(savedVid, { force: true });
     pushToast('Item deleted', 'success');
     if (routeIid === null && stillOnVid(savedVid) && routeSid === savedSid) {
-      document.getElementById(`seq-${savedSid}-header`)?.focus();
+      // D18: only a focus the closed modal dropped goes to the header.
+      void repairFocus(document.getElementById(`seq-${savedSid}-header`));
     }
     deletingIid = null;
   }
@@ -354,6 +356,8 @@
   let createErrors = $state<FieldErrors>({});
   let createGlobalError = $state<string | null>(null);
   let createBusy = $state(false);
+  // VR-B: only the POST itself; the follow-up reload keeps createBusy but not the form.
+  let posting = $state(false);
   let okEl = $state<HTMLButtonElement>();
   let titleEl = $state<HTMLInputElement>();
   let addLineEl = $state<HTMLButtonElement>();
@@ -410,14 +414,14 @@
   });
 
   async function openAdd() {
-    if (createBusy || busy || !perms?.canEditStructure) return;
+    if (posting || busy || !perms?.canEditStructure) return;
     creating = true;
     await tick();
     titleEl?.focus();
   }
 
   async function cancelAdd() {
-    if (createBusy) return;
+    if (posting) return;
     resetCreate(); creating = false;
     await tick();
     addLineEl?.focus();
@@ -429,8 +433,11 @@
     createErrors = {};
     createGlobalError = null;
     createBusy = true;
+    posting = true;
+    let failed = false;
     try {
       await api.post(`/api/versions/${savedVid}/blocks`, { title: newTitle });   // no info (5c D7)
+      posting = false;
       newTitle = ''; creating = false;
       // The row is gone; give a keyboard author the line back for the next
       // one — unless focus already moved somewhere on purpose.
@@ -440,13 +447,14 @@
       await loadAdminTree(savedVid, { force: true });
       pushToast('Block created', 'success');
     } catch (e) {
+      failed = true;
       const mapped = mapCreateError(e, ['title']);
       // The form closed while the POST was in flight (a confirmed discard, a
       // read-only flip): there is no form to show the error on, and writing it
       // would resurface stale on the next open — toast it instead (as the
       // accordions' create forms do).
       if (!creating) {
-        pushToast(mapped.globalMessage ?? Object.values(mapped.fieldErrors)[0] ?? 'Create failed', 'error');
+        pushToast(createErrorText(mapped), 'error');
         return;
       }
       createErrors = mapped.fieldErrors;
@@ -456,9 +464,10 @@
         pushToast(createGlobalError, 'error');
       }
     } finally {
+      posting = false;
       createBusy = false;
-      // F2: × is disabled while busy; a focus the browser dropped there comes back to the ✓.
-      if (creating) void repairFocus(okEl, titleEl);
+      // F2: × is disabled while it posts; a focus the browser dropped there comes back to the ✓.
+      if (failed && creating) void repairFocus(okEl, titleEl);
     }
   }
 
@@ -477,7 +486,7 @@
       if (!stillOnVid(savedVid)) return;
       await loadAdminTree(savedVid, { force: true });
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Reorder failed', 'error');
+      pushToast(failureText(e, 'Reorder failed'), 'error');
       if (stillOnVid(savedVid)) {
         await loadAdminTree(savedVid, { force: true });
       }
@@ -539,7 +548,7 @@
       pushToast(`Version ${past[action]}`, 'success');
       ok = true;
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : `Could not ${action}`, 'error');
+      pushToast(failureText(e, `Could not ${action}`), 'error');
     } finally {
       busy = false;
       // R54: the question settles once the reload has landed. Success: the
@@ -576,7 +585,7 @@
         void navigate(`/courses/${savedSlug}/edit`, { replace: true, force: true });
       }
     } catch (e) {
-      pushToast(e instanceof ApiError ? e.displayMessage : 'Delete failed', 'error');
+      pushToast(failureText(e, 'Delete failed'), 'error');
     } finally {
       busy = false;
       // A failure: back to the trigger once the bar is back (R54).
@@ -672,18 +681,20 @@
                   aria-describedby={createErrors.title || createGlobalError ? addErrId : undefined}
                   bind:value={newTitle}
                   maxlength={200}
-                  readonly={createBusy}
-                  onkeydown={(e) => { if (e.key === 'Escape' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); void cancelAdd(); } }}
+                  readonly={posting}
+                  onkeydown={(e) => { if (e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); e.stopPropagation(); void cancelAdd(); } }}
                   oninput={() => { if (createErrors.title) createErrors = { ...createErrors, title: '' }; createGlobalError = null; }}
                 />
                 {#if createErrors.title || createGlobalError}<p id={addErrId} class="add-err" role="alert">{createErrors.title || createGlobalError}</p>{/if}
               </div>
               <!-- F2: blocked, not disabled, while its create runs, so it keeps focus; submitCreateBlock's guard stops a second submit. -->
-              <IconButton size="sm" glyph="check" primary type="submit" title="Create" aria-label="Create block" bind:element={okEl} aria-disabled={createBusy} disabled={!createBusy && (busy || !newTitle.trim())} />
-              <IconButton size="sm" glyph="close" title="Cancel" aria-label="Cancel new block" disabled={createBusy} onclick={() => void cancelAdd()} />
+              <span class="add-acts">
+                <IconButton size="sm" glyph="check" primary type="submit" title={createBusy ? 'Wait for the request to finish' : 'Create'} aria-label="Create block" bind:element={okEl} aria-disabled={createBusy} disabled={!posting && (busy || !newTitle.trim())} />
+                <IconButton size="sm" glyph="close" title="Cancel" aria-label="Cancel new block" cancel disabled={posting} onclick={() => void cancelAdd()} />
+              </span>
             </form>
           {:else}
-            <button bind:this={addLineEl} type="button" class="add-line" data-action="add-block" disabled={busy} onclick={() => void openAdd()}>+ Add block</button>
+            <button bind:this={addLineEl} type="button" class="add-line" data-action="add-block" disabled={busy} aria-disabled={posting ? 'true' : undefined} title={posting ? 'Wait for the request to finish' : undefined} onclick={() => void openAdd()}>+ Add block</button>
           {/if}
         {/if}
       </section>
@@ -733,6 +744,7 @@
             onRequestClose={requestCloseItem}
             onDeleteItem={deleteOpenItem}
             deleting={deletingIid === it.id}
+            deleteBusy={deletingIid !== null && deletingIid !== it.id}
           />
         {/key}
       {/if}
@@ -809,8 +821,12 @@
     cursor: pointer;
   }
   .add-line:disabled { color: var(--muted); cursor: default; }
+  /* Blocked while a create from a closed form still posts. */
+  .add-line[aria-disabled='true'] { color: var(--muted); cursor: default; }
   .add-row { display: flex; align-items: flex-start; gap: 6px; margin-top: 4px; }
   .add-field { flex: 1 1 auto; min-width: 0; }
+  /* VR-B: ✓ and ✕ centred on the field, as the rename row (D90). */
+  .add-acts { display: flex; align-items: center; gap: 6px; height: var(--control-h); }
   .add-input {
     box-sizing: border-box;
     width: 100%;

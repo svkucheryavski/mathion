@@ -15,6 +15,10 @@ from mathion.schemas import QuestionReveal, QuizRevealResponse, QuizSubmitReques
 
 router = APIRouter(tags=["quiz"])
 
+# The student's QuizItem reads this exact text to tell the attempts 409 from
+# the endpoint's other 409s; one constant for both raises (VR-B).
+MAX_ATTEMPTS_DETAIL = "Max attempts reached"
+
 
 def _check_quiz_access(db: Session, user: User, item_id: int) -> tuple[Item, CourseVersion]:
     """Verify user is enrolled and item is in a published version."""
@@ -89,7 +93,7 @@ def submit_quiz(item_id: int, data: QuizSubmitRequest, user: User = Depends(get_
     # Check max attempts — atomic increment to prevent race condition
     max_attempts = version.max_quiz_attempts
     if state.attempt_count >= max_attempts:
-        raise HTTPException(status_code=409, detail="Max attempts reached")
+        raise HTTPException(status_code=409, detail=MAX_ATTEMPTS_DETAIL)
 
     # Evaluate each question — option-level scoring (Phase 7c)
     score_correct = 0
@@ -139,7 +143,7 @@ def submit_quiz(item_id: int, data: QuizSubmitRequest, user: User = Depends(get_
 
     if rows_updated == 0:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Max attempts reached")
+        raise HTTPException(status_code=409, detail=MAX_ATTEMPTS_DETAIL)
 
     db.commit()
     db.refresh(state)

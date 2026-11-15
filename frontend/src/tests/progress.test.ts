@@ -40,10 +40,28 @@ describe('progressOf', () => {
     expect(progressOf([], vstate([]))).toMatchObject({ covered: 0, total: 0, pct: 0, barPct: 0, done: false });
   });
 
-  it('quiz score = points earned ÷ points possible over the quizzes TRIED, rounded', () => {
-    // (3 + 1) / (4 + 2) = 66.67% → 67%; the untried quiz 4 is left out, not 0.
+  it('quiz score = points earned ÷ points possible over the quizzes TRIED, rounded down', () => {
+    // (3 + 1) / (4 + 2) = 66.67% → 66% (rounded down); the untried quiz 4 is left out, not 0.
     const items = [item(1), item(2, 'quiz'), item(3, 'quiz'), item(4, 'quiz')];
-    expect(progressOf(items, vstate([], { 2: [3, 4], 3: [1, 2] }))).toMatchObject({ hasQuiz: true, quizPct: 67 });
+    expect(progressOf(items, vstate([], { 2: [3, 4], 3: [1, 2] }))).toMatchObject({ hasQuiz: true, quizPct: 66 });
+  });
+
+  // VR-B (call 1): the chip rounds down like the bar: 100% means full marks.
+  it('quiz score rounds down', () => {
+    const items = [item(1, 'quiz')];
+    expect(progressOf(items, vstate([], { 1: [199, 200] }))).toMatchObject({ quizPct: 99 });
+    expect(progressOf(items, vstate([], { 1: [200, 200] }))).toMatchObject({ quizPct: 100 });
+    expect(progressOf(items, vstate([], { 1: [1, 3] }))).toMatchObject({ quizPct: 33 });
+    // Review r1: exact integer arithmetic, no float shortfall (0.29 * 100 = 28.999…).
+    expect(progressOf(items, vstate([], { 1: [29, 100] }))).toMatchObject({ quizPct: 29 });
+    expect(progressOf(items, vstate([], { 1: [57, 100] }))).toMatchObject({ quizPct: 57 });
+    expect(progressOf(items, vstate([], { 1: [114, 200] }))).toMatchObject({ quizPct: 57 });
+  });
+
+  it('the bar rounds down without a float shortfall', () => {
+    const items = Array.from({ length: 100 }, (_, k) => item(k + 1));
+    const covered = Array.from({ length: 29 }, (_, k) => k + 1);
+    expect(progressOf(items, vstate(covered))).toMatchObject({ pct: 29 });
   });
 
   it('quizzes present but none tried (or only zero-point ones): quizPct null, hasQuiz true', () => {

@@ -305,7 +305,8 @@ describe('BlockGroup', () => {
   it('gives the header chip the strip fill only while the block is open', () => {
     component = mount(BlockGroup, {
       target,
-      props: { n: 1, courseSlug: 'course-a', block: BASE_BLOCK, state: BASE_STATE, mpByBlockId: {}, expanded: false },
+      // An item, so the header has a meter (VR-B call 3: none for an empty block).
+      props: { n: 1, courseSlug: 'course-a', block: { ...BASE_BLOCK, sequences: [{ ...makeSequence(101, 1), items: [{ id: 5, sequence_id: 101, title: 'P', slug: 'p', order: 1, type: 'static_page', content_md: '', content_html: '' }] }] }, state: BASE_STATE, mpByBlockId: {}, expanded: false },
     });
     flushSync();
     const chip = () => target.querySelector('header .quiz-chip') as HTMLElement;
@@ -444,5 +445,18 @@ describe('BlockGroup', () => {
     expect(btn.getAttribute('aria-expanded')).toBe('false');
     expect((btn.querySelector('.progress .pct') as HTMLElement).textContent).toBe('66%');
     expect((btn.querySelector('.quiz-chip') as HTMLElement).textContent!.trim()).toBe('Quiz 50%');
+  });
+
+  // VR-B (call 3): a block with no items has nothing to measure.
+  it('a block with no items shows no meter, and its name carries no totals', () => {
+    component = mount(BlockGroup, {
+      target,
+      props: { n: 1, courseSlug: 'course-a', block: BASE_BLOCK, state: BASE_STATE },
+    });
+    flushSync();
+    const btn = target.querySelector('button.acc') as HTMLButtonElement;
+    expect(btn.querySelector('.progress')).toBeNull();
+    expect(btn.querySelector('.quiz-chip')).toBeNull();
+    expect(btn.getAttribute('aria-label')).toBe('1. Block 42');
   });
 });

@@ -13,7 +13,7 @@ export type Progress = {
   done: boolean;
   hasQuiz: boolean;
   /** Points earned ÷ points possible over the quizzes TRIED (latest attempt),
-   *  rounded; null when no quiz has been tried (or only zero-point ones).
+   *  rounded down; null when no quiz has been tried (or only zero-point ones).
    *  An untried quiz is left out, not counted as 0: students aren't sent its
    *  point total, and the bar already says how much is left. */
   quizPct: number | null;
@@ -35,7 +35,8 @@ export function progressOf(items: Item[], state: VersionState): Progress {
     got += ls.correct;
     max += ls.total;
   }
-  const pct = total ? Math.floor((covered / total) * 100) : 0;
+  // Integer arithmetic: (covered / total) * 100 falls short (29/100 → 28.99…).
+  const pct = total ? Math.floor((covered * 100) / total) : 0;
   return {
     covered,
     total,
@@ -43,7 +44,8 @@ export function progressOf(items: Item[], state: VersionState): Progress {
     barPct: covered > 0 ? Math.max(pct, 2) : 0,
     done: total > 0 && covered === total,
     hasQuiz,
-    quizPct: max > 0 ? Math.round((got / max) * 100) : null,
+    // VR-B (call 1): rounded down, as the bar: 100% only for full marks.
+    quizPct: max > 0 ? Math.floor((got * 100) / max) : null,
   };
 }
 

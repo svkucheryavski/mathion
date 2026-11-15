@@ -136,11 +136,13 @@ describe('SequenceLink', () => {
     expect(fill(root).classList.contains('done')).toBe(true);
   });
 
-  it('an empty sequence reads 0% and is not "done"', () => {
+  // VR-B (user, after call 3): like an empty block, an empty sequence has
+  // nothing to measure, so no bar, no chip and no count.
+  it('an empty sequence shows no meter and its label no count', () => {
     const root = render({ sequence: sequence({ items: [] }) });
-    expect(pct(root)).toBe('0%');
-    expect(fill(root).style.width).toBe('0%');
-    expect(fill(root).classList.contains('done')).toBe(false);
+    expect(root.querySelector('.progress')).toBeNull();
+    expect(root.querySelector('.quiz-chip')).toBeNull();
+    expect(row(root).getAttribute('aria-label')).toBe('Sequence: Determinants');
   });
 
   it('counts an item with no state entry as not done', () => {
@@ -166,9 +168,9 @@ describe('SequenceLink', () => {
     expect(q.querySelector('svg')).toBeNull();
   });
 
-  it('quiz score = points earned ÷ points possible over the quizzes TRIED, rounded', () => {
+  it('quiz score = points earned ÷ points possible over the quizzes TRIED, rounded down', () => {
     // Quiz 2: 3 of 4; quiz 3: 1 of 2; quiz 4 untried (left out, not counted as
-    // 0). (3 + 1) / (4 + 2) = 66.67% → 67%. A per-quiz average would say 63%;
+    // 0). (3 + 1) / (4 + 2) = 66.67% → 66% (rounded down, VR-B call 1). A per-quiz average would say 63%;
     // counting the untried quiz as 0 would need its total, which students
     // don't get — either slip changes the number.
     const root = render({
@@ -176,7 +178,7 @@ describe('SequenceLink', () => {
       state: vstate([1, 2, 3], { 2: [3, 4], 3: [1, 2] }),
     });
     const q = quiz(root);
-    expect(q.textContent!.trim()).toBe('Quiz 67%');
+    expect(q.textContent!.trim()).toBe('Quiz 66%');
     expect(q.classList.contains('none') || q.classList.contains('empty')).toBe(false);
     expect(Array.from(q.querySelector('svg')!.children).map((c) => c.tagName)).toEqual(['polyline']);
   });
@@ -228,17 +230,14 @@ describe('SequenceLink', () => {
       .toBe('Sequence: Determinants, 2 of 2 items completed, quiz score 75%');
   });
 
-  it('says "item" for exactly one item, "items" for zero and for more', () => {
-    // 1 of 2 separates `total === 1` from `covered === 1`; 0 of 0 separates
-    // `=== 1` from `<= 1` (both escaped review once, T7).
+  it('says "item" for exactly one item, "items" for more', () => {
+    // 1 of 2 separates `total === 1` from `covered === 1` (escaped review
+    // once, T7). An empty sequence has no count (VR-B).
     const root = render({ sequence: sequence({ items: [item(4)] }), state: vstate([4]) });
     expect(row(root).getAttribute('aria-label')).toBe('Sequence: Determinants, 1 of 1 item completed');
     props.sequence = sequence({ items: [item(1), item(4)] });
     flushSync();
     expect(row(root).getAttribute('aria-label')).toBe('Sequence: Determinants, 1 of 2 items completed');
-    props.sequence = sequence({ items: [] });
-    flushSync();
-    expect(row(root).getAttribute('aria-label')).toBe('Sequence: Determinants, 0 of 0 items completed');
   });
 
   it('points at the sequence route', () => {

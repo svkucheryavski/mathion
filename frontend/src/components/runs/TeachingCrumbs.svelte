@@ -2,6 +2,7 @@
   // Teaching / Course [/ Run] (spec §The breadcrumb). The last item is plain
   // text with aria-current; the drawn "/" separators are hidden from AT.
   import { routeClick } from '../../lib/routeClick';
+  import { teachingHref } from '../../lib/teachingFilter';
 
   let { course, runTitle = undefined }: {
     course: { slug: string; name: string };
@@ -9,10 +10,12 @@
   } = $props();
 
   const courseHref = $derived(`/teaching/${course.slug}`);
+  // C18: back to the status filter the teacher left the Teaching page with.
+  const homeHref = teachingHref();
 </script>
 
 <nav class="teach-crumbs" aria-label="Breadcrumb">
-  <a href="/teaching" onclick={(e) => routeClick(e, '/teaching')}>Teaching</a>
+  <a href={homeHref} onclick={(e) => routeClick(e, homeHref)}>Teaching</a>
   <span class="tc-sep" aria-hidden="true">/</span>
   {#if runTitle !== undefined}
     <a href={courseHref} onclick={(e) => routeClick(e, courseHref)}>{course.name}</a>

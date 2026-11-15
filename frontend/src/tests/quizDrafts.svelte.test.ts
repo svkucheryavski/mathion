@@ -7,6 +7,9 @@ import {
   clearAllDrafts,
   dropDraftsNotOwnedBy,
   hasUnsavedDrafts,
+  takeDraft,
+  restoreDraft,
+  endSend,
 } from '../stores/quizDrafts.svelte';
 import { session } from '../stores/session.svelte';
 import { api } from '../lib/api';
@@ -123,5 +126,82 @@ describe('quiz drafts (D83, C14)', () => {
     vi.spyOn(api, 'get').mockResolvedValue(user(9));
     await bootstrapSession();
     expect(getDraft(5)).toBeUndefined();
+  });
+});
+
+// VR-B: a submit takes its draft at send and gives it back only when that is
+// still right (review r2/r3).
+describe('a held draft (VR-B)', () => {
+  it('a failed latest send puts its draft back', () => {
+    setDraft(1, { q: [1] });
+    const held = takeDraft(1);
+    expect(getDraft(1)).toBeUndefined();
+    restoreDraft(1, held);
+    expect(getDraft(1)).toEqual({ q: [1] });
+  });
+
+  it('an older send gives nothing back once a newer one was sent', () => {
+    setDraft(1, { q: [1] });
+    const older = takeDraft(1);
+    setDraft(1, { q: [2] });
+    const newer = takeDraft(1);
+    restoreDraft(1, older);
+    expect(getDraft(1)).toBeUndefined();
+    restoreDraft(1, newer);
+    expect(getDraft(1)).toEqual({ q: [2] });
+  });
+
+  it('a draft typed since wins', () => {
+    setDraft(1, { q: [1] });
+    const held = takeDraft(1);
+    setDraft(1, { q: [2] });
+    restoreDraft(1, held);
+    expect(getDraft(1)).toEqual({ q: [2] });
+  });
+
+  it('nothing comes back after a sign-out, or to another user', () => {
+    setDraft(1, { q: [1] });
+    const a = takeDraft(1);
+    clearAllDrafts();
+    restoreDraft(1, a);
+    expect(getDraft(1)).toBeUndefined();
+    setDraft(2, { q: [1] });
+    const b = takeDraft(2);
+    session.user = user(8);
+    restoreDraft(2, b);
+    expect(getDraft(2)).toBeUndefined();
+  });
+
+  it('a 401 (nobody signed in) keeps the draft for the sign-in round trip', () => {
+    setDraft(1, { q: [1] });
+    const held = takeDraft(1);
+    session.user = null;
+    restoreDraft(1, held);
+    expect(getDraft(1)).toEqual({ q: [1] });
+  });
+
+  it('warns on unload while a send holds answers, until it ends', () => {
+    setDraft(1, { q: [1] });
+    const held = takeDraft(1);
+    expect(hasUnsavedDrafts()).toBe(true);
+    expect(unloadWarns()).toBe(true);
+    endSend(held);
+    expect(hasUnsavedDrafts()).toBe(false);
+  });
+
+  it("another user's sign-in ends the warning for a send in flight; the same user keeps it", () => {
+    setDraft(1, { q: [1] });
+    takeDraft(1);
+    dropDraftsNotOwnedBy(7);
+    expect(hasUnsavedDrafts()).toBe(true);
+    dropDraftsNotOwnedBy(8);
+    expect(hasUnsavedDrafts()).toBe(false);
+  });
+
+  it('a sign-out ends the warning for a send in flight', () => {
+    setDraft(1, { q: [1] });
+    takeDraft(1);
+    clearAllDrafts();
+    expect(hasUnsavedDrafts()).toBe(false);
   });
 });

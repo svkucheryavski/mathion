@@ -37,6 +37,35 @@ describe('InlineConfirm', () => {
     expect(target.querySelector('.warning')?.textContent).toBe('Students lose access.');
   });
 
+  it('a disabledReason holds Confirm: aria-disabled with the title, no aria-busy; clicks and keys do nothing; Cancel still works', () => {
+    const onConfirm = vi.fn();
+    const onCancel = vi.fn();
+    const { confirm, cancel } = render({ disabledReason: 'Wait for the current change to save', onConfirm, onCancel });
+    expect(confirm.getAttribute('aria-disabled')).toBe('true');
+    expect(confirm.getAttribute('aria-busy')).toBeNull();
+    expect(confirm.title).toBe('Wait for the current change to save');
+    confirm.click();
+    confirm.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(cancel.getAttribute('aria-disabled')).toBeNull();
+    cancel.click();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('an onConfirm promise holds Confirm until it settles: a double click acts once, then it acts again', async () => {
+    let release!: () => void;
+    const onConfirm = vi.fn(() => new Promise<void>((r) => { release = r; }));
+    const { confirm } = render({ onConfirm });
+    confirm.click();
+    confirm.click();
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    release();
+    await Promise.resolve();
+    await Promise.resolve();
+    confirm.click();
+    expect(onConfirm).toHaveBeenCalledTimes(2);
+  });
+
   it('Confirm click invokes onConfirm', () => {
     const onConfirm = vi.fn();
     render({ onConfirm }).confirm.click();

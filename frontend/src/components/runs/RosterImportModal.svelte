@@ -2,7 +2,7 @@
   import { tick } from 'svelte';
   import { parseCsv } from '../../lib/csv';
   import type { CsvParseResult } from '../../lib/csv';
-  import { ApiError } from '../../lib/api';
+  import { ApiError, failureText } from '../../lib/api';
   import { batchAddRunStudents } from '../../lib/runRoster';
   import { buildBatchRow } from '../../lib/buildBatchRow';
   import { pushToast } from '../../stores/toasts.svelte';
@@ -125,12 +125,8 @@
     } catch (e) {
       // Surface submit-step errors via the separate submitError slot, NOT via
       // parsed.error (the client-side CSV parse-error channel).
-      if (e instanceof ApiError) {
-        submitError = e.displayMessage;
-      } else {
-        submitError = 'Import failed — please retry.';
-        console.error(e);
-      }
+      submitError = failureText(e, 'Import failed — please retry.');
+      if (!(e instanceof ApiError) && !(e instanceof TypeError)) console.error(e);
     } finally {
       submitting = false;
     }
@@ -163,7 +159,7 @@
     if (!resultRows) return '';
     return resultRows
       .filter((r) => r.status === 'error')
-      .map((r) => `${r.email}\t${r.detail ?? ''}`)
+      .map((r) => `${r.email}\t${detailFor(r)}`)
       .join('\n');
   }
 
@@ -319,10 +315,10 @@
         {/if}
         <p>{parsed.rows.length === 1 ? '1 row' : `${parsed.rows.length} rows`} — <span class="ri-key">{parsed.validCount} valid</span>, {parsed.invalidCount} will skip ({parsed.invalidCount - parsed.duplicateInPasteCount} invalid, {parsed.duplicateInPasteCount} duplicate in paste).</p>
         {#if parsed.willCreateGroups.length > 0}
-          <p>Will create groups: {#each parsed.willCreateGroups as g, i (g)}{#if i > 0}, {/if}<span class="ri-key">{g}</span>{/each}.</p>
+          <p>Will create groups: {#each parsed.willCreateGroups as g, i (g)}{i > 0 ? ', ' : ''}<span class="ri-key">{g}</span>{/each}.</p>
         {/if}
         {#if realMoves.length > 0}
-          <p>Already enrolled, will be re-bucketed: {firstFive(realMoves)}.</p>
+          <p>Already enrolled, will be re-bucketed: {#each realMoves.slice(0, 5) as e, i (e)}{i > 0 ? ', ' : ''}<span class="ri-key mono">{e}</span>{/each}{realMoves.length > 5 ? `, +${realMoves.length - 5} more` : ''}.</p>
         {/if}
       </div>
     {:else if parsed && !parsed.ok}

@@ -12,6 +12,7 @@
   import SortMark from '../ui/SortMark.svelte';
   import StatusBadge from '../ui/StatusBadge.svelte';
   import DashboardSidePanel from './DashboardSidePanel.svelte';
+  import { loadFailureText as loadText } from '../../lib/api';
 
   let {
     runId,
@@ -65,7 +66,7 @@
       .then((res) => { data = res; loading = false; })
       .catch((err) => {
         if (err.name === 'AbortError') return;
-        error = String(err?.message ?? err);
+        error = loadText(err);
         loading = false;
       });
     return () => ctl.abort();
@@ -85,7 +86,7 @@
       .then((res) => { data = res; loading = false; })
       .catch((err) => {
         if (err.name === 'AbortError') return;
-        error = String(err?.message ?? err);
+        error = loadText(err);
         loading = false;
       });
   }
