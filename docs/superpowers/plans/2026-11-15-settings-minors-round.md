@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fix the seven items the 2026-11-15 walk kept: four mail-sending sentences and queue rules, two From-field messages, and the roster's bulk banner. Each item's bullet leaves `docs/backlog/superuser-settings-debt.md` in the commit that fixes it.
+**Goal:** Fix the seven items the 2026-11-15 walk kept: four mail-sending sentences and queue rules, two From-field messages, and the roster's bulk banner. The six mail and From bullets leave `docs/backlog/superuser-settings-debt.md` in the commits that fix them; the roster item had no bullet there.
 
 **Architecture:** Three tasks, one per area. Task 1 changes the mail path (`smtp_errors`, `mailer`, `dispatcher`, the PIN send). Task 2 changes the From check. Task 3 changes the roster banner. They share no code. New exceptions are subclasses of `smtplib.SMTPException`, so they count as `SMTP_FAILURES` and reach `describe()` on every path that already reads a mail failure: the Settings test, the queue and the PIN email.
 
 **Tech Stack:** FastAPI + Postgres 17 (pytest, real `smtplib` against the `_stub` socket server in `backend/tests/test_smtp_errors.py`), Svelte 5 runes + TypeScript (vitest, jsdom).
 
-**Spec:** the user's calls from the walk, copied below (record: `.superpowers/sdd/2026-11-15-settings-minors-walk/calls.md`). Design context: `docs/superpowers/specs/2026-11-04-superuser-settings-design.md` (rev 11: D7b From, D9/D9c sentences and batch stops, D9d sender lines). Tasks 1 and 2 each add a spec revision that records their calls.
+**Spec:** the user's calls from the walk, copied below (the walk's record was a scratch file, now deleted; this plan holds the calls). Design context: `docs/superpowers/specs/2026-11-04-superuser-settings-design.md` (rev 11: D7b From, D9/D9c sentences and batch stops, D9d sender lines). Tasks 1 and 2 each add a spec revision that records their calls; Task 3 updates the banner sentence in `docs/superpowers/specs/2026-05-19-run-management-admin-design.md`.
 
 ## Global Constraints
 
@@ -41,7 +41,7 @@
 ## Review Focus
 
 - **Real smtplib shapes.** C5a, C5b, C9 and C10 key on how smtplib raises: a non-220 to STARTTLS is a plain `SMTPResponseException`, a failed method match is a plain `SMTPException`, a non-ASCII login is `UnicodeEncodeError`, and a 421 at RCPT closes the socket and raises `SMTPRecipientsRefused`. Task 1 drives real `smtplib.SMTP` against `_stub` for all four, not only hand-made exceptions.
-- **Subclasses must not be swallowed.** `SMTPAuthenticationError`, `SMTPNotSupportedError` and `SMTPServerDisconnected` from `starttls()`/`login()` keep their own sentences. Only the exact plain classes are re-raised as the new ones. Task 1 tests each subclass still passes through.
+- **Subclasses must not be swallowed.** `SMTPAuthenticationError`, `SMTPNotSupportedError` and `SMTPServerDisconnected` from `starttls()`/`login()` keep their own sentences, except a 421, which reads TRY_LATER (C5a; a login 421 is re-raised as `LoginClosing`, an EHLO 421 as `SMTPHeloError`). Only the exact plain classes are re-raised as the new ones. Task 1 tests each subclass still passes through.
 - **421 elsewhere.** A 421 to MAIL FROM is already `SMTPSenderRefused` → TRY_LATER. A 421 from the PIN path's send must also reach the card as a batch-level TRY_LATER, not as "refused to send to".
 - **Curly quotes in the saved value.** A straightened pair is stored straight, so the queue's From and the PIN's From are the same as the tested one. A lone `“` is not a quote: it is kept as typed, as before rev 13 (Task 2 review, the user's narrower C7).
 - **The roster banner for a move.** The `move` path builds the same banner. Both remove and move get the reason, and the retry links and their labels don't change.
@@ -53,12 +53,12 @@
 **Files:**
 - Modify: `backend/mathion/notifications/smtp_errors.py` (new exceptions, sentences, `describe`, `stops_the_batch`)
 - Modify: `backend/mathion/notifications/mailer.py:96-116` (`SMTPMailer.session`)
-- Modify: `backend/mathion/notifications/dispatcher.py:497,515` (rename `_record_connected` → `record_connected`)
+- Modify: `backend/mathion/notifications/dispatcher.py` (rename `_record_connected` → `record_connected`; a `closing(send_exc)` branch, before the D9c stop, charges the message, sets the failure and breaks, per C10)
 - Modify: `backend/mathion/api/auth.py:75-131` (`_send_login_pin`)
-- Modify: `backend/mathion/api/superuser_settings.py:59` (import `USERNAME_ASCII` instead of its own copy)
+- Modify: `backend/mathion/api/superuser_settings.py` (import `USERNAME_ASCII` and `SAVED_NOT_ASCII` instead of its own copies)
 - Modify: `docs/superpowers/specs/2026-11-04-superuser-settings-design.md` (rev 12 line: D9 C5a, C5b, C9; D9c C10; D9d C11)
-- Modify: `docs/backlog/superuser-settings-debt.md` (delete the four bullets: session-start reply, non-ASCII username, 421, PIN recipient refused)
-- Test: `backend/tests/test_smtp_errors.py`, `backend/tests/test_notifications_mailer.py`, `backend/tests/test_dispatcher_settings.py`, `backend/tests/test_login_pin_delivery.py`
+- Modify: `docs/backlog/superuser-settings-debt.md` (delete the four bullets: session-start reply, non-ASCII username, 421, PIN recipient refused; add two from the review: a 421 to RSET, a refused DATA command)
+- Test: `backend/tests/test_smtp_errors.py`, `backend/tests/test_notifications_mailer.py`, `backend/tests/test_dispatcher_settings.py`, `backend/tests/test_login_pin_delivery.py`, `backend/tests/test_superuser_settings.py`
 
 **Interfaces:**
 - Produces in `smtp_errors.py`:
@@ -99,12 +99,12 @@ Expected: the new tests FAIL (ImportError for the new names counts, but `_login`
 
 - [ ] **Step 3: Implement**
 
-- `smtp_errors.py`: add the five classes, three constants and `closing` (Interfaces). In `describe`, before the generic branches: any `SMTPResponseException` with code 421 → `TRY_LATER`, True (rounds 4-6); other `StartTlsRefused` → the secure-connection sentence with `hint`, batch True; `NoLoginMethod` → `NO_LOGIN_METHOD`, True; `UsernameNotAscii` → `USERNAME_ASCII`, True; `PasswordNotAscii` → `SAVED_NOT_ASCII`, True; `SMTPRecipientsRefused`/`SMTPDataError` with `_code(exc) == 421` → `TRY_LATER`, True. `stops_the_batch` is also True for that 421 case.
+- `smtp_errors.py`: add the five classes, three constants and `closing` (Interfaces). In `describe`, before the generic branches: any `SMTPResponseException` with code 421 → `TRY_LATER`, True (rounds 4-6); other `StartTlsRefused` → the secure-connection sentence with `hint`, batch True; `NoLoginMethod` → `NO_LOGIN_METHOD`, True; `UsernameNotAscii` → `USERNAME_ASCII`, True; `PasswordNotAscii` → `SAVED_NOT_ASCII`, True; `SMTPRecipientsRefused`/`SMTPDataError` with `_code(exc) == 421` → `TRY_LATER`, True. `stops_the_batch` is also True for that 421 case, but the dispatcher checks `closing()` first and charges the message (C10).
 - `mailer.py`: add `@staticmethod _login(smtp, username, password)`. It raises `UsernameNotAscii` when `not username.isascii()` and `PasswordNotAscii` when the password isn't ASCII, calls `smtp.login`, and re-raises a plain `SMTPException` (`type(exc) is smtplib.SMTPException`) whose text starts "No suitable authentication method" as `NoLoginMethod() from exc`. It wraps `smtp.auth` on the connection so a 421 raises `LoginClosing` (an `SMTPResponseException`), which `login()` doesn't swallow (round 6). `session()` likewise wraps `smtp.ehlo` (`_stop_on_421`) so a 421 to any EHLO raises `SMTPHeloError` instead of smtplib sending HELO on the closed socket (round 7). Both wrappers live as long as the connection, which each session opens anew. `session` uses it. `starttls` is wrapped so a plain `SMTPResponseException` (`type(exc) is ...`) becomes `StartTlsRefused(exc.smtp_code, exc.smtp_error) from exc`.
-- `dispatcher.py`: rename to `record_connected` (one caller, line 497).
+- `dispatcher.py`: rename to `record_connected` (one caller). Before the D9c stop, a `closing(send_exc)` branch calls `_charge` on the message, sets `result.failure` and breaks (C10).
 - `auth.py`: in the `SMTP_FAILURES` branch, when `sending` and the exception is `SMTPRecipientsRefused` or `SMTPDataError` and no card was recorded, call `record_connected(db, site, past_sender=True)` in its own session, skipped in `DEV_MODES` like `_record_on_card`.
-- `superuser_settings.py`: `_USERNAME_ASCII` becomes the imported `USERNAME_ASCII`.
-- Spec rev 12 line and the four debt bullets deleted.
+- `superuser_settings.py`: `_USERNAME_ASCII` and `_SAVED_NOT_ASCII` become the imported `USERNAME_ASCII` and `SAVED_NOT_ASCII`.
+- Spec rev 12 line; the four debt bullets deleted and the two review bullets added.
 
 - [ ] **Step 4: Run the tests, then the suites**
 
@@ -119,9 +119,9 @@ Run the Step 2 command. Expected: all pass. Then the four suites from Global Con
 ### Task 2: The From field (C7, C8)
 
 **Files:**
-- Modify: `backend/mathion/schemas.py:1284-1289` (`EmailTestIn._trim`, which also feeds `EmailSettingsIn`)
+- Modify: `backend/mathion/schemas.py` (`_CURLY_PAIRS`, `_CURLY_MARKS`, and a new `EmailTestIn._straight_quotes` after the unchanged `_trim`; it also feeds `EmailSettingsIn`)
 - Modify: `backend/mathion/api/superuser_settings.py:57,124-130` (`_FROM_QUOTES` text; the name check's character set)
-- Modify: `docs/superpowers/specs/2026-11-04-superuser-settings-design.md` (rev 13 line: D7b C7, C8; the Rev 8 paragraph's sentence updated)
+- Modify: `docs/superpowers/specs/2026-11-04-superuser-settings-design.md` (rev 13 line: D7b C7, C8; the Rev 8 paragraph's sentence updated; Status set to rev 13)
 - Modify: `docs/backlog/superuser-settings-debt.md` (delete the curly-quotes and `@ ; [ ]` bullets)
 - Create: `backend/alembic/versions/d9a4c2e7f1b3_from_curly_quotes.py` and `backend/tests/test_migration_from_quotes.py` (review round 3: a From saved before rev 13 gets the same straightening)
 - Modify: `frontend/src/lib/panelForms/emailForm.svelte.ts` and `frontend/src/tests/panelForms.test.ts` (review rounds 1-3: the form compares the From the same way)
@@ -144,9 +144,9 @@ Expected: the new and changed tests FAIL.
 
 - [ ] **Step 3: Implement**
 
-- `_trim` (for `from_address` only) maps `“` and `”` to `"` after trimming. Use a separate validator if that reads more simply.
-- `_FROM_QUOTES` takes the C8 text. The name check becomes `any(c in ",:;@[]" for c in name)` in the `<` branch only. The no-`<` branch keeps `",:"`.
-- Spec rev 13 and the two debt bullets deleted. Only the won't-fix bullet stays in the file.
+- A separate `_straight_quotes` validator on `from_address`, after `_trim`, straightens only a curly pair that wraps the whole name before `<`, as C7 says (rev from the user, Task 2 review); `cleanFrom` mirrors it in the form, and migration `d9a4c2e7f1b3` stores a saved one the same way.
+- `_FROM_QUOTES` takes the C8 text. The name check becomes `any(c in ",:;@[]" for c in name)` in the `<` branch only, and the text-after-the-address check moves before it (rev 13). The no-`<` branch keeps `",:"`.
+- Spec rev 13 and the two debt bullets deleted. The won't-fix bullet and Task 1's two review bullets stay in the file.
 
 - [ ] **Step 4: Run the tests, then the suites**
 
@@ -159,26 +159,27 @@ Expected: the new and changed tests FAIL.
 ### Task 3: The roster's bulk banner (C12)
 
 **Files:**
-- Modify: `frontend/src/components/runs/RunRosterTab.svelte:26-30` (the `error` field's type becomes `unknown`), `:208-219` (`summaryText`), `:299,321` (keep the raw error)
+- Modify: `frontend/src/components/runs/RunRosterTab.svelte:38` (in `BulkOpResult`, the `error` field's type becomes `unknown`), `:208-219` (`summaryText`), `:299,321` (keep the raw error)
+- Modify: `docs/superpowers/specs/2026-05-19-run-management-admin-design.md` (the cancellation sentence, ~537, 539, 1015)
 - Test: `frontend/src/tests/RunRosterTab.table.svelte.test.ts`
 
-**Interfaces:** consumes `failureText`, `SERVER_ERROR_MESSAGE` and `OFFLINE_MESSAGE` from `lib/api.ts` (unchanged).
+**Interfaces:** consumes `ApiError`, `failureText`, `SERVER_ERROR_MESSAGE` and `REQUEST_ERROR_MESSAGE` from `lib/api.ts` (unchanged); offline reaches `OFFLINE_MESSAGE` through `failureText` (the tests import it).
 
 - [ ] **Step 1: Write the failing tests**
 
 - The cancelled-move test (line 413-419): its mock's detail becomes `'Something broke.'`, and the banner reads `'Moved 0 of 3 — 0 failed, 3 cancelled. Something broke.'`.
 - `cancelled remove, offline`: `bulk-delete` rejects with `new TypeError('Failed to fetch')`. The banner reads `'Removed 0 of 3 — 0 failed, 3 cancelled. ' + OFFLINE_MESSAGE`.
-- `cancelled remove, 409`: `jres({ detail: 'This run has ended.' }, 409)`. The banner ends with `'cancelled. This run has ended.'`.
+- `cancelled remove, 404` (renamed from a made-up 409 in review r2): `jres({ detail: 'Run not found' }, 404)`. The banner reads `'Removed 0 of 3 — 0 failed, 3 cancelled. Run not found.'`.
 - `cancelled with marked rows keeps the hover hint`: 201 selected rows. The first chunk (200) returns one row error, and the second chunk's request fails with a 500 and `{ detail: 'Something broke.' }`. The banner ends with `'cancelled. Something broke. Hover a marked row for the reason.'`.
 
 - [ ] **Step 2: Run them and see each fail**
 
 Run: `cd /Users/svkucheryavski/Documents/Developing/mathion/frontend && TMPDIR=/Users/svkucheryavski/Documents/Developing/mathion/.superpowers/sdd/2026-11-15-settings-minors-round/tmp TZ=Europe/Copenhagen npx vitest run src/tests/RunRosterTab.table.svelte.test.ts`
-Expected: the four tests FAIL on the banner text.
+Expected: the four tests FAIL on the banner text. (Review rounds r1-r5 added more cancelled-banner tests: a real detail without a stop, details ending in ! ? …, a trailing space, unfit details (422 list, object, blank, status 0, 5xx object), a falsy throw, and malformed replies; see the ledger.)
 
 - [ ] **Step 3: Implement**
 
-`chunkLevelError` holds the caught value as is (`unknown`). The cancelled line is ``${verb} … — ${f} failed, ${c} cancelled. ${failureText(r.error, SERVER_ERROR_MESSAGE)}${hint}``.
+`chunkLevelError` holds the caught value as is (`unknown`); a `chunkFailed` flag decides 'cancelled'. The cancelled line is ``${verb} … — ${f} failed, ${c} cancelled. ${cancelReason(r.error)}${hint}``, where `cancelReason` follows C12 (the reason trimmed, a full stop added, unfit details read the request or server sentence). A reply without exactly one row per asked id is malformed and throws before any row is counted.
 
 - [ ] **Step 4: Run the test file, then the suites**
 
