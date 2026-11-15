@@ -306,6 +306,141 @@ describe('RunMiniProjectsTab', () => {
     unmount(cmp);
   });
 
+  it('a failed force delete focuses the panel\'s checkbox', async () => {
+    const localBlocks: BlockResponse[] = [
+      { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
+    ];
+    const lockedMp: MiniProjectResponse = {
+      id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
+      assignment_md: 'x', assignment_html: '<p>x</p>',
+      soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+      is_published: true, first_submitted_at: '2026-05-22T00:00:00Z',
+      created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+    };
+    fetchSpy.mockImplementation((url, init) => {
+      if ((init as RequestInit | undefined)?.method === 'DELETE' && String(url).includes('force=true')) {
+        return jres({ detail: 'Internal server error' }, 503);
+      }
+      return jres([lockedMp]);
+    });
+    const { target, cmp } = mountMpTab({ blocks: localBlocks, miniProjects: [lockedMp] });
+    await settle();
+    (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+    const checkbox = target.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    (target.querySelector('button[data-action="force-delete"]') as HTMLButtonElement).click();
+    await settle();
+    await settle();
+    expect(document.activeElement).toBe(target.querySelector('input[data-role="danger-ack"]'));
+    unmount(cmp);
+  });
+
+  it('an admin\'s 409 on a still-unlocked row toasts the server message', async () => {
+    const localBlocks: BlockResponse[] = [
+      { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
+    ];
+    const mp: MiniProjectResponse = {
+      id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
+      assignment_md: 'x', assignment_html: '<p>x</p>',
+      soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+      is_published: true, first_submitted_at: null,
+      created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+    };
+    fetchSpy.mockImplementation((_url, init) => {
+      if ((init as RequestInit | undefined)?.method === 'DELETE') {
+        return jres({ detail: 'Mini-project is in use.' }, 409);
+      }
+      return jres([mp]);
+    });
+    const { target, cmp } = mountMpTab({
+      blocks: localBlocks, miniProjects: [mp],
+      onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined),
+    });
+    await settle();
+    (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+    (target.querySelector('button[data-action="confirm-delete"]') as HTMLButtonElement).click();
+    await settle();
+    await settle();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toContainEqual(['Mini-project is in use.', 'error']);
+    expect(target.querySelector('button[data-action="confirm-delete"]')).toBeNull();
+    expect(document.activeElement).toBe(target.querySelector('button[data-action="delete"]'));
+    unmount(cmp);
+  });
+
+  it('an admin\'s 409 whose refetch drops the row closes the confirm and moves focus on', async () => {
+    const localBlocks: BlockResponse[] = [
+      { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
+    ];
+    const mp: MiniProjectResponse = {
+      id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
+      assignment_md: 'x', assignment_html: '<p>x</p>',
+      soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+      is_published: true, first_submitted_at: null,
+      created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+    };
+    fetchSpy.mockImplementation((_url, init) => {
+      if ((init as RequestInit | undefined)?.method === 'DELETE') return jres({ detail: 'Conflict.' }, 409);
+      return jres([]);
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const propsRef: any = $state({
+      runId: 10, runIsPublished: true, runGroupsEnabled: true,
+      runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
+      blocks: localBlocks,
+      miniProjects: [mp],
+      onRefetchMiniProjects: vi.fn().mockImplementation(async () => { propsRef.miniProjects = []; }),
+      onNavigateToTab: vi.fn(),
+      course: baseCourse,
+    });
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunMiniProjectsTab, { target, props: propsRef });
+    await settle();
+    (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+    (target.querySelector('button[data-action="confirm-delete"]') as HTMLButtonElement).click();
+    await settle();
+    await settle();
+    expect(document.activeElement).toBe(target.querySelector('button[data-action="new-mp"]'));
+    expect(toasts.list).toHaveLength(0);
+    unmount(cmp);
+  });
+
+  it('a teacher\'s 409 on a still-unlocked row toasts the server message, not the submissions banner', async () => {
+    const localBlocks: BlockResponse[] = [
+      { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },
+    ];
+    const mp: MiniProjectResponse = {
+      id: 1, run_id: 10, block_id: 1, title: 'Mini project for Block 0',
+      assignment_md: 'x', assignment_html: '<p>x</p>',
+      soft_deadline: null, hard_deadline: null, resubmission_deadline: null,
+      is_published: true, first_submitted_at: null,
+      created_at: '2026-05-01T00:00:00Z', updated_at: '2026-05-01T00:00:00Z',
+    };
+    fetchSpy.mockImplementation((_url, init) => {
+      if ((init as RequestInit | undefined)?.method === 'DELETE') return jres({ detail: 'Mini-project is in use.' }, 409);
+      return jres([mp]);
+    });
+    const { target, cmp } = mountMpTab({
+      blocks: localBlocks, miniProjects: [mp], course: { is_admin: false },
+      onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined),
+    });
+    await settle();
+    (target.querySelector('button[data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+    (target.querySelector('button[data-action="confirm-delete"]') as HTMLButtonElement).click();
+    await settle();
+    await settle();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toContainEqual(['Mini-project is in use.', 'error']);
+    expect(target.querySelector('[data-role="delete-error-banner"]')).toBeNull();
+    expect(document.activeElement).toBe(target.querySelector('button[data-action="delete"]'));
+    unmount(cmp);
+  });
+
   it('409 on non-locked delete + refetch ALSO fails: surfaces deleteError banner, resets confirm state', async () => {
     const localBlocks: BlockResponse[] = [
       { id: 1, version_id: 7, title: 'Intro', slug: 'intro', order: 0, info: '', info_html: '' },

@@ -2309,6 +2309,77 @@ describe('DashboardSidePanel — the Evaluate form (6c T6, R37, R44)', () => {
     expect(host.querySelector('#evaluation-result-lock')!.textContent)
       .toBe('Without a feedback file the result can only be Accepted.');
   });
+
+  it("Save's title in a locked edit is the lock sentence (call 19)", async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        latest_evaluation: { ...NEEDS_REVISION_EVAL, result: 'major_revision', feedback_text: 'Fix it', has_feedback_file: false },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    (host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement).click();
+    await settle();
+    const save = host.querySelector('form[aria-label="Write evaluation"] button[type="submit"]') as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    expect(save.title).toBe('Without a feedback file the result can only be Accepted.');
+  });
+
+  it("a locked edit with no feedback text still names the lock on Save (call 19)", async () => {
+    mountPanel({
+      target: submissionTarget({
+        status: 'needs_revision',
+        latest_evaluation: { ...NEEDS_REVISION_EVAL, result: 'major_revision', feedback_text: null, has_feedback_file: false },
+      }),
+      isAdmin: true,
+    });
+    await settle();
+    (host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement).click();
+    await settle();
+    const save = host.querySelector('form[aria-label="Write evaluation"] button[type="submit"]') as HTMLButtonElement;
+    expect(save.title).toBe('Without a feedback file the result can only be Accepted.');
+  });
+
+  it('× during the discard question, then Discard, closes the panel (call 18)', async () => {
+    const { onClose } = mountPanel({
+      target: submissionTarget({ status: 'needs_revision', latest_evaluation: NEEDS_REVISION_EVAL }),
+      isAdmin: true,
+    });
+    await settle();
+    (host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement).click();
+    await settle();
+    await typeFeedback('Changed');
+    (host.querySelector('button[data-test="cancel-button"]') as HTMLButtonElement).click();
+    await settle();
+    closeX().click();
+    await settle();
+    expect(document.activeElement).toBe(discardCancel());
+    discardConfirm()!.click();
+    flushSync();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('after × re-asks, the question\'s Cancel returns focus to ×', async () => {
+    mountPanel({
+      target: submissionTarget({ status: 'needs_revision', latest_evaluation: NEEDS_REVISION_EVAL }),
+      isAdmin: true,
+    });
+    await settle();
+    (host.querySelector('button[data-test="edit-evaluation"]') as HTMLButtonElement).click();
+    await settle();
+    await typeFeedback('Changed');
+    const formCancel = host.querySelector('button[data-test="cancel-button"]') as HTMLButtonElement;
+    formCancel.focus();
+    formCancel.click();
+    await settle();
+    closeX().focus();
+    closeX().click();
+    await settle();
+    discardCancel()!.click();
+    await settle();
+    expect(document.activeElement).toBe(closeX());
+  });
 });
 
 describe('DashboardSidePanel — earlier submissions and Retry (6c T6)', () => {
@@ -2442,6 +2513,25 @@ describe('DashboardSidePanel — leaving with an unsaved evaluation (Polish 1 D3
     expect(discardCancel()).toBeNull();
     expect((host.querySelector('textarea[name="evaluation-feedback"]') as HTMLTextAreaElement).value).toBe('');
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('× during a navigation\'s question refuses the navigation; Discard then closes the panel (call 18)', async () => {
+    const { onClose } = mountPanel({ target: submissionTarget({ status: 'awaiting_eval' }), isAdmin: true });
+    await settle();
+    await typeFeedback('unsaved');
+    const start = location.pathname;
+    const nav = navigate('/sp-nav-x');
+    await settle();
+    closeX().click();
+    await nav;
+    await settle();
+    expect(location.pathname).toBe(start);
+    expect(host.querySelector('.sp-discard .warning')!.textContent!.trim()).toBe('Discard unsaved changes?');
+    expect(document.activeElement).toBe(discardCancel());
+    discardConfirm()!.click();
+    flushSync();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(location.pathname).toBe(start);
   });
 
   it('R53: with the × question open, a navigation is refused; focus stays on its Cancel', async () => {

@@ -458,6 +458,32 @@ describe('RunProgressTab', () => {
     expect(fetchMock.mock.calls.length).toBeGreaterThan(callCount);
   });
 
+  it('a failed first load says Check your connection and try again.', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    mountTab();
+    await settle();
+    expect(host.querySelector('.error-state .message')!.textContent).toBe('Check your connection and try again.');
+  });
+
+  it('a failed load with a server sentence shows that sentence', async () => {
+    vi.stubGlobal('fetch', mockFetch(404, { detail: 'Run not found.' }));
+    mountTab();
+    await settle();
+    expect(host.querySelector('.error-state .message')!.textContent).toBe('Run not found.');
+  });
+
+  it('a failed Refresh says Check your connection and try again.', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(progressMock()), { status: 200 }))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    vi.stubGlobal('fetch', fetchMock);
+    mountTab();
+    await settle();
+    (host.querySelector('button[aria-label="Refresh"]') as HTMLButtonElement).click();
+    await settle();
+    expect(host.querySelector('.error-state .message')!.textContent).toBe('Check your connection and try again.');
+  });
+
   // T20 – Stale-while-revalidate
   it('stale-while-revalidate: table stays visible during Refresh (data not reset)', async () => {
     let resolveRefresh!: (v: Response) => void;

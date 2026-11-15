@@ -19,10 +19,13 @@
   const uid = $props.id();
   let email = $state('');
   let addError: string | null = $state(null);
+  // Only a 409 or 422 is about the address; anything else leaves the field unmarked.
+  let addInvalid = $state(false);
   let busy = $state(false);
   let pendingRemove: number | null = $state(null);
 
   let emailInput = $state<HTMLInputElement>();
+  let plusEl = $state<HTMLButtonElement>();
   let headingEl = $state<HTMLElement>();
   const trashEls: Record<number, HTMLButtonElement | undefined> = $state({});
 
@@ -35,14 +38,21 @@
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     addError = null;
+    addInvalid = false;
     busy = true;
     try {
       await addRunTeacher(runId, email.trim());
       email = '';
-      await onRefetch();
+      // The teacher is added now: a failed refetch is not a failed add.
+      try {
+        await onRefetch();
+      } catch {
+        pushToast('Added (refresh failed — reload to see latest)', 'info');
+      }
     } catch (e) {
       if (e instanceof ApiError) {
         addError = e.status === 409 ? 'Teacher already assigned to this run.' : e.displayMessage;
+        addInvalid = e.status === 409 || e.status === 422;
       } else {
         addError = OFFLINE_MESSAGE;
       }
@@ -50,9 +60,10 @@
       busy = false;
     }
     // The + went disabled while busy, which drops a click's focus to <body>:
-    // put it back in the field either way, ready for a correction.
+    // put it back in the field, unless the user has moved on.
     await tick();
-    emailInput?.focus();
+    const a = document.activeElement;
+    if (!a || a === document.body || a === plusEl) emailInput?.focus();
   }
 
   async function cancelRemove(userId: number) {
@@ -94,12 +105,13 @@
           type="email"
           maxlength="254"
           placeholder="teacher@example.com"
-          aria-invalid={addError ? 'true' : undefined}
+          aria-invalid={addInvalid ? 'true' : undefined}
           aria-describedby={addError ? `${uid}-err` : undefined}
           bind:this={emailInput}
           bind:value={email}
         />
-        <IconButton glyph="plus" primary size="md" type="submit" title="Add teacher" disabled={busy || !email.trim()} />
+        <IconButton glyph="plus" primary size="md" type="submit" title="Add teacher" disabled={busy || !email.trim()}
+                    bind:element={plusEl} />
       </form>
     {/if}
   </div>

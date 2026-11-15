@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3054
+EXPECTED_CHECKS=3055
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4873,6 +4873,14 @@ if grep -q 'disabled-row' src/components/runs/RunProgressTab.svelte; then
   echo "FAIL  RunProgressTab still has a .disabled-row rule"; fail=1
 else
   echo "PASS  RunProgressTab has no .disabled-row (6a)"
+fi
+# Call 15: the block and sequence headers never stuck (no scroll box height); the rule is gone.
+# The style block on one line, so a rule split over lines is seen too.
+if sed -n '/<style>/,/<\/style>/p' src/components/runs/RunProgressTab.svelte | tr '\n' ' ' \
+    | grep -qE '\.(block|seq)-header[^{]*\{[^}]*sticky'; then
+  echo "FAIL  RunProgressTab still has the inert sticky header rule"; fail=1
+else
+  echo "PASS  RunProgressTab has no sticky block/sequence header rule (call 15)"
 fi
 own heat-legend RunProgressTab.svelte
 uniq1 heat-legend

@@ -200,8 +200,8 @@
           : e instanceof Error
             ? e.message
             : 'Force delete failed';
+      // The panel stays; DangerConfirm puts focus back on its box (R45).
       forceBusy = false;
-      await focusTrash(mpId);
     }
   }
 
@@ -217,11 +217,18 @@
       if (e instanceof ApiError && e.status === 409) {
         try {
           await onRefetchMiniProjects();
-          // Teachers cannot force-delete; close the inline-confirm and
-          // surface a banner so they see *some* feedback instead of a
-          // silent no-op (admins keep the row open so the refetch can
-          // reveal the danger panel).
-          if (!course.is_admin) {
+          const row = miniProjects.find((m) => m.id === mp.id);
+          if (!row) {
+            // Someone else deleted it: the row is gone, focus moves on.
+            deleteConfirmId = null;
+            await focusAfterRemoval(idx);
+          } else if (!row.first_submitted_at) {
+            // Still not locked: no danger panel comes, so say the server's reason.
+            pushToast(e.displayMessage, 'error');
+            deleteConfirmId = null;
+            await focusTrash(mp.id);
+          } else if (!course.is_admin) {
+            // Locked: a teacher gets a banner; an admin's row stays open for the danger panel.
             deleteConfirmId = null;
             deleteError =
               'This mini-project now has submissions and cannot be deleted. Ask a course admin to force-delete.';

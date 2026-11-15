@@ -410,13 +410,16 @@
   const saveTitle = $derived(
     formResult === ''
       ? 'Choose a result'
-      : errors.score
-        ? 'Score must be a whole number between 0 and 100'
-        : errors.feedbackText
-          ? 'Write feedback for a non-accepted result'
-          : errors.feedbackFile
-            ? 'Attach the feedback PDF'
-            : undefined,
+      // Call 19: a locked edit has no attach control; only Accepted frees Save.
+      : resultLocked && formResult !== 'accepted'
+        ? LOCK_TEXT
+        : errors.score
+          ? 'Score must be a whole number between 0 and 100'
+          : errors.feedbackText
+            ? 'Write feedback for a non-accepted result'
+            : errors.feedbackFile
+              ? 'Attach the feedback PDF'
+              : undefined,
   );
 
   const resultDescribedby = $derived(
@@ -547,7 +550,13 @@
   function tryClose() {
     if (submitting) return;
     // × (or Esc on ×) while the confirm asks: go to its Cancel, don't ask twice.
+    // Call 18: the question now closes the panel, so Discard does what × asked.
     if (confirmDiscard) {
+      if (discardSource !== 'close') {
+        if (discardSource === 'nav') answerNav(false);
+        discardSource = 'close';
+        discardReturnEl = closeX();
+      }
       focusDiscardCancel();
       return;
     }

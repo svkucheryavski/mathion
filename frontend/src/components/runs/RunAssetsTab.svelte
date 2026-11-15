@@ -18,6 +18,8 @@
   import { assetDropRefusal } from '../../lib/assetDrop';
   import { blockPositions } from '../../lib/blockNumbers';
   import { focusFirst } from '../../lib/focusFirst';
+  import { pushToast } from '../../stores/toasts.svelte';
+  import { failureText } from '../../lib/api';
   import { repairFocus } from '../../lib/askInPlace.svelte';
   import Button from '../ui/Button.svelte';
   import DangerConfirm from '../ui/DangerConfirm.svelte';
@@ -35,7 +37,7 @@
     onRefetchAssets,
     onRefetchMiniProjects,
     onEditMiniProject,
-    onReloadRun,
+    onRefetchCourse,
     blocks = [],
   }: {
     runId: number;
@@ -46,7 +48,7 @@
     onRefetchAssets: () => Promise<void>;
     onRefetchMiniProjects: () => Promise<void>;
     onEditMiniProject: (mp: MiniProjectResponse) => void;
-    onReloadRun: () => Promise<void>;
+    onRefetchCourse: () => Promise<void>;
     blocks?: BlockResponse[];
   } = $props();
 
@@ -105,7 +107,9 @@
   // Bulk summary banner (informational; separate from the single `banner`
   // error slot so a partial-fail summary persists alongside any newer error).
   let summaryBanner = $state<string | null>(null);
-  let bulkController: AbortController | null = null;
+  let bulkController = $state.raw<AbortController | null>(null);
+  // "Delete N selected" and each row's ↻ and 🗑 wait while a bulk delete runs.
+  const BULK_WAIT = 'Wait for the current change to finish';
 
   // 404 storm coalescer (spec L213): first 404 starts a 500ms timer;
   // subsequent 404s within the window are coalesced into ONE banner +
@@ -253,7 +257,7 @@
   }
 
   function handleReplaceClick(assetId: number): void {
-    if (versionIsDisabled) return;
+    if (versionIsDisabled || bulkController) return;
     pendingReplaceAssetId = assetId;
     banner = null;
     openConfirm = null;
@@ -305,7 +309,7 @@
   }
 
   function openBulkConfirm(): void {
-    if (versionIsDisabled || selectedIds.size === 0) return;
+    if (versionIsDisabled || selectedIds.size === 0 || bulkController) return;
     let orphanCount = 0;
     let referencedCount = 0;
     for (const a of assets) {
@@ -349,8 +353,11 @@
     const ids = Array.from(selectedIds);
     const bannerAtStart = banner;
     openConfirm = null;
-    // The confirm unmounts under the focus: wait on the strip button.
-    void tick().then(() => focusFirst([bulkBtnEl, uploadEl, headingEl]));
+    // The confirm unmounts under the focus: wait on the strip button (focusFirst skips a waiting one).
+    void tick().then(() => {
+      bulkBtnEl?.focus();
+      if (document.activeElement !== bulkBtnEl) focusFirst([uploadEl, headingEl]);
+    });
     const controller = new AbortController();
     bulkController = controller;
     const failed: string[] = [];
@@ -403,9 +410,9 @@
       summaryBanner = failed.length === 0
         ? `Deleted ${done} of ${total}.`
         : `Deleted ${done} of ${total}. Failed: ${failed.join(', ')}.`;
-      selectedIds = new Set();
-      await tick();
-      focusFirst([uploadEl, headingEl]);
+      // A selection made during the run stays; focus moves only if it fell to <body>.
+      selectedIds = new Set([...selectedIds].filter((id) => !ids.includes(id)));
+      await repairFocus(uploadEl, headingEl);
     } finally {
       // Identity guard: only clear if no newer bulk has reassigned.
       if (bulkController === controller) bulkController = null;
@@ -413,7 +420,7 @@
   }
 
   function handleDeleteClick(assetId: number, isReferenced: boolean): void {
-    if (versionIsDisabled) return;
+    if (versionIsDisabled || bulkController) return;
     banner = null;
     // One panel under a row (R14): either delete confirm closes "used by".
     if (openSubPanelAssetId === assetId) openSubPanelAssetId = null;
@@ -443,8 +450,9 @@
       const err = e as { name?: string; status?: number; message?: string } | null;
       if (err?.name === 'AbortError' || !mounted) return;
       if (err?.status === 403) {
-        banner = 'You no longer have permission to force-delete. Refresh and retry.';
-        await onReloadRun();
+        // The page stays: a toast, and the course's rights again (Force delete greys out).
+        pushToast(force ? 'You no longer have permission to force-delete.' : failureText(e, 'Delete failed.'), 'error');
+        try { await onRefetchCourse(); } catch { /* the toast already said it */ }
       } else if (err?.status === 404) {
         // Route through the storm coalescer (spec L212/213) — banner +
         // refetch happen at the 500ms flush.
@@ -452,7 +460,8 @@
       } else {
         banner = err?.message ?? 'Delete failed.';
       }
-      await focusRow(trashEls, assetId);
+      // Only if focus fell to <body>: the user may have moved on (or a bulk holds it).
+      await repairFocus(trashEls[assetId], uploadEl, headingEl);
       return;
     }
     if (!mounted) return;
@@ -462,11 +471,11 @@
     } else {
       await onRefetchAssets();
     }
-    // §Focus: the next row's Delete, the previous row's, + Upload, the h2.
+    // §Focus: the next row's Delete, the previous row's, + Upload, the h2; only from <body>.
     await tick();
     const next = sortedAssets[idx];
     const prev = idx > 0 ? sortedAssets[idx - 1] : undefined;
-    focusFirst([next && trashEls[next.id], prev && trashEls[prev.id], uploadEl, headingEl]);
+    await repairFocus(next && trashEls[next.id], prev && trashEls[prev.id], uploadEl, headingEl);
   }
 
   async function performReplace(): Promise<void> {
@@ -540,6 +549,14 @@
       const id = a.matches('button.uses-chip') ? Number(a.closest('tr')?.dataset.assetId)
         : panel ? Number(panel.id.replace('uses-', '')) : NaN;
       if (!Number.isNaN(id) && !used.has(id)) void repairFocus(replaceEls[id], headingEl);
+      else if (panel && a.dataset.mpId) {
+        // Only the focused entry goes: the panel's next Edit, else the chip.
+        const asset = assets.find((x) => x.id === id);
+        if (!asset || referencingMpIds(asset).includes(Number(a.dataset.mpId))) return;
+        const edits = Array.from(panel.querySelectorAll<HTMLElement>('button[data-mp-id]'));
+        const chip = panel.closest('tbody')?.querySelector(`tr[data-asset-id="${id}"] button.uses-chip`);
+        void repairFocus(...edits.slice(edits.indexOf(a) + 1), chip, replaceEls[id], headingEl);
+      }
     });
   });
 
@@ -710,7 +727,8 @@
                          confirmLabel="Delete" onConfirm={performBulkDelete} onCancel={() => void cancelBulk()} />
         {/if}
       {:else}
-        <Button variant="danger" disabled={versionIsDisabled} title={versionIsDisabled ? VERSION_OFF : undefined}
+        <Button variant="danger" disabled={versionIsDisabled} aria-disabled={bulkController !== null}
+                title={versionIsDisabled ? VERSION_OFF : bulkController ? BULK_WAIT : undefined}
                 bind:element={bulkBtnEl} onclick={openBulkConfirm}>Delete {selectedIds.size} selected</Button>
       {/if}
     </div>
@@ -794,11 +812,13 @@
               <td class="actions-cell">
                 <span class="row-icons">
                   <IconButton glyph="refresh" size="sm" aria-label="Replace {a.filename}"
-                              title={versionIsDisabled ? VERSION_OFF : 'Replace'} disabled={versionIsDisabled}
+                              title={versionIsDisabled ? VERSION_OFF : bulkController ? BULK_WAIT : 'Replace'}
+                              disabled={versionIsDisabled} aria-disabled={bulkController !== null}
                               data-action="replace" bind:element={replaceEls[a.id]}
                               onclick={() => handleReplaceClick(a.id)} />
                   <IconButton glyph="trash" size="sm" danger aria-label="Delete {a.filename}"
-                              title={versionIsDisabled ? VERSION_OFF : 'Delete'} disabled={versionIsDisabled}
+                              title={versionIsDisabled ? VERSION_OFF : bulkController ? BULK_WAIT : 'Delete'}
+                              disabled={versionIsDisabled} aria-disabled={bulkController !== null}
                               data-action="delete-asset" bind:element={trashEls[a.id]}
                               onclick={() => handleDeleteClick(a.id, a.is_referenced)} />
                 </span>
@@ -863,6 +883,7 @@
                             <button
                               type="button"
                               class="linklike"
+                              data-mp-id={mpId}
                               onclick={() => {
                                 openSubPanelAssetId = null;
                                 onEditMiniProject(mp);

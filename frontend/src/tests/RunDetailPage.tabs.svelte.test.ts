@@ -166,6 +166,41 @@ describe('RunDetailPage — the tab in the address', () => {
     expect(document.querySelector('[role="dialog"][aria-labelledby="mp-modal-title"]')).not.toBeNull();
   });
 
+  it('an Assets 403 refetches only the course: the page stays and Force delete greys out', async () => {
+    at('/teaching/algebra/runs/10?tab=assets');
+    let courseNow = course;
+    const base = fetchSpy.getMockImplementation()!;
+    fetchSpy.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method === 'DELETE') {
+        courseNow = { ...course, is_admin: false };
+        return jres({ detail: 'Only course admins can force-delete.' }, 403);
+      }
+      if (url.includes('/courses/by-slug/')) return jres(courseNow);
+      return base(url, init);
+    });
+    open();
+    await settle();
+    const courseLoads = () => fetchSpy.mock.calls.filter(([u]) => (u as string).includes('/courses/by-slug/')).length;
+    expect(courseLoads()).toBe(1);
+    (target.querySelector('button[aria-label="Delete fig.png"]') as HTMLButtonElement).click();
+    flushSync();
+    const box = target.querySelector('input[data-role="danger-ack"]') as HTMLInputElement;
+    box.checked = true;
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    (Array.from(target.querySelectorAll('button')).find((b) => /Force delete/.test(b.textContent ?? '')) as HTMLButtonElement).click();
+    await settle();
+    await settle();
+    expect(courseLoads()).toBe(2);
+    expect(runLoads()).toBe(1);
+    expect(selected()).toBe('run-tab-assets');
+    expect(target.querySelector('button[aria-label="Delete fig.png"]')).not.toBeNull();
+    (target.querySelector('button[aria-label="Delete fig.png"]') as HTMLButtonElement).click();
+    flushSync();
+    const force = Array.from(target.querySelectorAll('button')).find((b) => /Force delete/.test(b.textContent ?? '')) as HTMLButtonElement;
+    expect(force.disabled).toBe(true);
+  });
+
   it('a cancelled guard keeps the tab, the address, no prefilter and no pending edit', async () => {
     at('/teaching/algebra/runs/10');
     open();

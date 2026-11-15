@@ -2,13 +2,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunTeachersTab from '../components/runs/RunTeachersTab.svelte';
 import type { Course, RunTeacherResponse } from '../lib/types';
-import { toasts } from '../stores/toasts.svelte';
+import { toasts, clearToasts } from '../stores/toasts.svelte';
 
 const baseCourse: Course = { id: 1, slug: 'c', name: 'C', description: '', is_admin: true };
 
 const fetchSpy = vi.fn();
 
 beforeEach(() => {
+  clearToasts();
   fetchSpy.mockReset();
   (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
   document.body.innerHTML = '';
@@ -343,7 +344,136 @@ describe('RunTeachersTab', () => {
     plus.click();
     await settle();
     expect(target.querySelector('.t-err')?.textContent).toBe('Teacher already assigned to this run.');
+    expect(input.getAttribute('aria-invalid')).toBe('true');
     expect(document.activeElement).toBe(input);
+    unmount(cmp);
+  });
+
+  it('a failed refetch after a successful add toasts and leaves the field clear and unmarked', async () => {
+    fetchSpy.mockImplementation(() => jres({}, 201));
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunTeachersTab, {
+      target, props: { runId: 10, teachers: [], onRefetch: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')), course: baseCourse },
+    });
+    await settle();
+    const input = target.querySelector('input[name="email"]') as HTMLInputElement;
+    input.value = 'a@x.com';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    (target.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(input.value).toBe('');
+    expect(target.querySelector('.t-err')).toBeNull();
+    expect(input.getAttribute('aria-invalid')).toBeNull();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toContainEqual(['Added (refresh failed — reload to see latest)', 'info']);
+    unmount(cmp);
+  });
+
+  it('a 5xx on add shows its line under an unmarked field', async () => {
+    fetchSpy.mockImplementation(() => jres({ detail: 'Server trouble' }, 503));
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunTeachersTab, { target, props: { runId: 10, teachers: [], onRefetch: vi.fn(), course: baseCourse } });
+    await settle();
+    const input = target.querySelector('input[name="email"]') as HTMLInputElement;
+    input.value = 'a@x.com';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    (target.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(target.querySelector('.t-err')?.textContent).toBe('Server trouble');
+    expect(input.getAttribute('aria-invalid')).toBeNull();
+    unmount(cmp);
+  });
+
+  it('a 422 on add marks the field and shows the server\'s sentence', async () => {
+    fetchSpy.mockImplementation(() => jres({ detail: 'Enter a valid email address.' }, 422));
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunTeachersTab, { target, props: { runId: 10, teachers: [], onRefetch: vi.fn(), course: baseCourse } });
+    await settle();
+    const input = target.querySelector('input[name="email"]') as HTMLInputElement;
+    input.value = 'a@x';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    (target.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(target.querySelector('.t-err')?.textContent).toBe('Enter a valid email address.');
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    unmount(cmp);
+  });
+
+  it('a 403 on add (no longer an admin) leaves the field unmarked', async () => {
+    fetchSpy.mockImplementation(() => jres({ detail: 'Not a course admin.' }, 403));
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunTeachersTab, { target, props: { runId: 10, teachers: [], onRefetch: vi.fn(), course: baseCourse } });
+    await settle();
+    const input = target.querySelector('input[name="email"]') as HTMLInputElement;
+    input.value = 'a@x.com';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    (target.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(target.querySelector('.t-err')?.textContent).toBe('Not a course admin.');
+    expect(input.getAttribute('aria-invalid')).toBeNull();
+    unmount(cmp);
+  });
+
+  it('focus left on the + (a browser that keeps it) goes back to the field', async () => {
+    let release!: (r: Response) => void;
+    fetchSpy.mockImplementation(() => new Promise<Response>((r) => { release = r; }));
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunTeachersTab, { target, props: { runId: 10, teachers: [], onRefetch: vi.fn().mockResolvedValue(undefined), course: baseCourse } });
+    await settle();
+    const input = target.querySelector('input[name="email"]') as HTMLInputElement;
+    input.value = 'a@x.com';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const plus = target.querySelector('button[aria-label="Add teacher"]') as HTMLButtonElement;
+    plus.focus();
+    plus.click();
+    await settle();
+    // jsdom keeps focus on a button that turns disabled, as Safari does.
+    plus.focus();
+    expect(document.activeElement).toBe(plus);
+    release({ ok: true, status: 201, json: () => Promise.resolve({}), headers: new Headers({ 'content-type': 'application/json' }) } as unknown as Response);
+    await settle();
+    await settle();
+    expect(document.activeElement).toBe(input);
+    unmount(cmp);
+  });
+
+  it('Teachers add returns focus only if it is still free', async () => {
+    let release!: (r: Response) => void;
+    fetchSpy.mockImplementation(() => new Promise<Response>((r) => { release = r; }));
+    const teacher: RunTeacherResponse = {
+      id: 1, run_id: 10, user_id: 1, user_email: 't@x.com', user_full_name: 'T One', created_at: '2026-05-22T00:00:00Z',
+    };
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    const cmp = mount(RunTeachersTab, {
+      target, props: { runId: 10, teachers: [teacher], onRefetch: vi.fn().mockResolvedValue(undefined), course: baseCourse },
+    });
+    await settle();
+    const input = target.querySelector('input[name="email"]') as HTMLInputElement;
+    input.value = 'a@x.com';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    (target.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    // The user moves on: a remove confirm takes focus while the add runs.
+    (target.querySelector('button[data-action="remove"]') as HTMLButtonElement).click();
+    flushSync();
+    await settle();
+    const cancel = Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Cancel')!;
+    expect(document.activeElement).toBe(cancel);
+    release({ ok: true, status: 201, json: () => Promise.resolve({}), headers: new Headers({ 'content-type': 'application/json' }) } as unknown as Response);
+    await settle();
+    await settle();
+    expect(document.activeElement).toBe(cancel);
     unmount(cmp);
   });
 });
@@ -363,7 +493,7 @@ describe('RunTeachersTab — offline failures', () => {
     return { target, cmp };
   }
 
-  it('a rejected TypeError on add shows the inline error', async () => {
+  it('an offline Teachers add leaves the field unmarked', async () => {
     fetchSpy.mockImplementation(() => Promise.reject(new TypeError('Failed to fetch')));
     const { target, cmp } = mountTab();
     await settle();
@@ -373,7 +503,7 @@ describe('RunTeachersTab — offline failures', () => {
     (target.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
     expect(target.querySelector('[role="alert"]')?.textContent?.trim()).toBe('Could not reach server. Check your connection.');
-    expect(emailInput.getAttribute('aria-invalid')).toBe('true');
+    expect(emailInput.getAttribute('aria-invalid')).toBeNull();
     unmount(cmp);
   });
 

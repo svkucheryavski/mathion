@@ -2,13 +2,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunGroupsTab from '../components/runs/RunGroupsTab.svelte';
 import type { Course } from '../lib/types';
-import { toasts } from '../stores/toasts.svelte';
+import { toasts, clearToasts } from '../stores/toasts.svelte';
 
 const baseCourse: Course = { id: 1, slug: 'c', name: 'C', description: '', is_admin: true };
 
 const fetchSpy = vi.fn();
 
 beforeEach(() => {
+  clearToasts();
   fetchSpy.mockReset();
   (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
   document.body.innerHTML = '';
@@ -108,6 +109,25 @@ describe('RunGroupsTab', () => {
     const again = target.querySelector('input[aria-label="New group name"]') as HTMLInputElement;
     expect(again.value).toBe('');
     expect(document.activeElement).toBe(again);
+    unmount(cmp);
+  });
+
+  it('addGroup: a failed refetch after create clears the field and toasts Created (refresh failed — reload to see latest)', async () => {
+    fetchSpy.mockImplementation(() => jres({ id: 5, name: 'Alpha' }, 201));
+    const refetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    const { target, cmp } = mountTab({ onRefetchGroups: refetch });
+    await settle();
+    byAction(target, 'toggle-add-group')[0]!.click();
+    flushSync();
+    const input = target.querySelector('input[aria-label="New group name"]') as HTMLInputElement;
+    type(input, 'Alpha');
+    key(input, 'Enter');
+    await settle();
+    expect(refetch).toHaveBeenCalled();
+    const again = target.querySelector('input[aria-label="New group name"]') as HTMLInputElement;
+    expect(again.value).toBe('');
+    expect(target.querySelector('.in-err')).toBeNull();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toContainEqual(['Created (refresh failed — reload to see latest)', 'info']);
     unmount(cmp);
   });
 

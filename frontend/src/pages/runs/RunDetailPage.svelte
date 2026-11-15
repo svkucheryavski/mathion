@@ -106,7 +106,7 @@
 
   async function loadAll(slug: string, rid: number) {
     const myToken = ++loadToken;
-    // R33: a run change, a course change or reloadRun() frees a stuck publish.
+    // R33: a run change or a course change frees a stuck publish.
     publishing = false; unpublishing = false;
     course = null; run = null; versions = null; teachers = null;
     groups = null; students = null; blocks = null; miniProjects = null;
@@ -169,9 +169,13 @@
     assets = fetched;
   }
 
-  async function reloadRun(): Promise<void> {
-    if (runIdInt === null) return;
-    await loadAll(courseSlug, runIdInt);
+  // Assets' 403: the course's rights again, without reloading the page.
+  async function refetchCourse(): Promise<void> {
+    const slug = courseSlug;
+    const myToken = loadToken;
+    const c = await api.get<Course>(`/api/courses/by-slug/${slug}`);
+    if (myToken !== loadToken || slug !== courseSlug) return;
+    course = c;
   }
 
   async function refetchRosterData(): Promise<{ students: RunStudentResponse[]; groups: GroupResponse[] }> {
@@ -520,7 +524,7 @@
           onRefetchAssets={refetchAssets}
           onRefetchMiniProjects={refetchMiniProjects}
           onEditMiniProject={(mp) => void setTab('mini-projects', { editTarget: mp, focusTab: true })}
-          onReloadRun={reloadRun}
+          onRefetchCourse={refetchCourse}
           blocks={blocks ?? []}
         />
       {:else if activeTab === 'teachers'}

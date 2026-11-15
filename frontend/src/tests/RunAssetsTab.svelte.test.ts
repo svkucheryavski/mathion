@@ -14,6 +14,7 @@ vi.mock('../lib/runAssets', async () => {
 import RunAssetsTab from '../components/runs/RunAssetsTab.svelte';
 import { uploadRunAsset, replaceRunAsset, deleteRunAsset } from '../lib/runAssets';
 import { ApiError } from '../lib/api';
+import { toasts, clearToasts } from '../stores/toasts.svelte';
 import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
 import type { BlockResponse, Course, MiniProjectResponse, RunAssetResponse } from '../lib/types';
 
@@ -63,7 +64,7 @@ function baseProps(overrides: Partial<{
     onRefetchAssets: vi.fn().mockResolvedValue(undefined),
     onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined),
     onEditMiniProject: vi.fn(),
-    onReloadRun: vi.fn().mockResolvedValue(undefined),
+    onRefetchCourse: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -107,6 +108,7 @@ let target: HTMLDivElement;
 let component: ReturnType<typeof mount> | null;
 
 beforeEach(() => {
+  clearToasts();
   target = document.createElement('div');
   document.body.appendChild(target);
   component = null;
@@ -1336,6 +1338,20 @@ describe('RunAssetsTab — delete (orphan)', () => {
     expect(deleteRunAsset).not.toHaveBeenCalled();
   });
 
+  it('a 403 on a plain delete toasts the server\'s sentence', async () => {
+    (deleteRunAsset as any).mockRejectedValue(new ApiError(403, 'You are not a teacher of this run.'));
+    const onRefetchCourse = vi.fn().mockResolvedValue(undefined);
+    const assets = [{ ...mkAsset(1, 'orphan.pdf'), is_referenced: false }];
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets, onRefetchCourse } as any) });
+    flushSync();
+    findDeleteBtn('orphan.pdf').click();
+    flushSync();
+    findButton(target, /^(Delete|Replace)$/)!.click();
+    await settle();
+    expect(toasts.list.map((t) => [t.message, t.kind])).toContainEqual(['You are not a teacher of this run.', 'error']);
+    expect(onRefetchCourse).toHaveBeenCalledTimes(1);
+  });
+
   it('versionIsDisabled disables the [×] button', () => {
     const assets = [{ ...mkAsset(1, 'orphan.pdf'), is_referenced: false }];
     component = mount(RunAssetsTab, {
@@ -1437,17 +1453,19 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
     expect(danger.getAttribute('title') ?? '').toMatch(/course admins/i);
   });
 
-  it('403 stale-permission → banner + onReloadRun called once', async () => {
+  it('an Assets 403 on force delete toasts and refetches the course only', async () => {
     (deleteRunAsset as any).mockRejectedValue(
       Object.assign(new Error('forbidden'), { status: 403 }),
     );
-    const onReloadRun = vi.fn().mockResolvedValue(undefined);
+    const onRefetchCourse = vi.fn().mockResolvedValue(undefined);
+    const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
     component = mount(RunAssetsTab, {
       target,
       props: baseProps({
         assets: refAssets,
         miniProjects: refMps,
-        onReloadRun,
+        onRefetchCourse,
+        onRefetchAssets,
       } as any),
     });
     flushSync();
@@ -1461,8 +1479,33 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
     findButton(target, /Force delete/i)!.click();
     await settle();
 
-    expect(target.textContent).toMatch(/no longer have permission to force-delete/i);
-    expect(onReloadRun).toHaveBeenCalledTimes(1);
+    expect(toasts.list.map((t) => [t.message, t.kind])).toContainEqual(['You no longer have permission to force-delete.', 'error']);
+    expect(target.textContent).not.toMatch(/no longer have permission/i);
+    expect(onRefetchCourse).toHaveBeenCalledTimes(1);
+    expect(onRefetchAssets).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(findDeleteBtn('ref.pdf'));
+  });
+
+  it('a failed course refetch after a 403 is not an unhandled rejection', async () => {
+    (deleteRunAsset as any).mockRejectedValue(
+      Object.assign(new Error('forbidden'), { status: 403 }),
+    );
+    const onRefetchCourse = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: refAssets, miniProjects: refMps, onRefetchCourse } as any),
+    });
+    flushSync();
+    findDeleteBtn('ref.pdf').click();
+    flushSync();
+    const checkbox = target.querySelector('input[type="checkbox"][data-role="danger-ack"]') as HTMLInputElement;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    findButton(target, /Force delete/i)!.click();
+    await settle();
+    expect(onRefetchCourse).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(findDeleteBtn('ref.pdf'));
   });
 
   it('404 cross-user → banner + auto-refetch (after 500ms storm window)', async () => {
@@ -2682,6 +2725,128 @@ describe('RunAssetsTab — 6a focus never drops to <body> (T11 review)', () => {
     await settle();
   });
 
+  it('the end of a bulk run keeps a selection made during it and leaves focus where it is', async () => {
+    let release!: () => void;
+    (deleteRunAsset as any).mockImplementation(() => new Promise<void>((r) => { release = r; }));
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'a.pdf'), mkAsset(2, 'b.pdf')] }) });
+    flushSync();
+    (target.querySelector('input[aria-label="Select a.pdf"]') as HTMLInputElement).click();
+    flushSync();
+    findButton(target, /Delete 1 selected/i)!.click();
+    flushSync();
+    findButton(target, /^(Delete|Replace)$/)!.click();
+    await settle();
+    const b = target.querySelector('input[aria-label="Select b.pdf"]') as HTMLInputElement;
+    b.click();
+    b.focus();
+    flushSync();
+    release();
+    await settle();
+    await settle();
+    expect((target.querySelector('input[aria-label="Select b.pdf"]') as HTMLInputElement).checked).toBe(true);
+    expect(target.querySelector('.bulk-n')?.textContent).toBe('1 selected');
+    expect(document.activeElement).toBe(target.querySelector('input[aria-label="Select b.pdf"]'));
+  });
+
+  it('while a bulk delete runs, each row\'s ↻ and 🗑 wait', async () => {
+    let release!: () => void;
+    (deleteRunAsset as any).mockImplementation(() => new Promise<void>((r) => { release = r; }));
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'a.pdf'), mkAsset(2, 'b.pdf')] }) });
+    flushSync();
+    (target.querySelector('input[aria-label="Select a.pdf"]') as HTMLInputElement).click();
+    flushSync();
+    findButton(target, /Delete 1 selected/i)!.click();
+    flushSync();
+    findButton(target, /^(Delete|Replace)$/)!.click();
+    await settle();
+    for (const label of ['Replace b.pdf', 'Delete b.pdf']) {
+      const btn = target.querySelector(`button[aria-label="${label}"]`) as HTMLButtonElement;
+      expect(btn.getAttribute('aria-disabled')).toBe('true');
+      expect(btn.title).toBe('Wait for the current change to finish');
+    }
+    (target.querySelector('button[aria-label="Delete b.pdf"]') as HTMLButtonElement).click();
+    flushSync();
+    expect(target.querySelector('tr.delete-row, .delete-row')).toBeNull();
+    const picker = target.querySelector('input[type="file"][data-role="replace"]') as HTMLInputElement;
+    const pick = vi.spyOn(picker, 'click');
+    (target.querySelector('button[aria-label="Replace b.pdf"]') as HTMLButtonElement).click();
+    flushSync();
+    expect(pick).not.toHaveBeenCalled();
+    release();
+    await settle();
+    const after = target.querySelector('button[aria-label="Delete b.pdf"]') as HTMLButtonElement;
+    expect(after.getAttribute('aria-disabled')).toBeNull();
+    expect(after.title).toBe('Delete');
+  });
+
+  it('a single delete that fails during a bulk leaves focus on the waiting strip button', async () => {
+    let failSingle!: (e: unknown) => void;
+    let releaseBulk!: () => void;
+    (deleteRunAsset as any)
+      .mockImplementationOnce(() => new Promise<void>((_r, j) => { failSingle = j; }))
+      .mockImplementationOnce(() => new Promise<void>((r) => { releaseBulk = r; }));
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'a.pdf'), mkAsset(2, 'b.pdf')] }) });
+    flushSync();
+    (target.querySelector('button[aria-label="Delete a.pdf"]') as HTMLButtonElement).click();
+    flushSync();
+    findButton(target, /^(Delete|Replace)$/)!.click();
+    await settle();
+    (target.querySelector('input[aria-label="Select b.pdf"]') as HTMLInputElement).click();
+    flushSync();
+    findButton(target, /Delete 1 selected/i)!.click();
+    flushSync();
+    findButton(target, /^(Delete|Replace)$/)!.click();
+    await settle();
+    const strip = findButton(target, /Delete 1 selected/i)!;
+    expect(document.activeElement).toBe(strip);
+    failSingle(new ApiError(500, 'Boom.'));
+    await settle();
+    await settle();
+    expect(document.activeElement).toBe(strip);
+    releaseBulk();
+    await settle();
+  });
+
+  it('a 403 whose course refetch is slow leaves focus where the user moved it', async () => {
+    (deleteRunAsset as any).mockRejectedValue(new ApiError(403, 'Forbidden.'));
+    let done!: () => void;
+    const onRefetchCourse = vi.fn().mockImplementation(() => new Promise<void>((r) => { done = r; }));
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'a.pdf'), mkAsset(2, 'b.pdf')], onRefetchCourse } as any) });
+    flushSync();
+    (target.querySelector('button[aria-label="Delete a.pdf"]') as HTMLButtonElement).click();
+    flushSync();
+    findButton(target, /^(Delete|Replace)$/)!.click();
+    await settle();
+    const other = target.querySelector('button[aria-label="Replace b.pdf"]') as HTMLButtonElement;
+    other.focus();
+    done();
+    await settle();
+    await settle();
+    expect(document.activeElement).toBe(other);
+  });
+
+  it('Delete N selected is disabled while a bulk delete runs', async () => {
+    let release!: () => void;
+    (deleteRunAsset as any).mockImplementation(() => new Promise<void>((r) => { release = r; }));
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'a.pdf')] }) });
+    flushSync();
+    (target.querySelector('input[aria-label="Select all"]') as HTMLInputElement).click();
+    flushSync();
+    findButton(target, /Delete 1 selected/i)!.click();
+    flushSync();
+    findButton(target, /^(Delete|Replace)$/)!.click();
+    await settle();
+    const strip = findButton(target, /Delete 1 selected/i)!;
+    expect(strip.getAttribute('aria-disabled')).toBe('true');
+    expect(strip.title).toBe('Wait for the current change to finish');
+    strip.click();
+    flushSync();
+    expect(target.querySelector('.bulk-strip .inline-confirm')).toBeNull();
+    release();
+    await settle();
+    expect(deleteRunAsset).toHaveBeenCalledTimes(1);
+  });
+
   it('opening the replace confirm closes that row\'s "used by" panel: one panel under a row (R14)', async () => {
     const refAsset = { ...mkAsset(1, 'ref.pdf'), is_referenced: true };
     component = mount(RunAssetsTab, {
@@ -2806,6 +2971,27 @@ describe('RunAssetsTab (Polish 3 — 0 uses)', () => {
     await settle();
     expect(document.activeElement).toBe(chip);
     expect(chip.textContent).toBe('2 uses');
+  });
+
+  it('the used-by panel keeps focus when only its entry goes', async () => {
+    const both = () => [mkMp(10, 'M', '![](a.pdf)'), mkMp(11, 'N', '![](a.pdf)'), mkMp(12, 'O', '![](a.pdf)')];
+    const box: any = $state(baseProps({ assets: [mkAsset(1, 'a.pdf')], miniProjects: both() }));
+    component = mount(RunAssetsTab, { target, props: box });
+    flushSync();
+    (target.querySelector('button.uses-chip') as HTMLButtonElement).click();
+    flushSync();
+    const edits = () => Array.from(target.querySelectorAll('#uses-1 button')) as HTMLButtonElement[];
+    // The middle entry goes: the next Edit takes focus.
+    edits()[1].focus();
+    box.miniProjects = [mkMp(10, 'M', '![](a.pdf)'), mkMp(11, 'N', 'no files'), mkMp(12, 'O', '![](a.pdf)')];
+    await settle();
+    expect(edits()).toHaveLength(2);
+    expect(document.activeElement).toBe(edits()[1]);
+    // The last entry goes: the chip takes focus.
+    box.miniProjects = [mkMp(10, 'M', '![](a.pdf)'), mkMp(11, 'N', 'no files'), mkMp(12, 'O', 'no files')];
+    await settle();
+    expect(edits()).toHaveLength(1);
+    expect(document.activeElement).toBe(target.querySelector('button.uses-chip'));
   });
 
   it('focus inside the open "used by" panel also repairs when the uses drop to 0', async () => {

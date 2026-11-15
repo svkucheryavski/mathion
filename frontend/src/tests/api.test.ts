@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { ApiError, REQUEST_ERROR_MESSAGE, SERVER_ERROR_MESSAGE, api } from '../lib/api';
+import { ApiError, REQUEST_ERROR_MESSAGE, SERVER_ERROR_MESSAGE, api, loadFailureText } from '../lib/api';
 import * as events from '../lib/events';
 
 describe('lib/api', () => {
@@ -236,5 +236,13 @@ describe('lib/api', () => {
       const err = await api.post('/api/foo', {}).catch((e) => e);
       expect((err as ApiError).validationErrors()).toEqual(detail);
     });
+  });
+});
+
+describe('loadFailureText', () => {
+  it('the server\'s sentence, the network sentence, else the server-error one', () => {
+    expect(loadFailureText(new ApiError(404, 'Run not found.'))).toBe('Run not found.');
+    expect(loadFailureText(new TypeError('Failed to fetch'))).toBe('Check your connection and try again.');
+    expect(loadFailureText(new SyntaxError('Unexpected token <'))).toBe(SERVER_ERROR_MESSAGE);
   });
 });

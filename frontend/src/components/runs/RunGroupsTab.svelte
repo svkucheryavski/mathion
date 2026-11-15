@@ -68,7 +68,12 @@
       }
       throw e;
     }
-    await onRefetchGroups();
+    // The group exists now: a failed refetch is not a failed add.
+    try {
+      await onRefetchGroups();
+    } catch {
+      pushToast('Created (refresh failed — reload to see latest)', 'info');
+    }
     addKey += 1; // a fresh, empty, focused field for the next name
   }
 
