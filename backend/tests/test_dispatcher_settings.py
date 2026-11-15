@@ -251,6 +251,38 @@ def test_disconnect_mid_batch_charges_one_row_and_stops(db, seeded_run, mailer):
     assert load(db).send_failure_message is None       # not a D9c failure
 
 
+@pytest.mark.parametrize("exc", [smtplib.SMTPRecipientsRefused({"x@uni.dk": (421, b"bye")}),
+                                 smtplib.SMTPDataError(421, b"bye")])
+def test_a_421_charges_its_message_stops_and_backs_off(db, seeded_run, mailer, exc):
+    # The user's call (2026-11-15): charged, so a message the server always
+    # closes on fails out instead of holding the queue.
+    mailer["m"] = _Mailer(fail=exc, on_calls=[2])
+    set_site(db, **ON, email_off_at=None)
+    r1, r2, r3 = (_row(db, seeded_run, T0 + timedelta(seconds=i)) for i in range(3))
+    now = T0 + H
+    _tick_once(_state(), now)
+    for r in (r1, r2, r3):
+        db.refresh(r)
+    assert r1.sent_at is not None
+    assert (r2.retry_count, r2.next_attempt_at, r2.sent_at) == (1, now + timedelta(minutes=5), None)
+    assert (r3.retry_count, r3.sent_at) == (0, None)
+    assert mailer["m"].calls == 2                       # the batch ended at the 421
+    view = _fresh_view(db)
+    assert view.send_failure_message == "The mail server asked Mathion to try again later."
+    assert (view.send_retry_at, view.send_backoff_step) == (now + timedelta(minutes=5), 1)
+
+
+def test_a_421_on_the_last_try_fails_the_message_out(db, seeded_run, mailer):
+    mailer["m"] = _Mailer(fail=smtplib.SMTPRecipientsRefused({"x@uni.dk": (421, b"bye")}))
+    set_site(db, **ON, email_off_at=None)
+    r = _row(db, seeded_run, T0, retry_count=4)
+    _tick_once(_state(), T0 + H)
+    db.refresh(r)
+    assert (r.retry_count, r.next_attempt_at, r.sent_at) == (5, None, None)
+    assert r.error.startswith("max attempts:")
+    assert _fresh_view(db).send_failure_message == "The mail server asked Mathion to try again later."
+
+
 def test_unreadable_password_logged_once(db, seeded_run, caplog, monkeypatch):
     # The real factory: the password was sealed with another server's key.
     from mathion.notifications import mailer as mailer_mod

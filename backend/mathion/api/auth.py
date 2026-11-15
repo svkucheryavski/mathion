@@ -1,4 +1,5 @@
 import logging
+import smtplib
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -13,7 +14,7 @@ from mathion.database import SessionLocal, get_db
 from mathion.dependencies import get_current_user
 from mathion.models import CourseAdmin, RunTeacher
 from mathion.models_auth import User
-from mathion.notifications.dispatcher import record_send_outcome, refusal_on_card
+from mathion.notifications.dispatcher import record_connected, record_send_outcome, refusal_on_card
 from mathion.notifications.mailer import DEV_MODES, build_mailer, logs_in
 from mathion.notifications.smtp_errors import SMTP_FAILURES, describe, stops_the_batch
 from mathion.notifications.templates import build_login_pin_message
@@ -112,10 +113,24 @@ def _send_login_pin(email: str, raw_pin: str, minutes: int) -> None:
                                        has_login=logs_in(site.smtp_username, site.smtp_encryption))
             if card is not None:
                 _record_on_card(site, card)
+            elif isinstance(exc, (smtplib.SMTPRecipientsRefused, smtplib.SMTPDataError)):
+                _record_past_sender(site)
     except Exception as exc:
         # The class only: the text or traceback can quote the PIN or a
         # character of a copied password.
         logger.error("login PIN email send failed: %s", type(exc).__name__)
+
+
+def _record_past_sender(site) -> None:
+    """D9d: the PIN got past the sender, so a stored sender line goes, as in
+    the queue. Best-effort, and not for a developer outbox."""
+    if settings.email_mode in DEV_MODES:
+        return
+    try:
+        with SessionLocal() as db:
+            record_connected(db, site, past_sender=True)
+    except Exception:
+        logger.exception("login PIN email: clearing the sender line on the Email card failed")
 
 
 def _record_on_card(site, failure) -> None:

@@ -55,6 +55,48 @@ describe('EmailForm (Settings D7-D9)', () => {
     expect(f.changed).toBe(true);
   });
 
+  it('a curly pair around the From name compares as straight quotes (D7b rev 13)', () => {
+    const f = new EmailForm({ ...EMAIL, from_address: '"Mathion, AAU" <m@uni.dk>' });
+    for (const typed of ['\u201cMathion, AAU\u201d <m@uni.dk>', '\u201eMathion, AAU\u201c <m@uni.dk>',
+      '\u00bbMathion, AAU\u00ab <m@uni.dk> ']) {
+      f.from = typed;
+      expect(f.changed).toBe(false);
+    }
+    // Curly quotes inside a name are kept, so they are a change.
+    f.from = 'Mathion \u201cAAU\u201d <m@uni.dk>';
+    expect(f.changed).toBe(true);
+    f.from = '\u201cMathion, AAU <m@uni.dk>';
+    expect(f.changed).toBe(true);
+    for (const typed of ['\u201eMathion, AAU\u201d <m@uni.dk>', '\u00abMathion, AAU\u00bb <m@uni.dk>',
+      '\u201dMathion, AAU\u201d <m@uni.dk>', '\u00bbMathion, AAU\u00bb <m@uni.dk>']) {
+      f.from = typed;
+      expect(f.changed).toBe(false);
+    }
+  });
+
+  it('a curly pair with a quote or backslash inside, or nothing inside, stays as typed', () => {
+    for (const [saved, typed] of [['"A "b"" <m@uni.dk>', '\u201cA "b"\u201d <m@uni.dk>'],
+      ['"A\\B" <m@uni.dk>', '\u201cA\\B\u201d <m@uni.dk>'], ['"" <m@uni.dk>', '\u201c\u201d <m@uni.dk>'],
+      ['"Matte\u201d og \u201cFysik" <m@uni.dk>', '\u201cMatte\u201d og \u201cFysik\u201d <m@uni.dk>']]) {
+      const f = new EmailForm({ ...EMAIL, from_address: saved });
+      f.from = typed;
+      expect(f.changed).toBe(true);
+    }
+  });
+
+  it('the text between a curly pair and "<" is kept as it is', () => {
+    const f = new EmailForm({ ...EMAIL, from_address: '"Mathion, AAU"<m@uni.dk>' });
+    f.from = '\u201cMathion, AAU\u201d<m@uni.dk>';
+    expect(f.changed).toBe(false);
+    f.from = '\u201cMathion, AAU\u201d  <m@uni.dk>';
+    expect(f.changed).toBe(true);
+  });
+
+  it('a From saved with a curly pair before rev 13 is not a change on open', () => {
+    const f = new EmailForm({ ...EMAIL, from_address: '\u00abMathion\u00bb <m@uni.dk>' });
+    expect(f.changed).toBe(false);
+  });
+
   it('an edit clears the error and the test answer and counts', () => {
     const f = new EmailForm(EMAIL);
     f.error = 'x';

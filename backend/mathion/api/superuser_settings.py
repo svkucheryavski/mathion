@@ -26,7 +26,7 @@ from mathion.database import SessionLocal, get_db
 from mathion.models_auth import NotificationLogEntry, SiteSettings, User
 from mathion.notifications.dispatcher import refusal_on_card
 from mathion.notifications.mailer import DEV_MODES, SMTPMailer, logs_in
-from mathion.notifications.smtp_errors import SMTP_FAILURES, describe
+from mathion.notifications.smtp_errors import SAVED_NOT_ASCII, SMTP_FAILURES, USERNAME_ASCII, describe
 from mathion.schemas import (
     EmailSettingsIn, EmailTestIn, EmailTestResult, LimitsIn, PanelEmailSettings, PanelEmailTest,
     PanelLimits, PanelSendFailure, PanelSettings, PanelSignIn, PanelSite, SignInIn,
@@ -48,15 +48,13 @@ _FROM_ASCII = ("The address in From can only use plain letters, digits and symbo
                "write an accented domain in its xn-- form.")
 _LOGIN_NEEDS_TLS = "A login needs encryption: pick STARTTLS or SSL/TLS."
 _ASCII = "The password can only use plain letters, digits and symbols (no accents)."
-_SAVED_NOT_ASCII = "The saved password has characters that can't be sent: type it again."
 _NEEDS_PASSWORD = "Type the password for this username."
 _RETYPE = "Type the password again: the mail server, username or certificate check has changed."
 _UNREADABLE = "The saved password can't be read on this server: type it again."
 _TEST_RUNNING = "The last test is still finishing. Try again in a minute."  # the user's (2026-11-12)
 # The user's sentences (2026-11-12).
-_FROM_QUOTES = "Put a name with a comma or colon in quotes."
+_FROM_QUOTES = "Put a name with symbols like , : ; @ [ ] in quotes."
 _FROM_UNDERSCORE = "The From address's domain can't contain _."
-_USERNAME_ASCII = "The username can't contain letters like æ, ø or å."
 _SKIPPED_OFF = "skipped: email was off"
 
 _PRINTABLE_ASCII = re.compile(r"[\x20-\x7e]*")
@@ -123,10 +121,10 @@ def _from_problem(value: str) -> str | None:
     # quote: a comma or colon is a second address, a group or a pasted link.
     name, bracket, after = bare.partition("<")
     if bracket:
-        if not _AN_ADDRESS.search(name) and any(c in ",:" for c in name):
-            return _FROM_QUOTES
         if after.partition(">")[2].strip():
             return _FROM
+        if not _AN_ADDRESS.search(name) and any(c in ",:;@[]" for c in name):
+            return _FROM_QUOTES
     elif any(c in ",:" for c in name):
         return _FROM
     _name, addr = parseaddr(value)
@@ -178,7 +176,7 @@ def _check_email(data: EmailTestIn, row: SiteSettings, secret: str) -> str:
     if len(data.username) > 254:
         _bad(_USERNAME_TOO_LONG)
     if not _PRINTABLE_ASCII.fullmatch(data.username):
-        _bad(_USERNAME_ASCII)  # smtplib can't send any other
+        _bad(USERNAME_ASCII)  # smtplib can't send any other
     if not 1 <= data.port <= 65535:
         _bad(_PORT)
     problem = _from_problem(data.from_address)
@@ -201,7 +199,7 @@ def _check_email(data: EmailTestIn, row: SiteSettings, secret: str) -> str:
     except SealError:
         _bad(_UNREADABLE)
     if not _PRINTABLE_ASCII.fullmatch(saved):
-        _bad(_SAVED_NOT_ASCII)  # copied from .env as it was (D2); smtplib can't send it
+        _bad(SAVED_NOT_ASCII)  # copied from .env as it was (D2); smtplib can't send it
     return saved
 
 

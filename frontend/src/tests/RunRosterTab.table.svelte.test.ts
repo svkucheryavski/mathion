@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunRosterTab from '../components/runs/RunRosterTab.svelte';
 import { toasts } from '../stores/toasts.svelte';
+import { OFFLINE_MESSAGE, REQUEST_ERROR_MESSAGE, SERVER_ERROR_MESSAGE } from '../lib/api';
 import type { GroupResponse, RunStudentResponse } from '../lib/types';
 
 // Slice 6c Task 4 (10b): the bulk strip and its confirm, the result banner,
@@ -410,13 +411,13 @@ describe('RunRosterTab — the result banner', () => {
   });
 
   it('cancelled move without marked rows: no hover hint; "Move the N not processed…" with its hidden label', async () => {
-    fetchSpy.mockImplementation((url: string) => (url.endsWith('/bulk-move') ? jres({ detail: 'Server error' }, 500) : jres([])));
+    fetchSpy.mockImplementation((url: string) => (url.endsWith('/bulk-move') ? jres({ detail: 'Something broke.' }, 500) : jres([])));
     open();
     checkAll();
     pick(act<HTMLSelectElement>('bulk-move-select')!, '99');
     await settleAll();
     expect(banner()!.classList.contains('ro-banner-warn')).toBe(true);
-    expect(bannerText()).toBe('Moved 0 of 3 — 0 failed, 3 cancelled (connection issue).');
+    expect(bannerText()).toBe('Moved 0 of 3 — 0 failed, 3 cancelled. Something broke.');
     const rc = act<HTMLSelectElement>('retry-cancelled')!;
     expect(rc.tagName).toBe('SELECT');
     expect(options(rc)).toEqual(['Move the 3 not processed…', 'Unassign', 'Alpha · 7/10']);
@@ -433,6 +434,162 @@ describe('RunRosterTab — the result banner', () => {
     act('confirm-bulk-delete')!.click();
     await settleAll();
     expect(text(act('retry-cancelled'))).toBe('Retry the 2 not processed');
+  });
+
+  it('cancelled remove, offline: the banner gives the connection sentence', async () => {
+    fetchSpy.mockImplementation((url: string) => (url.endsWith('/bulk-delete') ? Promise.reject(new TypeError('Failed to fetch')) : jres([])));
+    open();
+    checkAll();
+    bulkTrash().click();
+    await settle();
+    act('confirm-bulk-delete')!.click();
+    await settleAll();
+    expect(bannerText()).toBe('Removed 0 of 3 — 0 failed, 3 cancelled. ' + OFFLINE_MESSAGE);
+  });
+
+  it('cancelled remove, 404: the banner gives the server\'s sentence', async () => {
+    fetchSpy.mockImplementation((url: string) => (url.endsWith('/bulk-delete') ? jres({ detail: 'Run not found' }, 404) : jres([])));
+    open();
+    checkAll();
+    bulkTrash().click();
+    await settle();
+    act('confirm-bulk-delete')!.click();
+    await settleAll();
+    expect(bannerText()).toBe('Removed 0 of 3 — 0 failed, 3 cancelled. Run not found.');
+  });
+
+  it('cancelled with marked rows keeps the hover hint after the reason', async () => {
+    let call = 0;
+    fetchSpy.mockImplementation((url: string) => {
+      if (!url.endsWith('/bulk-delete')) return jres([]);
+      return call++ === 0 ? jres(result(range(2, 200), [[1, 'not_in_run', null]])) : jres({ detail: 'Something broke.' }, 500);
+    });
+    open({ students: range(1, 201).map((id) => student(id)) });
+    checkAll();
+    bulkTrash().click();
+    await settle();
+    act('confirm-bulk-delete')!.click();
+    await settleAll();
+    expect(bannerText()).toBe('Removed 199 of 201 — 1 failed, 1 cancelled. Something broke. Hover a marked row for the reason.');
+  });
+
+  it('a real server detail gets its full stop before the hover hint', async () => {
+    let call = 0;
+    fetchSpy.mockImplementation((url: string) => {
+      if (!url.endsWith('/bulk-move')) return jres([]);
+      return call++ === 0
+        ? jres(result(range(2, 200), [[1, 'capacity_reached', 'full']]))
+        : jres({ detail: 'Cannot move student into disabled group' }, 409);
+    });
+    open({ students: range(1, 201).map((id) => student(id)) });
+    checkAll();
+    pick(act<HTMLSelectElement>('bulk-move-select')!, '99');
+    await settleAll();
+    expect(bannerText()).toBe('Moved 199 of 201 — 1 failed, 1 cancelled. Cannot move student into disabled group. Hover a marked row for the reason.');
+  });
+
+  it('a request that fails with no error value still cancels, with the server sentence', async () => {
+    fetchSpy.mockImplementation((url: string) => (url.endsWith('/bulk-delete') ? Promise.reject(undefined) : jres([])));
+    open();
+    checkAll();
+    bulkTrash().click();
+    await settle();
+    act('confirm-bulk-delete')!.click();
+    await settleAll();
+    expect(banner()!.classList.contains('ro-banner-warn')).toBe(true);
+    expect(bannerText()).toBe('Removed 0 of 3 — 0 failed, 3 cancelled. ' + SERVER_ERROR_MESSAGE);
+  });
+
+  it.each([
+    ['a 422 with a field list', { detail: [{ loc: ['body', 'user_ids'], msg: 'too many', type: 'value_error' }] }, 422],
+    ['an ApiError with status 0 (as validateBulkIds throws)', { detail: 'bulkUserIds: duplicate user_ids' }, 0],
+    ['an object detail', { detail: { msg: 'x' } }, 400],
+    ['a detail of only spaces', { detail: '  ' }, 409],
+  ])('%s reads the request sentence, not its own text', async (_name, body, status) => {
+    fetchSpy.mockImplementation((url: string) => (url.endsWith('/bulk-delete') ? Promise.resolve({ ...resp(body, status), ok: false }) : jres([])));
+    open();
+    checkAll();
+    bulkTrash().click();
+    await settle();
+    act('confirm-bulk-delete')!.click();
+    await settleAll();
+    expect(bannerText()).toBe('Removed 0 of 3 — 0 failed, 3 cancelled. ' + REQUEST_ERROR_MESSAGE);
+  });
+
+  it('a detail with trailing space keeps one full stop', async () => {
+    fetchSpy.mockImplementation((url: string) => (url.endsWith('/bulk-delete') ? jres({ detail: 'Run ended. ' }, 409) : jres([])));
+    open();
+    checkAll();
+    bulkTrash().click();
+    await settle();
+    act('confirm-bulk-delete')!.click();
+    await settleAll();
+    expect(target.querySelector('.ro-banner-text')!.textContent).toBe('Removed 0 of 3 — 0 failed, 3 cancelled. Run ended.');
+  });
+
+  it('an answer without results reads the server sentence, not offline', async () => {
+    fetchSpy.mockImplementation((url: string) => (url.endsWith('/bulk-delete') ? jres({}) : jres([])));
+    open();
+    checkAll();
+    bulkTrash().click();
+    await settle();
+    act('confirm-bulk-delete')!.click();
+    await settleAll();
+    expect(bannerText()).toBe('Removed 0 of 3 — 0 failed, 3 cancelled. ' + SERVER_ERROR_MESSAGE);
+  });
+
+  it.each([
+    ['a null row', [{ user_id: 1, status: 'ok' }, null, { user_id: 3, status: 'ok' }]],
+    ['a row without user_id', [{ user_id: 1, status: 'ok' }, { status: 'ok' }, { user_id: 3, status: 'ok' }]],
+    ['a string user_id', [{ user_id: 1, status: 'ok' }, { user_id: '2', status: 'ok' }, { user_id: 3, status: 'ok' }]],
+    ['no rows', []],
+    ['a duplicate id', [{ user_id: 1, status: 'ok' }, { user_id: 1, status: 'ok' }, { user_id: 2, status: 'ok' }]],
+    ['an id not asked for', [{ user_id: 1, status: 'ok' }, { user_id: 2, status: 'ok' }, { user_id: 9, status: 'ok' }]],
+  ])('a reply with %s reads the server sentence and counts nothing from it', async (_name, rows) => {
+    fetchSpy.mockImplementation((url: string) =>
+      (url.endsWith('/bulk-delete') ? jres({ results: rows }) : jres([])));
+    open();
+    checkAll();
+    bulkTrash().click();
+    await settle();
+    act('confirm-bulk-delete')!.click();
+    await settleAll();
+    expect(bannerText()).toBe('Removed 0 of 3 — 0 failed, 3 cancelled. ' + SERVER_ERROR_MESSAGE);
+  });
+
+  it('a 5xx with an object detail reads the server sentence', async () => {
+    fetchSpy.mockImplementation((url: string) => (url.endsWith('/bulk-delete') ? jres({ detail: { msg: 'x' } }, 500) : jres([])));
+    open();
+    checkAll();
+    bulkTrash().click();
+    await settle();
+    act('confirm-bulk-delete')!.click();
+    await settleAll();
+    expect(bannerText()).toBe('Removed 0 of 3 — 0 failed, 3 cancelled. ' + SERVER_ERROR_MESSAGE);
+  });
+
+  it.each(['Run ended!', 'Run ended?', 'Run ended…'])('a detail ending in its own mark (%s) gets no full stop', async (detail) => {
+    fetchSpy.mockImplementation((url: string) => (url.endsWith('/bulk-delete') ? jres({ detail }, 409) : jres([])));
+    open();
+    checkAll();
+    bulkTrash().click();
+    await settle();
+    act('confirm-bulk-delete')!.click();
+    await settleAll();
+    expect(bannerText()).toBe('Removed 0 of 3 — 0 failed, 3 cancelled. ' + detail);
+  });
+
+  it('a malformed second chunk keeps the first chunk\'s count', async () => {
+    let call = 0;
+    fetchSpy.mockImplementation((url: string) => {
+      if (!url.endsWith('/bulk-move')) return jres([]);
+      return call++ === 0 ? jres(result(range(1, 200))) : jres({ results: [] });
+    });
+    open({ students: range(1, 201).map((id) => student(id)) });
+    checkAll();
+    pick(act<HTMLSelectElement>('bulk-move-select')!, '99');
+    await settleAll();
+    expect(bannerText()).toBe('Moved 200 of 201 — 0 failed, 1 cancelled. ' + SERVER_ERROR_MESSAGE);
   });
 
   it('Dismiss closes the banner and focuses the search field', async () => {

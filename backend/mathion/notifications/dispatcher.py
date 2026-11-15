@@ -18,7 +18,7 @@ from mathion.site_settings import get_row, load as load_site
 
 from .errors import classify
 from .mailer import DEV_MODES, build_mailer, logs_in
-from .smtp_errors import SMTP_FAILURES, SmtpFailure, describe, sender_side, stops_the_batch
+from .smtp_errors import SMTP_FAILURES, SmtpFailure, closing, describe, sender_side, stops_the_batch
 from .templates import render, _build_email_message, RenderContext, COURSE_ADMIN_ASSIGNED
 
 
@@ -268,8 +268,9 @@ def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = T
 
     `off_interval` (D10a) leaves out rows born while email was off. A failure
     on the mail server's side (D9c) stops the batch without charging any
-    message and comes back in the result; `log_failures` logs it here (direct
-    `tick()` callers), otherwise the loop logs it once per change (D9d)."""
+    message (a 421 charges its own) and comes back in the result;
+    `log_failures` logs it here (direct `tick()` callers), otherwise the loop
+    logs it once per change (D9d)."""
     query = (
         select(NotificationLogEntry)
         .where(NotificationLogEntry.sent_at.is_(None))
@@ -407,6 +408,14 @@ def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = T
 
             failure = (describe(send_exc, recipient=recipient, **_where(mailer, view))
                        if isinstance(send_exc, SMTP_FAILURES) else None)
+            if failure is not None and closing(send_exc):
+                # A 421 (the user's call): charged, so a message the server
+                # always closes on fails out; the batch stops and backs off.
+                _charge(db, row_id, send_exc, failure, now)
+                result.failure = failure
+                if log_failures:
+                    logger.warning("notifications: sending stopped (%s): %s", row_id, failure.text())
+                break
             if failure is not None and stops_the_batch(send_exc, sender=sender):
                 # D9c: the server's side (login, TLS, the sender, the password).
                 # No message is charged; the loop retries after its back-off.
@@ -494,7 +503,7 @@ def _record(db, view, result: TickResult, now: datetime) -> None:
         # Refusals and nothing through: the card says so, the queue goes on.
         record_send_outcome(db, view, result.refused, now)
     elif result.connected:
-        _record_connected(db, view, past_sender=result.past_sender)
+        record_connected(db, view, past_sender=result.past_sender)
 
 
 def _clear_failure(row) -> None:
@@ -512,7 +521,7 @@ def _refusal_line(message: str | None) -> bool:
     return message is not None and (message == EVERYONE_REFUSED or message.startswith(REFUSED_PREFIX))
 
 
-def _record_connected(db, view, *, past_sender: bool) -> None:
+def record_connected(db, view, *, past_sender: bool) -> None:
     """The session opened (and logged in, when one happens), but nothing
     went out (every row was skipped, or failed on its own): the server's
     side works, so a stored failure on that side and the back-off go. A

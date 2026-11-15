@@ -205,6 +205,7 @@ def test_pin_email_uses_the_saved_from_and_minutes(client, db, monkeypatch):
 
     class _FakeSMTP:
         def __init__(self, *a, **k): pass
+        def ehlo(self, *a, **k): raise AssertionError("ehlo")
         def ehlo_or_helo_if_needed(self): pass
         def starttls(self, **k): pass
         def send_message(self, msg): sent.append(msg)
@@ -250,6 +251,7 @@ def test_pin_send_failure_logs_no_server_reply(client, db, monkeypatch, caplog):
 
 from datetime import datetime, timedelta, timezone  # noqa: E402
 import smtplib  # noqa: E402
+import pytest  # noqa: E402
 from contextlib import contextmanager  # noqa: E402
 
 from mathion.site_settings import load  # noqa: E402
@@ -290,6 +292,110 @@ def test_refused_recipient_on_a_pin_email_leaves_the_card(client, db, monkeypatc
     _smtp_on(monkeypatch, RecipientRefused())
     client.post("/api/auth/request-pin", json={"email": "real@example.com"})
     assert _card(db) == (None, None, 0)
+
+
+def test_refused_recipient_on_a_pin_email_clears_a_sender_line(client, db, monkeypatch):
+    class RecipientRefused(MemoryMailer):
+        def send(self, msg):
+            raise smtplib.SMTPRecipientsRefused({"real@example.com": (550, b"no such user")})
+
+    set_site(db, send_failure_message="The mail server refused m@uni.dk as the sender.",
+             send_failure_at=datetime.now(timezone.utc))
+    _make_user(db)
+    _smtp_on(monkeypatch, RecipientRefused())
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    # It got past the sender, so the server takes the From.
+    assert _card(db)[0] is None
+
+
+def test_421_on_a_pin_email_says_try_later(client, db, monkeypatch):
+    class Closing(MemoryMailer):
+        def send(self, msg):
+            raise smtplib.SMTPRecipientsRefused({"real@example.com": (421, b"closing")})
+
+    _make_user(db)
+    _smtp_on(monkeypatch, Closing())
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    # The card says it; the queue's wait is left alone.
+    assert _card(db) == ("The mail server asked Mathion to try again later.", None, 0)
+
+
+def test_421_after_the_body_on_a_pin_email_says_try_later(client, db, monkeypatch):
+    class Closing(MemoryMailer):
+        def send(self, msg):
+            raise smtplib.SMTPDataError(421, b"closing")
+
+    _make_user(db)
+    _smtp_on(monkeypatch, Closing())
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db) == ("The mail server asked Mathion to try again later.", None, 0)
+
+
+def test_421_on_a_pin_email_keeps_the_queue_wait(client, db, monkeypatch):
+    later = datetime.now(timezone.utc) + timedelta(minutes=30)
+    set_site(db, send_failure_message="The mail server refused the login.",
+             send_failure_at=datetime.now(timezone.utc), send_retry_at=later, send_backoff_step=3)
+    _make_user(db)
+    _smtp_on(monkeypatch, _refusing(smtplib.SMTPRecipientsRefused({"real@example.com": (421, b"x")})))
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db) == ("The mail server asked Mathion to try again later.", later, 3)
+
+
+def test_refused_recipient_on_a_pin_email_clears_a_server_line_and_its_wait(client, db, monkeypatch):
+    later = datetime.now(timezone.utc) + timedelta(minutes=30)
+    set_site(db, send_failure_message="The mail server refused the login.",
+             send_failure_at=datetime.now(timezone.utc), send_retry_at=later, send_backoff_step=3)
+    _make_user(db)
+    _smtp_on(monkeypatch, _refusing(smtplib.SMTPRecipientsRefused({"real@example.com": (550, b"x")})))
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db) == (None, None, 0)
+
+
+SENDER_LINE = "The mail server refused m@uni.dk as the sender."
+
+
+def _refusing(exc):
+    class Refusing(MemoryMailer):
+        def send(self, msg):
+            raise exc
+    return Refusing()
+
+
+def test_a_4xx_after_the_body_on_a_pin_email_clears_a_sender_line(client, db, monkeypatch):
+    set_site(db, send_failure_message=SENDER_LINE, send_failure_at=datetime.now(timezone.utc))
+    _make_user(db)
+    _smtp_on(monkeypatch, _refusing(smtplib.SMTPDataError(451, b"later")))
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db)[0] is None
+
+
+@pytest.mark.parametrize("exc", [smtplib.SMTPServerDisconnected("gone"),
+                                 smtplib.SMTPNotSupportedError("SMTPUTF8 not supported by server")])
+def test_a_pin_failing_before_the_sender_keeps_a_sender_line(client, db, monkeypatch, exc):
+    set_site(db, send_failure_message=SENDER_LINE, send_failure_at=datetime.now(timezone.utc))
+    _make_user(db)
+    _smtp_on(monkeypatch, _refusing(exc))
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db)[0] == SENDER_LINE
+
+
+def test_a_refused_pin_recipient_keeps_a_refusal_line(client, db, monkeypatch):
+    from mathion.notifications.dispatcher import REFUSED_PREFIX
+    line = f"{REFUSED_PREFIX}check that it accepts mail from m@uni.dk without a login."
+    set_site(db, send_failure_message=line, send_failure_at=datetime.now(timezone.utc))
+    _make_user(db)
+    _smtp_on(monkeypatch, _refusing(smtplib.SMTPRecipientsRefused({"real@example.com": (550, b"no")})))
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db)[0] == line
+
+
+def test_a_refused_pin_recipient_in_a_developer_outbox_clears_nothing(client, db, monkeypatch):
+    set_site(db, send_failure_message=SENDER_LINE, send_failure_at=datetime.now(timezone.utc))
+    _make_user(db)
+    _smtp_on(monkeypatch, _refusing(smtplib.SMTPRecipientsRefused({"real@example.com": (550, b"no")})))
+    monkeypatch.setattr(settings, "email_mode", "file")
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db)[0] == SENDER_LINE
 
 
 def test_sent_pin_email_clears_the_card(client, db, monkeypatch):
@@ -462,12 +568,13 @@ def test_non_smtp_pin_failure_logs_class_only(client, db, monkeypatch, caplog):
 
 def test_pin_session_start_failure_leaves_the_queue_wait(client, db, monkeypatch):
     # D9d: a PIN email failing before it is sent is the server's side, so the
-    # queue's wait stays, whatever sentence describe() gives it. (The 454's
-    # generic sentence is the backlog's "session-start reply" item.)
+    # queue's wait stays.
+    from mathion.notifications.smtp_errors import StartTlsRefused
+
     class TlsRefused(MemoryMailer):
         @contextmanager
         def session(self):
-            raise smtplib.SMTPResponseException(454, b"4.7.0 TLS not available")
+            raise StartTlsRefused(454, b"4.7.0 TLS not available")
             yield
 
     later = datetime.now(timezone.utc) + timedelta(minutes=30)
@@ -476,7 +583,8 @@ def test_pin_session_start_failure_leaves_the_queue_wait(client, db, monkeypatch
     _make_user(db)
     _smtp_on(monkeypatch, TlsRefused())
     client.post("/api/auth/request-pin", json={"email": "real@example.com"})
-    assert _card(db) == ("The mail server refused the message.", later, 3)
+    # The memory mailer has no host.
+    assert _card(db) == ("The secure connection to  failed.", later, 3)
 
 
 def test_pin_to_a_non_ascii_address_leaves_the_card(client, db, monkeypatch):

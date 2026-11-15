@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { SvelteSet, SvelteMap } from 'svelte/reactivity';
-  import { ApiError, failureText } from '../../lib/api';
+  import { ApiError, failureText, REQUEST_ERROR_MESSAGE, SERVER_ERROR_MESSAGE } from '../../lib/api';
   import { WAIT_TITLE as BUSY_TITLE } from '../../lib/runTabs';
   import {
     addRunStudent,
@@ -35,7 +35,8 @@
     // by T15's current banner code (T15 retries on a different group, since the
     // chunk-level cancellation usually implies the original target was bad).
     lastTargetGroupId?: number | null;
-    error?: ApiError;
+    // The caught value, so offline still reads as offline.
+    error?: unknown;
   };
 
   let {
@@ -205,6 +206,15 @@
     }
   });
 
+  // Why a whole request failed, as a sentence with its full stop.
+  function cancelReason(e: unknown): string {
+    let text = failureText(e, SERVER_ERROR_MESSAGE).trim();
+    if (e instanceof ApiError && (e.status === 0 || typeof e.detail !== 'string' || !e.detail.trim())) {
+      text = e.status >= 500 ? SERVER_ERROR_MESSAGE : REQUEST_ERROR_MESSAGE;
+    }
+    return /[.!?…]$/.test(text) ? text : `${text}.`;
+  }
+
   function summaryText(): string {
     const r = bulkOpResult;
     if (r.kind === 'in-flight') return `${r.lastOp === 'move' ? 'Moving' : 'Removing'} ${r.total}…`;
@@ -214,7 +224,7 @@
     if (r.kind === 'success') return `${verb} ${r.succeededIds.length} of ${total} — 0 failed.`;
     if (r.kind === 'partial') return `${verb} ${r.succeededIds.length} of ${total} — ${r.chunkErrorRowIds.length} failed.${hint}`;
     if (r.kind === 'cancelled') {
-      return `${verb} ${r.succeededIds.length} of ${total} — ${r.chunkErrorRowIds.length} failed, ${r.cancelledIds.length} cancelled (connection issue).${hint}`;
+      return `${verb} ${r.succeededIds.length} of ${total} — ${r.chunkErrorRowIds.length} failed, ${r.cancelledIds.length} cancelled. ${cancelReason(r.error)}${hint}`;
     }
     return '';
   }
@@ -296,7 +306,8 @@
     const succeededIds: number[] = [];
     const chunkErrorRowIds: number[] = [];
     let cancelledIds: number[] = [];
-    let chunkLevelError: ApiError | undefined;
+    let chunkLevelError: unknown;
+    let chunkFailed = false;
 
     for (let ci = 0; ci < chunks.length; ci++) {
       const chunk = chunks[ci];
@@ -304,6 +315,13 @@
         const response = kind === 'move'
           ? await bulkMoveRunStudents(runId, chunk, groupId)
           : await bulkDeleteRunStudents(runId, chunk);
+        // A malformed reply is the server's fault, not the connection's.
+        // One row per asked id: `asked.delete` is false for a missing, duplicate or foreign id.
+        const rows: unknown = response?.results;
+        const asked = new Set(chunk);
+        if (!Array.isArray(rows) || rows.length !== chunk.length || !rows.every((r) => asked.delete(r?.user_id))) {
+          throw new Error('malformed bulk reply');
+        }
         for (const row of response.results) {
           if (row.status === 'ok') {
             succeededIds.push(row.user_id);
@@ -318,7 +336,8 @@
         const remainingFromThisChunk = chunk;
         const remainingFromLaterChunks = chunks.slice(ci + 1).flat();
         cancelledIds = [...remainingFromThisChunk, ...remainingFromLaterChunks];
-        chunkLevelError = e instanceof ApiError ? e : new ApiError(500, 'Network error');
+        chunkLevelError = e;
+        chunkFailed = true;
         break;
       }
     }
@@ -338,7 +357,7 @@
     for (const id of cancelledIds) if (liveIds.has(id)) selected.add(id);
 
     let finalKind: BulkOpResult['kind'];
-    if (chunkLevelError) finalKind = 'cancelled';
+    if (chunkFailed) finalKind = 'cancelled';
     else if (chunkErrorRowIds.length > 0) finalKind = 'partial';
     else finalKind = 'success';
 
