@@ -771,7 +771,8 @@ describe('QuizItem across a remount (C13, D83)', () => {
     remount(quiz(1, 'Quiz A', 1));
     expect(getDraft(1)).toBeUndefined();
     // While the reveal loads, the restored answers must not re-enable Submit.
-    expect(submitButton().disabled).toBe(true);
+    expect([...host.querySelectorAll('button')].some((b) => b.textContent?.includes('Submit'))).toBe(false);
+    expect(radios().every((r) => r.disabled)).toBe(true);
     expect([...host.querySelectorAll<HTMLInputElement>('input[type="radio"]')].some((r) => r.checked)).toBe(false);
   });
 
@@ -1003,6 +1004,96 @@ describe('QuizItem submit in flight (VR backlog)', () => {
     // holds no answers.
     expect(getSpy).toHaveBeenCalledWith('/api/items/1/reveal');
     expect(radios().some((r) => r.checked)).toBe(false);
+  });
+
+  // Codex I1: a used-up quiz whose answers are not shown yet takes no new answers.
+  it('after an attempts 409, a pending reveal keeps the questions locked and the reveal busy', async () => {
+    session.user = student;
+    seed({ 1: 1 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    postSpy.mockRejectedValueOnce(new ApiError(409, 'Max attempts reached'));
+    submitButton().click();
+    await settle();
+    expect(radios().every((r) => r.disabled)).toBe(true);
+    expect([...host.querySelectorAll('button')].some((b) => b.textContent?.includes('Submit'))).toBe(false);
+    const show = buttonNamed('Show correct answers');
+    expect(show.getAttribute('aria-busy')).toBe('true');
+    expect(show.getAttribute('aria-disabled')).toBe('true');
+    getSpy.mockClear();
+    show.click();
+    await settle();
+    expect(getSpy).not.toHaveBeenCalled();
+    expect(hasUnsavedDrafts()).toBe(false);
+  });
+
+  for (const [label, start] of [['after an attempts 409', 1], ['when the quiz opens used up', MAX]] as const) {
+    it(`a failed reveal ${label} locks the questions and Show correct answers retries it`, async () => {
+      session.user = student;
+      seed({ 1: start });
+      getSpy.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+      render(quiz(1, 'Quiz A', 1));
+      if (start < MAX) {
+        answerAll();
+        postSpy.mockRejectedValueOnce(new ApiError(409, 'Max attempts reached'));
+        submitButton().click();
+      }
+      await settle();
+      await settle();
+      expect(radios().every((r) => r.disabled)).toBe(true);
+      radios()[0]!.click();
+      flushSync();
+      expect(hasUnsavedDrafts()).toBe(false);
+      const show = buttonNamed('Show correct answers');
+      expect(show.getAttribute('aria-busy')).toBeNull();
+      expect(show.getAttribute('aria-disabled')).toBeNull();
+      getSpy.mockResolvedValueOnce({
+        item_id: 1, attempt_count: MAX, score_correct: 0, score_total: 1,
+        questions: [{ id: 101, correct_option_ids: [1012], student_answer: [1011], explanation_html: '' }],
+      } as unknown as QuizRevealResponse);
+      show.click();
+      await settle();
+      expect(getSpy).toHaveBeenLastCalledWith('/api/items/1/reveal');
+      expect(host.querySelector('.result')?.textContent).toContain(`Attempt ${MAX} of ${MAX}`);
+    });
+  }
+
+  it('the result card\'s Show correct answers is busy while its reveal loads and sends it once', async () => {
+    session.user = student;
+    seed({ 1: MAX - 1 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    postSpy.mockResolvedValueOnce(submitResponse({ attempt_count: MAX, can_retry: false }));
+    submitButton().click();
+    await settle();
+    const show = buttonNamed('Show correct answers');
+    expect(host.querySelector('.result')?.contains(show)).toBe(true);
+    getSpy.mockClear();
+    show.click();
+    flushSync();
+    expect(show.getAttribute('aria-busy')).toBe('true');
+    expect(show.getAttribute('aria-disabled')).toBe('true');
+    show.click();
+    await settle();
+    expect(getSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('after an attempts 409, focus that fell to the page goes to Show correct answers', async () => {
+    session.user = student;
+    seed({ 1: 1 });
+    render(quiz(1, 'Quiz A', 1));
+    answerAll();
+    const h = held();
+    submitButton().focus();
+    submitButton().click();
+    flushSync();
+    const parked = document.createElement('input');
+    document.body.appendChild(parked);
+    parked.focus();
+    parked.remove();
+    h.reject(new ApiError(409, 'Max attempts reached'));
+    await settle();
+    expect(document.activeElement).toBe(buttonNamed('Show correct answers'));
   });
 
   // Review r1: a submit refused because the session ended. The 401 handler

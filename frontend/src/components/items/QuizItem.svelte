@@ -4,7 +4,7 @@
   import { recordQuizAttempt, recordQuizExhausted, currentCourse } from '../../stores/currentCourse.svelte';
   import { getDraft, setDraft, clearDraft, takeDraft, restoreDraft, endSend, sendStillOwned, holdsAnswers } from '../../stores/quizDrafts.svelte';
   import { pushToast } from '../../stores/toasts.svelte';
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { repairFocus } from '../../lib/askInPlace.svelte';
   import { assertNever } from '../../lib/types';
   import { externalLinks } from '../../lib/externalLinks';
@@ -70,6 +70,14 @@
     Math.max(0, (currentCourse.value?.version.max_quiz_attempts ?? 0) - attemptsUsed),
   );
 
+  // Codex I1: used up with its answers not shown yet: no new answers, only the reveal.
+  const usedUp = $derived.by(() => {
+    const max = currentCourse.value?.version.max_quiz_attempts;
+    return !locked && max !== undefined && attemptsUsed >= max;
+  });
+  const frozen = $derived(locked || inflight !== null || usedUp);
+  let revealing = $state(false);
+
   // Resolve the value to display per question: pre-fill from the student's
   // last submitted answers (revealed.student_answer) when we auto-loaded the
   // reveal, or from the stored result (D89); otherwise use the in-progress
@@ -101,7 +109,7 @@
       // the leave-page warning on nor re-enables Submit while the reveal loads.
       clearDraft(item.id);
       answers = {};
-      void revealAnswers();
+      untrack(() => void revealAnswers());
     }
   });
 
@@ -178,7 +186,8 @@
     } finally {
       inflight = null;
       endSend(held);
-      if (failed) void repairFocus(button);
+      // A used-up quiz swaps Submit for Show correct answers.
+      if (failed) void tick().then(() => repairFocus(button, quizEl?.querySelector('.submit-row button')));
       // After the card renders.
       else void tick().then(() => repairFocus(quizEl?.querySelector('.result button')));
     }
@@ -196,14 +205,18 @@
   }
 
   async function revealAnswers(e?: MouseEvent): Promise<void> {
+    if (revealing) return;
     // VR-B: focus lost goes to the card (from the button or our own 409).
     const quizEl = e?.currentTarget instanceof HTMLElement ? e.currentTarget.closest('article.quiz') : revealFocusIn;
     revealFocusIn = null;
+    revealing = true;
     try {
       revealed = await api.get<QuizRevealResponse>(`/api/items/${item.id}/reveal`);
       void tick().then(() => repairFocus(quizEl?.querySelector('.result')));
     } catch (e: unknown) {
       pushToast(e instanceof ApiError ? e.displayMessage : 'Could not load answers.', 'error');
+    } finally {
+      revealing = false;
     }
   }
 
@@ -240,16 +253,16 @@
         <span class="q-counter mono">Question {i + 1} of {item.questions.length}</span>
         {#if q.type === 'single_choice'}
           <SingleChoice question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
-            disabled={locked || inflight !== null} correctOptionIds={r?.correct_option_ids ?? null} />
+            disabled={frozen} correctOptionIds={r?.correct_option_ids ?? null} />
         {:else if q.type === 'multiple_choice'}
           <MultiChoice question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
-            disabled={locked || inflight !== null} correctOptionIds={r?.correct_option_ids ?? null} />
+            disabled={frozen} correctOptionIds={r?.correct_option_ids ?? null} />
         {:else if q.type === 'numeric_answer'}
           <Numeric question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
-            disabled={locked || inflight !== null} correctValue={r?.correct_numeric ?? null} />
+            disabled={frozen} correctValue={r?.correct_numeric ?? null} />
         {:else if q.type === 'text_answer'}
           <Text question={q} value={valueFor(q.id)} onanswer={(a) => setAnswer(q.id, a)}
-            disabled={locked || inflight !== null} correctValue={r?.correct_text ?? null} />
+            disabled={frozen} correctValue={r?.correct_text ?? null} />
         {/if}
         {#if r?.explanation_html}
           <div class="exp prose compact" {@attach externalLinks(r.explanation_html)}>{@html r.explanation_html}</div>
@@ -259,14 +272,18 @@
 
     {#if !locked}
       <div class="submit-row">
-        <Button
-          onclick={submit}
-          loading={inflight !== null}
-          disabled={!allAnswered || inflight !== null}
-          title={!allAnswered ? 'Answer every question first' : inflight !== null ? 'Submitting…' : undefined}
-        >
-          Submit answer
-        </Button>
+        {#if usedUp}
+          <Button variant="secondary" loading={revealing} aria-disabled={revealing} onclick={revealAnswers}>Show correct answers</Button>
+        {:else}
+          <Button
+            onclick={submit}
+            loading={inflight !== null}
+            disabled={!allAnswered || inflight !== null}
+            title={!allAnswered ? 'Answer every question first' : inflight !== null ? 'Submitting…' : undefined}
+          >
+            Submit answer
+          </Button>
+        {/if}
         <!-- The attempts line needs the snapshot's max_quiz_attempts; QuizItem
              is independently mountable (tests), so guard on the snapshot. -->
         {#if currentCourse.value !== null}
@@ -283,7 +300,7 @@
           {#if score.canRetry}
             <Button onclick={tryAgain}>Try again</Button>
           {:else if lastResult && !revealed}
-            <Button variant="secondary" onclick={revealAnswers}>Show correct answers</Button>
+            <Button variant="secondary" loading={revealing} aria-disabled={revealing} onclick={revealAnswers}>Show correct answers</Button>
           {/if}
         </div>
       {/if}

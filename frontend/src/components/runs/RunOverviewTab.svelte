@@ -24,7 +24,6 @@
   import { formatShortDate } from '../../lib/datetime';
   import { focusFirst } from '../../lib/focusFirst';
   import { repairFocus } from '../../lib/askInPlace.svelte';
-  import { WAIT_TITLE } from '../../lib/runTabs';
   import { pushToast } from '../../stores/toasts.svelte';
   import Button from '../ui/Button.svelte';
   import DangerConfirm from '../ui/DangerConfirm.svelte';
@@ -62,7 +61,8 @@
   } = $props();
 
   const uid = $props.id();
-  const WAIT = WAIT_TITLE;
+  // Overview's own wait sentence (call 16).
+  const WAIT = 'Wait for the current change to save';
   // Run details: the row label, the field's name, and its noun for the titles.
   const FIELDS: { key: Field; label: string; name: string; noun: string; type: 'text' | 'date'; action: string }[] = [
     { key: 'title', label: 'Title', name: 'Title', noun: 'the title', type: 'text', action: 'edit-title' },

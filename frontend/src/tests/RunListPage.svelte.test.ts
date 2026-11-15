@@ -200,6 +200,30 @@ describe('RunListPage', () => {
     unmount(cmp);
   });
 
+  for (const outcome of ['succeeds', 'fails'] as const) {
+    it(`a delete that ${outcome} after focus moved elsewhere leaves focus there`, async () => {
+      let release!: (r: Response) => void;
+      adminFetch([draftRun, pubRun], [v99, v98], (_url, init) =>
+        init?.method === 'DELETE' ? new Promise<Response>((r) => { release = r; }) : null);
+      const { target, cmp } = open();
+      await settle();
+      trash(target)[0]!.click();
+      await settle();
+      (Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
+      await settle();
+      const other = document.createElement('input');
+      document.body.appendChild(other);
+      other.focus();
+      release(outcome === 'succeeds'
+        ? { ok: true, status: 204, json: () => Promise.resolve(null), headers: new Headers() } as unknown as Response
+        : await err(409, 'Clear roster first'));
+      await settle();
+      await settle();
+      expect(document.activeElement).toBe(other);
+      unmount(cmp);
+    });
+  }
+
   it('the confirm is busy while its DELETE runs: Cancel waits, so no second DELETE can start', async () => {
     let release!: (r: Response) => void;
     let deletes = 0;
