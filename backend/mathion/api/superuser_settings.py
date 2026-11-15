@@ -53,7 +53,7 @@ _RETYPE = "Type the password again: the mail server, username or certificate che
 _UNREADABLE = "The saved password can't be read on this server: type it again."
 _TEST_RUNNING = "The last test is still finishing. Try again in a minute."  # the user's (2026-11-12)
 # The user's sentences (2026-11-12).
-_FROM_QUOTES = "Put a name with a comma or colon in quotes."
+_FROM_QUOTES = "Put a name with symbols like , : ; @ [ ] in quotes."
 _FROM_UNDERSCORE = "The From address's domain can't contain _."
 _SKIPPED_OFF = "skipped: email was off"
 
@@ -121,10 +121,10 @@ def _from_problem(value: str) -> str | None:
     # quote: a comma or colon is a second address, a group or a pasted link.
     name, bracket, after = bare.partition("<")
     if bracket:
-        if not _AN_ADDRESS.search(name) and any(c in ",:" for c in name):
-            return _FROM_QUOTES
         if after.partition(">")[2].strip():
             return _FROM
+        if not _AN_ADDRESS.search(name) and any(c in ",:;@[]" for c in name):
+            return _FROM_QUOTES
     elif any(c in ",:" for c in name):
         return _FROM
     _name, addr = parseaddr(value)

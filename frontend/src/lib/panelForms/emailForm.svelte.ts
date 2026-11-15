@@ -18,6 +18,22 @@ export const PORT_SENTENCE = 'The port must be from 1 to 65535.';
 // Python's \s also takes U+001C-U+001F and U+0085, which JavaScript's doesn't.
 const ENDS = /^[\s\x1C-\x1F\x85\u200B\u200C\u200D\u2060\uFEFF]+|[\s\x1C-\x1F\x85\u200B\u200C\u200D\u2060\uFEFF]+$/g;
 const clean = (v: string): string => v.replace(ENDS, '');
+// D7b rev 13: a curly pair around the whole name counts as straight quotes
+// (schemas.py EmailTestIn._straight_quotes).
+const CURLY_PAIRS = new Set(['\u201C\u201D', '\u201E\u201C', '\u201E\u201D', '\u00AB\u00BB', '\u00BB\u00AB',
+  '\u201D\u201D', '\u00BB\u00BB']);
+const INSIDE_STOPS = /["\\\u201C\u201D\u201E\u00AB\u00BB]/;
+const cleanFrom = (v: string): string => {
+  const from = clean(v);
+  const at = from.indexOf('<');
+  const name = at < 0 ? '' : from.slice(0, at);
+  const inner = name.trimEnd();
+  if (inner.length > 2 && CURLY_PAIRS.has(inner[0] + inner[inner.length - 1])
+    && !INSIDE_STOPS.test(inner.slice(1, -1))) {
+    return `"${inner.slice(1, -1)}"${name.slice(inner.length)}${from.slice(at)}`;
+  }
+  return from;
+};
 
 export class EmailForm extends PanelForm<PanelEmailSettings> {
   on = $state(this.saved.on);
@@ -40,7 +56,8 @@ export class EmailForm extends PanelForm<PanelEmailSettings> {
     || clean(this.username) !== this.saved.username
     // With no username a typed password is thrown away (the note says so).
     || (this.password !== '' && clean(this.username) !== '')
-    || clean(this.from) !== this.saved.from_address,
+    // Both sides cleaned, so a value the server keeps curly compares equal.
+    || cleanFrom(this.from) !== cleanFrom(this.saved.from_address),
   );
   readonly changed = $derived(this.on !== this.saved.on || this.fieldsChanged);
   // Off writes only the switch, so greyed fields that differ change nothing.

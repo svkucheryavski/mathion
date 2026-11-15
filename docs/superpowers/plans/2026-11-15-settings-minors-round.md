@@ -26,7 +26,7 @@
 - C9: a username smtplib can't send (non-ASCII, copied from `.env` by D2) reads `The username can't contain letters like æ, ø or å.` on the Email card, the same sentence as the Edit email dialog's. Stops the batch.
 - C10 (changed by the user in Task 1 review r3, 2026-11-15): a 421 at RCPT or after the body ends the batch and starts the back-off; its message is charged one try, so a message the server always closes on fails out. The card reads `The mail server asked Mathion to try again later.`
 - C11: a PIN email that got past the sender (recipient or body refused) clears a stored sender-side line, as the queue does.
-- C7: curly quotes `“ ”` in From are taken as straight `"`, before checking and before saving.
+- C7: curly quotes `“ ”` in From are taken as straight `"`, before checking and before saving. Rev (user, 2026-11-15, Task 2 review): only a curly pair that wraps the whole name before `<` (`“…”`, `„…“`, `„…”`, `”…”`, `«…»`, `»…«`, `»…»`, something inside, no `"`, `\` or other curly mark inside; migration `d9a4c2e7f1b3` stores a saved one the same way); curly marks anywhere else stay as typed.
 - C8: a From name before `<` with any of `, : ; @ [ ]` outside quotes (and no address in it) gets the quotes hint, now worded `Put a name with symbols like , : ; @ [ ] in quotes.`
 - C12: when a whole bulk request fails, the roster banner reads `{Verb} {n} of {total} — {f} failed, {c} cancelled. {reason}` with `reason = failureText(error, SERVER_ERROR_MESSAGE)`; the raw error is kept, so offline gives `OFFLINE_MESSAGE`. The hover hint, when present, still follows.
 
@@ -43,7 +43,7 @@
 - **Real smtplib shapes.** C5a, C5b, C9 and C10 key on how smtplib raises: a non-220 to STARTTLS is a plain `SMTPResponseException`, a failed method match is a plain `SMTPException`, a non-ASCII login is `UnicodeEncodeError`, and a 421 at RCPT closes the socket and raises `SMTPRecipientsRefused`. Task 1 drives real `smtplib.SMTP` against `_stub` for all four, not only hand-made exceptions.
 - **Subclasses must not be swallowed.** `SMTPAuthenticationError`, `SMTPNotSupportedError` and `SMTPServerDisconnected` from `starttls()`/`login()` keep their own sentences. Only the exact plain classes are re-raised as the new ones. Task 1 tests each subclass still passes through.
 - **421 elsewhere.** A 421 to MAIL FROM is already `SMTPSenderRefused` → TRY_LATER. A 421 from the PIN path's send must also reach the card as a batch-level TRY_LATER, not as "refused to send to".
-- **Curly quotes in the saved value.** The stored `email_from` must hold straight quotes, so the queue's From and the PIN's From are the same as the tested one. A lone `“` (unbalanced) must still fail the way an unbalanced `"` does.
+- **Curly quotes in the saved value.** A straightened pair is stored straight, so the queue's From and the PIN's From are the same as the tested one. A lone `“` is not a quote: it is kept as typed, as before rev 13 (Task 2 review, the user's narrower C7).
 - **The roster banner for a move.** The `move` path builds the same banner. Both remove and move get the reason, and the retry links and their labels don't change.
 
 ---
@@ -123,6 +123,8 @@ Run the Step 2 command. Expected: all pass. Then the four suites from Global Con
 - Modify: `backend/mathion/api/superuser_settings.py:57,124-130` (`_FROM_QUOTES` text; the name check's character set)
 - Modify: `docs/superpowers/specs/2026-11-04-superuser-settings-design.md` (rev 13 line: D7b C7, C8; the Rev 8 paragraph's sentence updated)
 - Modify: `docs/backlog/superuser-settings-debt.md` (delete the curly-quotes and `@ ; [ ]` bullets)
+- Create: `backend/alembic/versions/d9a4c2e7f1b3_from_curly_quotes.py` and `backend/tests/test_migration_from_quotes.py` (review round 3: a From saved before rev 13 gets the same straightening)
+- Modify: `frontend/src/lib/panelForms/emailForm.svelte.ts` and `frontend/src/tests/panelForms.test.ts` (review rounds 1-3: the form compares the From the same way)
 - Test: `backend/tests/test_superuser_settings.py`
 
 **Interfaces:** none shared.
@@ -130,8 +132,8 @@ Run the Step 2 command. Expected: all pass. Then the four suites from Global Con
 - [ ] **Step 1: Write the failing tests**
 
 - `QUOTES` in the test module becomes `"Put a name with symbols like , : ; @ [ ] in quotes."`
-- `test_curly_quotes_are_straightened`: saving `“Mathion, AAU” <m@uni.dk>` gives 200 and `_view(db).email_from == '"Mathion, AAU" <m@uni.dk>'`. `_test(...)` with the same value is not refused with a 422.
-- `test_a_lone_curly_quote_fails_like_a_straight_one`: `“Mathion, AAU <m@uni.dk>` gets the same status and sentence as `"Mathion, AAU <m@uni.dk>`.
+- `test_curly_quotes_around_the_name_are_straightened`: saving `“Mathion, AAU” <m@uni.dk>` gives 200 and `_view(db).email_from == '"Mathion, AAU" <m@uni.dk>'`. `_test(...)` with the same value is not refused with a 422.
+- `test_a_lone_curly_quote_is_not_a_quote`: `“Mathion, AAU <m@uni.dk>` gets `(422, QUOTES)` (Task 2 review: a lone curly mark is kept as typed).
 - `test_from_with_symbols_needs_quotes`, parametrized over `Mathion @ AAU <m@uni.dk>`, `Mathion; AAU <m@uni.dk>`, `Mathion [AAU] <m@uni.dk>`, `Maths@AAU <m@uni.dk>`: both `_email` and `_test` give `(422, QUOTES)`.
 - Their quoted forms (`"Mathion @ AAU" <m@uni.dk>`, and so on) are added to `test_good_from_accepted`.
 

@@ -195,7 +195,10 @@ def test_password_ascii_only(panel, password):
                                     # no name to quote: a pasted link or a group
                                     "mailto:m@uni.dk", "Mathion: m@uni.dk", "Team: m@uni.dk;",
                                     "Mathion <m@uni.dk", "Mathion m@uni.dk>",
-                                    "\u180e\\Å <noreply@uni.dk>"])
+                                    "\u180e\\Å <noreply@uni.dk>",
+                                    # C8: an address in the name, no "<", or more after the address
+                                    "a@uni.dk; B <b@uni.dk>", "m@uni.dk;", "m@[1.2.3.4]",
+                                    "Mathion [AAU] <m@uni.dk>, x@uni.dk"])
 def test_from_checked(panel, sender):
     r = _email(panel, from_address=sender)
     assert (r.status_code, _msg(r)) == (
@@ -221,7 +224,12 @@ def test_from_address_must_be_plain(panel, sender):
                                     '"Maths <-> Physics" <m@uni.dk>', "Mathion (AAU <x>) <m@uni.dk>",
                                     '"Mathion \\"AAU, DK" <m@uni.dk>', "Mathion <m@uni.dk> (AAU (Maths) DK)",
                                     "m@uni.dk (a, b)", '"Maths -> Physics" <m@uni.dk>', "Mathion (a < b) <m@uni.dk>",
-                                    "m@uni.dk (a > b)"])
+                                    "m@uni.dk (a > b)",
+                                    # C8: symbols in a quoted name
+                                    '"Mathion @ AAU" <m@uni.dk>', '"Mathion; AAU" <m@uni.dk>',
+                                    '"Mathion [AAU]" <m@uni.dk>', '"Maths@AAU" <m@uni.dk>',
+                                    "Mathion (a; b [c]) <m@uni.dk>", "Mathion (maths@aau) <m@uni.dk>",
+                                    "=?utf-8?q?Mathion=40AAU?= <m@uni.dk>"])
 def test_good_from_accepted(panel, db, sender):
     assert _email(panel, from_address=sender).status_code == 200
     assert _view(db).email_from == sender
@@ -755,7 +763,7 @@ def test_refused_sign_in_save_marks_nothing(panel, db):
 
 # --- D7, D7b, D9, rev 8: clearer sentences ---
 
-QUOTES = "Put a name with a comma or colon in quotes."
+QUOTES = "Put a name with symbols like , : ; @ [ ] in quotes."
 
 
 @pytest.mark.parametrize("sender", ["Mathion, AAU <m@uni.dk>", "Aalborg Universitet: Institut <m@aau.dk>",
@@ -771,6 +779,56 @@ QUOTES = "Put a name with a comma or colon in quotes."
 def test_from_with_a_comma_or_colon_needs_quotes(panel, sender):
     for r in (_email(panel, from_address=sender), _test(panel, from_address=sender)):
         assert (r.status_code, _msg(r)) == (422, QUOTES)
+
+
+@pytest.mark.parametrize("sender", ["Mathion @ AAU <m@uni.dk>", "Mathion; AAU <m@uni.dk>",
+                                    "Mathion [AAU] <m@uni.dk>", "Maths@AAU <m@uni.dk>",
+                                    "Mathion [AAU <m@uni.dk>", "Mathion ] <m@uni.dk>"])
+def test_from_with_symbols_needs_quotes(panel, sender):
+    for r in (_email(panel, from_address=sender), _test(panel, from_address=sender)):
+        assert (r.status_code, _msg(r)) == (422, QUOTES)
+
+
+@pytest.mark.parametrize("left,right", [("\u201c", "\u201d"), ("\u201e", "\u201c"), ("\u201e", "\u201d"),
+                                        ("\u00ab", "\u00bb"), ("\u00bb", "\u00ab"),
+                                        ("\u201d", "\u201d"), ("\u00bb", "\u00bb")])
+def test_curly_quotes_around_the_name_are_straightened(panel, db, smtp, left, right):
+    sender = f"{left}Mathion, AAU{right} <m@uni.dk>"
+    assert _email(panel, from_address=sender).status_code == 200
+    assert _view(db).email_from == '"Mathion, AAU" <m@uni.dk>'
+    assert _email(panel, from_address=f"{left}Mathion, AAU{right}<m@uni.dk>").status_code == 200
+    assert _view(db).email_from == '"Mathion, AAU"<m@uni.dk>'
+    assert _test(panel, from_address=sender).json()["ok"] is True
+    assert str(smtp.sent[-1]["From"]) == '"Mathion, AAU" <m@uni.dk>'
+
+
+@pytest.mark.parametrize("sender", ["Mathion \u201cAAU\u201d <m@uni.dk>", "Mathion \u201eAAU\u201c <m@uni.dk>",
+                                    '"Mathion \u201cAAU\u201d DK" <m@uni.dk>', "\u201cMathion\u201d AAU <m@uni.dk>",
+                                    '\u201cMathion "AAU"\u201d <m@uni.dk>', "\u201c\u201d <m@uni.dk>",
+                                    "\u201cMatte\u201d og \u201cFysik\u201d <m@uni.dk>",
+                                    "\u00bbMatte\u00ab og \u00bbFysik\u00ab <m@uni.dk>"])
+def test_curly_quotes_inside_a_name_are_kept(panel, db, sender):
+    assert _email(panel, from_address=sender).status_code == 200
+    assert _view(db).email_from == sender
+
+
+def test_a_curly_pair_with_a_backslash_is_not_straightened(panel):
+    # Quoting would hide the backslash from readers.
+    r = _email(panel, from_address="\u201cMatematik\\Fysik\u201d <m@uni.dk>")
+    assert (r.status_code, _msg(r)) == (
+        422, "The From address must look like Name <address@example.edu> or address@example.edu.")
+
+
+def test_a_lone_curly_quote_is_not_a_quote(panel):
+    r = _email(panel, from_address="\u201cMathion, AAU <m@uni.dk>")
+    assert (r.status_code, _msg(r)) == (422, QUOTES)
+
+
+def test_a_curly_test_then_a_curly_save_reaches_the_card(panel, db, smtp):
+    sender = "\u201cMathion, AAU\u201d <m@uni.dk>"
+    assert _test(panel, from_address=sender).json()["ok"] is True
+    assert _email(panel, from_address=sender).status_code == 200
+    assert _get(panel)["email"]["card_test"]["ok"] is True
 
 
 @pytest.mark.parametrize("mark", ["\u200b", "\u200c", "\u200d", "\u2060", "\ufeff"])

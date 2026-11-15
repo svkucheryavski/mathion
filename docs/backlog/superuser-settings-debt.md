@@ -11,11 +11,6 @@ Sorted 2026-11-12: only items a person using the site can meet, and open calls, 
   so each "Send PIN" tries a refused login again. A PIN is needed now, and
   skipping it during the wait could lock people out after the server
   recovers; the 3-per-hour PIN limit caps the tries.
-- **Curly quotes around a From name get the quotes sentence**:
-  `“Mathion, AAU” <m@uni.dk>` reads "Put a name with a comma or colon in
-  quotes." although they did. Accept curly quotes, or say "straight quotes".
-- **A From name with `@ ; [ ]` and no comma gets the general format
-  sentence** (`Mathion @ AAU <m@uni.dk>`), not the quotes hint.
 
 ## Minors round, Task 1 review (2026-11-15)
 

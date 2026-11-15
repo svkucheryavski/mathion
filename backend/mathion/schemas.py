@@ -1270,6 +1270,12 @@ class PanelSettings(BaseModel):
     site: PanelSite
 
 
+# Settings D7b rev 13: curly pairs that may wrap a From name.
+_CURLY_PAIRS = {("\u201c", "\u201d"), ("\u201e", "\u201c"), ("\u201e", "\u201d"), ("\u00ab", "\u00bb"),
+                ("\u00bb", "\u00ab"), ("\u201d", "\u201d"), ("\u00bb", "\u00bb")}
+_CURLY_MARKS = "\u201c\u201d\u201e\u00ab\u00bb"
+
+
 class EmailTestIn(BaseModel):
     """What a test email tests: the form as it is now. An empty password means
     the saved one (D8a decides whether that's allowed)."""
@@ -1287,6 +1293,17 @@ class EmailTestIn(BaseModel):
         # Spaces, and the invisible characters a paste can bring (zero-width
         # space, joiners, word joiner, byte-order mark), from both ends.
         return re.sub(r"^[\s\u200b\u200c\u200d\u2060\ufeff]+|[\s\u200b\u200c\u200d\u2060\ufeff]+$", "", v)
+
+    @field_validator("from_address")
+    @classmethod
+    def _straight_quotes(cls, v: str) -> str:
+        # A curly pair around the whole name counts as straight quotes.
+        name, bracket, rest = v.partition("<")
+        inner = name.rstrip()
+        if (bracket and len(inner) > 2 and (inner[0], inner[-1]) in _CURLY_PAIRS
+                and not any(c in '"\\' + _CURLY_MARKS for c in inner[1:-1])):
+            return f'"{inner[1:-1]}"{name[len(inner):]}<{rest}'
+        return v
 
 
 class EmailSettingsIn(EmailTestIn):
