@@ -106,6 +106,25 @@ describe('RosterImportModal — Stage 1 paste + preview', () => {
     unmount(cmp);
   });
 
+  it('two new groups are listed with a comma and a space', async () => {
+    const { target, cmp } = mountModal();
+    await settle();
+    paste(target, 'a@x.com,G1\nb@x.com,G2');
+    expect(target.textContent).toContain('Will create groups: G1, G2.');
+    unmount(cmp);
+  });
+
+  it('re-bucketed e-mails are mono, with the +N more cut kept (slice 6b backlog)', async () => {
+    const roster = Array.from({ length: 7 }, (_, i) => ({ user_id: i+1, user_email: `e${i+1}@x.com`, user_full_name: '', group_id: null }));
+    const { target, cmp } = mountModal({ existingRoster: roster });
+    await settle();
+    paste(target, roster.map((r) => `${r.user_email},G1`).join('\n'));
+    const line = Array.from(target.querySelectorAll('.ri-counts p')).find((p) => p.textContent?.startsWith('Already enrolled'));
+    expect(Array.from(line!.querySelectorAll('.ri-key.mono')).map((s) => s.textContent)).toEqual(['e1@x.com', 'e2@x.com', 'e3@x.com', 'e4@x.com', 'e5@x.com']);
+    expect(line!.textContent).toBe('Already enrolled, will be re-bucketed: e1@x.com, e2@x.com, e3@x.com, e4@x.com, e5@x.com, +2 more.');
+    unmount(cmp);
+  });
+
   it('debounce cancellation: rapid keystrokes coalesce into one parse of the final text', async () => {
     const { target, cmp } = mountModal();
     await settle();

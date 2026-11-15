@@ -560,6 +560,23 @@ describe('RosterImportModal — result stage (10g)', () => {
     unmount(cmp);
   });
 
+  it('copied failed rows match the Detail column (slice 6b backlog)', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    fetchSpy.mockImplementation(() => jres({ results: [
+      { email: 'e1@x.com', status: 'error', error_code: 'capacity_reached', detail: 'Run is full' },
+      { email: 'e2@x.com', status: 'error', error_code: 'not_in_run' },
+      { email: 'e3@x.com', status: 'error', error_code: 'internal_error', detail: 'internal error' },
+    ] }));
+    const { target, cmp } = mountModal();
+    await settle();
+    await importWith(target, 'e1@x.com');
+    (target.querySelector('button[data-action="copy-failed"]') as HTMLButtonElement).click();
+    await settle();
+    expect(writeText).toHaveBeenCalledWith('e1@x.com\tRun is full\ne2@x.com\tNot added\ne3@x.com\tServer error — try again');
+    unmount(cmp);
+  });
+
   it('a successful copy toasts "Copied 1 row" in the singular', async () => {
     fetchSpy.mockImplementation(() => jres({ results: [
       { email: 'a@x.com', status: 'added' },

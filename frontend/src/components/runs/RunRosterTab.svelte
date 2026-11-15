@@ -111,6 +111,8 @@
   let newEmail = $state('');
   let newGroupId = $state<number | '__unassigned'>('__unassigned');
   let addError: string | null = $state(null);
+  // Red only for an error about the address (polish3 WBR).
+  let addInvalid = $state(false);
   let pendingDelete = $state<number | null>(null);
   let removing = $state(false);
 
@@ -157,8 +159,10 @@
   // change or removal succeeded): they lose their mark and the retries leave
   // them out (user, 6c Safari pass).
   let fixedByHand = $state(new SvelteSet<number>());
-  const retryFailedIds = $derived(bulkOpResult.chunkErrorRowIds.filter((id) => !fixedByHand.has(id)));
-  const retryCancelledIds = $derived(bulkOpResult.cancelledIds.filter((id) => !fixedByHand.has(id)));
+  // Students a refresh removed are not retried (review r1).
+  const liveIds = $derived(new Set(students.map((s) => s.user_id)));
+  const retryFailedIds = $derived(bulkOpResult.chunkErrorRowIds.filter((id) => !fixedByHand.has(id) && liveIds.has(id)));
+  const retryCancelledIds = $derived(bulkOpResult.cancelledIds.filter((id) => !fixedByHand.has(id) && liveIds.has(id)));
 
   function markFixed(userId: number) {
     // A bulk op that is still running has the newer word on this row.
@@ -322,13 +326,14 @@
     // operations' results above are what the banner reports.
     try { await onRefetchRosterData(); } catch { /* the roster shows what it had */ }
 
-    // Selection book-keeping: remove succeeded, keep errored/cancelled selected.
+    // Selection book-keeping: remove succeeded, keep errored/cancelled selected
+    // while they are still on the roster.
     for (const id of succeededIds) selected.delete(id);
     for (const id of chunkErrorRowIds) {
-      selected.add(id);
+      if (liveIds.has(id)) selected.add(id);
       rowErrorBorders.add(id);
     }
-    for (const id of cancelledIds) selected.add(id);
+    for (const id of cancelledIds) if (liveIds.has(id)) selected.add(id);
 
     let finalKind: BulkOpResult['kind'];
     if (chunkLevelError) finalKind = 'cancelled';
@@ -347,9 +352,7 @@
     };
 
     // §Focus: the strip's 🗑 if the strip is still there, else the banner's
-    // first retry control, else Dismiss. Failed and cancelled rows stay
-    // selected, so while a retry control exists the strip does too: the retry
-    // entries are defensive, kept to match the spec's chain.
+    // first retry control, else Dismiss.
     await tick();
     if (focusIsOurs()) {
       focusFirst([bulkTrashEl, retryMoveEl, retryDeleteEl, retryCancelledSelectEl, retryCancelledBtnEl, dismissEl]);
@@ -452,11 +455,12 @@
     emailEl?.focus();
   }
 
-  // Closing keeps the typed e-mail; it is ignored while an add runs.
+  // Closing keeps the typed e-mail; it waits while an add runs.
   async function closeAdd() {
     if (adding) return;
     addOpen = false;
     addError = null;
+    addInvalid = false;
     await tick();
     toggleEl?.focus();
   }
@@ -474,38 +478,47 @@
 
   async function submitAdd(event: SubmitEvent) {
     event.preventDefault();
-    if (adding || !runIsPublished) return;
+    if (adding || bulkInFlight || !runIsPublished) return;
     addError = null;
+    addInvalid = false;
     const email = newEmail.trim().toLowerCase();
     if (!email) return;
     const dup = students.some((s) => s.user_email.toLowerCase() === email);
     if (dup) {
       addError = `${newEmail} is already enrolled. Edit their group in the table.`;
+      addInvalid = true;
+      await tick();
+      emailEl?.focus();
       return;
     }
     adding = true;
     try {
-      const groupId: number | null = newGroupId === '__unassigned' ? null : newGroupId;
-      await addRunStudent(runId, newEmail.trim(), groupId);
-      newEmail = '';
-      newGroupId = '__unassigned';
-      await onRefetchRosterData();
-    } catch (e) {
-      // Surface every ApiError (4xx/5xx) inline via the backend-supplied
-      // displayMessage — covers run_unpublished, student_already_active_in_course,
-      // capacity_reached, group_disabled, and any future error_code without
-      // per-branch wiring. A network failure (a fetch TypeError) says so (Polish 3).
-      addError = e instanceof ApiError ? e.displayMessage : OFFLINE_MESSAGE;
+      let added = false;
+      try {
+        const groupId: number | null = newGroupId === '__unassigned' ? null : newGroupId;
+        await addRunStudent(runId, newEmail.trim(), groupId);
+        added = true;
+        newEmail = '';
+        newGroupId = '__unassigned';
+      } catch (e) {
+        // Every ApiError shows its displayMessage; a network failure says so (Polish 3).
+        addError = e instanceof ApiError ? e.displayMessage : OFFLINE_MESSAGE;
+        addInvalid = e instanceof ApiError && (e.status === 422 || e.errorCode === 'student_already_active_in_course');
+      }
+      // The add stands even when the refetch fails (slice6c §3).
+      if (added) {
+        try { await onRefetchRosterData(); } catch { pushToast('Added (refresh failed — reload to see latest)', 'info'); }
+      }
     } finally {
       adding = false;
     }
-    // Success: ready for the next student. Failure: the field the error is about.
+    // Success: ready for the next student. Failure: back to the field.
     await tick();
     emailEl?.focus();
   }
 
   function askRemove(userId: number) {
-    if (removing) return;
+    if (removing || bulkInFlight) return;
     pendingDelete = userId;
   }
 
@@ -518,21 +531,27 @@
   // §Focus (6a's chain): Remove → the next row's 🗑, else the previous row's,
   // else the add toggle, else the search field; a failure → this row's 🗑.
   async function confirmRemove(userId: number) {
-    if (removing) return;
+    if (removing || bulkInFlight) return;
     removing = true;
     const idx = visible.findIndex((s) => s.user_id === userId);
+    // `removing` clears before each focus move: focusFirst skips the aria-disabled 🗑.
     try {
       await removeRunStudent(runId, userId);
       selected.delete(userId);
       markFixed(userId);
       pendingDelete = null;
-      await onRefetchRosterData();
+      // The remove stands even when the refetch fails (review r1).
+      try { await onRefetchRosterData(); } catch { pushToast('Removed (refresh failed — reload to see latest)', 'info'); }
+      removing = false;
       await tick();
-      const next = visible[idx];
-      const prev = idx > 0 ? visible[idx - 1] : undefined;
+      // A failed refetch leaves the removed row listed: skip it.
+      const rest = visible.filter((s) => s.user_id !== userId);
+      const next = rest[idx];
+      const prev = idx > 0 ? rest[idx - 1] : undefined;
       focusFirst([next && trashEls[next.user_id], prev && trashEls[prev.user_id], toggleEl, searchEl]);
     } catch (e) {
       pendingDelete = null;
+      removing = false;
       pushToast(e instanceof ApiError ? e.displayMessage : OFFLINE_MESSAGE, 'error');
       await tick();
       focusFirst([trashEls[userId], toggleEl, searchEl]);
@@ -541,9 +560,17 @@
     }
   }
 
+  // F8 + polish3 §4: focus goes back to the last changed select once its request settles.
+  let lastChange: { id: number; sel: HTMLSelectElement } | null = null;
+  function repairGroupFocus() {
+    if (!lastChange || pendingGroupId.has(lastChange.id)) return;
+    void repairFocus(lastChange.sel, searchEl);
+  }
+
   async function onGroupChange(s: RunStudentResponse, raw: string, sel: HTMLSelectElement) {
     const targetGroupId: number | null = raw === '__unassigned' ? null : Number(raw);
     pendingGroupId.set(s.user_id, targetGroupId);
+    lastChange = { id: s.user_id, sel };
     try {
       const updated = await updateRunStudent(runId, s.user_id, targetGroupId);
       // Mutate the local student row in place. Spec §4.4: inline-edit success
@@ -552,9 +579,6 @@
       s.group_id = updated.group_id;
       pendingGroupId.delete(s.user_id);
       markFixed(s.user_id);
-      // F8: the select is enabled again; focus goes back now, not after the groups refetch.
-      void repairFocus(sel, searchEl);
-      await onRefetchGroupsOnly();
     } catch (e) {
       // Delete from pendingGroupId on EVERY error path (incl. network failures),
       // otherwise a TypeError thrown by fetch would leave the row permanently disabled.
@@ -573,10 +597,16 @@
       } else {
         pushToast(OFFLINE_MESSAGE, 'error');
       }
-    } finally {
-      // F8: the select is natively disabled while its request runs, which drops focus.
-      // A newer change of the same select still in flight repairs for itself.
-      if (!pendingGroupId.has(s.user_id)) void repairFocus(sel, searchEl);
+      repairGroupFocus();
+      return;
+    }
+    // F8: the select is enabled again; focus goes back now, not after the groups refetch.
+    repairGroupFocus();
+    // Outside the PATCH's try: a failed refetch must not free a newer change of this row.
+    try {
+      await onRefetchGroupsOnly();
+    } catch {
+      pushToast('Saved (refresh failed — reload to see latest)', 'info');
     }
   }
 
@@ -587,10 +617,17 @@
     // Dependency declaration trick: reading `students` here registers the
     // effect's dependency on the array reference for fine-grained reactivity.
     void students;
-    const liveIds = new Set(students.map((s) => s.user_id));
-    for (const uid of Array.from(pendingGroupId.keys())) {
-      if (!liveIds.has(uid)) pendingGroupId.delete(uid);
-    }
+    const live = liveIds;
+    untrack(() => {
+      for (const uid of Array.from(pendingGroupId.keys())) {
+        if (!live.has(uid)) pendingGroupId.delete(uid);
+      }
+      // A student a refresh removed leaves the selection; their Remove question closes (slice6c §4).
+      for (const uid of Array.from(selected)) {
+        if (!live.has(uid)) selected.delete(uid);
+      }
+      if (pendingDelete !== null && !live.has(pendingDelete)) pendingDelete = null;
+    });
   });
 </script>
 
@@ -652,9 +689,10 @@
         glyph={addShown ? 'close' : 'plus'}
         primary={!addShown}
         size="sm"
-        title={!runIsPublished ? draftTitle : addShown ? 'Close add row' : 'Add student'}
+        title={!runIsPublished ? draftTitle : adding ? BUSY_TITLE : addShown ? 'Close add row' : 'Add student'}
         aria-label={addShown ? 'Close add row' : 'Add student'}
         disabled={!runIsPublished}
+        aria-disabled={adding}
         describedby={runIsPublished ? undefined : DRAFT_HINT_ID}
         aria-expanded={addShown}
         aria-controls={addShown ? `${uid}-add` : undefined}
@@ -678,10 +716,10 @@
         placeholder="student@example.com"
         autocomplete="off"
         readonly={adding}
-        aria-invalid={addError ? 'true' : undefined}
+        aria-invalid={addInvalid ? 'true' : undefined}
         aria-describedby={addError ? `${uid}-add-err` : undefined}
         bind:value={newEmail}
-        oninput={() => { addError = null; }}
+        oninput={() => { addError = null; addInvalid = false; }}
         bind:this={emailEl}
       />
       {#if groupsEnabled}
@@ -698,11 +736,17 @@
         variant="primary"
         data-action="add-student"
         loading={adding}
-        aria-disabled={adding}
+        aria-disabled={adding || bulkInFlight}
         disabled={!adding && !newEmail.trim()}
-        title={adding ? BUSY_TITLE : newEmail.trim() ? undefined : 'Enter an email address'}
+        title={adding || bulkInFlight ? BUSY_TITLE : newEmail.trim() ? undefined : 'Enter an email address'}
       >Add</Button>
-      <Button variant="secondary" data-action="cancel-add-student" onclick={closeAdd}>Cancel</Button>
+      <Button
+        variant="secondary"
+        data-action="cancel-add-student"
+        aria-disabled={adding}
+        title={adding ? BUSY_TITLE : undefined}
+        onclick={closeAdd}
+      >Cancel</Button>
     </form>
     {#if addError}<p id="{uid}-add-err" class="ro-err error" role="alert">{addError}</p>{/if}
   {/if}
@@ -757,7 +801,9 @@
       bind:this={bannerEl}
     >
       <span class="ro-banner-text">{summaryText()}</span>
-      {#if bulkOpResult.kind === 'partial' && bulkOpResult.lastOp === 'move'}
+      {#if (bulkOpResult.kind === 'partial' && retryFailedIds.length === 0) || (bulkOpResult.kind === 'cancelled' && retryCancelledIds.length + retryFailedIds.length === 0)}
+        <!-- Nothing left on the roster to retry. -->
+      {:else if bulkOpResult.kind === 'partial' && bulkOpResult.lastOp === 'move'}
         {@const n = retryFailedIds.length}
         <label class="vh" for="{uid}-retry-move">Move the {n} failed {n === 1 ? 'student' : 'students'} to a group</label>
         <select id="{uid}-retry-move" class="ro-retry" data-action="retry-move-select" bind:this={retryMoveEl} onchange={retryMove}>
@@ -842,7 +888,8 @@
                     class="ro-select"
                     aria-label="Group for {s.user_email}"
                     value={selectValueFor(s)}
-                    disabled={pendingGroupId.has(s.user_id)}
+                    disabled={pendingGroupId.has(s.user_id) || bulkInFlight}
+                    title={bulkInFlight ? BUSY_TITLE : undefined}
                     onchange={(e) => onGroupChange(s, e.currentTarget.value, e.currentTarget)}
                   >
                     <option value="__unassigned">Unassigned</option>
@@ -857,8 +904,9 @@
                   glyph="trash"
                   size="sm"
                   danger
-                  title="Remove from run"
+                  title={removing || bulkInFlight ? BUSY_TITLE : 'Remove from run'}
                   aria-label="Remove {s.user_email}"
+                  aria-disabled={removing || bulkInFlight}
                   data-action="delete-student"
                   bind:element={trashEls[s.user_id]}
                   onclick={() => askRemove(s.user_id)}
@@ -875,6 +923,8 @@
                     warning="Remove {s.user_email} from this run?"
                     confirmLabel="Remove"
                     confirmDataAction="confirm-delete-student"
+                    busy={removing}
+                    disabledReason={bulkInFlight ? BUSY_TITLE : undefined}
                     onConfirm={() => confirmRemove(s.user_id)}
                     onCancel={() => cancelRemove(s.user_id)}
                   />
