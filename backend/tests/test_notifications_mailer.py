@@ -292,3 +292,47 @@ def test_dev_modes_use_the_saved_from_or_the_default():
 def test_factory_unknown_mode_raises():
     with pytest.raises(RuntimeError):
         build_mailer(DEFAULTS, SECRET, "bogus")
+
+
+@pytest.mark.parametrize("exc", [smtplib.SMTPAuthenticationError(535, b"x"),
+                                 smtplib.SMTPNotSupportedError("SMTP AUTH extension not supported by server."),
+                                 smtplib.SMTPNotSupportedError("No suitable authentication method found."),
+                                 smtplib.SMTPServerDisconnected("gone")])
+def test_auth_subclasses_pass_through(exc):
+    with patch("mathion.notifications.mailer.smtplib.SMTP") as MockSMTP:
+        MockSMTP.return_value.login.side_effect = exc
+        with pytest.raises(type(exc)) as caught:
+            with _smtp().session():
+                pass
+    assert type(caught.value) is type(exc)
+
+
+@pytest.mark.parametrize("exc", [smtplib.SMTPNotSupportedError("STARTTLS extension not supported by server."),
+                                 smtplib.SMTPServerDisconnected("gone"), smtplib.SMTPHeloError(501, b"x")])
+def test_starttls_subclasses_pass_through(exc):
+    with patch("mathion.notifications.mailer.smtplib.SMTP") as MockSMTP:
+        MockSMTP.return_value.starttls.side_effect = exc
+        with pytest.raises(type(exc)) as caught:
+            with _smtp().session():
+                pass
+    assert type(caught.value) is type(exc)
+
+
+@pytest.mark.parametrize("kw,raised", [({"username": "søren@uni.dk"}, "UsernameNotAscii"),
+                                       ({"password": "pässword"}, "PasswordNotAscii")])
+def test_session_checks_the_login_before_sending_it(kw, raised):
+    from mathion.notifications import smtp_errors
+    with patch("mathion.notifications.mailer.smtplib.SMTP") as MockSMTP:
+        with pytest.raises(getattr(smtp_errors, raised)):
+            with _smtp(**kw).session():
+                pass
+        MockSMTP.return_value.login.assert_not_called()
+
+
+def test_session_names_a_missing_login_method():
+    from mathion.notifications.smtp_errors import NoLoginMethod
+    with patch("mathion.notifications.mailer.smtplib.SMTP") as MockSMTP:
+        MockSMTP.return_value.login.side_effect = smtplib.SMTPException("No suitable authentication method found.")
+        with pytest.raises(NoLoginMethod):
+            with _smtp().session():
+                pass

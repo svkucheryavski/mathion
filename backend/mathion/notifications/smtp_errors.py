@@ -27,6 +27,29 @@ NO_SMTPUTF8 = "The mail server can't take an address with letters like æ, ø or
 TRY_LATER = "The mail server asked Mathion to try again later."
 SENDER_REFUSED = "The mail server refused {sender} as the sender."
 _SENDER_HEAD, _SENDER_TAIL = SENDER_REFUSED.split("{sender}")
+NO_LOGIN_METHOD = "The mail server offers no login method Mathion can use."
+USERNAME_ASCII = "The username can't contain letters like æ, ø or å."
+SAVED_NOT_ASCII = "The saved password has characters that can't be sent: type it again."
+
+
+class StartTlsRefused(smtplib.SMTPResponseException):
+    """A reply other than 220 to STARTTLS."""
+
+
+class LoginClosing(smtplib.SMTPResponseException):
+    """A 421 to the login; smtplib would try the next method on a closed socket."""
+
+
+class NoLoginMethod(smtplib.SMTPException):
+    """The server offers no login method smtplib can use."""
+
+
+class UsernameNotAscii(smtplib.SMTPException):
+    """A username smtplib can't send."""
+
+
+class PasswordNotAscii(smtplib.SMTPException):
+    """A saved password smtplib can't send."""
 
 
 def sender_side(sentence: str | None) -> bool:
@@ -61,14 +84,23 @@ def _letters_in_from(exc: BaseException, sender: str) -> bool:
             and not parseaddr(sender)[1].isascii())
 
 
+def closing(exc: BaseException) -> bool:
+    """A 421 at RCPT or DATA: the server is closing the connection."""
+    if isinstance(exc, smtplib.SMTPRecipientsRefused):
+        return any(code == 421 for code, _msg in (exc.recipients or {}).values())
+    return isinstance(exc, smtplib.SMTPDataError) and exc.smtp_code == 421
+
+
 def stops_the_batch(exc: BaseException, *, sender: str) -> bool:
     """D9c, mid-send: True for a failure on the server's side (no message is
-    charged). A disconnect is charged to its message and also ends the batch;
-    the dispatcher handles that one itself."""
-    return isinstance(exc, _STOP_MID_SEND) or _letters_in_from(exc, sender)
+    charged). A disconnect and a 421 are charged to their message and also end
+    the batch; the dispatcher handles those itself."""
+    return isinstance(exc, _STOP_MID_SEND) or _letters_in_from(exc, sender) or closing(exc)
 
 
 def _code(exc: BaseException) -> int | None:
+    if closing(exc):
+        return 421
     if isinstance(exc, smtplib.SMTPRecipientsRefused):
         codes = [code for code, _msg in (exc.recipients or {}).values()]
         return codes[0] if codes else None
@@ -87,8 +119,20 @@ def describe(exc: BaseException, *, host: str, port: int, sender: str, recipient
     """D9's sentence for `exc`, which never quotes the server."""
     hint = _PORT_HINT if (encryption, port) in (("ssl", 587), ("starttls", 465)) else ""
     reach = f"Couldn't reach {host} on port {port}.{hint}"
-    if isinstance(exc, smtplib.SMTPAuthenticationError):
+    if isinstance(exc, smtplib.SMTPResponseException) and exc.smtp_code == 421:
+        sentence, batch = TRY_LATER, True
+    elif isinstance(exc, smtplib.SMTPAuthenticationError):
         sentence, batch = "The mail server refused the login.", True
+    elif isinstance(exc, StartTlsRefused):
+        sentence, batch = f"The secure connection to {host} failed.{hint}", True
+    elif isinstance(exc, NoLoginMethod):
+        sentence, batch = NO_LOGIN_METHOD, True
+    elif isinstance(exc, UsernameNotAscii):
+        sentence, batch = USERNAME_ASCII, True
+    elif isinstance(exc, PasswordNotAscii):
+        sentence, batch = SAVED_NOT_ASCII, True
+    elif closing(exc):
+        sentence, batch = TRY_LATER, True
     elif isinstance(exc, SealError):
         sentence, batch = "The saved password can't be read on this server: type it again.", True
     elif isinstance(exc, smtplib.SMTPSenderRefused):

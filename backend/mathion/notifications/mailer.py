@@ -5,6 +5,7 @@ from email.message import EmailMessage
 from pathlib import Path
 import functools, smtplib, ssl, uuid, datetime as dt
 
+from mathion.notifications.smtp_errors import LoginClosing, NoLoginMethod, PasswordNotAscii, StartTlsRefused, UsernameNotAscii
 from mathion.secret_box import unseal
 
 # The From when nothing is saved (a developer mode on a fresh install); the
@@ -102,13 +103,19 @@ class SMTPMailer(Mailer):
         else:
             self._smtp = smtplib.SMTP(self.host, self.port, timeout=self.timeout)
         try:
+            self._stop_on_421(self._smtp)
             # The greeting now, so a refused EHLO/HELO fails the session start
             # (D9c) instead of the first message.
             self._smtp.ehlo_or_helo_if_needed()
             if self.encryption == "starttls":
-                self._smtp.starttls(context=self._context())
+                try:
+                    self._smtp.starttls(context=self._context())
+                except smtplib.SMTPResponseException as exc:
+                    if type(exc) is not smtplib.SMTPResponseException:
+                        raise
+                    raise StartTlsRefused(exc.smtp_code, exc.smtp_error) from exc
             if login:
-                self._smtp.login(self.username, password)
+                self._login(self._smtp, self.username, password)
             yield
         finally:
             try:
@@ -116,6 +123,45 @@ class SMTPMailer(Mailer):
             except Exception:
                 pass
             self._smtp = None
+
+    @staticmethod
+    def _stop_on_421(smtp) -> None:
+        """A 421 to any EHLO raises; smtplib would send HELO on the closed socket."""
+        real_ehlo = smtp.ehlo
+
+        def ehlo(*args, **kwargs):
+            reply = real_ehlo(*args, **kwargs)
+            if reply[0] == 421:
+                raise smtplib.SMTPHeloError(*reply)
+            return reply
+
+        smtp.ehlo = ehlo
+
+    @staticmethod
+    def _login(smtp, username: str, password: str) -> None:
+        """Log in; a failure smtplib gives no class of its own gets one."""
+        if not username.isascii():
+            raise UsernameNotAscii("username")
+        if not (password or "").isascii():
+            raise PasswordNotAscii("password")
+        real_auth = smtp.auth
+
+        def auth(*args, **kwargs):
+            try:
+                return real_auth(*args, **kwargs)
+            except smtplib.SMTPAuthenticationError as exc:
+                if exc.smtp_code != 421:
+                    raise
+                raise LoginClosing(exc.smtp_code, exc.smtp_error) from exc
+
+        smtp.auth = auth
+        try:
+            smtp.login(username, password)
+        except smtplib.SMTPException as exc:
+            # smtplib's own words, not the server's.
+            if type(exc) is not smtplib.SMTPException or not str(exc).startswith("No suitable authentication method"):
+                raise
+            raise NoLoginMethod("no login method") from exc
 
     def send(self, msg):
         assert self._smtp is not None, "SMTPMailer.send called outside session()"

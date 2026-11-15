@@ -81,6 +81,12 @@ class _FakeSMTP:
     def starttls(self, context=None):
         pass
 
+    def ehlo(self, *args, **kwargs):  # the greeting is faked whole, so never called
+        raise AssertionError("ehlo")
+
+    def auth(self, *args, **kwargs):  # login() is faked whole, so never called
+        raise AssertionError("auth")
+
     def login(self, user, password):
         if _FakeSMTP.fail_login is not None:
             raise _FakeSMTP.fail_login

@@ -21,10 +21,10 @@
 - Browser checks: run them in agent-browser myself; hand the user only what needs real Safari, and never ask about a focus ring after a mouse click.
 
 **The user's calls (copy is verbatim):**
-- C5a: a STARTTLS reply that isn't 220 (e.g. `454 TLS not available`) reads `The secure connection to {host} failed.` plus the existing port hint, and stops the batch.
+- C5a: a STARTTLS reply that isn't 220 (e.g. `454 TLS not available`) reads `The secure connection to {host} failed.` plus the existing port hint, and stops the batch. A 421 when the session opens (greeting, EHLO, STARTTLS, login, also when the server hangs up after a login 421) reads `The mail server asked Mathion to try again later.` (review rounds 4-6).
 - C5b: "No suitable authentication method found." from `login()` reads `The mail server offers no login method Mathion can use.` and stops the batch.
 - C9: a username smtplib can't send (non-ASCII, copied from `.env` by D2) reads `The username can't contain letters like æ, ø or å.` on the Email card, the same sentence as the Edit email dialog's. Stops the batch.
-- C10: a 421 at RCPT or after the body ends the batch like the server's other mid-send stops: no message is charged, the back-off starts, and the card reads `The mail server asked Mathion to try again later.`
+- C10 (changed by the user in Task 1 review r3, 2026-11-15): a 421 at RCPT or after the body ends the batch and starts the back-off; its message is charged one try, so a message the server always closes on fails out. The card reads `The mail server asked Mathion to try again later.`
 - C11: a PIN email that got past the sender (recipient or body refused) clears a stored sender-side line, as the queue does.
 - C7: curly quotes `“ ”` in From are taken as straight `"`, before checking and before saving.
 - C8: a From name before `<` with any of `, : ; @ [ ]` outside quotes (and no address in it) gets the quotes hint, now worded `Put a name with symbols like , : ; @ [ ] in quotes.`
@@ -64,9 +64,12 @@
 - Produces in `smtp_errors.py`:
   - `class StartTlsRefused(smtplib.SMTPResponseException)`
   - `class NoLoginMethod(smtplib.SMTPException)`
-  - `class UsernameNotAscii(smtplib.SMTPException)`
+  - `class UsernameNotAscii(smtplib.SMTPException)`, `class PasswordNotAscii(smtplib.SMTPException)`
+  - `class LoginClosing(smtplib.SMTPResponseException)` (review round 6)
   - `NO_LOGIN_METHOD = "The mail server offers no login method Mathion can use."`
   - `USERNAME_ASCII = "The username can't contain letters like æ, ø or å."`
+  - `SAVED_NOT_ASCII = "The saved password has characters that can't be sent: type it again."`
+  - `closing(exc) -> bool`: a 421 at RCPT or DATA (public, the dispatcher charges it)
 - Produces in `dispatcher.py`: `record_connected(db, view, *, past_sender: bool) -> None` (the renamed `_record_connected`, same body).
 
 - [ ] **Step 1: Write the failing tests**
@@ -82,7 +85,7 @@
 - `test_auth_subclasses_pass_through`: `login` raising `SMTPAuthenticationError(535, b"x")`, `SMTPNotSupportedError("AUTH")` or `SMTPServerDisconnected("x")` reaches the caller as that same class.
 
 `test_dispatcher_settings.py`:
-- `test_a_421_at_rcpt_charges_no_row_and_backs_off`: `_Mailer(fail=SMTPRecipientsRefused({"x": (421, b"bye")}), on_calls=[2])` with three rows. r1 is sent; r2 and r3 have `retry_count == 0`; the card reads TRY_LATER; `send_retry_at` is set.
+- `test_a_421_charges_its_message_stops_and_backs_off` (RCPT and DATA, per the changed C10): with three rows and the 421 on the second, r1 is sent, r2 has `retry_count == 1` and waits 5 minutes, r3 is untouched, the card reads TRY_LATER and the back-off is at step 1. Also `test_a_421_on_the_last_try_fails_the_message_out`.
 
 `test_login_pin_delivery.py`:
 - `test_refused_recipient_on_a_pin_email_clears_a_sender_line`: `set_site(send_failure_message="The mail server refused m@uni.dk as the sender.", …)`, and the mailer raises `SMTPRecipientsRefused` (550). After request-pin, `_card(db)[0] is None`.
@@ -96,8 +99,8 @@ Expected: the new tests FAIL (ImportError for the new names counts, but `_login`
 
 - [ ] **Step 3: Implement**
 
-- `smtp_errors.py`: add the three classes and two constants (Interfaces). In `describe`, before the generic branches: `StartTlsRefused` → the secure-connection sentence with `hint`, batch True; `NoLoginMethod` → `NO_LOGIN_METHOD`, True; `UsernameNotAscii` → `USERNAME_ASCII`, True; `SMTPRecipientsRefused`/`SMTPDataError` with `_code(exc) == 421` → `TRY_LATER`, True. `stops_the_batch` is also True for that 421 case.
-- `mailer.py`: add `@staticmethod _login(smtp, username, password)`. It raises `UsernameNotAscii` when `not username.isascii()`, calls `smtp.login`, and re-raises a plain `SMTPException` (`type(exc) is smtplib.SMTPException`) as `NoLoginMethod() from exc`. `session` uses it. `starttls` is wrapped so a plain `SMTPResponseException` (`type(exc) is ...`) becomes `StartTlsRefused(exc.smtp_code, exc.smtp_error) from exc`.
+- `smtp_errors.py`: add the five classes, three constants and `closing` (Interfaces). In `describe`, before the generic branches: any `SMTPResponseException` with code 421 → `TRY_LATER`, True (rounds 4-6); other `StartTlsRefused` → the secure-connection sentence with `hint`, batch True; `NoLoginMethod` → `NO_LOGIN_METHOD`, True; `UsernameNotAscii` → `USERNAME_ASCII`, True; `PasswordNotAscii` → `SAVED_NOT_ASCII`, True; `SMTPRecipientsRefused`/`SMTPDataError` with `_code(exc) == 421` → `TRY_LATER`, True. `stops_the_batch` is also True for that 421 case.
+- `mailer.py`: add `@staticmethod _login(smtp, username, password)`. It raises `UsernameNotAscii` when `not username.isascii()` and `PasswordNotAscii` when the password isn't ASCII, calls `smtp.login`, and re-raises a plain `SMTPException` (`type(exc) is smtplib.SMTPException`) whose text starts "No suitable authentication method" as `NoLoginMethod() from exc`. It wraps `smtp.auth` on the connection so a 421 raises `LoginClosing` (an `SMTPResponseException`), which `login()` doesn't swallow (round 6). `session()` likewise wraps `smtp.ehlo` (`_stop_on_421`) so a 421 to any EHLO raises `SMTPHeloError` instead of smtplib sending HELO on the closed socket (round 7). Both wrappers live as long as the connection, which each session opens anew. `session` uses it. `starttls` is wrapped so a plain `SMTPResponseException` (`type(exc) is ...`) becomes `StartTlsRefused(exc.smtp_code, exc.smtp_error) from exc`.
 - `dispatcher.py`: rename to `record_connected` (one caller, line 497).
 - `auth.py`: in the `SMTP_FAILURES` branch, when `sending` and the exception is `SMTPRecipientsRefused` or `SMTPDataError` and no card was recorded, call `record_connected(db, site, past_sender=True)` in its own session, skipped in `DEV_MODES` like `_record_on_card`.
 - `superuser_settings.py`: `_USERNAME_ASCII` becomes the imported `USERNAME_ASCII`.
