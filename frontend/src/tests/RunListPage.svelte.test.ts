@@ -97,7 +97,11 @@ describe('RunListPage', () => {
     expect(nav.querySelector('[aria-current="page"]')?.textContent).toBe('Algebra');
     expect(target.querySelector('h1')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Runs 2');
     expect(Array.from(target.querySelectorAll('thead th')).map((th) => th.textContent?.trim()))
-      .toEqual(['Title', 'Status', 'Version', 'Start', 'End', '']);
+      .toEqual(['Title', 'Status', 'Version', 'Start', 'End', 'Actions']);
+    // The actions header is visually hidden text, as on the tabs, not an aria-label.
+    const actionsTh = target.querySelectorAll('thead th')[5]!;
+    expect(actionsTh.hasAttribute('aria-label')).toBe(false);
+    expect(actionsTh.querySelector('span.vh')?.textContent).toBe('Actions');
     const rows = target.querySelectorAll('tbody tr');
     expect(rows[0]!.querySelector('a')?.getAttribute('href')).toBe('/teaching/algebra/runs/10');
     expect(rows[0]!.textContent).toContain('Spring 2026');

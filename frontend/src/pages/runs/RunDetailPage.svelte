@@ -503,6 +503,7 @@
           onRefetchRosterData={refetchRosterData}
           onRefetchGroupsOnly={refetchGroups}
           onOpenImport={() => (showImportModal = true)}
+          importOpen={showImportModal}
         />
       {:else if activeTab === 'groups'}
         <RunGroupsTab

@@ -829,7 +829,7 @@
                    and the danger panel (Safari pass). -->
               <tr class="delete-row">
                 <td colspan="7">
-                  <InlineConfirm row align="end" takeFocus warning="Delete this asset?" confirmLabel="Delete" onConfirm={performDelete} onCancel={() => cancelDelete(a.id)} />
+                  <InlineConfirm row align="end" takeFocus warning={`Delete "${a.filename}"?`} confirmLabel="Delete" onConfirm={performDelete} onCancel={() => cancelDelete(a.id)} />
                 </td>
               </tr>
             {/if}

@@ -353,6 +353,12 @@
     };
   }
 
+  // A failed Save in a scrolled body brings its banner into view.
+  let bannerEl = $state<HTMLElement>();
+  $effect(() => {
+    if (serverError && bannerEl) bannerEl.scrollIntoView?.({ block: 'nearest' });
+  });
+
   async function cancelClose() {
     pendingClose = false;
     answerNav(false);
@@ -590,6 +596,10 @@
   header={head}
   footer={foot}
 >
+  <!-- At the top of the body, scrolled into view when it appears. -->
+  {#if serverError}
+    <div class="banner banner-error mpm-banner" role="alert" bind:this={bannerEl}>{serverError}</div>
+  {/if}
   <div class="mpm-block">
     {#if mode === 'create'}
       <label class="mpm-key" for="{uid}-block">Block</label>
@@ -656,13 +666,10 @@
     {/each}
   </div>
 
-  {#if serverError}
-    <div class="banner banner-error mpm-banner" role="alert">{serverError}</div>
-  {/if}
   {#if boxShows && publishCheckResult}
     <div class="mpm-box precondition-banner" data-testid="publish-preconditions">
       <p class="mpm-box-head">Cannot publish yet</p>
-      <ul class="mpm-box-list">
+      <ul class="mpm-box-list" role="list">
         {#each publishCheckResult as bullet, idx (bullet.text)}
           {#if bullet.text.includes('Open Overview')}
             {@const linkIdx = bullet.text.indexOf('Open Overview')}
@@ -748,6 +755,7 @@
   .mpm-error { font-size: 12px; color: var(--danger); }
   .mpm-banner {
     margin: 0;
+    scroll-margin-top: 14px;
     padding: 8px 12px;
     background: var(--danger-panel-bg);
     border-left: 3px solid var(--danger);
@@ -780,7 +788,7 @@
     line-height: 1.5;
   }
   /* P2: the "·" is drawn, so a bullet's text stays the sentence alone. */
-  .mpm-box-list li::before { content: '· '; }
+  .mpm-box-list li::before { content: '· '; content: '· ' / ''; }
   .linklike {
     background: none;
     border: 0;

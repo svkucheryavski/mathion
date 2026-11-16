@@ -849,7 +849,7 @@
                   type="button"
                   class="sp-link"
                   data-action="attach-feedback-file"
-                  aria-describedby="{uid}-file-label {uid}-file-help"
+                  aria-describedby="{uid}-file-label {uid}-file-help{errors.feedbackFile ? ` ${uid}-file-err` : ''}"
                   onclick={() => fileInputEl?.click()}
                 >attach PDF</button>
               {/if}
@@ -864,7 +864,7 @@
               onchange={handleFileChange}
             />
             <span class="sp-help" id="{uid}-file-help">{uploadLimit.mb === null ? 'PDF only.' : `PDF only, max ${uploadLimit.mb} MB.`}</span>
-            {#if errors.feedbackFile}<p class="sp-field-err" role="alert">{errors.feedbackFile}</p>{/if}
+            {#if errors.feedbackFile}<p class="sp-field-err" id="{uid}-file-err" role="alert">{errors.feedbackFile}</p>{/if}
           {:else if existingHasFeedbackFile}
             <p class="sp-muted">The feedback file cannot be replaced.</p>
           {/if}

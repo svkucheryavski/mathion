@@ -53,6 +53,7 @@
     onRefetchRosterData,
     onRefetchGroupsOnly,
     onOpenImport,
+    importOpen = false,
   }: {
     runId: number;
     runIsPublished: boolean;
@@ -67,6 +68,8 @@
     onRefetchRosterData: () => Promise<{ students: RunStudentResponse[]; groups: GroupResponse[] }>;
     onRefetchGroupsOnly: () => Promise<void>;
     onOpenImport: () => void;
+    // The page's import modal is open.
+    importOpen?: boolean;
   } = $props();
 
   const uid = $props.id();
@@ -103,15 +106,28 @@
   // modal could not return focus to it. Hand focus to the toolbar's Import
   // roster first: that is the opener the modal returns to after Done.
   let importBtnEl = $state<HTMLButtonElement>();
+  let importLinkEl = $state<HTMLButtonElement>();
+  let openedFromLink = false;
   function openImportFromLink() {
     importBtnEl?.focus({ preventScroll: true });
+    openedFromLink = true;
     onOpenImport();
   }
+  // An import from the link that added no one hands focus back to the link.
+  $effect(() => {
+    if (importOpen) return;
+    untrack(() => {
+      if (!openedFromLink) return;
+      openedFromLink = false;
+      if (students.length === 0) importLinkEl?.focus();
+    });
+  });
 
   let search = $state('');
   let newEmail = $state('');
   let newGroupId = $state<number | '__unassigned'>('__unassigned');
   let addError: string | null = $state(null);
+  let addStatus = $state('');
   // Red only for an error about the address (polish3 WBR).
   let addInvalid = $state(false);
   let pendingDelete = $state<number | null>(null);
@@ -482,6 +498,7 @@
     addOpen = false;
     addError = null;
     addInvalid = false;
+    addStatus = '';
     await tick();
     toggleEl?.focus();
   }
@@ -493,6 +510,8 @@
 
   function onAddKeydown(event: KeyboardEvent) {
     if (event.key !== 'Escape') return;
+    // The group select's own popup owns Esc.
+    if (event.target instanceof HTMLSelectElement) return;
     event.preventDefault();
     void closeAdd();
   }
@@ -502,6 +521,7 @@
     if (adding || bulkInFlight || !runIsPublished) return;
     addError = null;
     addInvalid = false;
+    addStatus = '';
     const email = newEmail.trim().toLowerCase();
     if (!email) return;
     const dup = students.some((s) => s.user_email.toLowerCase() === email);
@@ -519,6 +539,7 @@
         const groupId: number | null = newGroupId === '__unassigned' ? null : newGroupId;
         await addRunStudent(runId, newEmail.trim(), groupId);
         added = true;
+        addStatus = `${newEmail.trim()} added`;
         newEmail = '';
         newGroupId = '__unassigned';
       } catch (e) {
@@ -731,7 +752,7 @@
         aria-invalid={addInvalid ? 'true' : undefined}
         aria-describedby={addError ? `${uid}-add-err` : undefined}
         bind:value={newEmail}
-        oninput={() => { addError = null; addInvalid = false; }}
+        oninput={() => { addError = null; addInvalid = false; addStatus = ''; }}
         bind:this={emailEl}
       />
       {#if groupsEnabled}
@@ -759,6 +780,8 @@
         title={adding ? BUSY_TITLE : undefined}
         onclick={closeAdd}
       >Cancel</Button>
+      <!-- Mounted with the row, so the filled text is announced. -->
+      <p class="vh" role="status">{addStatus}</p>
     </form>
     {#if addError}<p id="{uid}-add-err" class="ro-err error" role="alert">{addError}</p>{/if}
   {/if}
@@ -962,6 +985,7 @@
             type="button"
             class="ro-link"
             data-action="open-import-link"
+            bind:this={importLinkEl}
             disabled={!runIsPublished}
             title={runIsPublished ? undefined : draftTitle}
             aria-describedby={runIsPublished ? undefined : DRAFT_HINT_ID}

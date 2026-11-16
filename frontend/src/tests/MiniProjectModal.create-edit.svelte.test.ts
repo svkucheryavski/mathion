@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, onTestFinished } from 'vitest';
 import { mount, unmount, flushSync, type Component, type MountOptions } from 'svelte';
 import MiniProjectModal from '../components/runs/MiniProjectModal.svelte';
 import type { Course, MiniProjectResponse, BlockResponse } from '../lib/types';
@@ -594,6 +594,10 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
   });
 
   it('404 on Save: surfaces "deleted between open and Save" banner with Ctrl/Cmd+A/+C copy instructions (spec line 519)', async () => {
+    const intoView = vi.fn();
+    const had = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = intoView;
+    onTestFinished(() => { Element.prototype.scrollIntoView = had; });
     // Codex T6a r1 catch: 404 banner copy is implemented but had no test.
     // Spec table row "404 on Save | MP deleted between open and Save | inline
     // banner: 'This mini-project has been deleted. Select-all (Ctrl/Cmd+A)
@@ -634,6 +638,11 @@ describe('MiniProjectModal — edit mode + dirty close', () => {
     await settle();
     const banner = target.querySelector('.banner-error') as HTMLElement;
     expect(banner).toBeTruthy();
+    // At the top of the body, and scrolled into view when the body was scrolled down.
+    const block = target.querySelector('.mpm-block')!;
+    expect(banner.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(intoView).toHaveBeenCalledWith({ block: 'nearest' });
+    expect(intoView.mock.contexts).toContain(banner);
     expect(banner.textContent).toContain('This mini-project has been deleted');
     expect(banner.textContent).toContain('Ctrl/Cmd+A');
     expect(banner.textContent).toContain('Ctrl/Cmd+C');

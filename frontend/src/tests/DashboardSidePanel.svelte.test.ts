@@ -579,6 +579,25 @@ describe('DashboardSidePanel', () => {
     expect(evalCalls(fetchMock)).toHaveLength(0);
   });
 
+  it('a feedback-file error describes "attach PDF" while it shows', async () => {
+    mountPanel({ target: submissionTarget({ status: 'awaiting_eval' }), isAdmin: true });
+    await settle();
+    const attach = () => host.querySelector('button[data-action="attach-feedback-file"]') as HTMLButtonElement;
+    const ids = () => attach().getAttribute('aria-describedby')!.split(' ');
+    expect(ids().some((id) => id.endsWith('-file-err'))).toBe(false);
+    const fileInput = host.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, 'files', { value: [new File(['x'], 'note.txt', { type: 'text/plain' })], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const errId = ids().find((id) => id.endsWith('-file-err'));
+    expect(errId).toBeDefined();
+    expect(document.getElementById(errId!)?.textContent).toBe('Only PDF files accepted.');
+    Object.defineProperty(fileInput, 'files', { value: [], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(ids().some((id) => id.endsWith('-file-err'))).toBe(false);
+  });
+
   // T27: file extension / empty / size / MIME
   it('T27: file extension/empty/size/MIME validation', async () => {
     mountPanel({

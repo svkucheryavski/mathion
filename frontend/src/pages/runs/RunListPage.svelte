@@ -147,7 +147,7 @@
                 <th scope="col">Version</th>
                 <th scope="col">Start</th>
                 <th scope="col">End</th>
-                <th scope="col" aria-label="Actions"></th>
+                <th scope="col"><span class="vh">Actions</span></th>
               </tr>
             </thead>
             <tbody>
@@ -227,7 +227,7 @@
   /* Polish 3 (table corners): the outer border and radius sit on a scroll wrapper,
      as on Progress and Submissions. It clips the grey header corners, which a
      table's own radius does not, and scrolls a table wider than its container. */
-  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  .table-scroll { position: relative; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
   .runs-table { width: 100%; border-collapse: separate; border-spacing: 0; }
   .runs-table th {
     text-align: left;

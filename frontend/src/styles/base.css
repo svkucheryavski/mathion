@@ -38,6 +38,9 @@ h4 { font-size: 13px; font-weight: 600; margin: 0; }
   :focus-visible:not([tabindex="-1"]) { outline: 2px solid Highlight !important; }
 }
 
+/* Visually hidden text a screen reader still reads. */
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
 /* ---------------------------------------------------------------------------
    Header lockup — exact geometry
    The mark is two overlapping peaks: gold behind, steel blue in front. Its

@@ -179,6 +179,8 @@ describe('PublishConflictsModal — on ui/Modal (10l)', () => {
     expect(titles).toEqual(['Spring 2025', 'Fall 2025']);
     const emails = Array.from(target.querySelectorAll('.pc-emails li')).map((li) => li.getAttribute('title'));
     expect(emails).toEqual(['a@example.com', 'b@example.com']);
+    // Safari drops list semantics under list-style: none; the role restores them.
+    for (const ul of target.querySelectorAll('.pc-emails')) expect(ul.getAttribute('role')).toBe('list');
   });
 
   it('focuses Close on open, and Close closes', async () => {

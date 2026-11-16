@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync, type ComponentProps } from 'svelte';
 import MiniProjectModal from '../components/runs/MiniProjectModal.svelte';
+import modalSource from '../components/runs/MiniProjectModal.svelte?raw';
 import { __resetGuardsForTests } from '../lib/router.svelte';
 import type { Course, MiniProjectResponse, BlockResponse } from '../lib/types';
 
@@ -126,6 +127,15 @@ describe('MiniProjectModal — the precondition box up front (D13, D21, R22)', (
     await settle();
     expect(box()).toBeNull();
     expect(btn('publish')!.title).toBe('Save your changes first');
+  });
+
+  it('keeps its list role and draws the "·" without reading it aloud', async () => {
+    open(baseProps({ initial: mp({ hard_deadline: null }) }));
+    await settle();
+    expect(box()!.querySelector('ul.mpm-box-list')?.getAttribute('role')).toBe('list');
+    // jsdom cannot evaluate content alt text, so read the rule from the source.
+    // A plain value first, for a browser that drops the alt-text form.
+    expect(modalSource).toMatch(/\.mpm-box-list li::before \{ content: '· '; content: '· ' \/ ''; \}/);
   });
 
   it('is information, not an alert: it has no live role', async () => {
