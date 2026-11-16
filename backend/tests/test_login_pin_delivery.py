@@ -206,6 +206,8 @@ def test_pin_email_uses_the_saved_from_and_minutes(client, db, monkeypatch):
     class _FakeSMTP:
         def __init__(self, *a, **k): pass
         def ehlo(self, *a, **k): raise AssertionError("ehlo")
+        def data(self, *a, **k): raise AssertionError("data")
+        def rset(self, *a, **k): raise AssertionError("rset")
         def ehlo_or_helo_if_needed(self): pass
         def starttls(self, **k): pass
         def send_message(self, msg): sent.append(msg)
@@ -359,6 +361,46 @@ def _refusing(exc):
         def send(self, msg):
             raise exc
     return Refusing()
+
+
+def _refused_then(closed):
+    exc = smtplib.SMTPRecipientsRefused({"real@example.com": (550, b"no such user")})
+    exc.closed_after = closed
+    return exc
+
+
+def test_a_421_at_the_reset_after_a_pin_refusal_says_try_later_and_keeps_the_wait(client, db, monkeypatch):
+    later = datetime.now(timezone.utc) + timedelta(minutes=30)
+    set_site(db, send_failure_message="The mail server refused the login.",
+             send_failure_at=datetime.now(timezone.utc), send_retry_at=later, send_backoff_step=3)
+    _make_user(db)
+    _smtp_on(monkeypatch, _refusing(_refused_then(smtplib.SMTPResponseException(421, b"closing"))))
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db) == ("The mail server asked Mathion to try again later.", later, 3)
+
+
+def test_a_body_refusal_then_a_hang_up_at_the_reset_keeps_the_pin_refusal_line(client, db, monkeypatch):
+    from mathion.notifications.dispatcher import REFUSED_PREFIX
+    exc = smtplib.SMTPDataError(554, b"rejected")
+    exc.closed_after = smtplib.SMTPServerDisconnected("gone")
+    later = datetime.now(timezone.utc) + timedelta(minutes=30)
+    set_site(db, send_failure_message="The mail server refused the login.",
+             send_failure_at=datetime.now(timezone.utc), send_retry_at=later, send_backoff_step=3)
+    _make_user(db)
+    _smtp_on(monkeypatch, _refusing(exc))
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    message, retry_at, step = _card(db)
+    assert message.startswith(REFUSED_PREFIX) and (retry_at, step) == (None, 0)
+
+
+def test_a_hang_up_at_the_reset_after_a_pin_refusal_leaves_the_card(client, db, monkeypatch):
+    later = datetime.now(timezone.utc) + timedelta(minutes=30)
+    set_site(db, send_failure_message="The mail server refused the login.",
+             send_failure_at=datetime.now(timezone.utc), send_retry_at=later, send_backoff_step=3)
+    _make_user(db)
+    _smtp_on(monkeypatch, _refusing(_refused_then(smtplib.SMTPServerDisconnected("gone"))))
+    client.post("/api/auth/request-pin", json={"email": "real@example.com"})
+    assert _card(db) == ("The mail server refused the login.", later, 3)
 
 
 def test_a_4xx_after_the_body_on_a_pin_email_clears_a_sender_line(client, db, monkeypatch):

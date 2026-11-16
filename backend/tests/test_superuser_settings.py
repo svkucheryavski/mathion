@@ -87,6 +87,12 @@ class _FakeSMTP:
     def auth(self, *args, **kwargs):  # login() is faked whole, so never called
         raise AssertionError("auth")
 
+    def data(self, *args, **kwargs):  # send_message() is faked whole, so never called
+        raise AssertionError("data")
+
+    def rset(self, *args, **kwargs):  # send_message() is faked whole, so never called
+        raise AssertionError("rset")
+
     def login(self, user, password):
         if _FakeSMTP.fail_login is not None:
             raise _FakeSMTP.fail_login

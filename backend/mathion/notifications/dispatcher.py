@@ -18,7 +18,7 @@ from mathion.site_settings import get_row, load as load_site
 
 from .errors import classify
 from .mailer import DEV_MODES, build_mailer, logs_in
-from .smtp_errors import SMTP_FAILURES, SmtpFailure, closing, describe, sender_side, stops_the_batch
+from .smtp_errors import SMTP_FAILURES, SmtpFailure, closed_after, closing, describe, sender_side, stops_the_batch
 from .templates import render, _build_email_message, RenderContext, COURSE_ADMIN_ASSIGNED
 
 
@@ -334,6 +334,7 @@ def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = T
     # refused at the recipient with a 5xx. Two or more addresses, every
     # message refused: the relay is refusing everyone.
     attempts, rcpt_refusals, refused_to, first_rcpt = 0, 0, set(), None
+    cut_short = False
 
     # The ids are taken while the rows are loaded: a commit expires them, and
     # a row deleted meanwhile can't be read again to name it.
@@ -434,13 +435,19 @@ def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = T
                 first_rcpt = first_rcpt or failure
             result.refused = refusal_on_card(send_exc, failure, sender, has_login=has_login) or result.refused
             _charge(db, row_id, send_exc, failure, now)
-            if isinstance(send_exc, smtplib.SMTPServerDisconnected):
-                # D9c: a disconnect mid-batch is charged to the message being
-                # sent and ends the batch, so the ones after it aren't charged.
-                # Nothing then says the server's side works.
-                result.connected = False
+            after = closed_after(send_exc)
+            if isinstance(after, smtplib.SMTPResponseException):
+                # A 421 at the reset: the message keeps its refusal; the batch backs off.
+                result.failure = describe(after, recipient=recipient, **_where(mailer, view))
+                if log_failures:
+                    logger.warning("notifications: sending stopped (%s): %s", row_id, result.failure.text())
                 break
-        if first_rcpt is not None and len(refused_to) >= 2 and rcpt_refusals == attempts:
+            if isinstance(send_exc, smtplib.SMTPServerDisconnected) or after is not None:
+                # D9c: a disconnect or a hang-up at the reset ends the batch.
+                result.connected = False
+                cut_short = True
+                break
+        if first_rcpt is not None and len(refused_to) >= 2 and rcpt_refusals == attempts and not cut_short:
             result.refused = SmtpFailure(first_rcpt.cls, first_rcpt.code, EVERYONE_REFUSED, False)
     finally:
         try:

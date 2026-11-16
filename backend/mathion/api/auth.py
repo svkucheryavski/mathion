@@ -16,7 +16,7 @@ from mathion.models import CourseAdmin, RunTeacher
 from mathion.models_auth import User
 from mathion.notifications.dispatcher import record_connected, record_send_outcome, refusal_on_card
 from mathion.notifications.mailer import DEV_MODES, build_mailer, logs_in
-from mathion.notifications.smtp_errors import SMTP_FAILURES, describe, stops_the_batch
+from mathion.notifications.smtp_errors import SMTP_FAILURES, closed_after, describe, stops_the_batch
 from mathion.notifications.templates import build_login_pin_message
 from mathion.page_fill import branding_public
 from mathion.schemas import AuthConfigResponse, PinRequestSchema, PinVerifySchema, UserResponse, UserUpdate
@@ -95,25 +95,30 @@ def _send_login_pin(email: str, raw_pin: str, minutes: int) -> None:
                 mailer.send(msg)
             _record_on_card(site, None)
     except SMTP_FAILURES as exc:
-        failure = describe(exc, host=getattr(mailer, "host", ""), port=getattr(mailer, "port", 0),
-                           sender=getattr(mailer, "sender", ""), recipient=email,
-                           encryption=getattr(mailer, "encryption", ""),
-                           timeout=getattr(mailer, "timeout", 20))
+        where = dict(host=getattr(mailer, "host", ""), port=getattr(mailer, "port", 0),
+                     sender=getattr(mailer, "sender", ""), recipient=email,
+                     encryption=getattr(mailer, "encryption", ""),
+                     timeout=getattr(mailer, "timeout", 20))
+        failure = describe(exc, **where)
         logger.warning("login PIN email send failed: %s", failure.text())
         # The Email card hears about the server's side (login, TLS, the
         # sender, no answer) and a refusal after the body, not about one
         # refused recipient.
         if site is not None:
+            after = closed_after(exc)
             if not sending or stops_the_batch(exc, sender=site.email_from):
                 # The server's side, whatever describe() says, as in the queue
                 # (D9c): the card shows it and the queue's wait stays.
                 card = replace(failure, batch_level=True)
+            elif isinstance(after, smtplib.SMTPResponseException):
+                # A 421 at the reset is the server's side too.
+                card = replace(describe(after, **where), batch_level=True)
             else:
                 card = refusal_on_card(exc, failure, site.email_from,
                                        has_login=logs_in(site.smtp_username, site.smtp_encryption))
             if card is not None:
                 _record_on_card(site, card)
-            elif isinstance(exc, (smtplib.SMTPRecipientsRefused, smtplib.SMTPDataError)):
+            elif after is None and isinstance(exc, (smtplib.SMTPRecipientsRefused, smtplib.SMTPDataError)):
                 _record_past_sender(site)
     except Exception as exc:
         # The class only: the text or traceback can quote the PIN or a

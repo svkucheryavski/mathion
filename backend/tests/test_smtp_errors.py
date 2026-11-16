@@ -515,3 +515,142 @@ def test_421_to_starttls_says_try_later():
                 pass
     f = describe(caught.value, **{**WHERE, "port": 465})
     assert (f.sentence, f.batch_level) == (TRY_LATER, True)
+
+
+def _mailbox(replies, seen):
+    """A stub with a transaction (MAIL inside one gets 503); replies per verb in turn, b"HANGUP" hangs up."""
+    def nxt(verb, default):
+        queue = replies.get(verb)
+        if not queue:
+            return default
+        return queue.pop(0) if len(queue) > 1 else queue[0]
+
+    def talk(conn, f):
+        f.write(b"220 stub ready\r\n")
+        f.flush()
+        open_tx = in_body = False
+        for line in f:
+            seen.append(line)
+            if in_body:
+                if line == b".\r\n":
+                    in_body = open_tx = False
+                    f.write(nxt(b"DOT", b"250 queued") + b"\r\n")
+                    f.flush()
+                continue
+            verb = line[:4].upper().strip()
+            if verb == b"QUIT":
+                f.write(b"221 bye\r\n")
+                f.flush()
+                return
+            if verb == b"MAIL":
+                reply = b"503 nested MAIL command" if open_tx else nxt(verb, b"250 ok")
+                open_tx = open_tx or reply.startswith(b"2")
+            elif verb == b"RSET":
+                reply = nxt(verb, b"250 ok")
+                if reply == b"HANGUP":
+                    return
+                open_tx = False
+            elif verb == b"DATA":
+                reply = nxt(verb, b"354 go on")
+                in_body = reply.startswith(b"354")
+            else:
+                reply = nxt(verb, b"250 ok")
+            f.write(reply + b"\r\n")
+            f.flush()
+            if reply.startswith(b"421"):
+                return
+    return talk
+
+
+def _letter(to="anna@uni.dk"):
+    msg = EmailMessage()
+    msg["From"], msg["To"], msg["Subject"] = "noreply@uni.dk", to, "x"
+    msg.set_content("x")
+    return msg
+
+
+def _send_twice(replies):
+    """Two sends in one SMTPMailer session: (first error, second error, lines heard)."""
+    from mathion.notifications.mailer import SMTPMailer
+    seen = []
+    errors = []
+    with _stub(_mailbox(replies, seen)) as port:
+        mailer = SMTPMailer("127.0.0.1", port, "none", "", "", True, timeout=5)
+        with mailer.session():
+            for _ in range(2):
+                try:
+                    mailer.send(_letter())
+                    errors.append(None)
+                except Exception as exc:
+                    errors.append(exc)
+    return errors[0], errors[1], seen
+
+
+def _verbs(seen):
+    return [line[:4].upper() for line in seen]
+
+
+def test_a_421_to_the_reset_after_a_refusal_is_kept():
+    from mathion.notifications.smtp_errors import closed_after, closing
+    first, second, _seen = _send_twice({b"RCPT": [b"550 no such user"], b"RSET": [b"421 closing"]})
+    assert isinstance(first, smtplib.SMTPRecipientsRefused)
+    assert closed_after(first).smtp_code == 421
+    assert closing(first) is False
+    assert describe(first, **WHERE).code == 550
+    assert isinstance(second, smtplib.SMTPServerDisconnected) and closed_after(second) is None
+
+
+def test_a_hang_up_at_the_reset_is_kept():
+    from mathion.notifications.smtp_errors import closed_after
+    first, second, _seen = _send_twice({b"RCPT": [b"550 no such user"], b"RSET": [b"HANGUP"]})
+    assert isinstance(first, smtplib.SMTPRecipientsRefused)
+    assert isinstance(closed_after(first), smtplib.SMTPServerDisconnected)
+    assert isinstance(second, smtplib.SMTPServerDisconnected) and closed_after(second) is None
+
+
+def test_a_250_to_the_reset_changes_nothing():
+    from mathion.notifications.smtp_errors import closed_after
+    first, second, _seen = _send_twice({b"RCPT": [b"550 no such user", b"250 ok"]})
+    assert isinstance(first, smtplib.SMTPRecipientsRefused)
+    assert closed_after(first) is None
+    assert second is None
+
+
+def test_a_refused_data_command_is_reset():
+    first, second, seen = _send_twice({b"DATA": [b"554 no", b"354 go on"]})
+    assert isinstance(first, smtplib.SMTPDataError) and first.smtp_code == 554
+    verbs = _verbs(seen)
+    data_at = verbs.index(b"DATA")
+    assert verbs[data_at + 1] == b"RSET"
+    assert verbs.count(b"RSET") == 1
+    assert second is None
+
+
+def test_a_refused_body_gets_one_reset():
+    first, second, seen = _send_twice({b"DOT": [b"554 rejected", b"250 queued"]})
+    assert isinstance(first, smtplib.SMTPDataError) and first.smtp_code == 554
+    assert _verbs(seen).count(b"RSET") == 1
+    assert second is None
+
+
+def test_a_refused_data_command_then_a_421_reset():
+    from mathion.notifications.smtp_errors import closed_after
+    first, _second, _seen = _send_twice({b"DATA": [b"451 later"], b"RSET": [b"421 closing"]})
+    assert isinstance(first, smtplib.SMTPDataError) and first.smtp_code == 451
+    assert closed_after(first).smtp_code == 421
+
+
+def test_a_421_to_the_data_command_is_not_reset():
+    from mathion.notifications.smtp_errors import closed_after
+    first, _second, seen = _send_twice({b"DATA": [b"421 closing"]})
+    assert isinstance(first, smtplib.SMTPDataError) and first.smtp_code == 421
+    assert b"RSET" not in _verbs(seen)
+    assert closed_after(first) is None
+
+
+def test_an_unreadable_reply_to_the_reset_is_kept_as_a_hang_up():
+    from mathion.notifications.smtp_errors import closed_after
+    first, second, _seen = _send_twice({b"RCPT": [b"550 no such user"], b"RSET": [b"250 " + b"x" * 9000]})
+    assert isinstance(first, smtplib.SMTPRecipientsRefused)
+    assert isinstance(closed_after(first), smtplib.SMTPServerDisconnected)
+    assert isinstance(second, smtplib.SMTPServerDisconnected) and closed_after(second) is None

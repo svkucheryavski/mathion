@@ -84,6 +84,11 @@ def _letters_in_from(exc: BaseException, sender: str) -> bool:
             and not parseaddr(sender)[1].isascii())
 
 
+def closed_after(exc: BaseException) -> BaseException | None:
+    """The 421 or hang-up the server gave at the reset after `exc`, if any."""
+    return getattr(exc, "closed_after", None)
+
+
 def closing(exc: BaseException) -> bool:
     """A 421 at RCPT or DATA: the server is closing the connection."""
     if isinstance(exc, smtplib.SMTPRecipientsRefused):
