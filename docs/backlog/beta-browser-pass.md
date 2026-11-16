@@ -4,67 +4,51 @@ added: 2026-11-14
 ---
 # Browser checks by hand for the beta pass
 
-Checks only a person in a real browser can settle, collected for one pass when the beta is ready. The VoiceOver checks are in `beta-voiceover-pass.md`.
+Only the checks a person must make: Safari, Windows High Contrast, a real HTTP/1.1 proxy, a touch device and the keyboard inside an iframe, plus one decision for the pass. Chrome's forced-colours and reduced-motion emulation, the superuser pages, the Evaluation control and most Task 4-5 fixes were checked in agent-browser on 2026-11-16 (beta backlog round, Task 9). The rest are below. The VoiceOver checks are in `beta-voiceover-pass.md`.
 
-## Carried over from the slices' Safari passes
+## Safari
 
-- The superuser pages (13d) in the full beta pass.
-- Reduced motion (14): every transition and animation with `prefers-reduced-motion: reduce` on.
-- Forced colours (15): Windows High Contrast on the student, authoring and teaching screens.
-- The Evaluation control (8i) on the run pages.
+- **Asset table at 1000px** (Run → Assets, a long filename and a long uploader email, delete question open): the Filename column keeps about 12rem and the question sits in its own row. Does WebKit honour `min-width` on the `td`? Where does the email break? Chrome breaks it mid-word.
+- **Pinned sort buttons keep the scroll.** Progress (Student, Group) and Submissions (Group): scroll the grid sideways, then Tab or ⇧Tab onto a pinned button. The table should stay where it was. The hold relies on async scroll events, which were checked only in Chrome.
+- **Confirm rows leave room for the focus ring.** Tab to Cancel in a roster, asset or mini-project delete question. The ring should not touch the row above.
+- **A wrapped end-aligned warning** (a delete question with a long email or filename, 1000px): its lines end at the right edge.
+- **Esc with a native `datetime-local` or `date` picker open** (mini-project deadlines, run dates): note whether Esc closes only the picker or also the edit or dialog.
+- **A failed Save in the mini-project editor at about 1000px** brings the error banner into view at the top of the body, not under the padding.
+- **New run and the Publish conflicts at 1000px:** they fit without a sideways scroll. They were checked only in Chrome.
+- **Copying a paragraph with an authored link** leaves out the hidden "(opens in a new tab)". Chromium does. Also note whether find-in-page counts it (record only).
 
-## Superuser Settings (uploads)
+## Windows High Contrast
 
-- **A too-big upload through an old proxy:** a proxy (HTTP/1.1 nginx) can drop the connection instead of sending its 413. Upload 40 MB through one and note which message the student gets: the network copy with Retry, or the limit sentence. If it is the network copy, adjust the README's D11c paragraph ("Upload limit", README.md) and `docs/release-notes/settings-release-order.md`, which quote the sentence.
+Chrome's emulation was read on every screen. Only a real theme settles the colours.
 
-## Slice 5a (authoring)
+- **The selected run tab** has the only Highlight line under the tab row; a hovered tab shows a plain line.
+- **Disabled fields** (Set up step 1 with email off, including the selected encryption option) grey their text and borders with GrayText. So does the student's file drop while a submission is sending.
+- **The Evaluation result** (run side panel): the selected option has a ring, and the focused one has the Highlight ring.
+- **The Switch:** on, off and disabled are all visible. A disabled Switch shows on or off by knob position only (accepted).
+- **The item and question type pickers:** the selected card has a neutral ring and the focused card a Highlight ring. Check that Highlight and black are told apart in a real theme.
+- **The open block or sequence panel:** the parent and the focused panel share one CanvasText ring. Is the focused one still clear?
+- **The student strip:** a done item is solid, a not-done item dashed, and the current item a three-sided Highlight tab.
+- **The header's current page** (Authoring or Teaching) shows by bold weight only, because the fill is dropped.
 
-- **Forced colors: the selected picker card grows by 1px.** `label.selected { border: 2px solid Highlight }`
-  shifts layout; use `outline: 2px solid Highlight; outline-offset: -1px` (or keep the 1px border and add
-  an outline).
+## Real HTTP/1.1 proxy
 
-## Slice 5c (constructor)
+- **A too-big upload through an old proxy:** HTTP/1.1 nginx can drop the connection instead of sending its 413. Upload 40 MB through one and note which message the student gets: the network copy with Retry, or the limit sentence. If it is the network copy, adjust the README's D11c paragraph ("Upload limit", README.md) and `docs/release-notes/settings-release-order.md`, which quote the sentence.
 
-- **Forced-colors cue for the focus panel.** Under `forced-colors: active` the
-  `--focus-*` shades and `--focus-shadow` are dropped and `border-color` is
-  forced, so the focus/parent panel looks like a plain row (expansion is still
-  conveyed by the open body and `aria-expanded`; not a regression). Candidate:
-  `@media (forced-colors: active) { .block-card.focus, .seq-card.focus { border-width: 2px } }`
-  or an `outline: 2px solid Highlight`.
+## Any browser, to decide at the pass
 
-## Slice 5d (quiz editor)
+- **Hover tips on Users chips and Progress cells:**
+  - A reload that moves a hovered chip from under a still mouse can leave its tip beside the pointer until the next mouse move.
+  - Escape on a keyboard-focused chip keeps its tip closed until you Tab away and back.
+  - The tip cannot be hovered (`pointer-events: none`). That is a WCAG 1.4.13 "hoverable" gap: decide whether a long list needs it.
 
-- Safari pass with the user (2026-10-09/10) — done. OK: stacked level-3 modal (dimmed, centred, not clipped;
-  Esc closes only the top one), the New question modal, narrow-window wrapping of the card actions, student
-  block numbers, phone width (empty quiz-chip space kept by decision), no freeze after closing an item, the
-  Video URL label, focus after a mouse Save/Create. Not done: D8's always-shown answer controls on a real
-  touch device (no device test), and Japanese/Chinese input (not planned).
+## A real touch device
 
-## Slice 6a (teacher run pages)
+- The quiz editor's always-shown answer controls (D8) on a phone or tablet.
 
-- At 1000px, an extreme filename together with a very long uploader email (and the plain delete confirm open in the actions cell) squeezes the Filename column; the replace confirm already sits in its own full-width row (browser pass).
+## Keyboard in an iframe
 
-## Slice 6b (teacher modals)
+- The video and app frames get no focus ring (D67): CSS cannot style a focused frame in Safari. Tab into a YouTube video and into an interactive app, including an admin-authored app that draws no focus of its own, and check that the focus is still findable.
 
-- **Switch in forced-colors mode.** `border: 0` and state by background only; in Windows High Contrast on/off differ only by knob position. Fix: a `@media (forced-colors: active)` block (border `ButtonText`, on-knob `Highlight`).
-- **Observation:** Esc while a native `datetime-local` picker is open belongs to the browser; glance at it in the Safari pass.
-- **The server-error banner sits at the bottom of the editor body.** At 1000px the assets sidebar stacks and the body scrolls, so a failed Save can show its banner below the fold (pre-6b position; New run puts its banner at the top). Glance in the browser pass.
-- **After Cancel/Esc from an empty roster, focus returns to the toolbar's Import roster, not the link the teacher used.** Both open the same import; mention in the browser pass.
-- About 1000px: the mini-project editor and the import fit, and the editor's assets panel stays beside the text. Below 880px it stacks and the body scrolls inside the dialog (expected). New run and Publish conflicts were not checked at 1000px in Safari (the Task 1-2 screenshots, in Chrome, cover 1000px).
-- Not exercised in Safari, stay as they are: × while a confirm already shows (jsdom-tested: it keeps the confirm and moves focus to its Cancel); Esc while a native `datetime-local` picker is open (Task 4 note); the server-error banner's position after a failed Save at 1000px (no failed Save was mocked); focus after Cancel/Esc from an empty roster (run 8's roster is not empty).
+## Kept on purpose
 
-## Slice 6c (overview, roster, side panel)
-
-- **Esc in the group select may close the whole add row.** The form's keydown also catches an Esc that comes from the `<select>`. A native popup usually swallows the key, so check this in the browser pass. Fix: ignore the event when its target is the select. Safari pass: Safari's popup swallows Esc and the row stays open; other browsers are still unchecked.
-
-## Polish 1 (confirms)
-
-- **Focus ring clearance in `tr.delete-row` / `.ro-confirm-row`:** `td` has 0 top padding, so the ring (2px offset + 2px) overlaps the row above's border. Cosmetic; check in the Safari pass. (Fable)
-- **D42 with a wrapped warning:** with `align="end"` and a long email or filename, the `.warning` lines stay left-ragged while the block sits at the right edge. Check at 1000px in the Safari pass. (Fable)
-- **Esc in a clean title edit while #19's question asks** focuses that question's Cancel instead of cancelling the edit (R53, one question per place). Glance at it in the Safari pass. (Fable lane)
-
-## Polish 2 (named items)
-
-- The video and app iframes get no focus ring (D67, Safari pass): CSS cannot style a focused frame in Safari, and in Chrome only `:focus-within` matches it. Focus inside the frame is shown by the embedded page itself (YouTube's controls; an app's own page). Check with the keyboard at the beta pass, including an admin-authored app that draws no focus of its own.
-- **Not checked in a browser:** High Contrast (forced colors) for the strip. The review traced the cascade (solid done fill, dashed not-done, a three-sided Highlight tab), but neither Chrome here nor Safari emulates forced colors; check on Windows High Contrast before beta.
-- D73/D74 review: in both grids, focusing a pinned sort button (Progress Student/Group, Submissions Group) scrolls the table back to the start, so ⇧Tab from a late sequence header loses the place. Mild (Opus m2).
+- Esc in a clean title edit while #19's question asks focuses that question's Cancel instead of cancelling the edit: R53, one question per place.
