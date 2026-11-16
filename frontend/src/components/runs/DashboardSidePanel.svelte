@@ -1085,6 +1085,9 @@
   /* The radio is hidden with clip(), which clips its outline too. */
   @media (forced-colors: active) {
     .sp-seg-opt:has(.sp-radio:focus-visible) { outline: 2px solid Highlight; outline-offset: -2px; }
+    /* The selected fill is dropped here: an outline marks it, as in Segmented. */
+    .sp-seg-opt.checked { outline: 2px solid; outline-offset: -2px; }
+    .sp-seg-opt.locked { color: GrayText; }
   }
   .sp-radio {
     position: absolute;

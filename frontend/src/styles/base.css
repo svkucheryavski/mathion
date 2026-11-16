@@ -36,6 +36,8 @@ h4 { font-size: 13px; font-weight: 600; margin: 0; }
    inset ring keeps its own. */
 @media (forced-colors: active) {
   :focus-visible:not([tabindex="-1"]) { outline: 2px solid Highlight !important; }
+  /* Forced colours drop the components' grey fills; a disabled field greys by GrayText. */
+  :is(input, select, textarea):disabled { color: GrayText !important; border-color: GrayText !important; }
 }
 
 /* Visually hidden text a screen reader still reads. */

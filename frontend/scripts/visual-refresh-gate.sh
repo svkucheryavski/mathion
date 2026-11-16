@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3088
+EXPECTED_CHECKS=3101
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -541,6 +541,7 @@ else:
 # (b2efbc30), after the focus rules. +1 rule (52 -> 53).
 # Beta round T6: `.live-slot:empty`, a status region mounted empty that takes no box. +1 rule (53 -> 54).
 # Beta round T8: `.new-tab-note`, the hidden "(opens in a new tab)", left out of copied text. +1 rule (54 -> 55).
+# Beta round T9: forced colours grey a disabled field (GrayText); the components' own greys are dropped there. +1 rule (55 -> 56).
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.live-slot:empty', 'bb6a43fd'), ('', '.mono,code,kbd', '84a226e9'),
     ('', '.new-tab-note', 'c24b8404'),
@@ -585,8 +586,9 @@ WANT_FULL = [
     ('', 'h3', 'b36ddbd5'), ('', 'h4', 'f98d3d7e'), ('', 'html,body', '3bd2fa51'),
     ('', 'img,video', 'aa84fbab'), ('', 'p', '11696618'), ('', 'ul,ol', '99409a76'),
     ('@media (forced-colors:active)', ':focus-visible:not([tabindex="-1"])', '1ff87bb6'),
+    ('@media (forced-colors:active)', ':is(input,select,textarea):disabled', '602da9b5'),
 ]
-# Document ORDER of the same 55 rules. `a` at #9 (reset.css) and #13 (base.css)
+# Document ORDER of the same 56 rules. `a` at #9 (reset.css) and #13 (base.css)
 # are the live case: only order decides that base's --primary wins, and swapping
 # two @imports in app.css flips it while the sorted multiset stays identical.
 # The four focus rules close it, frozen in order like the rest. None depends on
@@ -601,6 +603,7 @@ WANT_ORDER = [
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible'),
     ('', '[tabindex="-1"]:focus-visible'),
     ('@media (forced-colors:active)', ':focus-visible:not([tabindex="-1"])'),
+    ('@media (forced-colors:active)', ':is(input,select,textarea):disabled'),
     ('', '.vh'), ('', '.live-slot:empty'), ('', '.new-tab-note'),
     ('', '.prose'), ('', '.prose :is(h1,h2,h3,h4,h5,h6)'),
     ('', '.prose h1'), ('', '.prose h2'), ('', '.prose h3'), ('', '.prose h4'),
@@ -3705,6 +3708,9 @@ else
   # deadline with the hidden window still open reads "Overdue since" in crimson.
   d '\.deadline-overdue' '' 'color:var\(--danger\)'
   none "MiniProjectDetailPage: no soft-deadline aside (D80)" "\.deadline-soft\.${H}"
+  # Beta round T9: forced colours drop the disabled drop's fill; its frame and label grey by GrayText.
+  chk "@media \(forced-colors: ?active\)\{([^{}]*\{[^{}]*\})*\.drop\.${H}:has\(input:where\(\.${H}\):disabled\)" 'border-color:GrayText'
+  chk "@media \(forced-colors: ?active\)\{([^{}]*\{[^{}]*\})*\.drop\.${H}:has\(input:where\(\.${H}\):disabled\) \.drop-label:where\(\.${H}\)" 'color:GrayText'
   # D69 (Polish 2 Safari pass): one body grid under the header. Wide windows put the
   # group and submit cards in a 300px right column beside the assignment and the
   # history; at 880px and under it is one column in DOM order (assignment, group,
@@ -4808,6 +4814,9 @@ if [[ -n $REPLY ]]; then
   d '\.run-tab' ':hover' 'color:var\(--text\)' 'border-bottom-color:var\(--border-ground\)'
   check "RunDetailPage the selected-tab rule follows the hover rule (D72)" "\.run-tab\.${H}:hover\{[^}]*\}\.run-tab(\.${H})?\[aria-selected=['\"]?true['\"]?\]"
   chk "\.run-tab(\.${H})?\[aria-selected=['\"]?true['\"]?\](\.${H})?" 'color:var\(--text\)' 'border-bottom-color:var\(--primary\)'
+  # Beta round T9: forced colours paint every transparent tab line; only the selected one stays.
+  chk "@media \(forced-colors: active\)\{\.run-tab\.${H}" 'border-bottom-color:Canvas' 'margin-bottom:0'
+  chk "@media \(forced-colors: active\)\{\.run-tab\.${H}\{border-bottom-color:Canvas;margin-bottom:0\}\.run-tab(\.${H})?\[aria-selected=['\"]?true['\"]?\](\.${H})?" 'border-bottom-color:Highlight' 'margin-bottom:-1px'
   d '\.run-banner-warn' '' 'background:var\(--status-needs-revision-bg\)' 'border-left:3px solid var\(--gold\)'
   d '\.run-meta' '' 'font-family:var\(--font-mono\)' 'color:var\(--muted\)'
   # 6b browser pass (user, 2026-10-12): the run title matches authoring's page titles (18px).
@@ -5725,6 +5734,9 @@ uniq1 sp-card
 if [[ -n $REPLY ]]; then
   N=DashboardSidePanel; H=$REPLY
   chk "@media \(forced-colors: ?active\)\{\.sp-seg-opt\.${H}:has\(\.sp-radio:where\(\.${H}\):focus-visible\)" 'outline:2px solid Highlight' 'outline-offset:-2px'
+  # Beta round T9: the selected result keeps a cue once the fill is dropped; a locked one greys.
+  chk "@media \(forced-colors: ?active\)\{([^{}]*\{[^{}]*\})*\.sp-seg-opt\.checked\.${H}" 'outline:2px solid' 'outline-offset:-2px'
+  chk "@media \(forced-colors: ?active\)\{([^{}]*\{[^{}]*\})*\.sp-seg-opt\.locked\.${H}" 'color:GrayText'
 fi
 # Inset rings where a control is flush against an overflow clip (spec §Inset rings).
 uniq1 seg-btn
@@ -6310,6 +6322,10 @@ if [[ -n $REPLY ]]; then
   chk "\.fit\.${H} \.segment:where\(\.${H}\)" 'flex:none' 'padding:5px 12px'
   chk "\.disabled\.${H} \.segment:where\(\.${H}\)" 'cursor:default' 'background:var\(--surface-2\)' 'color:var\(--muted\)'
   chk "\.segment\.${H}:has\(input:where\(\.${H}\):focus-visible\)" 'box-shadow:inset 0 0 0 2px var\(--primary\)'
+  # Beta round T9: forced colours drop the grey fill, so a disabled control greys its text and lines.
+  chk "@media \(forced-colors: active\)\{([^{}]*\{[^{}]*\})*\.segmented\.disabled\.${H}" 'border-color:GrayText'
+  chk "@media \(forced-colors: active\)\{([^{}]*\{[^{}]*\})*\.disabled\.${H} \.segment:where\(\.${H}\)" 'color:GrayText' 'border-left-color:GrayText'
+  chk "@media \(forced-colors: active\)\{([^{}]*\{[^{}]*\})*\.disabled\.${H} \.segment\.selected:where\(\.${H}\)" 'color:GrayText'
   sweep Segmented $H
 fi
 

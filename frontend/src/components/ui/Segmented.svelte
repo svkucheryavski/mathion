@@ -79,5 +79,9 @@
   @media (forced-colors: active) {
     .segment.selected { outline: 2px solid; outline-offset: -2px; }
     .segment:has(input:focus-visible) { outline: 2px solid Highlight; outline-offset: -2px; }
+    /* The grey fill is dropped here: a disabled control greys its text and lines instead. */
+    .segmented.disabled { border-color: GrayText; }
+    .disabled .segment { color: GrayText; border-left-color: GrayText; }
+    .disabled .segment.selected { color: GrayText; }
   }
 </style>
