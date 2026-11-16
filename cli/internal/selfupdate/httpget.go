@@ -1,4 +1,4 @@
-// Package selfupdate implements `mathion self-update`: channel-aware,
+// Package selfupdate implements `mathion self-update`: package-owner-aware,
 // S_rel-signature-verified, forward-only in-place upgrade of the mathion CLI.
 package selfupdate
 

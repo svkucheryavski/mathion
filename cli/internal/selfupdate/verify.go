@@ -53,7 +53,7 @@ func srelSubkeyFingerprints(kr openpgp.EntityList) [][]byte {
 // assertSingleSigningSubkey enforces §6.1 correction 5: the verifying keyring must
 // carry EXACTLY ONE signing-capable non-primary subkey. Zero means an unusable
 // keyring; two or more means an untrimmed asset (e.g. a full `gpg --export` that
-// swept in S_apt) that would silently widen the accepted-signer set. Called both at
+// swept in another subkey) that would silently widen the accepted-signer set. Called both at
 // load (embedded asset) AND at the top of verifyChecksums, so an injected keyring
 // (Task 8 seam) is guarded on the same path a signature is checked.
 func assertSingleSigningSubkey(kr openpgp.EntityList) error {

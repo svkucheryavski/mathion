@@ -47,13 +47,13 @@ func Run(ctx context.Context, p Params) error {
 		return err
 	}
 
-	// Step 2: channel (§4.2 step 2).
-	switch ch, err := detectChannel(ctx, resolved); {
-	case err != nil:
+	// Step 2: refuse a package-owned binary, before any network or root step (also under --check).
+	owners, err := packageOwners(ctx, resolved)
+	if err != nil {
 		return err
-	case ch == channelApt:
-		fmt.Fprintln(p.Out, "sudo apt update && sudo apt install --only-upgrade mathion")
-		return nil // apt-managed: defer, no root, no swap (also under --check)
+	}
+	if err := refusePackageOwned(resolved, owners); err != nil {
+		return err
 	}
 
 	// Step 3: eligible releases + forward-gate (§4.2 step 3).
@@ -159,7 +159,7 @@ func Run(ctx context.Context, p Params) error {
 	// The root pre-run (spec §4.1), running as the NEW binary on the operator's next
 	// non-excluded `sudo mathion` command, is the authoritative drift detector; this line
 	// only points there — it makes NO drift claim, killing the old always-fires false
-	// positive. Fires ONLY here (the confirmed-swap path) — not apt-defer, up-to-date,
+	// positive. Fires ONLY here (the confirmed-swap path) — not package-owned, up-to-date,
 	// --check/cancelled/durability-uncertain (all return earlier).
 	fmt.Fprintln(p.Out, "self-update complete — your next `sudo mathion` management command will report whether this release changed the stack (apply changes with `sudo mathion reconcile`).")
 	return nil

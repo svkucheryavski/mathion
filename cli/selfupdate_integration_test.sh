@@ -1,6 +1,6 @@
 #!/bin/sh
 # self-update integration: throwaway OpenPGP keys + REAL shell-launched binaries.
-# Covers the §9.2 scenarios: happy path, rotation crossing, apt defer, S_apt reject,
+# Covers the §9.2 scenarios: happy path, rotation crossing, package-owned refusal, sibling-subkey reject,
 # and the staged-exec bound + fd-hygiene legs (past-deadline abort + fork-orphan i/ii).
 set -eu
 [ "${MATHION_SELFUPDATE_E2E:-}" = 1 ] || { echo "SKIP: set MATHION_SELFUPDATE_E2E=1 (mutates /usr/local/bin/mathion + /usr/bin/mathion)"; exit 0; }
@@ -107,19 +107,19 @@ v="$(/usr/local/bin/mathion version --short)"
 m="$(stat -c %a /usr/local/bin/mathion)"
 [ "$m" = 755 ] || { echo "FAIL(happy): installed mode $m != 755"; exit 1; }
 
-# === LEG 2: S_apt REJECTION (re-sign with K2, which the K1 client does not trust) ==
+# === LEG 2: SIBLING-SUBKEY REJECTION (re-sign with K2, which the K1 client does not trust) ==
 publish cli-v0.9.0 "$WORK/rel090_k1" "$K2"    # foreign signature
 install -m0755 "$WORK/client_k1" /usr/local/bin/mathion
 if /usr/local/bin/mathion self-update --yes; then echo "FAIL(reject): foreign-key sig accepted"; exit 1; fi
 v="$(/usr/local/bin/mathion version --short)"
 [ "$v" = "cli-v0.2.0" ] || { echo "FAIL(reject): binary changed to $v"; exit 1; }
 
-# === LEG 3: APT DEFER (a real dpkg-owned path) =============================
+# === LEG 3: PACKAGE-OWNED REFUSAL (a real dpkg-owned path) ================
 # Make `dpkg -S /usr/bin/mathion` report the file as mathion-owned. A `.list`
 # file ALONE is not enough — dpkg's search only reports files for packages that
 # have a stanza in the status DB, so we must ALSO append a minimal
 # `Status: install ok installed` stanza to /var/lib/dpkg/status (this is what a
-# real apt install leaves behind: both the .list file and the status stanza).
+# real package install leaves behind: both the .list file and the status stanza).
 # Back up the status DB first; the success path restores it inline (and removes
 # status.bak to disarm the trap), while cleanup() restores it on any mid-leg abort
 # — we are mutating the container's real dpkg database.
@@ -127,13 +127,15 @@ mkdir -p /var/lib/dpkg/info
 cp /var/lib/dpkg/status "$WORK/status.bak.partial"
 mv "$WORK/status.bak.partial" "$WORK/status.bak"   # atomic-arm: status.bak appears ONLY as a COMPLETE copy
 printf '/usr/bin/mathion\n' > /var/lib/dpkg/info/mathion.list
-printf '\nPackage: mathion\nStatus: install ok installed\nPriority: optional\nSection: admin\nMaintainer: Mathion Test <t@example.invalid>\nArchitecture: %s\nVersion: 0.2.0\nDescription: apt-defer test stub\n' "$(dpkg --print-architecture)" >> /var/lib/dpkg/status
+printf '\nPackage: mathion\nStatus: install ok installed\nPriority: optional\nSection: admin\nMaintainer: Mathion Test <t@example.invalid>\nArchitecture: %s\nVersion: 0.2.0\nDescription: package-owned test stub\n' "$(dpkg --print-architecture)" >> /var/lib/dpkg/status
 install -m0755 "$WORK/client_k1" /usr/bin/mathion
-publish cli-v0.9.0 "$WORK/rel090_k1" "$K1"    # a valid update EXISTS; defer must still win
-out="$(/usr/bin/mathion self-update --yes)"
-printf '%s' "$out" | grep -q 'apt install --only-upgrade mathion' || { echo "FAIL(apt): no defer message: $out"; exit 1; }
+publish cli-v0.9.0 "$WORK/rel090_k1" "$K1"    # a valid update EXISTS; the refusal must still win
+if out="$(/usr/bin/mathion self-update --yes 2>&1)"; then echo "FAIL(owned): self-update exited 0: $out"; exit 1; fi
+printf '%s' "$out" | grep -q 'belongs to the system package mathion' || { echo "FAIL(owned): no refusal message: $out"; exit 1; }
+if out="$(/usr/bin/mathion self-update --check 2>&1)"; then echo "FAIL(owned): --check exited 0: $out"; exit 1; fi
+printf '%s' "$out" | grep -q 'belongs to the system package mathion' || { echo "FAIL(owned): --check gave no refusal message: $out"; exit 1; }
 v="$(/usr/bin/mathion version --short)"
-[ "$v" = "cli-v0.2.0" ] || { echo "FAIL(apt): dpkg-owned binary was swapped to $v"; exit 1; }
+[ "$v" = "cli-v0.2.0" ] || { echo "FAIL(owned): dpkg-owned binary was swapped to $v"; exit 1; }
 cp "$WORK/status.bak" /var/lib/dpkg/status
 rm -f /var/lib/dpkg/info/mathion.list /usr/bin/mathion "$WORK/status.bak"
 
@@ -291,4 +293,4 @@ v="$(/usr/local/bin/mathion version --short)"
 [ "$v" = "cli-v0.2.0" ] || { echo "FAIL(fork-ii): live binary changed to $v"; exit 1; }
 rm -f /usr/local/bin/mathion /usr/local/bin/.mathion-selfupdate-*.tmp
 
-echo "self-update integration PASSED (happy + reject + apt-defer + rotation-crossing + staged-exec-bound + fd-hygiene i/ii)"
+echo "self-update integration PASSED (happy + reject + package-owned + rotation-crossing + staged-exec-bound + fd-hygiene i/ii)"

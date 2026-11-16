@@ -156,25 +156,58 @@ func TestRun_Check_NoRootNoArchiveNoSwap(t *testing.T) {
 	}
 }
 
-func TestRun_AptManaged_Defers(t *testing.T) {
-	p, rootCalled, _, done := harness(t, "cli-v0.2.0")
+// runRefused runs self-update with dpkg stubbed and the release server unreachable,
+// so a refusal placed after any network step would surface as a network error.
+func runRefused(t *testing.T, check bool, dpkg func(path string) dpkgResult) error {
+	t.Helper()
+	p, rootCalled, archiveHits, done := harness(t, "cli-v0.2.0")
 	defer done()
-	dpkgSearch = func(context.Context, string) dpkgResult {
-		return dpkgResult{stdout: []byte("mathion: /usr/bin/mathion\n"), exitCode: 0}
-	}
+	dpkgSearch = func(_ context.Context, path string) dpkgResult { return dpkg(path) }
+	p.Cfg.apiBase, p.Cfg.dlBase = "https://127.0.0.1:1", "https://127.0.0.1:1"
+	p.Check = check
 	var out bytes.Buffer
 	p.Out = &out
-	if err := Run(context.Background(), p); err != nil {
-		t.Fatalf("apt defer: %v", err)
-	}
+	err := Run(context.Background(), p)
 	if *rootCalled {
-		t.Fatal("apt-managed must NOT require root")
+		t.Fatal("a refusal must NOT require root")
 	}
-	if !strings.Contains(out.String(), "apt install --only-upgrade mathion") {
-		t.Fatalf("apt defer output: %q", out.String())
+	if *archiveHits != 0 {
+		t.Fatalf("a refusal must download nothing; archive hits %d", *archiveHits)
 	}
-	if strings.Contains(out.String(), "sudo mathion reconcile") {
-		t.Fatalf("apt-defer must NOT print the reconcile nudge; got %q", out.String())
+	if out.Len() != 0 {
+		t.Fatalf("a refusal must print nothing to Out; got %q", out.String())
+	}
+	return err
+}
+
+func ownedBy(pkg string) func(string) dpkgResult {
+	return func(path string) dpkgResult {
+		return dpkgResult{stdout: []byte(pkg + ": " + path + "\n"), exitCode: 0}
+	}
+}
+
+func TestRun_PackageOwned_Refuses(t *testing.T) {
+	for _, check := range []bool{false, true} {
+		err := runRefused(t, check, ownedBy("mathion"))
+		if err == nil || !strings.Contains(err.Error(), "belongs to the system package mathion. Remove it") {
+			t.Fatalf("check=%v: want the mathion refusal, got %v", check, err)
+		}
+	}
+}
+
+func TestRun_ForeignPackage_Refuses(t *testing.T) {
+	err := runRefused(t, false, ownedBy("coreutils"))
+	if err == nil || !strings.Contains(err.Error(), "belongs to the system package coreutils; refusing to replace it.") {
+		t.Fatalf("want the foreign-package refusal, got %v", err)
+	}
+}
+
+func TestRun_DpkgError_FailsClosed(t *testing.T) {
+	err := runRefused(t, false, func(string) dpkgResult {
+		return dpkgResult{stderr: []byte("dpkg: database locked"), exitCode: 2}
+	})
+	if err == nil || !strings.Contains(err.Error(), "dpkg -S") {
+		t.Fatalf("want the dpkg error, got %v", err)
 	}
 }
 

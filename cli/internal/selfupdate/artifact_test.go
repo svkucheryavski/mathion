@@ -84,7 +84,7 @@ func TestExtractSingleBinary_RejectsSecondMathion(t *testing.T) {
 
 func TestSelectRelease_FirstVerifiableDescending(t *testing.T) {
 	relEntity, relKR := newSigner(t)
-	aptEntity, _ := newSigner(t) // foreign — signs the higher tag, which must be SKIPPED
+	siblingEntity, _ := newSigner(t) // foreign — signs the higher tag, which must be SKIPPED
 	asset := archiveName()
 	sums := []byte(fmt.Sprintf("deadbeef  %s\n", asset))
 
@@ -94,7 +94,7 @@ func TestSelectRelease_FirstVerifiableDescending(t *testing.T) {
 		case "/cli-v0.4.0/checksums.txt", "/cli-v0.3.0/checksums.txt":
 			w.Write(sums)
 		case "/cli-v0.4.0/checksums.txt.asc":
-			w.Write(armoredSig(t, aptEntity, sums)) // unverifiable (foreign key)
+			w.Write(armoredSig(t, siblingEntity, sums)) // unverifiable (foreign key)
 		case "/cli-v0.3.0/checksums.txt.asc":
 			w.Write(armoredSig(t, relEntity, sums)) // verifiable
 		default:
@@ -254,7 +254,7 @@ func TestSelectRelease_BudgetAborts(t *testing.T) {
 // 17 (index 16) is not, at topN=16. Only `verifiableTag` carries a real signature.
 func TestSelectRelease_CrossingBoundary(t *testing.T) {
 	relEntity, relKR := newSigner(t)
-	aptEntity, _ := newSigner(t)
+	siblingEntity, _ := newSigner(t)
 	sums := []byte(fmt.Sprintf("deadbeef  %s\n", archiveName()))
 	newServer := func(verifiableTag string) *httptest.Server {
 		return httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -265,7 +265,7 @@ func TestSelectRelease_CrossingBoundary(t *testing.T) {
 				if strings.Contains(r.URL.Path, verifiableTag+"/") {
 					w.Write(armoredSig(t, relEntity, sums))
 				} else {
-					w.Write(armoredSig(t, aptEntity, sums)) // unverifiable
+					w.Write(armoredSig(t, siblingEntity, sums)) // unverifiable
 				}
 			default:
 				w.WriteHeader(404)

@@ -7,13 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-)
-
-type channelResult int
-
-const (
-	channelApt channelResult = iota
-	channelCurl
+	"strings"
 )
 
 type dpkgResult struct {
@@ -46,39 +40,53 @@ var dpkgSearch = func(ctx context.Context, path string) dpkgResult {
 	return r
 }
 
-// parseDpkgPkg extracts the package name from "pkg[:arch]: /path" (first line),
-// tolerating the multiarch :arch qualifier (dpkg renders `mathion:amd64: ...`).
-func parseDpkgPkg(out []byte) string {
-	line := out
-	if i := bytes.IndexByte(out, '\n'); i >= 0 {
-		line = out[:i]
-	}
-	if colon := bytes.IndexByte(line, ':'); colon >= 0 {
-		return string(line[:colon]) // package name is up to the FIRST colon
-	}
-	return ""
-}
-
-// detectChannel classifies the install channel, failing closed on anything
-// ambiguous or foreign. §4.2 step 2.
-func detectChannel(ctx context.Context, path string) (channelResult, error) {
+// packageOwners lists the dpkg packages that own path; none when dpkg is absent or knows no owner.
+func packageOwners(ctx context.Context, path string) ([]string, error) {
 	r := dpkgSearch(ctx, path)
 	if r.absent {
-		return channelCurl, nil
+		return nil, nil
 	}
 	switch r.exitCode {
 	case 0:
-		if pkg := parseDpkgPkg(r.stdout); pkg == "mathion" {
-			return channelApt, nil
-		} else {
-			return 0, fmt.Errorf("%s is owned by package %q, not mathion; refusing", path, pkg)
+		var owners []string
+		seen := map[string]bool{}
+		for _, line := range strings.Split(string(r.stdout), "\n") {
+			pkgs, ok := strings.CutSuffix(line, ": "+path)
+			if !ok || strings.HasPrefix(line, "diversion by ") || strings.HasPrefix(line, "local diversion ") {
+				continue
+			}
+			for _, pkg := range strings.Split(pkgs, ", ") {
+				if c := strings.IndexByte(pkg, ':'); c >= 0 {
+					pkg = pkg[:c] // drop the multiarch :arch suffix
+				}
+				if pkg != "" && !seen[pkg] {
+					seen[pkg] = true
+					owners = append(owners, pkg)
+				}
+			}
 		}
+		if len(owners) == 0 {
+			return nil, fmt.Errorf("dpkg -S %s: could not read the owning package from: %s", path, bytes.TrimSpace(r.stdout))
+		}
+		return owners, nil
 	case 1:
 		if bytes.Contains(r.stderr, []byte("no path found matching pattern")) {
-			return channelCurl, nil
+			return nil, nil
 		}
-		return 0, fmt.Errorf("dpkg -S %s: unexpected exit-1 output: %s", path, bytes.TrimSpace(r.stderr))
+		return nil, fmt.Errorf("dpkg -S %s: unexpected exit-1 output: %s", path, bytes.TrimSpace(r.stderr))
 	default:
-		return 0, fmt.Errorf("dpkg -S %s failed (exit %d): %s", path, r.exitCode, bytes.TrimSpace(r.stderr))
+		return nil, fmt.Errorf("dpkg -S %s failed (exit %d): %s", path, r.exitCode, bytes.TrimSpace(r.stderr))
+	}
+}
+
+// refusePackageOwned refuses to replace a binary that a system package owns.
+func refusePackageOwned(path string, owners []string) error {
+	switch {
+	case len(owners) == 0:
+		return nil
+	case len(owners) == 1 && owners[0] == "mathion":
+		return fmt.Errorf("%s belongs to the system package mathion. Remove it (sudo apt remove mathion) and install Mathion with curl | sh.", path)
+	default:
+		return fmt.Errorf("%s belongs to the system package %s; refusing to replace it.", path, strings.Join(owners, ", "))
 	}
 }
