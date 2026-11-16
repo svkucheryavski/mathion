@@ -62,12 +62,20 @@ BASE="http://127.0.0.1:8000"
 echo "==> /health"
 [ "$(curl -fsS "${BASE}/health")" = '{"status":"ok"}' ] || fail "/health"
 
-echo "==> SPA served at / and deep links → packaged index.html"
-"${CMP[@]}" exec -T app cat /app/static/index.html > "${WORK}/index.expected"
+echo "==> SPA served at / and deep links → the packaged index.html, filled by the server"
+"${CMP[@]}" exec -T app cat /app/static/index.html > "${WORK}/index.expected" || fail "could not read the packaged index.html"
 curl -fsS "${BASE}/"                -o "${WORK}/index.root"
 curl -fsS "${BASE}/some/deep/route" -o "${WORK}/index.deep"
-diff -q "${WORK}/index.expected" "${WORK}/index.root" >/dev/null || fail "/ is not the packaged index.html"
-diff -q "${WORK}/index.expected" "${WORK}/index.deep" >/dev/null || fail "SPA fallback is not index.html"
+diff -q "${WORK}/index.root" "${WORK}/index.deep" >/dev/null || fail "SPA fallback is not the page / serves"
+# The server fills the branding marker (Branding D13); the built script and CSS tags stay.
+grep -E '<script type="module"|<link rel="stylesheet"' "${WORK}/index.expected" > "${WORK}/index.tags" || true
+grep -q '<script type="module"' "${WORK}/index.tags" || fail "packaged index.html lacks its script tag"
+grep -q '<link rel="stylesheet"' "${WORK}/index.tags" || fail "packaged index.html lacks its CSS tag"
+while IFS= read -r tag; do
+  grep -qF "${tag}" "${WORK}/index.root" || fail "/ lacks the packaged tag: ${tag}"
+done < "${WORK}/index.tags"
+if grep -qF '<!--branding-->' "${WORK}/index.root"; then fail "/ still has the unfilled branding marker"; fi
+grep -qF 'id="branding"' "${WORK}/index.root" || fail "/ lacks the inline branding data"
 
 echo "==> Unknown /api/* → JSON 404 (API/SPA boundary)"
 code=$(curl -s -D "${WORK}/api-404.hdr" -o "${BODY}" -w '%{http_code}' "${BASE}/api/does-not-exist")

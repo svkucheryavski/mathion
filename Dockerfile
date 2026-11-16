@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- Stage 1: build the Svelte SPA (arch-independent → build once, natively) ----
-FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
+FROM --platform=$BUILDPLATFORM node:26-alpine AS frontend
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
@@ -22,7 +22,8 @@ WORKDIR /app
 # and `python -m mathion.superuser` work.
 COPY backend/pyproject.toml /tmp/backend/pyproject.toml
 COPY backend/mathion /tmp/backend/mathion
-RUN pip install --no-cache-dir /tmp/backend && rm -rf /tmp/backend
+COPY backend/constraints.txt /tmp/backend/constraints.txt
+RUN pip install --no-cache-dir -c /tmp/backend/constraints.txt /tmp/backend && rm -rf /tmp/backend
 
 # Migration assets are excluded from the wheel — copy them separately, tree
 # preserved, owned numerically (no build-order dependency on the `app` name).

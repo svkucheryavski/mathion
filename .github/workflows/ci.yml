@@ -33,7 +33,12 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install backend + dev deps
-        run: pip install './backend[dev]'
+        run: pip install -c backend/constraints.txt './backend[dev]'
+      - name: Installed versions equal backend/constraints.txt
+        run: |
+          norm() { sed -E 's/[[:space:]]*#.*$//; /^[[:space:]]*$/d' | tr '[:upper:]' '[:lower:]' | sed -E 's/[-_.]+/-/g' | sort; }
+          diff <(norm < backend/constraints.txt) \
+               <(pip freeze --exclude mathion --exclude setuptools --exclude wheel | norm)
       - name: Run backend suite
         run: cd backend && pytest -q
 
@@ -43,7 +48,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "22"
+          node-version: "26"
       - name: Install
         run: cd frontend && npm ci
       - name: Test (TZ pinned by the npm script)
