@@ -110,8 +110,11 @@ def enroll_batch(
     require_course_admin(db, current_user, course_id)
     version = get_newest_published_version(db, course_id)
     unique_emails = list(dict.fromkeys(e.strip().lower() for e in data.emails))
-    if not all(email_shape_ok(e) for e in unique_emails):
-        raise HTTPException(status_code=422, detail=BAD_EMAIL)
+    bad = [e for e in unique_emails if not email_shape_ok(e)]
+    if bad:
+        # Name the first non-blank one: one typo in a long list must be findable.
+        named = next((e for e in bad if e), None)
+        raise HTTPException(status_code=422, detail=f"{BAD_EMAIL}: {named}" if named else BAD_EMAIL)
     # Phase 9-A2 invariant #2 (spec §5.2/§5.3): ENROLLMENT(course_id) once BEFORE
     # the loop, before any get_or_create_user (advisory-before-index).
     advisory.advisory_xact_lock(db, advisory.LOCK_NS_ENROLLMENT, course_id)

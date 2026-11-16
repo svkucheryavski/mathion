@@ -518,7 +518,7 @@ def test_421_to_starttls_says_try_later():
 
 
 def _mailbox(replies, seen):
-    """A stub with a transaction (MAIL inside one gets 503); replies per verb in turn, b"HANGUP" hangs up."""
+    """A stub with a transaction (MAIL inside one gets 503); replies per verb in turn, b"HANGUP" hangs up, b"SILENT" says nothing until the client leaves."""
     def nxt(verb, default):
         queue = replies.get(verb)
         if not queue:
@@ -549,6 +549,10 @@ def _mailbox(replies, seen):
                 reply = nxt(verb, b"250 ok")
                 if reply == b"HANGUP":
                     return
+                if reply == b"SILENT":
+                    conn.settimeout(5)   # a broken client timeout fails the test, never hangs it
+                    conn.recv(1)   # say nothing until the client times out and closes
+                    return
                 open_tx = False
             elif verb == b"DATA":
                 reply = nxt(verb, b"354 go on")
@@ -569,13 +573,13 @@ def _letter(to="anna@uni.dk"):
     return msg
 
 
-def _send_twice(replies):
+def _send_twice(replies, timeout=5):
     """Two sends in one SMTPMailer session: (first error, second error, lines heard)."""
     from mathion.notifications.mailer import SMTPMailer
     seen = []
     errors = []
     with _stub(_mailbox(replies, seen)) as port:
-        mailer = SMTPMailer("127.0.0.1", port, "none", "", "", True, timeout=5)
+        mailer = SMTPMailer("127.0.0.1", port, "none", "", "", True, timeout=timeout)
         with mailer.session():
             for _ in range(2):
                 try:
@@ -605,6 +609,16 @@ def test_a_hang_up_at_the_reset_is_kept():
     first, second, _seen = _send_twice({b"RCPT": [b"550 no such user"], b"RSET": [b"HANGUP"]})
     assert isinstance(first, smtplib.SMTPRecipientsRefused)
     assert isinstance(closed_after(first), smtplib.SMTPServerDisconnected)
+    assert isinstance(second, smtplib.SMTPServerDisconnected) and closed_after(second) is None
+
+
+def test_a_silent_server_at_the_reset_is_kept_as_a_hang_up():
+    from mathion.notifications.smtp_errors import closed_after
+    first, second, _seen = _send_twice({b"RCPT": [b"550 no such user"], b"RSET": [b"SILENT"]}, timeout=1)
+    assert isinstance(first, smtplib.SMTPRecipientsRefused)
+    assert describe(first, **WHERE).code == 550
+    assert isinstance(closed_after(first), smtplib.SMTPServerDisconnected)
+    assert "timed out" in str(closed_after(first))
     assert isinstance(second, smtplib.SMTPServerDisconnected) and closed_after(second) is None
 
 
