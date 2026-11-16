@@ -11,7 +11,7 @@
 // literal. Keys MUST stay in sync with the union in
 // `StudentMiniProjectDetail.can_submit_reason_if_not` (see ./types.ts).
 
-import { api, ApiError, errorDetail } from './api';
+import { api, ApiError, REQUEST_ERROR_MESSAGE, errorDetail } from './api';
 import { emitUnauthorized } from './events';
 import type { StudentMiniProjectListItem, StudentMiniProjectDetail, LatestStatus } from './types';
 
@@ -115,7 +115,7 @@ export async function submit(mpId: number, file: File): Promise<void> {
       // Non-JSON response (HTML error page, truncated payload) — body stays
       // undefined. Mirrors lib/api.ts non-2xx handling.
     }
-    const detail = errorDetail(r, parsedBody, 'Submission failed');
+    const detail = errorDetail(r, parsedBody, REQUEST_ERROR_MESSAGE);
     const errorCode = (parsedBody as { error_code?: string } | undefined)?.error_code;
     throw new ApiError(r.status, detail, errorCode, parsedBody);
   }

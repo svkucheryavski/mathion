@@ -7,7 +7,7 @@ import {
   ALLOWED_EXTENSIONS,
 } from '../lib/runAssets';
 import * as events from '../lib/events';
-import { OFFLINE_MESSAGE, SERVER_ERROR_MESSAGE } from '../lib/api';
+import { OFFLINE_MESSAGE, REQUEST_ERROR_MESSAGE, SERVER_ERROR_MESSAGE } from '../lib/api';
 
 const fetchSpy = vi.fn();
 
@@ -112,11 +112,10 @@ describe('runAssets wrappers', () => {
     expect((err as InstanceType<typeof ApiError>).errorCode).toBe('asset_exists');
   });
 
-  // A 5xx with no sentence of its own says the server sentence; a 4xx keeps
-  // the plain fallback.
+  // With no sentence of its own, a 5xx says the server sentence and a 4xx the general one.
   it.each([
     [502, SERVER_ERROR_MESSAGE],
-    [405, 'Upload failed'],
+    [405, REQUEST_ERROR_MESSAGE],
   ])('uploadRunAsset on a %i with no detail says %s', async (status, detail) => {
     fetchSpy.mockImplementation(() => jres({}, status));
     const err = await uploadRunAsset(10, new File(['x'], 'x.png', { type: 'image/png' })).catch((e) => e);
@@ -125,7 +124,7 @@ describe('runAssets wrappers', () => {
 
   it.each([
     [500, SERVER_ERROR_MESSAGE],
-    [405, 'Replace failed'],
+    [405, REQUEST_ERROR_MESSAGE],
   ])('replaceRunAsset on a %i with no detail says %s', async (status, detail) => {
     fetchSpy.mockImplementation(() => jres({}, status));
     const err = await replaceRunAsset(10, 42, new File(['x'], 'x.png', { type: 'image/png' })).catch((e) => e);

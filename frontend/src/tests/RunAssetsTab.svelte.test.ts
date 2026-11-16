@@ -13,7 +13,7 @@ vi.mock('../lib/runAssets', async () => {
 
 import RunAssetsTab from '../components/runs/RunAssetsTab.svelte';
 import { uploadRunAsset, replaceRunAsset, deleteRunAsset } from '../lib/runAssets';
-import { ApiError } from '../lib/api';
+import { ApiError, REQUEST_ERROR_MESSAGE } from '../lib/api';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
 import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
 import type { BlockResponse, Course, MiniProjectResponse, RunAssetResponse } from '../lib/types';
@@ -711,7 +711,7 @@ describe('RunAssetsTab — upload via file picker', () => {
   });
 
   it("upload 413 with no sentence (the proxy's) says the server's upload limit (D11a)", async () => {
-    (uploadRunAsset as any).mockRejectedValue(new ApiError(413, 'Upload failed'));
+    (uploadRunAsset as any).mockRejectedValue(new ApiError(413, REQUEST_ERROR_MESSAGE));
     component = mount(RunAssetsTab, { target, props: baseProps() });
     flushSync();
     const hiddenInput = target.querySelector('input[type="file"]') as HTMLInputElement;

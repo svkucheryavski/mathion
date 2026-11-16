@@ -209,19 +209,20 @@ describe('lib/api', () => {
       [413, 'Payload Too Large'],
       [429, 'Too Many Requests'],
       [431, 'Request Header Fields Too Large'],
-    ])('a %i with no sentence of its own still carries the status text', async (status, statusText) => {
+      [403, 'Forbidden'],
+    ])('a %i with no sentence of its own says the general sentence, not the status text', async (status, statusText) => {
       fetchSpy.mockResolvedValueOnce(new Response('<html>error</html>', {
         status, statusText, headers: { 'content-type': 'text/html' },
       }));
       const err = await api.get('/api/foo').catch((e) => e);
-      expect(err).toMatchObject({ status, detail: statusText });
+      expect(err).toMatchObject({ status, detail: REQUEST_ERROR_MESSAGE });
     });
 
-    // Over HTTP/2 there is no status text: never a blank line.
+    // An empty body or an empty detail says the general sentence too.
     it.each([
       ['no body', ''],
       ['an empty detail', JSON.stringify({ detail: '' })],
-    ])('a 4xx with no status text and %s says the general sentence', async (_what, text) => {
+    ])('a 4xx with %s says the general sentence', async (_what, text) => {
       fetchSpy.mockResolvedValueOnce(new Response(text, { status: 403, statusText: '', headers: { 'content-type': 'application/json' } }));
       const err = await api.get('/api/foo').catch((e) => e);
       expect(err).toMatchObject({ status: 403, detail: REQUEST_ERROR_MESSAGE });

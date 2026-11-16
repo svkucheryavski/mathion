@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { ApiError, OFFLINE_MESSAGE, SERVER_ERROR_MESSAGE } from '../lib/api';
+import { ApiError, OFFLINE_MESSAGE, REQUEST_ERROR_MESSAGE, SERVER_ERROR_MESSAGE } from '../lib/api';
 import * as events from '../lib/events';
 import { uploadAsset, listAssets, deleteAsset, formatRef, type AssetResponse } from '../lib/assets';
 
@@ -115,10 +115,16 @@ describe('lib/assets', () => {
       }
     });
 
-    it('a non-JSON error with no status text (HTTP/2) still has a detail, never a blank one', async () => {
+    it('a non-JSON 4xx with no status text says the general sentence', async () => {
       fetchSpy.mockResolvedValueOnce(new Response('<html>Not allowed</html>', { status: 405, statusText: '' }));
       const err = await uploadAsset(42, new File(['x'], 'a.png', { type: 'image/png' })).catch((e) => e);
-      expect(err).toMatchObject({ status: 405, detail: 'Upload failed' });
+      expect(err).toMatchObject({ status: 405, detail: REQUEST_ERROR_MESSAGE });
+    });
+
+    it('a proxy 413 page says the general sentence, not the status text', async () => {
+      fetchSpy.mockResolvedValueOnce(new Response('<html>Too big</html>', { status: 413, statusText: 'Request Entity Too Large' }));
+      const err = await uploadAsset(42, new File(['x'], 'a.png', { type: 'image/png' })).catch((e) => e);
+      expect(err).toMatchObject({ status: 413, detail: REQUEST_ERROR_MESSAGE });
     });
 
     it.each([

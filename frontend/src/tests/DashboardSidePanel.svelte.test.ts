@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest';
 import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
+import { REQUEST_ERROR_MESSAGE } from '../lib/api';
 import { mount, unmount, flushSync, tick } from 'svelte';
 
 import DashboardSidePanel from '../components/runs/DashboardSidePanel.svelte';
@@ -2175,7 +2176,7 @@ describe('DashboardSidePanel — the Evaluate form (6c T6, R37, R44)', () => {
     await settle();
     const banner = host.querySelector('[role="alert"].form-error')?.textContent ?? '';
     expect(banner).toContain("This file is over the server's upload limit.");
-    expect(banner).not.toContain('Upload failed');
+    expect(banner).not.toContain(REQUEST_ERROR_MESSAGE);
   });
 
   it('a chosen file shows "{name} · {size}" with its remove × focused; remove clears the input and focuses "attach PDF"', async () => {

@@ -13,7 +13,7 @@
 // `listAssets` and `deleteAsset` delegate to api.get / api.delete since
 // they don't carry multipart concerns.
 
-import { api, ApiError, OFFLINE_MESSAGE, errorDetail } from './api';
+import { api, ApiError, OFFLINE_MESSAGE, REQUEST_ERROR_MESSAGE, errorDetail } from './api';
 import { emitUnauthorized } from './events';
 
 export type AssetResponse = {
@@ -69,8 +69,7 @@ export async function uploadAsset(
       // Non-JSON response (HTML error page, truncated payload) — body stays
       // undefined. Mirrors lib/api.ts non-2xx handling.
     }
-    // statusText is empty over HTTP/2, so it can't be the only fallback.
-    const detail = errorDetail(res, parsedBody, res.statusText || 'Upload failed');
+    const detail = errorDetail(res, parsedBody, REQUEST_ERROR_MESSAGE);
     const errorCode = (parsedBody as { error_code?: string } | undefined)?.error_code;
     throw new ApiError(res.status, detail, errorCode, parsedBody);
   }
@@ -104,7 +103,7 @@ export async function fetchAssetSource(
     throw new ApiError(401, 'Not authenticated');
   }
   if (!res.ok) {
-    throw new ApiError(res.status, res.statusText);
+    throw new ApiError(res.status, errorDetail(res, undefined, REQUEST_ERROR_MESSAGE));
   }
   return res.text();
 }

@@ -4,7 +4,7 @@ import {
   fetchDetail,
   submit,
 } from '../lib/studentMiniProjects';
-import { ApiError, SERVER_ERROR_MESSAGE } from '../lib/api';
+import { ApiError, REQUEST_ERROR_MESSAGE, SERVER_ERROR_MESSAGE } from '../lib/api';
 import * as events from '../lib/events';
 import type { StudentMiniProjectListItem, StudentMiniProjectDetail } from '../lib/types';
 
@@ -228,9 +228,9 @@ describe('submit', () => {
     await expect(submit(42, pdf)).rejects.toMatchObject({ status: 503, detail: SERVER_ERROR_MESSAGE });
   });
 
-  it('a 4xx with no sentence of its own says "Submission failed"', async () => {
+  it('a 4xx with no sentence of its own says the general sentence', async () => {
     const pdf = new File([new Uint8Array([0x25])], 's.pdf', { type: 'application/pdf' });
     fetchMock.mockResolvedValue(nonJsonResp(405, 'Method Not Allowed'));
-    await expect(submit(42, pdf)).rejects.toMatchObject({ status: 405, detail: 'Submission failed' });
+    await expect(submit(42, pdf)).rejects.toMatchObject({ status: 405, detail: REQUEST_ERROR_MESSAGE });
   });
 });

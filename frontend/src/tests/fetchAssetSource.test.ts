@@ -1,6 +1,6 @@
 import { it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fetchAssetSource } from '../lib/assets';
-import { ApiError, OFFLINE_MESSAGE } from '../lib/api';
+import { ApiError, OFFLINE_MESSAGE, REQUEST_ERROR_MESSAGE, SERVER_ERROR_MESSAGE } from '../lib/api';
 import * as events from '../lib/events';
 
 const fetchSpy = vi.fn();
@@ -11,8 +11,8 @@ beforeEach(() => {
 });
 afterEach(() => { (globalThis as { fetch: typeof fetch }).fetch = originalFetch; vi.restoreAllMocks(); });
 
-function tres(text: string, status = 200) {
-  return Promise.resolve({ ok: status < 400, status, statusText: 'x', text: () => Promise.resolve(text) } as unknown as Response);
+function tres(text: string, status = 200, statusText = 'x') {
+  return Promise.resolve({ ok: status < 400, status, statusText, text: () => Promise.resolve(text) } as unknown as Response);
 }
 
 it('returns the response body text on success', async () => {
@@ -43,4 +43,12 @@ it('rethrows AbortError untouched', async () => {
 it('a lost connection throws ApiError(0) with the offline sentence', async () => {
   fetchSpy.mockImplementation(() => Promise.reject(new TypeError('Failed to fetch')));
   await expect(fetchAssetSource(5, 'app.js')).rejects.toMatchObject({ status: 0, detail: OFFLINE_MESSAGE });
+});
+
+it.each([
+  [403, 'Forbidden', REQUEST_ERROR_MESSAGE],
+  [502, 'Bad Gateway', SERVER_ERROR_MESSAGE],
+])('a %i says a sentence, not the status text', async (status, statusText, sentence) => {
+  fetchSpy.mockImplementation(() => tres('<html>no</html>', status, statusText));
+  await expect(fetchAssetSource(5, 'app.js')).rejects.toMatchObject({ status, detail: sentence });
 });
