@@ -540,8 +540,10 @@ else:
 # Beta round T5 (2026-11-16): base.css gains the shared visually hidden `.vh`
 # (b2efbc30), after the focus rules. +1 rule (52 -> 53).
 # Beta round T6: `.live-slot:empty`, a status region mounted empty that takes no box. +1 rule (53 -> 54).
+# Beta round T8: `.new-tab-note`, the hidden "(opens in a new tab)", left out of copied text. +1 rule (54 -> 55).
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.live-slot:empty', 'bb6a43fd'), ('', '.mono,code,kbd', '84a226e9'),
+    ('', '.new-tab-note', 'c24b8404'),
     ('', '.prose', '115422ed'),
     ('', '.prose :is(h1,h2,h3,h4,h5,h6)', '9dabc362'),
     ('', '.prose :where(h1,h2,h3,h4,h5,h6)', '8f770fc2'),
@@ -584,7 +586,7 @@ WANT_FULL = [
     ('', 'img,video', 'aa84fbab'), ('', 'p', '11696618'), ('', 'ul,ol', '99409a76'),
     ('@media (forced-colors:active)', ':focus-visible:not([tabindex="-1"])', '1ff87bb6'),
 ]
-# Document ORDER of the same 54 rules. `a` at #9 (reset.css) and #13 (base.css)
+# Document ORDER of the same 55 rules. `a` at #9 (reset.css) and #13 (base.css)
 # are the live case: only order decides that base's --primary wins, and swapping
 # two @imports in app.css flips it while the sorted multiset stays identical.
 # The four focus rules close it, frozen in order like the rest. None depends on
@@ -599,7 +601,7 @@ WANT_ORDER = [
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible'),
     ('', '[tabindex="-1"]:focus-visible'),
     ('@media (forced-colors:active)', ':focus-visible:not([tabindex="-1"])'),
-    ('', '.vh'), ('', '.live-slot:empty'),
+    ('', '.vh'), ('', '.live-slot:empty'), ('', '.new-tab-note'),
     ('', '.prose'), ('', '.prose :is(h1,h2,h3,h4,h5,h6)'),
     ('', '.prose h1'), ('', '.prose h2'), ('', '.prose h3'), ('', '.prose h4'),
     ('', '.prose h5'), ('', '.prose h6'), ('', '.prose.compact h1'), ('', '.prose.compact h2'),
@@ -1536,7 +1538,7 @@ const SIG = {
      "path:[d=\"M8 4.6C6.4 3.5 4.6 3.1 2.6 3.3V12.7C4.6 12.5 6.4 12.9 8 14C9.6 12.9 11.4 12.5 13.4 12.7V3.3C11.4 3.1 9.6 3.5 8 4.6Z\"]",
      "line:[x1=\"8\" y1=\"4.6\" x2=\"8\" y2=\"14\"]"],
   "ItemIcon.svelte":
-    ["button:icon.{expr}[class=\"icon {istate}\" data-type={item.type} onclick title aria-label]",
+    ["button:icon.{expr}[class=\"icon {istate}\" data-type={item.type} onclick title aria-label aria-current={istate === '"'"'current'"'"' ? '"'"'step'"'"' : undefined}]",
      "ItemMark:[type={item.type} state={istate} inStrip]"],
   "SequenceLink.svelte":
     ["a:row[class=\"row\" href aria-label onclick]",
@@ -1607,10 +1609,10 @@ const SIG = {
      "Button:[variant=\"secondary\" loading={revealing} aria-disabled={revealing} onclick]", "#else:",
      "Button:[onclick loading={inflight !== null} disabled={!allAnswered || inflight !== null} title]",
      "#if:", "p:hint[class=\"hint\"]", "span:mono[class=\"mono\"]", "#else:", "#if:",
-     "div:result[class=\"result\" tabindex=\"-1\"]", "p:", "strong:", "span:mono[class=\"mono\"]",
-     "p:meta[class=\"meta\"]", "span:mono[class=\"mono\"]", "span:mono[class=\"mono\"]", "#if:",
-     "Button:[onclick]", "#else:", "#if:",
-     "Button:[variant=\"secondary\" loading={revealing} aria-disabled={revealing} onclick]"],
+     "div:result[class=\"result\" tabindex=\"-1\"]", "p:[id]", "strong:", "span:mono[class=\"mono\"]",
+     "p:meta[class=\"meta\" id]", "span:mono[class=\"mono\"]", "span:mono[class=\"mono\"]", "#if:",
+     "Button:[aria-describedby={resultDesc} onclick]", "#else:", "#if:",
+     "Button:[variant=\"secondary\" aria-describedby={resultDesc} loading={revealing} aria-disabled={revealing} onclick]"],
   // The two choice components differ in their CONTROL markup exactly as they
   // differ in their control CSS (the divergence set in section (n)): the radio
   // has a `span:dot`, the checkbox an `svg:check`. Everything else is one shape.
@@ -5965,12 +5967,43 @@ fi
 # Ruling (Task 3 review m2): the scanner's attachOn and the src_count rows pin
 # the attachment's TEXT, not what it does. The attachment may only set a link's
 # target and rel, and every content surface takes it from the lib, once, with no
-# local binding that could shadow it.
-ndo=$(grep -cE '\.style|classList|className|cssText|innerHTML|outerHTML|insertAdjacent|append|prepend|replaceWith|\.remove\(|toggleAttribute|setAttributeNS' src/lib/externalLinks.ts)
-nset=$(grep -oE 'setAttribute\([^,)]*' src/lib/externalLinks.ts | sort -u | tr '\n' ' ')
-if [[ $ndo -eq 0 && $nset == "setAttribute('rel' setAttribute('target' " ]]; then
-  echo "PASS  externalLinks only sets a link's target and rel"
-else echo "FAIL  externalLinks does more than set a link's target and rel ($ndo; $nset)"; fail=1; fi
+# local binding that could shadow it. Beta round T8: it also adds one hidden
+# "(opens in a new tab)" note. Every code line of the file (whole-line //
+# comments and blank lines aside) is pinned exactly; no /* comment and no line
+# break grep can't see (CR, U+2028, U+2029) may hide code from the pin.
+WANT_ATTACH=$(cat <<'XL'
+export function opensInNewTab(href: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(href, document.baseURI);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+  if (u.origin !== location.origin) return true;
+  return /^\/(assets|api)\//.test(u.pathname);
+}
+export function externalLinks(_html: string) {
+  return (el: HTMLElement): void => {
+    for (const a of el.querySelectorAll('a[href]')) {
+      if (!opensInNewTab(a.getAttribute('href') ?? '')) continue;
+      a.setAttribute('target', '_blank');
+      a.setAttribute('rel', 'noopener noreferrer');
+      if (a.querySelector(':scope > .new-tab-note')) continue;
+      const note = document.createElement('span');
+      note.className = 'vh new-tab-note';
+      note.textContent = ' (opens in a new tab)';
+      a.append(note);
+    }
+  };
+}
+XL
+)
+got_attach=$(grep -vE '^[[:space:]]*(//|$)' src/lib/externalLinks.ts)
+nhide=$(LC_ALL=C grep -cE $'\r|\xe2\x80[\xa8\xa9]|/\\*' src/lib/externalLinks.ts)
+if [[ "$got_attach" == "$WANT_ATTACH" && $nhide -eq 0 ]]; then
+  echo "PASS  externalLinks sets only a new-tab link's target and rel and adds the hidden note (every code line pinned)"
+else echo "FAIL  externalLinks.ts changed: every code line is pinned, with no /* comment or hidden line break ($nhide)"; fail=1; fi
 nbind=0
 for f in $CONTENT_SURFACES; do
   [[ $(grep -cE "^  import \{ externalLinks \} from '(\.\./)+lib/externalLinks';$" $f) -eq 1 ]] || nbind=$((nbind+1))

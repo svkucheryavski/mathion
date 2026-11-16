@@ -13,6 +13,7 @@
   {onclick}
   title={item.title}
   aria-label={item.title}
+  aria-current={istate === 'current' ? 'step' : undefined}
 >
   <!-- `state` MUST be forwarded: the visual state now lives on the child, so
        dropping it here would leave the button's own state class intact while

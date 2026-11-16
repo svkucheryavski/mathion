@@ -33,6 +33,12 @@ export function externalLinks(_html: string) {
       if (!opensInNewTab(a.getAttribute('href') ?? '')) continue;
       a.setAttribute('target', '_blank');
       a.setAttribute('rel', 'noopener noreferrer');
+      // Said once, also when the attachment runs again on the same node.
+      if (a.querySelector(':scope > .new-tab-note')) continue;
+      const note = document.createElement('span');
+      note.className = 'vh new-tab-note';
+      note.textContent = ' (opens in a new tab)';
+      a.append(note);
     }
   };
 }
