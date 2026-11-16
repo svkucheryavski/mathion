@@ -337,7 +337,7 @@
   .chip.ad { background: var(--primary-soft); color: var(--primary); }
   .row-icons { display: inline-flex; gap: 4px; }
   /* RunMiniProjectsTab's confirm row under its row. */
-  .u-confirm td { padding: 0 12px 10px; border-top: 0; }
+  .u-confirm td { padding: 4px 12px 10px; border-top: 0; }
   .u-count { margin: 8px 2px 0; font-size: 12px; color: var(--muted); }
   .vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 </style>

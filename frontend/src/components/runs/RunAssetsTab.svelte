@@ -789,7 +789,7 @@
               </td>
               <td class="num">{formatFileSize(a.file_size)}</td>
               <td class="num">{formatLocalWithTz(a.uploaded_at)}</td>
-              <td class="num">{a.uploaded_by_email ?? '—'}</td>
+              <td class="num a-by">{a.uploaded_by_email ?? '—'}</td>
               <td>
                 {#if miniProjects == null}
                   —
@@ -963,9 +963,12 @@
   .assets-table tbody tr:first-child td { border-top: 0; }
   .col-check { width: 1%; }
   .sort-btn { display: inline-flex; align-items: center; gap: 4px; padding: 0; background: none; border: 0; font: inherit; color: inherit; cursor: pointer; }
+  /* A long name and a long email share the row; the name keeps 12rem. */
+  .a-name { min-width: 12rem; overflow-wrap: anywhere; }
   .a-name a { color: var(--primary); text-decoration: none; }
   .a-name a:hover { text-decoration: underline; }
   .num { font-family: var(--font-mono); font-size: 12px; color: var(--text-2); white-space: nowrap; }
+  .num.a-by { white-space: normal; overflow-wrap: anywhere; }
 
   .uses-chip { padding: 1px 8px; border: 0; border-radius: var(--radius-pill); font-family: var(--font-mono); font-size: 11.5px; white-space: nowrap; cursor: pointer; }
   .uses-on { background: var(--status-accepted-bg); color: var(--status-accepted-fg); }
@@ -976,7 +979,7 @@
   .row-icons { display: inline-flex; gap: 4px; }
   .sp-head code { font-family: var(--font-mono); }
 
-  .danger-row td, .sub-panel-row td, .replace-row td, .delete-row td { padding: 0 10px 10px; border-top: 0; }
+  .danger-row td, .sub-panel-row td, .replace-row td, .delete-row td { padding: 4px 10px 10px; border-top: 0; }
   .sub-panel { padding: 8px 12px; background: var(--surface-2); border-radius: var(--radius); }
   .sp-head { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
   .sub-panel ul { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }

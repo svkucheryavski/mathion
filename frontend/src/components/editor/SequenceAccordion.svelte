@@ -366,6 +366,10 @@
     border-color: var(--focus-line-strong);
     box-shadow: var(--focus-shadow);
   }
+  /* Forced colours drop the focus shades, so the focus panel gets a ring. */
+  @media (forced-colors: active) {
+    .seq-card.focus { outline: 2px solid CanvasText; outline-offset: -1px; }
+  }
   .acc-body { padding: 12px 14px; border-top: 1px solid var(--border-soft); /* ref 1578 */ }
   .add-line {
     margin-top: 8px;

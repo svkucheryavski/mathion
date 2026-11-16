@@ -445,7 +445,7 @@
   .mp-sep { margin: 0 6px; color: var(--faint); }
   .mp-actions { width: 1%; white-space: nowrap; text-align: right; }
   .row-icons { display: inline-flex; gap: 4px; }
-  .mp-panel-row td { padding: 0 12px 10px; border-top: 0; }
+  .mp-panel-row td { padding: 4px 12px 10px; border-top: 0; }
 
   .mp-chip { display: inline-block; padding: 1px 8px; border-radius: var(--radius-pill); font-size: 11.5px; }
   .chip-draft { background: var(--state-created-bg); color: var(--state-created-fg); }

@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3058
+EXPECTED_CHECKS=3082
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4086,6 +4086,8 @@ own block-card BlockAccordion.svelte
 uniq1 block-card
 if [[ -n $REPLY ]]; then
   N=BlockAccordion; H=$REPLY
+  # Beta round: forced colours drop the focus shades, so the focus panel gets a ring.
+  chk "@media \(forced-colors: active\)\{\.block-card\.focus\.${H},\.block-card\.parent\.${H}" 'outline:2px solid CanvasText' 'outline-offset:-1px'
   d '\.block-card' '' 'border:1px solid var\(--focus-line\)' 'border-radius:var\(--radius\)' 'background:transparent' 'overflow:hidden' 'margin-bottom:6px'
   # 5c T5 (user): a focus-level row is white on the shaded page.
   d '\.block-card\.at-focus' '' 'background:var\(--focus-0\)'
@@ -4103,6 +4105,8 @@ own seq-card SequenceAccordion.svelte
 uniq1 seq-card
 if [[ -n $REPLY ]]; then
   N=SequenceAccordion; H=$REPLY
+  # Beta round: the forced-colours ring for the focus panel.
+  chk "@media \(forced-colors: active\)\{\.seq-card\.focus\.${H}" 'outline:2px solid CanvasText' 'outline-offset:-1px'
   d '\.acc-body' '' 'padding:12px 14px' 'border-top:1px solid var\(--border-soft\)'
   none "SequenceAccordion no Items heading rules (5c T2)" "(\.items-head|h5)\.${H}"
   # "+ Add item" — a text line like + Add block / + Add sequence (user, 5c T3);
@@ -4163,8 +4167,8 @@ if [[ -n $REPLY ]]; then
   d 'label\.selected' '' 'border-color:var\(--primary\)' 'background:var\(--primary-soft\)'
   # D12 exception: the established inset ring, and the forced-colors block.
   chk "label\.${H}:has\(input:where\(\.${H}\):focus-visible\)" 'box-shadow:inset 0 0 0 2px var\(--primary\)'
-  chk "@media \(forced-colors: active\)\{label\.selected\.${H}" 'border:2px solid Highlight'
-  chk "label\.selected\.${H}\{border:2px solid Highlight\}label\.${H}:has\(input:where\(\.${H}\):focus-visible\)" 'outline:2px solid Highlight' 'outline-offset:-2px'
+  chk "@media \(forced-colors: active\)\{label\.selected\.${H}" 'outline:2px solid' 'outline-offset:-2px'
+  chk "label\.selected\.${H}\{outline:2px solid;outline-offset:-2px\}label\.${H}:has\(input:where\(\.${H}\):focus-visible\)" 'outline:2px solid Highlight' 'outline-offset:-2px'
   # Constraint 2: the radio stays the sr-only idiom (position + pointer-events), not a dim.
   chk "label\.${H} input:where\(\.${H}\)" 'position:absolute' 'opacity:0' 'pointer-events:none'
   # D12: focus styling only via :focus-visible — selector-agnostic, so a :focus /
@@ -4173,8 +4177,8 @@ if [[ -n $REPLY ]]; then
   # No outline but a Highlight one (the forced-colors block): the inset ring is the
   # only non-forced focus indicator. Per declaration, so a non-Highlight outline
   # cannot ride on a Highlight sibling in the same rule; the longhands count too
-  # (outline-offset is geometry, not a ring).
-  bad=$(grep -oE "[^{}]*\.${H}[^{}]*\{[^}]*\}" $CSS | grep -oE '[{;]outline(-(style|color|width))?:[^;}]*' | grep -v Highlight)
+  # (outline-offset is geometry, not a ring). The forced-colors selection ring is skipped.
+  bad=$(sed -E "s/@media \(forced-colors: active\)\{label\.selected\.${H}\{outline:2px solid;outline-offset:-2px\}//" $CSS | grep -oE "[^{}]*\.${H}[^{}]*\{[^}]*\}" | grep -oE '[{;]outline(-(style|color|width))?:[^;}]*' | grep -v Highlight)
   if [[ -z $bad ]]; then echo "PASS  ItemTypePicker: no outline outside forced colors (D12)"
   else echo "FAIL  ItemTypePicker: no outline outside forced colors (D12): ${(f)bad}"; fail=1; fi
   none "ItemTypePicker pre-5a .picker/.glyph gone" "\.(picker|glyph)\.${H}"
@@ -4406,6 +4410,9 @@ if grep -rqE "import QuestionTypePicker from" src --include='*.svelte' --exclude
     d '\.cards' '' 'display:flex' 'flex-wrap:wrap' 'gap:8px'
     chk "label\.${H}" 'display:flex' 'padding:6px 10px' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:13px'
     chk "label\.selected\.${H}" 'border-color:var\(--primary\)' 'background:var\(--primary-soft\)'
+    # Beta round: forced colours, a neutral ring for selection and Highlight for focus.
+    chk "@media \(forced-colors: active\)\{label\.selected\.${H}" 'outline:2px solid' 'outline-offset:-2px'
+    chk "label\.selected\.${H}\{outline:2px solid;outline-offset:-2px\}label\.${H}:has\(input:where\(\.${H}\):focus-visible\)" 'outline:2px solid Highlight' 'outline-offset:-2px'
     none "QuestionTypePicker no --accent / --accent-bg fallbacks" "\.${H}[^{]*\{[^}]*var\(--accent"
     sweep QuestionTypePicker $H
   fi
@@ -4565,6 +4572,8 @@ own inline-confirm InlineConfirm.svelte
 uniq1 inline-confirm
 if [[ -n $REPLY ]]; then
   N=InlineConfirm; H=$REPLY
+  # Beta round: a wrapped warning in an end-aligned confirm ends at the right edge too.
+  chk "\.inline-confirm\.end\.${H} \.warning:where\(\.${H}\)" 'text-align:end'
   d '\.inline-confirm\.row' '' 'flex-direction:row' 'align-items:center' 'gap:12px'
   # VR backlog T7: a confirm held by its disabledReason takes the blocked look.
   chk "\.confirm\[aria-disabled=true\]\.${H}:not\(\[aria-busy=true\]\)" 'background:var\(--disabled-bg\)' 'color:var\(--faint\)' 'cursor:not-allowed'
@@ -5040,6 +5049,8 @@ own mp-table RunMiniProjectsTab.svelte
 uniq1 mp-table
 if [[ -n $REPLY ]]; then
   N=RunMiniProjectsTab; H=$REPLY
+  # Beta round: the confirm row keeps room for the focus ring.
+  chk "\.mp-panel-row\.${H} td:where\(\.${H}\)" 'padding:4px 12px 10px'
   d '\.chip-draft' '' 'background:var\(--state-created-bg\)' 'color:var\(--state-created-fg\)'
   d '\.chip-published' '' 'background:var\(--state-published-bg\)' 'color:var\(--state-published-fg\)'
   d '\.chip-locked' '' 'background:var\(--state-archived-bg\)' 'color:var\(--state-archived-fg\)'
@@ -5071,6 +5082,10 @@ own assets-table RunAssetsTab.svelte
 uniq1 assets-table
 if [[ -n $REPLY ]]; then
   N=RunAssetsTab; H=$REPLY
+  # Beta round: a long name keeps 12rem beside a long email, and confirm rows keep ring room.
+  d '\.a-name' '' 'min-width:12rem' 'overflow-wrap:anywhere'
+  d '\.num\.a-by' '' 'white-space:normal' 'overflow-wrap:anywhere'
+  chk "\.delete-row\.${H} td:where\(\.${H}\)" 'padding:4px 10px 10px'
   d '\.bulk-strip' '' 'background:var\(--surface-2\)'
   # Polish 3 Task 7 (table corners): the outer border and radius sit on a scroll
   # wrapper. It clips the grey header corners and scrolls a table wider than its
@@ -5137,6 +5152,12 @@ own switch Switch.svelte
 uniq1 switch
 if [[ -n $REPLY ]]; then
   N=Switch; H=$REPLY
+  # Beta round: forced colours draw the track and knob in system colours.
+  chk "@media \(forced-colors: active\)\{\.switch\.${H}" 'padding:1px' 'border:1px solid ButtonText'
+  chk "\.switch\.${H}\{padding:1px;border:1px solid ButtonText\}\.knob\.${H}" 'forced-color-adjust:none' 'background:ButtonText'
+  chk "@media \(forced-colors: active\)\{\.switch\.${H}\{padding:1px;border:1px solid ButtonText\}\.knob\.${H}\{forced-color-adjust:none;background:ButtonText\}\.switch\.on\.${H} \.knob:where\(\.${H}\)" 'background:Highlight'
+  chk "@media \(forced-colors: active\)\{\.switch\.${H}\{padding:1px;border:1px solid ButtonText\}\.knob\.${H}\{forced-color-adjust:none;background:ButtonText\}\.switch\.on\.${H} \.knob:where\(\.${H}\)\{background:Highlight\}\.switch\.${H}:disabled" 'border-color:GrayText'
+  chk "@media \(forced-colors: active\)\{\.switch\.${H}\{padding:1px;border:1px solid ButtonText\}\.knob\.${H}\{forced-color-adjust:none;background:ButtonText\}\.switch\.on\.${H} \.knob:where\(\.${H}\)\{background:Highlight\}\.switch\.${H}:disabled\{border-color:GrayText\}\.switch\.${H}:disabled \.knob:where\(\.${H}\)" 'background:GrayText'
   d '\.switch' '' 'width:30px' 'height:17px' 'padding:2px' 'border-radius:9px' 'background:var\(--border-strong\)'
   d '\.switch\.on' '' 'background:var\(--primary\)'
   d '\.switch' ':disabled' 'background:var\(--border-faint\)'
@@ -5288,6 +5309,8 @@ own ro-toolbar RunRosterTab.svelte
 uniq1 ro-toolbar
 if [[ -n $REPLY ]]; then
   N=RunRosterTab; H=$REPLY
+  # Beta round: the confirm row keeps room for the focus ring.
+  chk "\.ro-confirm-row\.${H} td:where\(\.${H}\)" 'padding:4px 12px 10px'
   d '\.ro-toolbar' '' 'display:flex' 'align-items:center' 'gap:9px' 'flex-wrap:wrap'
   d '\.ro-tools-right' '' 'margin-left:auto' 'gap:8px'
   d '\.ro-search' '' 'width:230px'
@@ -6130,7 +6153,7 @@ if [[ -n $REPLY ]]; then
   none "SuperuserUsers has no Disabled column (D14 rev 8)" "\.(u-off|u-dot)\.${H}"
   d '\.row-icons' '' 'display:inline-flex' 'gap:4px'
   chk "\.u-table\.${H} td\.u-actions:where\(\.${H}\)" 'width:1%' 'white-space:nowrap'
-  chk "\.u-confirm\.${H} td:where\(\.${H}\)" 'padding:0 12px 10px' 'border-top:0'
+  chk "\.u-confirm\.${H} td:where\(\.${H}\)" 'padding:4px 12px 10px' 'border-top:0'
   d '\.u-count' '' 'margin:8px 2px 0' 'font-size:12px' 'color:var\(--muted\)'
   none "SuperuserUsers puts no flex on a table cell (the chips sit in .u-chips)" "\.u-roles\.${H}\{[^}]*display:"
   sweep SuperuserUsers $H

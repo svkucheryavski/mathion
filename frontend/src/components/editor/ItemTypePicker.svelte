@@ -57,8 +57,9 @@
   label:has(input:focus-visible) { box-shadow: inset 0 0 0 2px var(--primary); }
   /* Constraint 2: the sr-only idiom for a still-focusable radio, not a dim. */
   label input { position: absolute; opacity: 0; pointer-events: none; }
+  /* Forced colours: a neutral ring for selection, Highlight for focus. */
   @media (forced-colors: active) {
-    label.selected { border: 2px solid Highlight; }
+    label.selected { outline: 2px solid; outline-offset: -2px; }
     label:has(input:focus-visible) { outline: 2px solid Highlight; outline-offset: -2px; }
   }
 </style>

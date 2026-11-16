@@ -80,4 +80,12 @@
   @media (prefers-reduced-motion: reduce) {
     .knob { transition: none; }
   }
+  /* Forced colours paint track and knob as Canvas; draw them in system colours. */
+  @media (forced-colors: active) {
+    .switch { padding: 1px; border: 1px solid ButtonText; }
+    .knob { forced-color-adjust: none; background: ButtonText; }
+    .switch.on .knob { background: Highlight; }
+    .switch:disabled { border-color: GrayText; }
+    .switch:disabled .knob { background: GrayText; }
+  }
 </style>

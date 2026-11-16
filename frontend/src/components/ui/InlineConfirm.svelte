@@ -113,6 +113,7 @@
   .inline-confirm.row { flex-direction: row; align-items: center; gap: 12px; }
   /* D42: the question takes its whole line and ends under the row's actions. */
   .inline-confirm.end { display: flex; justify-content: flex-end; }
+  .inline-confirm.end .warning { text-align: end; }
   /* A long title or an unbroken name wraps inside the question, so the
      buttons stay on screen (Review Focus 1). */
   .warning { font-size: 12.5px; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; }

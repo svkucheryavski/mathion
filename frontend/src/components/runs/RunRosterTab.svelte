@@ -1181,7 +1181,7 @@
   .ro-mark { box-shadow: inset 3px 0 0 0 var(--danger); }
   .ro-email-cell { overflow-wrap: anywhere; }
   .ro-none { color: var(--muted); }
-  .ro-confirm-row td { padding: 0 12px 10px; border-top: 0; }
+  .ro-confirm-row td { padding: 4px 12px 10px; border-top: 0; }
 
   .ro-nomatch { margin: 0; font-size: 13px; color: var(--muted); }
   .ro-empty-links { display: inline-flex; gap: 16px; }
