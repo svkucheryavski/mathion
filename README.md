@@ -6,7 +6,9 @@ A learning-management backend (FastAPI + SQLAlchemy 2.0 + Alembic) on
 ## Prerequisites
 
 - Docker (for the local Postgres) and Docker Compose
-- Python 3.12+ with the backend virtualenv at `backend/.venv`
+- Python 3.13 (as CI) with the backend virtualenv at `backend/.venv`, installed with CI's pins:
+  `backend/.venv/bin/pip install -c backend/constraints.txt -e './backend[dev]'`
+- Node 26 for the frontend (CI and the image build use Node 26)
 
 ## Dev bootstrap
 
