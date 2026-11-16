@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
-  QuizServer, q, opt, renderQuiz, cleanup, settle, panel, cards, rows, byName, live, text,
+  QuizServer, q, opt, renderQuiz, cleanup, settle, panel, cards, rows, byName, said, text,
 } from './support/quizHarness.svelte';
 
 afterEach(cleanup);
@@ -196,7 +196,7 @@ describe('Quiz overview (5d T3)', () => {
   it('an empty quiz says so', async () => {
     await renderQuiz(new QuizServer([]));
     expect(text(panel().querySelector('.quiz-empty'))).toBe('No questions yet.');
-    expect(live()).toBe('');
+    expect(await said()).toBe('');
   });
 
   it('disabled: plain Markdown source under the note, and no /render call', async () => {

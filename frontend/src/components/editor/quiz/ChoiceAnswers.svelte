@@ -377,7 +377,7 @@
         <InlineInput edit={addEdit} label={`New answer for question ${n}`} saveTitle="Add answer" />
       {:else}
         <button type="button" class="ans-add-btn" aria-label={`Add answer to question ${n}`}
-                title={addReason ?? 'Add answer'} disabled={addReason !== null} onclick={() => void openAdd()}>+ Add answer</button>
+                title={addReason ?? 'Add answer'} disabled={addReason !== null} onclick={() => void openAdd()}><span aria-hidden="true">+</span> Add answer</button>
       {/if}
     </div>
   {/if}

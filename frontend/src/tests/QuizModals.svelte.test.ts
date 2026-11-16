@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
-  QuizServer, q, mkVersion, renderQuiz, cleanup, settle, panel, topPanel, cards, byName, typeInto, press, live, toastTexts, text,
+  QuizServer, q, mkVersion, renderQuiz, cleanup, settle, panel, topPanel, cards, byName, typeInto, press, said, toastTexts, text,
 } from './support/quizHarness.svelte';
 import { DISCARD, DISCARD_CONTINUE } from '../lib/editorReasons';
 import { FORBIDDEN_TITLE } from '../lib/quizEdits.svelte';
@@ -44,7 +44,7 @@ describe('Question text modal (5d T7)', () => {
     expect(isL3Open()).toBe(false);
     expect(cards()[0].querySelector('.qtext a')!.getAttribute('target')).toBe('_blank');
     expect(document.activeElement).toBe(byName(cards()[0], 'Edit question 1'));
-    expect(live()).toBe('Saved');
+    expect(await said()).toBe('Saved');
   });
 
   it('closing without changes just closes; with changes it asks in the footer (#15); Esc closes only the top modal', async () => {
@@ -413,7 +413,7 @@ describe('Level 3 — review fixes (5d T7)', () => {
     (r.props.modal as { stillOnVid: () => boolean }).stillOnVid = () => false;
     hold.release();
     await settle();
-    expect(live()).not.toBe('Saved');
+    expect(await said()).not.toBe('Saved');
     expect(footBtn('Cancel').disabled).toBe(false);
     expect(area().readOnly).toBe(false);
   });
@@ -522,7 +522,7 @@ describe('Level 3 — ⌘S with focus on <body>', () => {
   it('New question: ⌘S with focus on body saves once', async () => {
     const s = new QuizServer([q({ id: 1 })]);
     await renderQuiz(s);
-    byName(panel(), '+ Add question')!.click();
+    byName(panel(), 'Add question')!.click();
     await settle();
     typeInto(area(), 'Pick one');
     const { e, pd } = fromBody();

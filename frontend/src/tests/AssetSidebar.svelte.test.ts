@@ -358,6 +358,9 @@ describe('AssetSidebar — delete UI', () => {
     expect(t1.title).toBe('Remove asset');
     expect(t2.disabled).toBe(true);
     expect(t2.title).toBe('Remove asset — still referenced in this version');
+    // The reason is in the name too: a title alone is not read with a disabled button.
+    expect(t2.getAttribute('aria-label')).toBe('Remove asset — still referenced in this version: b.pdf');
+    expect(t1.getAttribute('aria-label')).toBe('Delete a.png');
     expect(target.querySelector('[data-testid="asset-row-2"] [data-testid="used-badge"]')!.textContent).toBe('used');
   });
 

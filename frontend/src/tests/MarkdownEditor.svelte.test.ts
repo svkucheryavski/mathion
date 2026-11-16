@@ -829,3 +829,37 @@ describe('MarkdownEditor — preview variant (Polish 2 D51)', () => {
     expect(preview.querySelector(`a[href="${location.origin}/courses/x"]`)!.hasAttribute('target')).toBe(false);
   });
 });
+
+describe('MarkdownEditor — a named card when there is no field to name', () => {
+  beforeEach(() => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+  });
+
+  it('plain: the card is a group named by ariaLabel', () => {
+    const { target } = mountEditor({ plain: true, value: 'x', ariaLabel: 'Content' });
+    flushSync();
+    const card = target.querySelector('.md-card')!;
+    expect(card.getAttribute('role')).toBe('group');
+    expect(card.getAttribute('aria-label')).toBe('Content');
+  });
+
+  it('read-only: the card is a group named by ariaLabel', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ html: '<p>x</p>' }), { status: 200, headers: { 'content-type': 'application/json' } })));
+    try {
+      const { target } = mountEditor({ readOnly: true, value: 'x', ariaLabel: 'Content' });
+      await Promise.resolve(); flushSync();
+      const card = target.querySelector('.md-card')!;
+      expect(card.getAttribute('role')).toBe('group');
+      expect(card.getAttribute('aria-label')).toBe('Content');
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('editing: the textarea carries the name, the card has no role', async () => {
+    const { target } = mountEditor({ value: 'x', ariaLabel: 'Content' });
+    await Promise.resolve(); flushSync();
+    const card = target.querySelector('.md-card')!;
+    expect(card.hasAttribute('role')).toBe(false);
+    expect(card.hasAttribute('aria-label')).toBe(false);
+    expect(target.querySelector('textarea')?.getAttribute('aria-label')).toBe('Content');
+  });
+});

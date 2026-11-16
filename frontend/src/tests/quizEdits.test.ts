@@ -145,12 +145,33 @@ describe('QuizEdits (D10)', () => {
     expect(late.close).not.toHaveBeenCalled();
   });
 
-  it('say clears the message, then sets it', async () => {
-    const e = new QuizEdits();
-    e.say('Saved');
-    expect(e.message).toBe('');
-    await Promise.resolve();
-    expect(e.message).toBe('Saved');
+  it('say clears the message, then sets it 150 ms later, after the focus move', () => {
+    vi.useFakeTimers();
+    try {
+      const e = new QuizEdits();
+      e.say('Saved');
+      expect(e.message).toBe('');
+      vi.advanceTimersByTime(149);
+      expect(e.message).toBe('');
+      vi.advanceTimersByTime(1);
+      expect(e.message).toBe('Saved');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('a newer say replaces a pending one', () => {
+    vi.useFakeTimers();
+    try {
+      const e = new QuizEdits();
+      e.say('Saved');
+      vi.advanceTimersByTime(100);
+      e.say('Answer moved to position 2 of 3');
+      vi.advanceTimersByTime(100);
+      expect(e.message).toBe('');
+      vi.advanceTimersByTime(50);
+      expect(e.message).toBe('Answer moved to position 2 of 3');
+      vi.advanceTimersByTime(500);
+      expect(e.message).toBe('Answer moved to position 2 of 3');
+    } finally { vi.useRealTimers(); }
   });
 
   it('track counts requests in flight, success or failure', async () => {
@@ -227,7 +248,7 @@ describe('InlineEdit', () => {
     await p;
     expect(send).toHaveBeenCalledWith('new');
     expect(close).toHaveBeenCalledWith(true);
-    await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 160));
     expect(edits.message).toBe('Saved');
   });
 
@@ -317,7 +338,7 @@ describe('InlineEdit', () => {
     live = false;
     resolve();
     await p;
-    await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 160));
     expect(edits.message).toBe('');
     expect(ed.saving).toBe(false);
     expect(close).not.toHaveBeenCalled();

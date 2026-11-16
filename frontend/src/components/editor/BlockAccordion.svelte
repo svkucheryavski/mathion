@@ -420,7 +420,7 @@
             </span>
           </form>
         {:else}
-          <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} aria-disabled={posting ? 'true' : undefined} title={posting ? 'Wait for the request to finish' : undefined} onclick={() => void openAdd()}>+ Add sequence</button>
+          <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} aria-disabled={posting ? 'true' : undefined} title={posting ? 'Wait for the request to finish' : undefined} onclick={() => void openAdd()}><span aria-hidden="true">+</span> Add sequence</button>
         {/if}
       {/if}
     </div>

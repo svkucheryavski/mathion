@@ -663,7 +663,7 @@
     <div class="upload-area">
       <Button variant="primary" data-action="upload" disabled={versionIsDisabled}
               title={versionIsDisabled ? VERSION_OFF : undefined} bind:element={uploadEl}
-              onclick={handleUploadPicker}>+ Upload</Button>
+              onclick={handleUploadPicker}><span aria-hidden="true">+</span> Upload</Button>
       <input
         type="file"
         multiple

@@ -694,7 +694,7 @@
               </span>
             </form>
           {:else}
-            <button bind:this={addLineEl} type="button" class="add-line" data-action="add-block" disabled={busy} aria-disabled={posting ? 'true' : undefined} title={posting ? 'Wait for the request to finish' : undefined} onclick={() => void openAdd()}>+ Add block</button>
+            <button bind:this={addLineEl} type="button" class="add-line" data-action="add-block" disabled={busy} aria-disabled={posting ? 'true' : undefined} title={posting ? 'Wait for the request to finish' : undefined} onclick={() => void openAdd()}><span aria-hidden="true">+</span> Add block</button>
           {/if}
         {/if}
       </section>

@@ -73,6 +73,26 @@ describe('AccordionHeader — block number', () => {
     btn('Cancel editing the block title')!.click(); await settle();
     expect(row().classList.contains('renaming')).toBe(false);
   });
+  // The id moves to the field inside the heading: the region stays named, and focus lookups find a focusable field.
+  it('while renaming, the field inside the h3 holds the header id', async () => {
+    render(blk);
+    btn('Edit the block title')!.click(); await settle();
+    expect(document.getElementById('h')).toBe(input());
+    expect(document.querySelectorAll('#h').length).toBe(1);
+    const h = input()!.closest('h3')!;
+    expect(h).not.toBeNull();
+    type('');
+    key('Enter'); await settle();
+    const err = target.querySelector('p.err');
+    expect(err).not.toBeNull();
+    expect(h.contains(err)).toBe(false);
+  });
+  it('a sequence keeps its h4 around the field while renaming', async () => {
+    render();
+    pencil()!.click(); await settle();
+    expect(document.getElementById('h')).toBe(input());
+    expect(input()!.closest('h4')).not.toBeNull();
+  });
   it('a sequence header has no number', () => {
     render({ index: 2 });
     expect(target.querySelector('.num')).toBeNull();
@@ -198,7 +218,7 @@ describe('AccordionHeader — inline title (D8)', () => {
     expect(input()!.value).toBe('Linear combinations');
     expect(input()!.getAttribute('aria-label')).toBe('Sequence title');
     expect(document.activeElement).toBe(input());
-    expect(target.querySelector('#h')).toBeNull();
+    expect(document.getElementById('h')).toBe(input());
   });
   it('Enter saves through onRename with the trimmed title, then closes and refocuses ✎', async () => {
     const p = render();

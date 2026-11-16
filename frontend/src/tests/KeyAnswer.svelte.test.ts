@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
-  QuizServer, q, mkVersion, renderQuiz, panel, cleanup, settle, cards, byName, typeInto, press, live, toastTexts, text,
+  QuizServer, q, mkVersion, renderQuiz, panel, cleanup, settle, cards, byName, typeInto, press, said, toastTexts, text,
 } from './support/quizHarness.svelte';
 import { KEY_CONFIRM, DISCARD_PROMPT, FORBIDDEN_TITLE, WAIT_TITLE } from '../lib/quizEdits.svelte';
 import { versionPermissions } from '../lib/versionPermissions';
@@ -31,7 +31,7 @@ describe('Number answer (5d T6)', () => {
     expect(qWrites(s).map((c) => c.body)).toEqual([{ correct_numeric: 4.5, precision: 1 }]);
     expect(line()).toBe('Answer 4.5 · 1 decimal (± 0.05)');
     expect(document.activeElement).toBe(pencil());
-    expect(live()).toBe('Saved');
+    expect(await said()).toBe('Saved');
   });
 
   it('old data opens with an empty value and 0 decimals', async () => {

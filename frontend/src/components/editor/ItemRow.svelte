@@ -4,6 +4,7 @@
   // the arrows and delete only when the version allows structure changes
   // (Slice-5c: hidden, not disabled).
   import { labelFor } from '../../lib/labelFor';
+  import { ITEM_TYPE_NAME } from '../../lib/dashboards';
   import ItemMark from '../course/ItemMark.svelte';
   import IconButton from '../ui/IconButton.svelte';
   import type { AdminTreeItem } from '../../lib/types';
@@ -51,7 +52,7 @@
 
 <div class="item-row">
   <ItemMark type={item.type} state="not-yet" />
-  <span class="item-title">{visibleTitle}</span>
+  <span class="item-title"><span class="vh">{`${ITEM_TYPE_NAME[item.type]}: `}</span>{visibleTitle}</span>
   {#if item.type === 'quiz'}
     <span class="sep" aria-hidden="true">·</span>
     <span class="mono q-count" data-testid="item-question-count">{item.questions_count} {item.questions_count === 1 ? 'question' : 'questions'}</span>

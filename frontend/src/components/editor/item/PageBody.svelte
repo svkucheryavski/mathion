@@ -55,9 +55,9 @@
 </script>
 
 {#if versionDisabled}
-  <MarkdownEditor {assetContext} value={item.content_md ?? ''} plain />
+  <MarkdownEditor {assetContext} ariaLabel="Content" value={item.content_md ?? ''} plain />
 {:else if !editable}
-  <MarkdownEditor {assetContext} value={item.content_md ?? ''} readOnly />
+  <MarkdownEditor {assetContext} ariaLabel="Content" value={item.content_md ?? ''} readOnly />
 {:else}
   <MarkdownEditor
     {assetContext}

@@ -1,6 +1,7 @@
 import { api, ApiError, OFFLINE_MESSAGE, REQUEST_ERROR_MESSAGE } from './api';
 import type { BrandingPublic } from './branding.svelte';
 import { setUploadLimit } from './uploadLimit.svelte';
+import { graphemes } from './graphemes';
 
 // Every panel call passes skipAuthRedirect: the panel's shell handles 401 and
 // 404 itself (panelError), instead of the app-wide onUnauthorized redirect.
@@ -233,13 +234,9 @@ export type RoleChip = { kind: 'su' | 'ad' | 'role'; text: string; items: string
 
 const TIP_LINES = 10;
 
-// Cut by visible characters (graphemes), so a cut never splits a flag, an
-// emoji sequence or a letter from its accent.
-// Firefox before 125 has no Segmenter: there a cut counts code points, which
-// can split a flag but never fails the panel's import.
-const graphemes = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+// Cut by visible characters, so a cut never splits a flag, an emoji sequence or a letter from its accent.
 function cut(s: string, max: number): string {
-  const chars = graphemes ? Array.from(graphemes.segment(s), (g) => g.segment) : Array.from(s);
+  const chars = graphemes(s);
   return chars.length <= max ? s : chars.slice(0, max - 1).join('').trimEnd() + '…';
 }
 

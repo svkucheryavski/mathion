@@ -337,7 +337,7 @@
 
       {#if canStructure}
         <!-- After the list: new items land at the end (user, T3). -->
-        <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} onclick={() => { opens++; creating = true; }}>+ Add item</button>
+        <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} onclick={() => { opens++; creating = true; }}><span aria-hidden="true">+</span> Add item</button>
       {/if}
       {#if creating}
         <NewItemModal

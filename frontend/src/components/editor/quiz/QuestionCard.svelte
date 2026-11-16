@@ -131,7 +131,7 @@
     </div>
   {:else if ctx.canText}
     <button type="button" class="qexpl-add" aria-label={`Add explanation to question ${n}`}
-            title={openReason ?? 'Add explanation'} disabled={openReason !== null} onclick={() => void open('expl')}>+ Add explanation</button>
+            title={openReason ?? 'Add explanation'} disabled={openReason !== null} onclick={() => void open('expl')}><span aria-hidden="true">+</span> Add explanation</button>
   {/if}
 
   <!-- Level 3 stays mounted whatever a 403/409 reload does to the permissions. -->

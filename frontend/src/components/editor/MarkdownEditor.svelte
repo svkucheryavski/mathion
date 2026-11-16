@@ -292,7 +292,8 @@
   });
 </script>
 
-<div class="md-card">
+<!-- No field to carry the name when plain or read-only: the card is the named group. -->
+<div class="md-card" role={plain || readOnly ? 'group' : undefined} aria-label={plain || readOnly ? ariaLabel : undefined}>
   {#if plain}
     <pre class="plain-src" data-testid="markdown-plain">{value}</pre>
   {:else}
