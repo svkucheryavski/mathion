@@ -175,6 +175,7 @@ def delete_run(
         # Simple delete (cascade via FKs handles teachers/groups/students)
         db.delete(run)
         db.commit()
+        _remove_run_tree(run_id)
         return
 
     # ?force=true on an unpublished run (course admins): override the student and submission blocks
@@ -193,16 +194,15 @@ def delete_run(
     # Group and run_student/teacher cascade via FK on run delete; just delete RunAsset rows + files explicitly.
     # Storage layout puts everything under a single per-run tree, so one rmtree wipes both
     # run-asset files and submission/feedback PDFs.
-    run_tree = os.path.join(settings.asset_path, "runs", str(run_id))
     db.execute(RunAsset.__table__.delete().where(RunAsset.run_id == run_id))
     db.delete(run)
     db.commit()
     # Disk cleanup last (after DB commit so we don't end up with files but no rows)
-    if os.path.isdir(run_tree):
-        try:
-            shutil.rmtree(run_tree)
-        except OSError:
-            pass
+    _remove_run_tree(run_id)
+
+
+def _remove_run_tree(run_id: int) -> None:
+    shutil.rmtree(os.path.join(settings.asset_path, "runs", str(run_id)), ignore_errors=True)
 
 
 @router.post("/api/runs/{run_id}/publish", response_model=RunResponse)

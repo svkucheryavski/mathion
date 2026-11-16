@@ -578,6 +578,7 @@ BulkRosterErrorCode = Literal[
     "capacity_reached",  # target group is at the 10-student cap
     "internal_error",    # unexpected exception during per-row processing
     "student_already_active_in_course",  # student has an active enrollment in another run of the same course
+    "invalid_email",     # the address has no local@domain shape
 ]
 
 
@@ -988,6 +989,14 @@ class AuthConfigResponse(BaseModel):
 # --- The superuser panel: Courses (spec D4-D13) and Users (D14-D21) ---
 
 _PANEL_EMAIL_SHAPE = re.compile(r"^[^@\s]+@[^@\s]+$")
+BAD_EMAIL = "Enter an email address"
+
+
+def email_shape_ok(v: str) -> bool:
+    """A minimal local@domain shape (D4)."""
+    return bool(_PANEL_EMAIL_SHAPE.match(v))
+
+
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 _SLUG_SHAPE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")  # CourseCreate.slug's rule
 
@@ -1000,8 +1009,8 @@ def _normalize_panel_email(v: str) -> str:
     if len(v) > 254:
         raise ValueError("An email address is at most 254 characters")
     v = _normalize_email(v)
-    if not _PANEL_EMAIL_SHAPE.match(v):
-        raise ValueError("Enter an email address")
+    if not email_shape_ok(v):
+        raise ValueError(BAD_EMAIL)
     return v
 
 

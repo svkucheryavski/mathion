@@ -323,3 +323,21 @@ def test_api_remove_nonexistent_student(admin_client, db, superuser):
     _add_course_admin(db, course.id, superuser.id)
     response = admin_client.delete(f"/api/courses/{course.id}/students/9999")
     assert response.status_code == 404
+
+
+def test_api_enroll_rejects_a_bad_email(admin_client, db, superuser):
+    course, _version = _make_published_course(db)
+    _add_course_admin(db, course.id, superuser.id)
+    response = admin_client.post(f"/api/courses/{course.id}/enroll", json={"email": "anna"}, headers=CSRF)
+    assert (response.status_code, response.json()["detail"]) == (422, "Enter an email address")
+
+
+def test_api_enroll_batch_rejects_a_bad_email_and_adds_no_one(admin_client, db, superuser):
+    from sqlalchemy import select
+    course, _version = _make_published_course(db)
+    _add_course_admin(db, course.id, superuser.id)
+    response = admin_client.post(f"/api/courses/{course.id}/enroll-batch",
+                                 json={"emails": ["bo@uni.dk", "anna"]}, headers=CSRF)
+    assert (response.status_code, response.json()["detail"]) == (422, "Enter an email address")
+    db.expire_all()
+    assert db.scalar(select(User).where(User.email.in_(["bo@uni.dk", "anna"]))) is None

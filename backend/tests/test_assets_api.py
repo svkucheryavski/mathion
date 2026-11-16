@@ -688,3 +688,63 @@ def test_asset_file_response_has_nosniff(admin_client, asset_tmpdir):
         response = admin_client.get(f"/assets/{version['id']}/{name}")
         assert response.status_code == 200
         assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_upload_into_a_version_deleted_meanwhile_leaves_no_folder(admin_client, asset_tmpdir, monkeypatch):
+    from sqlalchemy import text
+    from mathion.api import assets as assets_api
+    from mathion.database import SessionLocal
+    _course, version = _create_published_version(admin_client)
+    real_replace = assets_api.os.replace
+
+    def replace_after_delete(src, dst):
+        with SessionLocal() as s:
+            s.execute(text("DELETE FROM course_versions WHERE id = :id"), {"id": version["id"]})
+            s.commit()
+        real_replace(src, dst)
+
+    monkeypatch.setattr(assets_api.os, "replace", replace_after_delete)
+    response = admin_client.post(
+        f"/api/versions/{version['id']}/assets",
+        files={"file": ("a.png", io.BytesIO(b"x"), "image/png")},
+    )
+    assert response.status_code == 404
+    assert not (asset_tmpdir / "courses" / str(version["id"])).exists()
+
+
+def test_upload_into_a_version_deleted_before_the_insert_is_404(admin_client, monkeypatch):
+    from mathion.api import assets as assets_api
+    from mathion.database import SessionLocal
+    from mathion.models import CourseVersion
+    _course, version = _create_published_version(admin_client)
+    real_load = assets_api.load_site
+
+    def load_after_delete(db):
+        with SessionLocal() as s:
+            s.delete(s.get(CourseVersion, version["id"]))
+            s.commit()
+        return real_load(db)
+
+    monkeypatch.setattr(assets_api, "load_site", load_after_delete)
+    response = admin_client.post(f"/api/versions/{version['id']}/assets",
+                                 files={"file": ("a.png", io.BytesIO(b"x"), "image/png")})
+    assert (response.status_code, response.json()["detail"]) == (404, "CourseVersion not found")
+
+
+def test_upload_whose_asset_row_is_deleted_meanwhile_is_404(admin_client, asset_tmpdir, monkeypatch):
+    from sqlalchemy import text
+    from mathion.api import assets as assets_api
+    from mathion.database import SessionLocal
+    _course, version = _create_published_version(admin_client)
+    real_replace = assets_api.os.replace
+
+    def replace_after_delete(src, dst):
+        with SessionLocal() as s:
+            s.execute(text("DELETE FROM assets WHERE version_id = :id"), {"id": version["id"]})
+            s.commit()
+        real_replace(src, dst)
+
+    monkeypatch.setattr(assets_api.os, "replace", replace_after_delete)
+    response = admin_client.post(f"/api/versions/{version['id']}/assets",
+                                 files={"file": ("a.png", io.BytesIO(b"x"), "image/png")})
+    assert (response.status_code, response.json()["detail"]) == (404, "Asset not found")

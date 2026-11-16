@@ -284,6 +284,20 @@ describe('RunRosterTab — the add toggle and the add row (D25)', () => {
     expect(email()!.value).toBe('b@x.com');
     expect(email()!.getAttribute('aria-invalid')).toBeNull();
   });
+
+  it("a 422 for a bad address shows the server's sentence and marks the field", async () => {
+    open({ students: [] });
+    toggle().click();
+    await settle();
+    const field = email()!;
+    fetchSpy.mockImplementation(() => jres({ detail: 'Enter an email address' }, 422));
+    type(field, 'anna@x');
+    act('add-student')!.click();
+    await settle();
+    await settle();
+    expect(text(target.querySelector('p.ro-err'))).toBe('Enter an email address');
+    expect(field.getAttribute('aria-invalid')).toBe('true');
+  });
 });
 
 describe('RunRosterTab — the draft banner and the draft-disabled add controls', () => {

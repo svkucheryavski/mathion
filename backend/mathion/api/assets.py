@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
@@ -73,9 +74,12 @@ def upload_asset(
     )
     db.add(asset)
     try:
+        db.flush()
+        asset_id = asset.id
         db.commit()
     except IntegrityError:
         db.rollback()
+        get_or_404(db, CourseVersion, version_id)
         raise HTTPException(status_code=409, detail=f"Asset '{filename}' already exists in this version")
 
     # Registry committed; now write file via temp+rename for atomicity.
@@ -100,8 +104,15 @@ def upload_asset(
         db.commit()
         raise HTTPException(status_code=500, detail="Failed to write asset to disk")
 
-    db.refresh(asset)
-    return asset
+    # A version deleted while the file was written leaves no folder behind.
+    db.expire_all()
+    if db.get(CourseVersion, version_id) is None:
+        shutil.rmtree(dirpath, ignore_errors=True)
+        raise HTTPException(status_code=404, detail="CourseVersion not found")
+    fresh = db.get(Asset, asset_id)
+    if fresh is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return fresh
 
 
 @router.get("/api/versions/{version_id}/assets", response_model=list[AssetResponse])

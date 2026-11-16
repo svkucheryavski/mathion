@@ -618,3 +618,110 @@ def test_run_asset_file_response_has_nosniff(admin_client, seed_run_with_groups)
     response = admin_client.get(f"/api/runs/{run['id']}/assets/d.csv")
     assert response.status_code == 200
     assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def _delete_run(run_id):
+    from mathion.database import SessionLocal
+    from mathion.models import Run
+    with SessionLocal() as s:
+        s.delete(s.get(Run, run_id))
+        s.commit()
+
+
+def test_upload_into_a_run_deleted_before_the_insert_is_404(admin_client, seed_run_with_groups, monkeypatch):
+    from mathion.api import run_assets as run_assets_api
+    run, _, _ = seed_run_with_groups()
+    real_load = run_assets_api.load_site
+
+    def load_after_delete(db):
+        _delete_run(run["id"])
+        return real_load(db)
+
+    monkeypatch.setattr(run_assets_api, "load_site", load_after_delete)
+    response = admin_client.post(f"/api/runs/{run['id']}/assets",
+                                 files={"file": ("a.csv", io.BytesIO(b"x"), "text/csv")})
+    assert (response.status_code, response.json()["detail"]) == (404, "Run not found")
+
+
+def test_replace_in_a_run_deleted_meanwhile_leaves_no_folder(admin_client, seed_run_with_groups, monkeypatch, asset_tmpdir):
+    from mathion.api import run_assets as run_assets_api
+    run, _, _ = seed_run_with_groups()
+    asset = admin_client.post(f"/api/runs/{run['id']}/assets",
+                              files={"file": ("a.csv", io.BytesIO(b"x"), "text/csv")}).json()
+    real_replace = run_assets_api.os.replace
+
+    def replace_after_delete(src, dst):
+        _delete_run(run["id"])
+        real_replace(src, dst)
+
+    monkeypatch.setattr(run_assets_api.os, "replace", replace_after_delete)
+    response = admin_client.put(f"/api/runs/{run['id']}/assets/{asset['id']}",
+                                files={"file": ("b.csv", io.BytesIO(b"yy"), "text/csv")})
+    assert (response.status_code, response.json()["detail"]) == (404, "Run not found")
+    assert not (asset_tmpdir / "runs" / str(run["id"])).exists()
+
+
+def test_replace_in_a_run_deleted_before_the_commit_is_404(admin_client, seed_run_with_groups, monkeypatch, asset_tmpdir):
+    from mathion.api import run_assets as run_assets_api
+    run, _, _ = seed_run_with_groups()
+    asset = admin_client.post(f"/api/runs/{run['id']}/assets",
+                              files={"file": ("a.csv", io.BytesIO(b"x"), "text/csv")}).json()
+    real_mime = run_assets_api.get_mime_type
+
+    def mime_after_delete(ext):
+        _delete_run(run["id"])
+        return real_mime(ext)
+
+    monkeypatch.setattr(run_assets_api, "get_mime_type", mime_after_delete)
+    response = admin_client.put(f"/api/runs/{run['id']}/assets/{asset['id']}",
+                                files={"file": ("b.csv", io.BytesIO(b"yy"), "text/csv")})
+    assert (response.status_code, response.json()["detail"]) == (404, "Run not found")
+    assert not (asset_tmpdir / "runs" / str(run["id"])).exists()
+
+
+def _delete_run_after_the_asset_commit(run_id, changed_only=False):
+    """Arm a one-shot listener: the run is deleted right after a commit that wrote a RunAsset."""
+    from sqlalchemy import event
+    from sqlalchemy.orm import Session
+    from mathion.models import RunAsset
+    state = {"armed": False, "done": False}
+
+    def before(session):
+        seen = session.dirty if changed_only else session.identity_map.values()
+        if not state["done"] and any(isinstance(o, RunAsset) for o in seen):
+            state["armed"] = True
+
+    def after(session):
+        if state["armed"] and not state["done"]:
+            state["done"] = True
+            _delete_run(run_id)
+
+    event.listen(Session, "before_commit", before)
+    event.listen(Session, "after_commit", after)
+    return lambda: (event.remove(Session, "before_commit", before), event.remove(Session, "after_commit", after))
+
+
+def test_upload_whose_run_is_deleted_right_after_its_commit_is_404(admin_client, seed_run_with_groups, asset_tmpdir):
+    run, _, _ = seed_run_with_groups()
+    stop = _delete_run_after_the_asset_commit(run["id"])
+    try:
+        response = admin_client.post(f"/api/runs/{run['id']}/assets",
+                                     files={"file": ("a.csv", io.BytesIO(b"x"), "text/csv")})
+    finally:
+        stop()
+    assert (response.status_code, response.json()["detail"]) == (404, "Run not found")
+    assert not (asset_tmpdir / "runs" / str(run["id"])).exists()
+
+
+def test_replace_whose_run_is_deleted_right_after_its_commit_is_404(admin_client, seed_run_with_groups, asset_tmpdir):
+    run, _, _ = seed_run_with_groups()
+    asset = admin_client.post(f"/api/runs/{run['id']}/assets",
+                              files={"file": ("a.csv", io.BytesIO(b"x"), "text/csv")}).json()
+    stop = _delete_run_after_the_asset_commit(run["id"], changed_only=True)
+    try:
+        response = admin_client.put(f"/api/runs/{run['id']}/assets/{asset['id']}",
+                                    files={"file": ("b.csv", io.BytesIO(b"yy"), "text/csv")})
+    finally:
+        stop()
+    assert (response.status_code, response.json()["detail"]) == (404, "Run not found")
+    assert not (asset_tmpdir / "runs" / str(run["id"])).exists()

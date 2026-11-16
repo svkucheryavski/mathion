@@ -348,7 +348,8 @@ export type BulkRosterErrorCode =
   | 'not_in_run'
   | 'capacity_reached'
   | 'internal_error'
-  | 'student_already_active_in_course';
+  | 'student_already_active_in_course'
+  | 'invalid_email';
 
 // PublishConflict — uniform 409 body shape returned by add_student, batch
 // roster upload, and publish_run when a student already has an active

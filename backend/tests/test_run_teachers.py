@@ -64,3 +64,9 @@ def test_teacher_can_list_but_not_add(teacher_client, admin_client, db, teacher_
     db.commit()
     assert teacher_client.get(f"/api/runs/{run['id']}/teachers").status_code == 200
     assert teacher_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "x@example.com"}).status_code == 403
+
+
+def test_add_teacher_rejects_a_bad_email(admin_client, seed_publishable_version):
+    run = _make_run(admin_client, seed_publishable_version)
+    response = admin_client.post(f"/api/runs/{run['id']}/teachers", json={"email": "anna"})
+    assert (response.status_code, response.json()["detail"]) == (422, "Enter an email address")

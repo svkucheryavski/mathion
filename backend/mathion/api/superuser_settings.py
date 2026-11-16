@@ -24,7 +24,7 @@ from mathion.branding import load_branding
 from mathion.config import settings
 from mathion.database import SessionLocal, get_db
 from mathion.models_auth import NotificationLogEntry, SiteSettings, User
-from mathion.notifications.dispatcher import refusal_on_card
+from mathion.notifications.dispatcher import SKIPPED_OFF, refusal_on_card
 from mathion.notifications.mailer import DEV_MODES, SMTPMailer, logs_in
 from mathion.notifications.smtp_errors import SAVED_NOT_ASCII, SMTP_FAILURES, USERNAME_ASCII, describe
 from mathion.schemas import (
@@ -55,7 +55,6 @@ _TEST_RUNNING = "The last test is still finishing. Try again in a minute."  # th
 # The user's sentences (2026-11-12).
 _FROM_QUOTES = "Put a name with symbols like , : ; @ [ ] in quotes."
 _FROM_UNDERSCORE = "The From address's domain can't contain _."
-_SKIPPED_OFF = "skipped: email was off"
 
 _PRINTABLE_ASCII = re.compile(r"[\x20-\x7e]*")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
@@ -313,7 +312,7 @@ def save_email(data: EmailSettingsIn, _user: User = Depends(require_superuser_pa
                 .where(NotificationLogEntry.sent_at.is_(None), NotificationLogEntry.error.is_(None),
                        NotificationLogEntry.created_at >= row.email_off_at,
                        NotificationLogEntry.created_at < now)
-                .values(error=_SKIPPED_OFF)
+                .values(error=SKIPPED_OFF)
             )
     _clear_send_failure(row)
     db.commit()

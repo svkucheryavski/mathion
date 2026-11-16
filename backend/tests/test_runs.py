@@ -459,3 +459,14 @@ def test_short_date_uses_english_months_whatever_the_locale():
         assert _short_date(date(2026, 9, 1)) == "01 Sep 2026"
     finally:
         locale.setlocale(locale.LC_TIME, saved)
+
+
+def test_delete_unpublished_run_removes_its_folder(admin_client, seed_publishable_version, asset_tmpdir):
+    course, _ = seed_publishable_version()
+    run = admin_client.post(f"/api/courses/{course['id']}/runs",
+        json={"title": "R", "start_date": "2026-01-01", "end_date": "2026-06-01"}).json()
+    folder = asset_tmpdir / "runs" / str(run["id"])
+    (folder / "assets").mkdir(parents=True)
+    (folder / "assets" / "a.csv").write_bytes(b"x")
+    assert admin_client.delete(f"/api/runs/{run['id']}").status_code == 204
+    assert not folder.exists()

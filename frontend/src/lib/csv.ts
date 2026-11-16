@@ -21,7 +21,9 @@ export type CsvParseResult =
     }
   | { ok: false; error: string };
 
-const EMAIL_RE = /^\S+@\S+\.\S+$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Looser: which cell holds the address, so one typo doesn't misread the paste.
+const LOOKS_LIKE_EMAIL = /^\S+@\S+\.\S+$/;
 
 function normalize(text: string): string[] {
   let t = text;
@@ -83,8 +85,8 @@ export function parseCsv(
   let positional: 'email-first' | 'name-first' = 'name-first';
   if (!hasHeader && dataRows.length > 0) {
     const r0 = dataRows[0];
-    const first = r0[0] || EMAIL_RE.test(r0[1] || '') ? r0 : dataRows.find((r) => (r[0] || '') !== '');
-    if (first && EMAIL_RE.test(first[0] || '')) positional = 'email-first';
+    const first = r0[0] || LOOKS_LIKE_EMAIL.test(r0[1] || '') ? r0 : dataRows.find((r) => (r[0] || '') !== '');
+    if (first && LOOKS_LIKE_EMAIL.test(first[0] || '')) positional = 'email-first';
   }
 
   // E-mail-first: the group is cell 3 only when cell 2 is blank on every row.
@@ -119,7 +121,7 @@ export function parseCsv(
       if (cells.length === 1) {
         // Single-cell row in name-first mode: treat the cell as email if it matches.
         const only = cells[0] || '';
-        if (EMAIL_RE.test(only)) email = only;
+        if (LOOKS_LIKE_EMAIL.test(only)) email = only;
         else name = only;
       } else {
         name = cells[0] || '';
@@ -137,8 +139,20 @@ export function parseCsv(
     if (!email) {
       errors.push('Missing email');
       valid = false;
+    } else if (email.length > 254) {
+      errors.push('Email is too long');
+      valid = false;
     } else if (!EMAIL_RE.test(email)) {
       errors.push('Invalid email format');
+      valid = false;
+    }
+    // The server's limits: one long cell must not refuse the whole import.
+    if (name && name.length > 200) {
+      errors.push('Name is too long');
+      valid = false;
+    }
+    if (group && group.length > 80) {
+      errors.push('Group name is too long');
       valid = false;
     }
 

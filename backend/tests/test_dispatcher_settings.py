@@ -75,22 +75,27 @@ def test_off_sends_nothing_marks_nothing(db, seeded_run, mailer):
 
 def test_turn_on_skips_rows_born_off(db, seeded_run, mailer):
     # t1 (on) and t3 (after the turn-on) go; t2 (born in the off interval) never
-    # does. Task 4's turn-on marks it "skipped: email was off".
+    # does, and the dispatcher closes it as skipped.
     set_site(db, **ON, email_off_at=T0 + H, email_on_at=T0 + 3 * H)
     t1, t2, t3 = _row(db, seeded_run, T0), _row(db, seeded_run, T0 + 2 * H), _row(db, seeded_run, T0 + 4 * H)
     _tick_once(_state(), T0 + 5 * H)
     assert _sent(db, t1, t2, t3) == [True, False, True]
-    assert (t2.error, t2.retry_count) == (None, 0)
+    assert (t2.error, t2.retry_count) == (dispatcher.SKIPPED_OFF, 0)
 
 
-def test_late_commit_in_off_interval_not_sent(db, seeded_run, mailer):
+def test_late_commit_in_off_interval_is_closed_skipped(db, seeded_run, mailer):
     # A row whose transaction began in the off interval and committed after the
-    # turn-on: created_at is the transaction's start, so the select leaves it out.
+    # turn-on: never sent, and closed rather than left open.
     set_site(db, **ON, email_off_at=T0 + H, email_on_at=T0 + 3 * H)
     _tick_once(_state(), T0 + 3 * H + timedelta(minutes=1))
     late = _row(db, seeded_run, T0 + 2 * H)
     _tick_once(_state(), T0 + 4 * H)
-    assert _sent(db, late) == [False]
+    db.refresh(late)
+    assert (late.sent_at, late.error) == (None, dispatcher.SKIPPED_OFF)
+
+
+def test_skipped_off_text():
+    assert dispatcher.SKIPPED_OFF == "skipped: email was off"
 
 
 def test_off_interval_skips_only_rows_born_off(db, seeded_run, mailer):

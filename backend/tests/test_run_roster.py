@@ -311,3 +311,27 @@ def test_remove_run_student_helper_deletes_and_returns_true(db, seed_publishable
         user_id=s["user_id"], version_id=run.version_id
     ).one()
     assert enrollment.is_active is False
+
+
+def test_add_student_rejects_a_bad_email(admin_client, seed_publishable_version):
+    run = _make_published_run(admin_client, seed_publishable_version)
+    response = admin_client.post(f"/api/runs/{run['id']}/students", json={"email": "anna"})
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Enter an email address"
+
+
+def test_batch_with_a_bad_email_adds_the_rest(admin_client, seed_publishable_version):
+    run = _make_published_run(admin_client, seed_publishable_version)
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/students/batch",
+        json={"rows": [{"email": "anna@uni.dk"}, {"email": "not-an-email"}, {"email": "bo@uni.dk"}]},
+    )
+    assert response.status_code == 207
+    results = response.json()["results"]
+    assert [r["status"] for r in results] == ["added", "error", "added"]
+    assert (results[1]["error_code"], results[1]["detail"]) == ("invalid_email", "Invalid email format")
+    from sqlalchemy import select
+    from mathion.database import SessionLocal
+    from mathion.models_auth import User
+    with SessionLocal() as s:
+        assert s.scalar(select(User).where(User.email == "not-an-email")) is None

@@ -8,7 +8,7 @@ from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Run, RunTeacher
 from mathion.models_auth import NotificationLogEntry, User
-from mathion.schemas import RunTeacherCreate, RunTeacherResponse
+from mathion.schemas import BAD_EMAIL, RunTeacherCreate, RunTeacherResponse, email_shape_ok
 
 router = APIRouter(tags=["run_teachers"])
 
@@ -28,6 +28,8 @@ def _to_response(rt: RunTeacher) -> dict:
 def add_teacher(run_id: int, data: RunTeacherCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     run = get_or_404(db, Run, run_id)
     require_course_admin_for_run(db, user, run)
+    if not email_shape_ok(data.email):
+        raise HTTPException(status_code=422, detail=BAD_EMAIL)
 
     target = get_or_create_user(db, data.email)
     existing = db.execute(

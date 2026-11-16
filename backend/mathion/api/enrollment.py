@@ -9,7 +9,7 @@ from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import Course, CourseVersion
 from mathion.models_auth import StudentEnrollment, User
-from mathion.schemas import EnrollBatchRequest, EnrollmentResponse, EnrollRequest
+from mathion.schemas import BAD_EMAIL, EnrollBatchRequest, EnrollmentResponse, EnrollRequest, email_shape_ok
 
 router = APIRouter(tags=["enrollment"])
 
@@ -84,6 +84,8 @@ def enroll_student(
     get_or_404(db, Course, course_id)
     require_course_admin(db, current_user, course_id)
     version = get_newest_published_version(db, course_id)
+    if not email_shape_ok(data.email):
+        raise HTTPException(status_code=422, detail=BAD_EMAIL)
     # Phase 9-A2 invariant #2 (spec §5.2): ENROLLMENT(course_id) BEFORE
     # get_or_create_user (advisory-before-index) so the deactivate-then-insert in
     # _enroll_user is atomic and the users index INSERT sits inside the lock.
@@ -108,6 +110,8 @@ def enroll_batch(
     require_course_admin(db, current_user, course_id)
     version = get_newest_published_version(db, course_id)
     unique_emails = list(dict.fromkeys(e.strip().lower() for e in data.emails))
+    if not all(email_shape_ok(e) for e in unique_emails):
+        raise HTTPException(status_code=422, detail=BAD_EMAIL)
     # Phase 9-A2 invariant #2 (spec §5.2/§5.3): ENROLLMENT(course_id) once BEFORE
     # the loop, before any get_or_create_user (advisory-before-index).
     advisory.advisory_xact_lock(db, advisory.LOCK_NS_ENROLLMENT, course_id)
