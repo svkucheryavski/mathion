@@ -40,6 +40,8 @@ h4 { font-size: 13px; font-weight: 600; margin: 0; }
 
 /* Visually hidden text a screen reader still reads. */
 .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* A status region mounted empty: no box (no flex gap) until it has text. */
+.live-slot:empty { position: absolute; }
 
 /* ---------------------------------------------------------------------------
    Header lockup — exact geometry

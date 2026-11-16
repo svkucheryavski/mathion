@@ -16,10 +16,10 @@ function render(tone: 'info' | 'error') {
   return onClose;
 }
 
-it('an info note is a status, in the info look (Review Focus 4)', () => {
+it('an info note has no role: its caller\'s always-mounted status region announces it', () => {
   render('info');
   const strip = target.querySelector('.note-strip')!;
-  expect(strip.getAttribute('role')).toBe('status');
+  expect(strip.hasAttribute('role')).toBe(false);
   expect(strip.classList.contains('info')).toBe(true);
   expect(strip.textContent).toContain('Anna Holm is now the admin of Statistics 101.');
 });

@@ -153,7 +153,7 @@
     <div class="ec-choose">
       <Button variant="secondary" disabled={busy} onclick={() => picker?.click()}>Choose a .css file…</Button>
       {#if pending?.kind === 'file'}
-        <span class="ec-file">{pending.file.name}: {answer ? counted(Object.keys(answer.changes).length) : 'checking…'}</span>
+        <span class="ec-file" aria-live="polite">{pending.file.name}: {answer ? counted(Object.keys(answer.changes).length) : 'checking…'}</span>
       {/if}
       <input bind:this={picker} type="file" accept=".css,text/css" hidden onchange={onChoose} />
     </div>

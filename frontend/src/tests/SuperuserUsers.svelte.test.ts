@@ -74,6 +74,12 @@ const gets = () => calls.filter((c) => c.startsWith('GET /users')).length;
 const search = () => target.querySelector<HTMLInputElement>('input[type="search"]')!;
 const pill = (label: string) => [...target.querySelectorAll<HTMLButtonElement>('[role="group"] button')].find((b) => b.textContent!.trim().startsWith(label))!;
 const countLine = () => target.querySelector('.u-count')?.textContent?.trim();
+function hoverText(chip: HTMLElement): string | undefined {
+  chip.dispatchEvent(new MouseEvent('mouseenter')); flushSync();
+  const text = document.querySelector('.u-tip')?.textContent ?? undefined;
+  chip.dispatchEvent(new MouseEvent('mouseleave')); flushSync();
+  return text;
+}
 function type(el: HTMLInputElement, v: string) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); flushSync(); }
 
 it('has the Users heading with New account beside it', async () => {
@@ -96,7 +102,7 @@ it('rows show name, email, the role chips and last active (D14, D22)', async () 
   // D14 rev 8: short chips; the list is the hover and, hidden, the screen reader's.
   const chips = [...anna.querySelectorAll<HTMLElement>('.chip')];
   expect(chips.map((c) => c.querySelector('.chip-text')?.textContent?.trim())).toEqual(['Admin (1)', 'Teacher (2)']);
-  expect(chips.map((c) => c.title)).toEqual(['- Statistics 101', '- Statistics 101 · Autumn 2026\n- Statistics 101 · Spring 2026']);
+  expect(chips.map(hoverText)).toEqual(['- Statistics 101', '- Statistics 101 · Autumn 2026\n- Statistics 101 · Spring 2026']);
   expect(chips[1].querySelector('.vh')?.textContent).toBe(': Statistics 101 · Autumn 2026, Statistics 101 · Spring 2026');
   expect(anna.classList.contains('u-disabled')).toBe(false);
   expect(anna.querySelector('.u-last')?.textContent?.trim()).toBe('2 hours ago');
@@ -114,7 +120,7 @@ it('an admin of two courses with the same name lists both on hover, each with it
   routes['GET /users'] = () => [200, page([twin])];
   await render();
   const chip = row('twin@uni.dk').querySelector<HTMLElement>('.chip')!;
-  expect(chip.title).toBe('- Algebra (algebra)\n- Algebra (algebra-2)');
+  expect(hoverText(chip)).toBe('- Algebra (algebra)\n- Algebra (algebra-2)');
   expect(chip.querySelector('.vh')?.textContent).toBe(': Algebra (algebra), Algebra (algebra-2)');
 });
 
@@ -292,7 +298,7 @@ it('New account creates, closes, reloads and says no email was sent, with the em
   expect(sent).toEqual({ email: 'New.Colleague@uni.dk', full_name: null });
   expect(panel()).toBeNull();
   expect(gets()).toBe(2);
-  expect(note()?.getAttribute('role')).toBe('status');
+  expect(note()?.parentElement?.getAttribute('role')).toBe('status');
   expect(note()?.textContent?.trim()).toBe('The account for new.colleague@uni.dk is created. No email was sent.');
 });
 
@@ -476,4 +482,207 @@ it('a failed quiet reload with nothing on screen yet shows the error, not "Loadi
   footButton('Create').click(); await settle();
   first([200, page()]); await settle();   // the older first load answers late; it is dropped
   expect(target.textContent).toContain('Could not load accounts.');
+});
+
+it('a confirmed Disable focuses the Enable that replaces it, after the reload', async () => {
+  routes['POST /users/9/disable'] = () => {
+    routes['GET /users'] = () => [200, page([SU, { ...ANNA, is_disabled: true }, OLE, NEW])];
+    return [200, { ...ANNA, is_disabled: true }];
+  };
+  await render();
+  act(row('aho@uni.dk'), 'disable')!.click(); await settle();
+  target.querySelector<HTMLButtonElement>('[data-action="confirm-disable"]')!.click(); await settle();
+  expect(document.activeElement).toBe(act(row('aho@uni.dk'), 'enable'));
+});
+
+it('a confirmed Enable focuses the Disable that replaces it', async () => {
+  routes['POST /users/7/enable'] = () => {
+    routes['GET /users'] = () => [200, page([SU, ANNA, { ...OLE, is_disabled: false }, NEW])];
+    return [200, { ...OLE, is_disabled: false }];
+  };
+  await render();
+  act(row('old@uni.dk'), 'enable')!.click(); await settle();
+  target.querySelector<HTMLButtonElement>('[data-action="confirm-enable"]')!.click(); await settle();
+  expect(document.activeElement).toBe(act(row('old@uni.dk'), 'disable'));
+});
+
+it('a confirmed Delete focuses the page heading', async () => {
+  routes['DELETE /users/12'] = () => [204, null];
+  await render();
+  act(row('new.colleague@uni.dk'), 'delete')!.click(); await settle();
+  target.querySelector<HTMLButtonElement>('[data-action="confirm-delete"]')!.click(); await settle();
+  expect(document.activeElement).toBe(target.querySelector('h1'));
+});
+
+it('a refused strip returns focus to the button that opened it', async () => {
+  routes['POST /users/9/disable'] = () => [409, { detail: 'This account was changed' }];
+  await render();
+  act(row('aho@uni.dk'), 'disable')!.click(); await settle();
+  target.querySelector<HTMLButtonElement>('[data-action="confirm-disable"]')!.click(); await settle();
+  expect(document.activeElement).toBe(act(row('aho@uni.dk'), 'disable'));
+});
+
+it('the count line is a status region', async () => {
+  await render();
+  expect(target.querySelector('.u-count')?.getAttribute('role')).toBe('status');
+});
+
+it('an info note fills an always-mounted status region; an error note is an alert outside it', async () => {
+  routes['POST /users'] = () => [201, NEW];
+  routes['POST /users/9/disable'] = () => [409, { detail: 'This account was changed' }];
+  await render();
+  const live = target.querySelector<HTMLElement>('.live-slot[role="status"]')!;
+  expect(live.textContent).toBe('');
+  expect(live.matches(':empty')).toBe(true);
+  act(row('aho@uni.dk'), 'disable')!.click(); await settle();
+  target.querySelector<HTMLButtonElement>('[data-action="confirm-disable"]')!.click(); await settle();
+  expect(note()!.getAttribute('role')).toBe('alert');
+  expect(live.contains(note())).toBe(false);
+  [...target.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'New account')!.click(); await settle();
+  type(field('Email'), 'new.colleague@uni.dk');
+  footButton('Create').click(); await settle();
+  expect(target.querySelector('.live-slot[role="status"]')).toBe(live);
+  expect(live.querySelector('.note-strip')!.hasAttribute('role')).toBe(false);
+  expect(live.textContent).toContain('No email was sent');
+});
+
+it('a chip with a list is a tab stop with no title; its tooltip shows on hover and on keyboard focus', async () => {
+  routes['GET /users'] = () => [200, page([SU, ANNA])];
+  await render();
+  const tip = () => document.querySelector<HTMLElement>('.u-tip');
+  const [admin, teacher] = [...row('aho@uni.dk').querySelectorAll<HTMLElement>('.chip')];
+  const su = row('svk@uni.dk').querySelector<HTMLElement>('.chip')!;
+  expect(admin.getAttribute('tabindex')).toBe('0');
+  expect(admin.hasAttribute('title')).toBe(false);
+  expect(su.hasAttribute('tabindex')).toBe(false);
+  expect(tip()).toBeNull();
+  teacher.dispatchEvent(new MouseEvent('mouseenter')); flushSync();
+  expect(tip()?.textContent).toBe('- Statistics 101 · Autumn 2026\n- Statistics 101 · Spring 2026');
+  expect(tip()?.getAttribute('aria-hidden')).toBe('true');
+  expect(target.querySelector('.table-scroll .u-tip')).toBeNull();
+  teacher.dispatchEvent(new MouseEvent('mouseleave')); flushSync();
+  expect(tip()).toBeNull();
+  admin.focus(); flushSync();
+  expect(tip()?.textContent).toBe('- Statistics 101');
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); flushSync();
+  expect(tip()).toBeNull();
+  admin.blur(); admin.focus(); flushSync();
+  expect(tip()).not.toBeNull();
+  admin.blur(); flushSync();
+  expect(tip()).toBeNull();
+});
+
+it('a hovered chip that a search filters out takes its tip with it', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  routes['GET /users'] = (_b, q) => [200, q.get('q') ? page([]) : page([SU, ANNA])];
+  await render();
+  row('aho@uni.dk').querySelector<HTMLElement>('.chip')!.dispatchEvent(new MouseEvent('mouseenter')); flushSync();
+  expect(document.querySelector('.u-tip')).not.toBeNull();
+  type(search(), 'zzzz');
+  vi.advanceTimersByTime(300); await settle();
+  expect(rows()).toHaveLength(0);
+  expect(document.querySelector('.u-tip')).toBeNull();
+});
+
+it('a mouse-out from one chip puts back the tip of the chip that has keyboard focus', async () => {
+  routes['GET /users'] = () => [200, page([SU, ANNA])];
+  await render();
+  const [admin, teacher] = [...row('aho@uni.dk').querySelectorAll<HTMLElement>('.chip')];
+  admin.focus(); flushSync();
+  teacher.dispatchEvent(new MouseEvent('mouseenter')); flushSync();
+  expect(document.querySelector('.u-tip')?.textContent).toContain('Autumn 2026');
+  teacher.dispatchEvent(new MouseEvent('mouseleave')); flushSync();
+  expect(document.querySelector('.u-tip')?.textContent).toBe('- Statistics 101');
+});
+
+it('a sideways scroll of the table re-places a focus tip', async () => {
+  routes['GET /users'] = () => [200, page([SU, ANNA])];
+  await render();
+  const admin = row('aho@uni.dk').querySelector<HTMLElement>('.chip')!;
+  admin.focus(); flushSync();
+  let left = 100;
+  admin.getBoundingClientRect = () => ({ top: 400, bottom: 420, left, right: left + 60, width: 60, height: 20, x: left, y: 400, toJSON: () => ({}) });
+  left = 40;
+  target.querySelector('.table-scroll')!.dispatchEvent(new Event('scroll')); flushSync();
+  expect(document.querySelector<HTMLElement>('.u-tip')!.style.left).toBe('40px');
+});
+
+it('focus moved elsewhere during the reload stays there', async () => {
+  let release!: () => void;
+  routes['POST /users/9/disable'] = () => {
+    routes['GET /users'] = () => new Promise((r) => { release = () => r([200, page([SU, { ...ANNA, is_disabled: true }, OLE, NEW])]); });
+    return [200, { ...ANNA, is_disabled: true }];
+  };
+  await render();
+  act(row('aho@uni.dk'), 'disable')!.click(); await settle();
+  target.querySelector<HTMLButtonElement>('[data-action="confirm-disable"]')!.click(); await settle();
+  search().focus();
+  release(); await settle();
+  expect(document.activeElement).toBe(search());
+});
+
+it('a strip opened on another row meanwhile keeps its focus', async () => {
+  let release!: (r: Reply) => void;
+  routes['POST /users/9/disable'] = () => new Promise((r) => { release = r; });
+  await render();
+  act(row('aho@uni.dk'), 'disable')!.click(); await settle();
+  target.querySelector<HTMLButtonElement>('[data-action="confirm-disable"]')!.click(); await settle();
+  act(row('old@uni.dk'), 'enable')!.click(); await settle();
+  const cancel = () => [...target.querySelectorAll<HTMLButtonElement>('.u-confirm button')].find((b) => b.textContent?.trim() === 'Cancel');
+  const mine = cancel();
+  release([200, { ...ANNA, is_disabled: true }]); await settle();
+  expect(target.querySelectorAll('.u-confirm')).toHaveLength(1);
+  expect(document.activeElement).toBe(mine);
+});
+
+it('a failed reload after Disable focuses the Disable still on screen', async () => {
+  routes['POST /users/9/disable'] = () => {
+    routes['GET /users'] = () => [500, { detail: 'Boom.' }];
+    return [200, { ...ANNA, is_disabled: true }];
+  };
+  await render();
+  act(row('aho@uni.dk'), 'disable')!.click(); await settle();
+  target.querySelector<HTMLButtonElement>('[data-action="confirm-disable"]')!.click(); await settle();
+  expect(document.activeElement).toBe(act(row('aho@uni.dk'), 'disable'));
+});
+
+it('a reload overtaken by a newer one (a pill) moves no focus', async () => {
+  let release!: () => void;
+  let held = true;
+  routes['POST /users/9/disable'] = () => {
+    routes['GET /users'] = () => held
+      ? new Promise((r) => { held = false; release = () => r([200, page([SU, { ...ANNA, is_disabled: true }, OLE, NEW])]); })
+      : [200, page([{ ...ANNA, is_disabled: true }])];
+    return [200, { ...ANNA, is_disabled: true }];
+  };
+  await render();
+  act(row('aho@uni.dk'), 'disable')!.click(); await settle();
+  target.querySelector<HTMLButtonElement>('[data-action="confirm-disable"]')!.click(); await settle();
+  pill('Admins').click(); await settle();
+  release(); await settle();
+  expect(document.activeElement).toBe(document.body);
+});
+
+it('an Enable whose reload drops the row focuses the page heading', async () => {
+  routes['GET /users'] = () => [200, page([OLE])];
+  routes['POST /users/7/enable'] = () => {
+    routes['GET /users'] = () => [200, page([])];
+    return [200, { ...OLE, is_disabled: false }];
+  };
+  await render();
+  act(row('old@uni.dk'), 'enable')!.click(); await settle();
+  target.querySelector<HTMLButtonElement>('[data-action="confirm-enable"]')!.click(); await settle();
+  expect(document.activeElement).toBe(target.querySelector('h1'));
+});
+
+it('a reload that changes a shown chip\'s list updates its tip', async () => {
+  routes['GET /users'] = () => [200, page([ANNA])];
+  await render();
+  const admin = row('aho@uni.dk').querySelector<HTMLElement>('.chip')!;
+  admin.focus(); flushSync();
+  expect(document.querySelector('.u-tip')?.textContent).toBe('- Statistics 101');
+  routes['GET /users'] = () => [200, page([{ ...ANNA, admin_of: [{ id: 1, name: 'Statistics 102', slug: 'stat' }] }])];
+  pill('Admins').click(); await settle();
+  expect(row('aho@uni.dk').querySelector('.chip')).toBe(admin);
+  expect(document.querySelector('.u-tip')?.textContent).toBe('- Statistics 102');
 });

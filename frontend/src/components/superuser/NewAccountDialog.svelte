@@ -5,7 +5,7 @@
   // the fields kept (D25).
   import Modal from '../ui/Modal.svelte';
   import Button from '../ui/Button.svelte';
-  import { panelError, type PanelOnAuth } from '../../lib/superuser';
+  import { panelError, panelErrorField, type PanelOnAuth } from '../../lib/superuser';
 
   type Body = { email: string; full_name: string | null };
   type Props = { onSave: (body: Body) => Promise<void>; onClose: () => void; onAuth: PanelOnAuth };
@@ -18,6 +18,10 @@
   let email = $state('');
   let name = $state('');
   let error = $state<string | null>(null);
+  let errorField = $state<string | null>(null);
+  // A 422 naming a field ties the sentence to that field, not the form.
+  const bad = $derived(error && (errorField === 'email' || errorField === 'full_name') ? errorField : null);
+  const mark = (f: string) => (bad === f ? { 'aria-invalid': 'true' as const, 'aria-describedby': errId } : {});
   let busy = $state(false);
 
   const ready = $derived(email.trim() !== '');
@@ -30,6 +34,7 @@
       await onSave({ email: email.trim(), full_name: name.trim() || null });
     } catch (e) {
       error = panelError(e, onAuth);
+      errorField = panelErrorField(e);
     } finally {
       busy = false;
     }
@@ -48,13 +53,13 @@
 
 <Modal labelledby={titleId} width={440} maxHeight={440} onRequestClose={onClose} closeDisabled={busy} header={head} footer={foot}>
   <!-- novalidate: the server's sentence is the check (type="email" would block Enter). -->
-  <form class="na-form" novalidate aria-describedby={error ? errId : undefined}
+  <form class="na-form" novalidate aria-describedby={error && !bad ? errId : undefined}
     onsubmit={(e) => { e.preventDefault(); void save(); }}>
     <label class="na-label" for="{uid}-email">Email</label>
-    <input id="{uid}-email" class="na-input" type="email" data-autofocus bind:value={email} readonly={busy}
+    <input id="{uid}-email" class="na-input" type="email" data-autofocus bind:value={email} readonly={busy} {...mark('email')}
       autocomplete="off" spellcheck="false" oninput={() => { error = null; }} />
     <label class="na-label" for="{uid}-name">Name (optional)</label>
-    <input id="{uid}-name" class="na-input" bind:value={name} readonly={busy} autocomplete="off"
+    <input id="{uid}-name" class="na-input" bind:value={name} readonly={busy} autocomplete="off" {...mark('full_name')}
       oninput={() => { error = null; }} />
     {#if error}<p id={errId} class="na-err" role="alert">{error}</p>{/if}
     <!-- Enter in a field submits. -->

@@ -994,6 +994,20 @@ it('with no save due, edits only in greyed fields still block Save and continue 
   expect(writes()).toEqual([]);
 });
 
+it("step 1's test answer fills a status region that is there, empty, before it", async () => {
+  routes['POST /settings/email/test'] = () => [200, { ok: true, message: 'Sent.' }];
+  await render();
+  const live = card()!.querySelector<HTMLElement>('.live-slot[role="status"]')!;
+  expect(live.textContent).toBe('');
+  expect(live.matches(':empty')).toBe(true);
+  type(input('Mail server'), 'smtp.other.dk');
+  [...card()!.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Send test email')!.click();
+  await settle();
+  expect(card()!.querySelector('.live-slot[role="status"]')).toBe(live);
+  expect(live.querySelector('.se-result')?.textContent).toBe('Sent.');
+  expect(live.querySelector('.se-result')!.hasAttribute('role')).toBe(false);
+});
+
 it("a passed test's answer stays after the save, also when step saved then fails (D6)", async () => {
   routes['POST /settings/email/test'] = () => [200, { ok: true, message: 'Sent.' }];
   routes['GET /setup'] = () => [200, state()];
@@ -1965,6 +1979,16 @@ it('create sends the course, then step saved; the note shows the command as code
   expect(foot('skip')).toBeNull();
   expect(mark(3).classList.contains('done')).toBe(true);
   expect(registry.isAnyDirty()).toBe(false);
+});
+
+it("step 3's note fills a status region that is there, empty, before it", async () => {
+  await render(state({ step: 3 }));
+  const live = card()!.querySelector<HTMLElement>('.live-slot[role="status"]')!;
+  expect(live.textContent).toBe('');
+  expect(live.matches(':empty')).toBe(true);
+  await create(() => [200, state({ step: 4 }, [false, false, true, false])]);
+  expect(card()!.querySelector('.live-slot[role="status"]')).toBe(live);
+  expect(live.contains(strip())).toBe(true);
 });
 
 it('the note survives its own step-saved answer (step 4, or over) and a re-read', async () => {

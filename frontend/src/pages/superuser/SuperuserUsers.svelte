@@ -4,7 +4,7 @@
   // row's last cell holds Edit (one dialog, D24 rev 6), Disable or Enable, and
   // the trash for an account with no data. Disable, Enable and Delete ask in a
   // strip under the row. A superuser row has only Edit (D21).
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { ApiError } from '../../lib/api';
   import {
     countLine, createUser, deleteUser, disableUser, disableWarning, enableUser, formatCount, listUsers, panelError, personName,
@@ -48,6 +48,7 @@
   let dialog = $state<Dialog | null>(null);
   let ask = $state<Ask | null>(null);
   let asking = $state(false);
+  let heading = $state<HTMLElement>();
   const askEls: Record<string, HTMLButtonElement | undefined> = $state({});
   let latest = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -56,20 +57,24 @@
   // the table (after a save or a strip action) and keep it if they fail;
   // with no rows on screen (no list yet, or an empty one) there is nothing
   // to keep, so the failure shows (D25, rev 13, as on the Courses page).
-  async function load(quiet = false): Promise<void> {
+  // Resolves false when a newer load overtook this one.
+  async function load(quiet = false): Promise<boolean> {
     const mine = ++latest;
     const q = query.trim();
     const r = role;
     try {
       const list = await listUsers(token, q, r);
-      if (mine !== latest) return;
+      if (mine !== latest) return false;
       shown = { list, q, role: r, now: new Date() };
       loadError = '';
+      // A tip on a chip that stays follows its new place and list.
+      void tick().then(() => { if (tipEl?.isConnected) placeTip(tipEl); });
     } catch (err) {
-      if (mine !== latest) return;
+      if (mine !== latest) return false;
       const msg = panelError(err, onAuth);
       if (!quiet || shown === null || shown.list.users.length === 0) loadError = msg ?? '';
     }
+    return true;
   }
 
   $effect(() => {
@@ -137,6 +142,7 @@
     if (asking) return;
     asking = true;
     const mine = ask;
+    let done = false;
     try {
       if (kind === 'disable') await disableUser(token, u.id);
       else if (kind === 'enable') await enableUser(token, u.id);
@@ -151,6 +157,7 @@
         }
       }
       note = null;
+      done = true;
     } catch (err) {
       const msg = panelError(err, onAuth);
       if (msg) showNote('error', msg);
@@ -159,7 +166,52 @@
       // Only this strip closes: another row's, opened meanwhile, stays (rev 11).
       if (ask === mine) ask = null;
     }
-    void load(true);
+    const newest = await load(true);
+    await tick();
+    // Only lost focus moves, and not once a newer load (a search, a pill) took over.
+    const at = document.activeElement;
+    if (!newest || ask !== null || (at && at !== document.body && at.isConnected)) return;
+    if (done && kind === 'delete') { heading?.focus(); return; }
+    const swap = done ? (kind === 'disable' ? 'enable' : 'disable') : kind;
+    [askEls[`${u.id}-${swap}`], askEls[`${u.id}-${kind}`], heading].find((el) => el?.isConnected)?.focus();
+  }
+
+  // A chip's list as a fixed tooltip; aria-hidden, as the hidden list is read.
+  let tip = $state<{ text: string; top: number; left: number; below: boolean } | null>(null);
+  let tipEl: HTMLElement | null = null;
+  let focusEl: HTMLElement | null = null;
+  function placeTip(el: HTMLElement): void {
+    const text = el.dataset.tip ?? '';
+    const r = el.getBoundingClientRect();
+    const below = r.top < window.innerHeight / 2;
+    tipEl = el;
+    tip = { text, below, top: below ? r.bottom + 4 : r.top - 4, left: Math.max(8, Math.min(r.left, window.innerWidth - 328)) };
+  }
+  function showTip(e: Event): void { placeTip(e.currentTarget as HTMLElement); }
+  // Only keyboard focus keeps a tip after a mouse-out.
+  function focusTip(e: Event): void {
+    const el = e.currentTarget as HTMLElement;
+    placeTip(el);
+    focusEl = el.matches(':focus-visible') ? el : null;
+  }
+  function blurTip(e: Event): void {
+    if (focusEl === e.currentTarget) focusEl = null;
+    if (tipEl === e.currentTarget) hideTip();
+  }
+  function hideTip(): void { tip = null; tipEl = null; }
+  function restoreTip(): void {
+    if (focusEl && document.activeElement === focusEl) placeTip(focusEl);
+    else hideTip();
+  }
+  function tipKey(e: KeyboardEvent): void {
+    if (e.key === 'Escape') { hideTip(); focusEl = null; }
+  }
+  // A chip a re-render removes gets no mouse-out, so its tip goes with it.
+  function chipGone(el: HTMLElement): () => void {
+    return () => {
+      if (focusEl === el) focusEl = null;
+      if (tipEl === el) hideTip();
+    };
   }
 
   function askText(u: PanelUser, kind: Ask['kind']): string {
@@ -174,11 +226,12 @@
   <Button variant="primary" onclick={() => (dialog = { kind: 'new' })}>New account</Button>
 {/snippet}
 
-<PanelHead title="Users" actions={newButton} />
+<PanelHead title="Users" actions={newButton} bind:heading />
 
-{#if note}
+<div class="live-slot" role="status">{#if note?.tone === 'info'}{#key note.id}<NoteStrip tone="info" onClose={() => (note = null)}>{note.text}</NoteStrip>{/key}{/if}</div>
+{#if note?.tone === 'error'}
   {#key note.id}
-    <NoteStrip tone={note.tone} onClose={() => (note = null)}>{note.text}</NoteStrip>
+    <NoteStrip tone="error" onClose={() => (note = null)}>{note.text}</NoteStrip>
   {/key}
 {/if}
 
@@ -194,7 +247,7 @@
   <Skeleton rows={4} label="Loading accounts…" />
 {:else}
   {#if shown.list.users.length > 0}
-    <div class="table-scroll">
+    <div class="table-scroll" onscroll={restoreTip}>
       <table class="u-table">
         <thead>
           <tr>
@@ -217,12 +270,18 @@
                 {#if chips.length === 0}
                   <span class="u-none">—</span>
                 {:else}
-                  <!-- D14 rev 8: the list is the hover (one per line) and, hidden, the screen reader's. -->
+                  <!-- D14 rev 8: the list is the tooltip (one per line) and, hidden, the screen reader's. -->
                   <span class="u-chips">
                     {#each chips as chip (chip.kind + chip.text)}
-                      <span class={['chip', chip.kind]} title={chip.tip || undefined}
-                        ><span class="chip-text">{chip.text}</span
-                        >{#if chip.items.length}<span class="vh">: {chip.items.join(', ')}</span>{/if}</span>
+                      {#if chip.items.length}
+                        <!-- A tab stop only so a keyboard user can open the list; it does nothing else. -->
+                        <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_static_element_interactions -->
+                        <span class={['chip', chip.kind]} tabindex="0" data-tip={chip.tip} {@attach chipGone}
+                          onmouseenter={showTip} onmouseleave={restoreTip} onfocus={focusTip} onblur={blurTip}
+                          ><span class="chip-text">{chip.text}</span><span class="vh">: {chip.items.join(', ')}</span></span>
+                      {:else}
+                        <span class={['chip', chip.kind]}><span class="chip-text">{chip.text}</span></span>
+                      {/if}
                     {/each}
                   </span>
                 {/if}
@@ -268,7 +327,13 @@
       </table>
     </div>
   {/if}
-  <p class="u-count">{countLine(shown.list, shown.role, shown.q !== '')}</p>
+  <p class="u-count" role="status">{countLine(shown.list, shown.role, shown.q !== '')}</p>
+{/if}
+
+<!-- Escape, a scroll and a resize update the tip. -->
+<svelte:window onkeydown={tipKey} onscroll={restoreTip} onresize={restoreTip} />
+{#if tip}
+  <div class="u-tip" class:below={tip.below} aria-hidden="true" style="top:{tip.top}px;left:{tip.left}px">{tip.text}</div>
 {/if}
 
 {#if dialog?.kind === 'new'}
@@ -339,5 +404,25 @@
   /* RunMiniProjectsTab's confirm row under its row. */
   .u-confirm td { padding: 4px 12px 10px; border-top: 0; }
   .u-count { margin: 8px 2px 0; font-size: 12px; color: var(--muted); }
+  /* Progress's header tooltip (D79): above the chip, or below it in the window's top half. */
+  .u-tip {
+    position: fixed;
+    z-index: 10;
+    transform: translateY(-100%);
+    max-width: min(320px, calc(100vw - 16px));
+    overflow-wrap: anywhere;
+    white-space: pre-line;
+    padding: 4px 8px;
+    border-radius: var(--radius);
+    background: var(--text);
+    color: var(--surface);
+    font-size: 12px;
+    line-height: 1.4;
+    pointer-events: none;
+  }
+  .u-tip.below { transform: none; }
+  @media (forced-colors: active) {
+    .u-tip { border: 1px solid CanvasText; }
+  }
   .vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 </style>

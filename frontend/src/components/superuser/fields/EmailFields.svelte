@@ -32,7 +32,7 @@
 </div>
 
 <span class="ee-label" id="{uid}-enc">Encryption</span>
-<Segmented options={ENCRYPTIONS} bind:value={form.encryption} name="{uid}-encryption" label="Encryption"
+<Segmented options={ENCRYPTIONS} bind:value={form.encryption} name="{uid}-encryption" label="Encryption" labelledby="{uid}-enc"
   fit disabled={!form.on} frozen={busy} onchange={(next) => form.pickEncryption(next)} />
 <p class="ee-hint">Picking one sets the usual port: 587, 465 or 25.</p>
 <label class="ee-check">

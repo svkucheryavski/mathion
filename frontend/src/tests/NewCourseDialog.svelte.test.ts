@@ -134,3 +134,29 @@ it('a lookup 404 goes to onAuth', async () => {
   await vi.advanceTimersByTimeAsync(260); await settle();
   expect(p.onAuth).toHaveBeenCalledWith('expired');
 });
+
+it('a 422 naming the address marks that field invalid and ties the sentence to it', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, { status: 'existing', full_name: 'A' })));
+  render({ onSave: vi.fn(() => Promise.reject(new ApiError(422, [{ loc: ['body', 'slug'], msg: 'Value error, Use lower-case letters, digits and dashes', type: 'value_error' }]))) });
+  await settle();
+  type(field('Course name'), 'Statistics 101');
+  type(field("Admin's email"), 'a@x');
+  create().click(); await settle();
+  const err = panel().querySelector<HTMLElement>('[role="alert"]')!;
+  expect(field('Address').getAttribute('aria-invalid')).toBe('true');
+  expect(field('Address').getAttribute('aria-describedby')).toBe(err.id);
+  expect(field('Course name').hasAttribute('aria-invalid')).toBe(false);
+  expect(panel().querySelector('form')!.hasAttribute('aria-describedby')).toBe(false);
+});
+
+it("a 422 naming the admin's email marks that field invalid", async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, { status: 'existing', full_name: 'A' })));
+  render({ onSave: vi.fn(() => Promise.reject(new ApiError(422, [{ loc: ['body', 'admin_email'], msg: 'value is not a valid email address', type: 'value_error' }]))) });
+  await settle();
+  type(field('Course name'), 'Statistics 101');
+  type(field("Admin's email"), 'a@x');
+  create().click(); await settle();
+  const err = panel().querySelector<HTMLElement>('[role="alert"]')!;
+  expect(field("Admin's email").getAttribute('aria-invalid')).toBe('true');
+  expect(field("Admin's email").getAttribute('aria-describedby')).toBe(err.id);
+});

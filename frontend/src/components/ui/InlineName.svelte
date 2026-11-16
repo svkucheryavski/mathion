@@ -112,8 +112,8 @@
                 aria-label={subject ? `${saving ? 'Saving' : saveTitle} ${subject}` : undefined}
                 disabled={!trimmed || saving} onclick={() => void save()} />
   </div>
-  {#if error}<p class="in-err" id={errId} role="alert">{error}</p>
-  {:else if hint}<p class="in-hint" id={hintId} role="status">{hint}</p>{/if}
+  {#if error}<p class="in-err" id={errId} role="alert">{error}</p>{/if}
+  <div class="live-slot" role="status">{#if !error && hint}<p class="in-hint" id={hintId}>{hint}</p>{/if}</div>
 </div>
 
 <style>

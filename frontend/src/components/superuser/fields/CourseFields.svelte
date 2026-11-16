@@ -5,18 +5,22 @@
   import type { CourseForm } from '../../../lib/panelForms/courseForm.svelte';
   import type { PanelOnAuth } from '../../../lib/superuser';
 
-  type Props = { form: CourseForm; uid: string; busy: boolean; token: string; onAuth: PanelOnAuth };
-  let { form, uid, busy, token, onAuth }: Props = $props();
+  type Props = { form: CourseForm; uid: string; busy: boolean; token: string; onAuth: PanelOnAuth; errId?: string };
+  let { form, uid, busy, token, onAuth, errId = undefined }: Props = $props();
+  // A 422 naming a field ties the sentence to that field.
+  const bad = $derived(errId && form.error ? form.errorField : null);
+  const mark = (f: string) => (bad === f ? { 'aria-invalid': 'true' as const, 'aria-describedby': errId } : {});
 </script>
 
 <label class="nc-label" for="{uid}-name">Course name</label>
-<input id="{uid}-name" class="nc-input" data-autofocus bind:value={form.name} readonly={busy} autocomplete="off"
+<input id="{uid}-name" class="nc-input" data-autofocus bind:value={form.name} readonly={busy} autocomplete="off" {...mark('name')}
   oninput={() => form.onName()} />
 <label class="nc-label" for="{uid}-slug">Address</label>
-<input id="{uid}-slug" class="nc-input nc-mono" bind:value={form.slug} readonly={busy} autocomplete="off" spellcheck="false"
+<input id="{uid}-slug" class="nc-input nc-mono" bind:value={form.slug} readonly={busy} autocomplete="off" spellcheck="false" {...mark('slug')}
   oninput={() => form.onSlug()} />
 <label class="nc-label" for="{uid}-email">Admin's email</label>
 <AdminEmailField id="{uid}-email" {token} value={form.email} {onAuth} readonly={busy}
+  errorId={bad === 'admin_email' ? errId : undefined}
   oninput={(v) => { form.email = v; form.edited(); }} />
 
 <style>

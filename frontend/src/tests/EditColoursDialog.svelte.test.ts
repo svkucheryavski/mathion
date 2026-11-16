@@ -96,6 +96,8 @@ describe('the Edit colours dialog (D2, D10)', () => {
     expect(checks[0].bytes).toEqual([...enc.encode(css)]);
     expect(checks[0].filename).toBe('school.css');
     expect(fileLine()).toBe('school.css: checking…');
+    // Polite, so "checking…" turning into the count is announced.
+    expect(panel().querySelector('.ec-file')?.getAttribute('aria-live')).toBe('polite');
     expect(blocked()).toBe(true);
     save().click(); await settle();
     expect(saves).toHaveLength(0);

@@ -35,6 +35,13 @@ it('is a named radiogroup with one radio per option, in order', () => {
   expect(radios().map((r) => r.name)).toEqual(['duration', 'duration', 'duration']);
 });
 
+it('labelledby names the group by its visible caption instead of aria-label', () => {
+  render({ labelledby: 'cap-1' });
+  const group = target.querySelector('[role="radiogroup"]')!;
+  expect(group.getAttribute('aria-labelledby')).toBe('cap-1');
+  expect(group.hasAttribute('aria-label')).toBe(false);
+});
+
 it('marks the bound value selected and checked', () => {
   render();
   expect(segments().map((s) => s.classList.contains('selected'))).toEqual([false, true, false]);

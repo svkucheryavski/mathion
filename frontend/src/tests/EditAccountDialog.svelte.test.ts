@@ -107,3 +107,16 @@ it("a superuser's email can't be changed here; the name can (D21)", async () => 
   save().click(); await settle();
   expect(p.onSave).toHaveBeenCalledWith({ full_name: 'Sergey' });
 });
+
+it('a 422 naming the name marks that field invalid and ties the sentence to it', async () => {
+  render({ onSave: vi.fn(() => Promise.reject(new ApiError(422, [{ loc: ['body', 'full_name'], msg: 'Value error, The name is too long', type: 'value_error' }]))) });
+  await settle();
+  type(field('Name'), 'A very long name');
+  save().click(); await settle();
+  const err = panel().querySelector<HTMLElement>('[role="alert"]')!;
+  expect(err.textContent?.trim()).toBe('The name is too long');
+  expect(field('Name').getAttribute('aria-invalid')).toBe('true');
+  expect(field('Name').getAttribute('aria-describedby')).toBe(err.id);
+  expect(field('Email').hasAttribute('aria-invalid')).toBe(false);
+  expect(panel().querySelector('form')!.hasAttribute('aria-describedby')).toBe(false);
+});

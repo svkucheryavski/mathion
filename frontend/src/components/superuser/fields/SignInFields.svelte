@@ -17,8 +17,8 @@
 <label class="es-label" for="{uid}-try">Wrong PIN tries per hour</label>
 <input id="{uid}-try" class="es-input" bind:value={form.tries} readonly={busy}
   inputmode="numeric" autocomplete="off" oninput={() => form.edited()} />
-<span class="es-label">Longest sign-in</span>
-<Segmented options={LONGEST} bind:value={form.days} name="{uid}-longest" label="Longest sign-in"
+<span class="es-label" id="{uid}-longest-label">Longest sign-in</span>
+<Segmented options={LONGEST} bind:value={form.days} name="{uid}-longest" label="Longest sign-in" labelledby="{uid}-longest-label"
   fit disabled={busy} onchange={() => form.edited()} />
 
 <style>

@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3085
+EXPECTED_CHECKS=3088
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -539,8 +539,9 @@ else:
 # (:is(.loose,:has(>li>p))); declarations, hashes and order unchanged.
 # Beta round T5 (2026-11-16): base.css gains the shared visually hidden `.vh`
 # (b2efbc30), after the focus rules. +1 rule (52 -> 53).
+# Beta round T6: `.live-slot:empty`, a status region mounted empty that takes no box. +1 rule (53 -> 54).
 WANT_FULL = [
-    ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
+    ('', '*,*:before,*:after', '8d5d6c83'), ('', '.live-slot:empty', 'bb6a43fd'), ('', '.mono,code,kbd', '84a226e9'),
     ('', '.prose', '115422ed'),
     ('', '.prose :is(h1,h2,h3,h4,h5,h6)', '9dabc362'),
     ('', '.prose :where(h1,h2,h3,h4,h5,h6)', '8f770fc2'),
@@ -583,7 +584,7 @@ WANT_FULL = [
     ('', 'img,video', 'aa84fbab'), ('', 'p', '11696618'), ('', 'ul,ol', '99409a76'),
     ('@media (forced-colors:active)', ':focus-visible:not([tabindex="-1"])', '1ff87bb6'),
 ]
-# Document ORDER of the same 53 rules. `a` at #9 (reset.css) and #13 (base.css)
+# Document ORDER of the same 54 rules. `a` at #9 (reset.css) and #13 (base.css)
 # are the live case: only order decides that base's --primary wins, and swapping
 # two @imports in app.css flips it while the sorted multiset stays identical.
 # The four focus rules close it, frozen in order like the rest. None depends on
@@ -598,7 +599,7 @@ WANT_ORDER = [
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible'),
     ('', '[tabindex="-1"]:focus-visible'),
     ('@media (forced-colors:active)', ':focus-visible:not([tabindex="-1"])'),
-    ('', '.vh'),
+    ('', '.vh'), ('', '.live-slot:empty'),
     ('', '.prose'), ('', '.prose :is(h1,h2,h3,h4,h5,h6)'),
     ('', '.prose h1'), ('', '.prose h2'), ('', '.prose h3'), ('', '.prose h4'),
     ('', '.prose h5'), ('', '.prose h6'), ('', '.prose.compact h1'), ('', '.prose.compact h2'),
@@ -6139,6 +6140,8 @@ own u-count SuperuserUsers.svelte
 uniq1 u-table
 if [[ -n $REPLY ]]; then
   N=SuperuserUsers; H=$REPLY
+  # Beta round T6: the chips' list tooltip, fixed so the scroll box can't clip it, one line per item.
+  d '\.u-tip' '' 'position:fixed' 'white-space:pre-line' 'pointer-events:none'
   d '\.u-tools' '' 'display:flex' 'justify-content:space-between' 'flex-wrap:wrap' 'margin:0 0 12px'
   d '\.u-search' '' 'height:var\(--control-h-sm\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
   d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'

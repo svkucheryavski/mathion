@@ -474,3 +474,10 @@ export function panelError(err: unknown, onAuth: PanelOnAuth): string | null {
   if (err instanceof TypeError) return OFFLINE_MESSAGE;
   return REQUEST_ERROR_MESSAGE;
 }
+
+/** The body field a 422's first error names ("email"), or null. */
+export function panelErrorField(err: unknown): string | null {
+  const loc = err instanceof ApiError ? err.validationErrors()?.[0]?.loc : undefined;
+  const last = loc && loc.length > 1 && loc[0] === 'body' ? loc[loc.length - 1] : null;
+  return typeof last === 'string' ? last : null;
+}

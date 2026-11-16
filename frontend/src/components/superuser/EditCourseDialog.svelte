@@ -9,7 +9,7 @@
   import Modal from '../ui/Modal.svelte';
   import Button from '../ui/Button.svelte';
   import AdminEmailField from './AdminEmailField.svelte';
-  import { formatCount, panelError, type PanelCourse, type PanelOnAuth } from '../../lib/superuser';
+  import { formatCount, panelError, panelErrorField, type PanelCourse, type PanelOnAuth } from '../../lib/superuser';
 
   type Props = {
     token: string;
@@ -36,6 +36,11 @@
   let slug = $state(untrack(() => saved.slug));
   let email = $state(untrack(() => saved.email));
   let error = $state<string | null>(null);
+  let errorField = $state<string | null>(null);
+  // A 422 naming a field ties the sentence to it (the admin step names `email`).
+  const bad = $derived(!error ? null : errorField === 'name' || errorField === 'slug' ? errorField
+    : errorField === 'email' || errorField === 'admin_email' ? 'email' : null);
+  const mark = (f: string) => (bad === f ? { 'aria-invalid': 'true' as const, 'aria-describedby': errId } : {});
   let busy = $state(false);
 
   const nameChanged = $derived(name.trim() !== saved.name);
@@ -77,6 +82,7 @@
       onDone();
     } catch (e) {
       error = panelError(e, onAuth);
+      errorField = panelErrorField(e);
     } finally {
       busy = false;
     }
@@ -96,17 +102,17 @@
 
 <Modal labelledby={titleId} width={480} maxHeight={560} onRequestClose={onClose} closeDisabled={busy} header={head} footer={foot}>
   <!-- novalidate: the server's sentence is the check (type="email" would block Enter). -->
-  <form class="ec-form" novalidate aria-describedby={error ? errId : undefined}
+  <form class="ec-form" novalidate aria-describedby={error && !bad ? errId : undefined}
     onsubmit={(e) => { e.preventDefault(); void save(); }}>
     <label class="ec-label" for="{uid}-name">Course name</label>
-    <input id="{uid}-name" class="ec-input" data-autofocus bind:value={name} readonly={busy} autocomplete="off"
+    <input id="{uid}-name" class="ec-input" data-autofocus bind:value={name} readonly={busy} autocomplete="off" {...mark('name')}
       oninput={() => { error = null; }} />
     <label class="ec-label" for="{uid}-slug">Address</label>
-    <input id="{uid}-slug" class="ec-input ec-mono" bind:value={slug} readonly={busy} autocomplete="off" spellcheck="false"
+    <input id="{uid}-slug" class="ec-input ec-mono" bind:value={slug} readonly={busy} autocomplete="off" spellcheck="false" {...mark('slug')}
       oninput={() => { error = null; }} />
     {#if slugChanged}<p class="ec-note">{warning}</p>{/if}
     <label class="ec-label" for="{uid}-email">Admin's email</label>
-    <AdminEmailField id="{uid}-email" {token} value={email} {onAuth} readonly={busy}
+    <AdminEmailField id="{uid}-email" {token} value={email} {onAuth} readonly={busy} errorId={bad === 'email' ? errId : undefined}
       oninput={(v) => { email = v; error = null; }} />
     <!-- Rev 11: the name as typed, so a rename in the same Save reads right. -->
     {#if removing}<p class="ec-note">{name.trim() || saved.name} will have no admin.</p>{/if}

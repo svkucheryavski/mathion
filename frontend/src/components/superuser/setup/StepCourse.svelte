@@ -140,11 +140,10 @@
 <StepCard n={3} title="First course and its admin" note="A course and the person who will build it."
   error={form.error ?? moveError} {busy} {mode} canSave={mode === 'save' ? form.ready : true}
   onBack={note ? undefined : back} onSkip={note || done ? undefined : skip} {onSave}>
-  {#if note}
-    <div {@attach continueFocus}><NoteStrip tone="info"><CommandText text={note.text} command={note.command} /></NoteStrip></div>
-  {:else if doneText}
+  <div class="live-slot" role="status">{#if note}<div {@attach continueFocus}><NoteStrip tone="info"><CommandText text={note.text} command={note.command} /></NoteStrip></div>{/if}</div>
+  {#if !note && doneText}
     <p class="sc-done" {@attach continueFocus}><CommandText text={doneText.text} command={doneText.command} /></p>
-  {:else}
+  {:else if !note}
     {#if noAdmin}<p class="sc-line">{noAdmin} has no admin: give it one on the Courses page, or create another course here.</p>{/if}
     <!-- D3a: every edit notes the time for the keep-alive. The lead-in stays
          outside the fields' parent (their labels' :not(:first-child) margins). -->

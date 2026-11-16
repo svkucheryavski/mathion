@@ -4,6 +4,7 @@
   // all its fields (D24 rev 6), and the trash; Delete course is the one dialog
   // where the name is typed. One note at a time under the heading; the next
   // action replaces it (D5a).
+  import { tick } from 'svelte';
   import { ApiError } from '../../lib/api';
   import {
     adminIsMe, adminNoteParts, assignAdmin, createCourse, deleteCourse, formatCount, listCourses, panelError, removeAdmin, updateCourse,
@@ -42,6 +43,7 @@
     note = null;
   }
   let dialog = $state<Dialog | null>(null);
+  let heading = $state<HTMLElement>();
 
   // `quiet` reloads behind what is on screen (after a save, or a 409 that says
   // the list is stale) and keeps the table if it fails. Only the newest
@@ -135,6 +137,9 @@
     dialog = null;
     clearNote();
     void load(true);
+    // The trash went with its row.
+    await tick();
+    heading?.focus();
   }
 
   const runsReason = (n: number) => `${formatCount(n)} ${n === 1 ? 'run' : 'runs'}: can't be deleted`;
@@ -144,15 +149,9 @@
   <Button variant="primary" onclick={() => open({ kind: 'new' })}>New course</Button>
 {/snippet}
 
-<PanelHead title="Courses" actions={newButton} />
+<PanelHead title="Courses" actions={newButton} bind:heading />
 
-{#if note}
-  {#key note.id}
-    <NoteStrip tone="info" onClose={() => (note = null)}>
-      <CommandText text={note.text} command={note.command} />
-    </NoteStrip>
-  {/key}
-{/if}
+<div class="live-slot" role="status">{#if note}{#key note.id}<NoteStrip tone="info" onClose={() => (note = null)}><CommandText text={note.text} command={note.command} /></NoteStrip>{/key}{/if}</div>
 
 {#if loading}
   <Skeleton rows={3} label="Loading courses…" />
@@ -196,7 +195,7 @@
                 <IconButton glyph="pencil" size="sm" title="Edit" aria-label="Edit {c.name}" data-action="edit"
                   onclick={() => open({ kind: 'edit', course: c })} />
                 <!-- D12: blocked, not disabled, so the reason can be focused and read. -->
-                <IconButton glyph="trash" size="sm" danger aria-label="Delete {c.name}"
+                <IconButton glyph="trash" size="sm" danger aria-label={c.run_count > 0 ? `Delete ${c.name}: ${runsReason(c.run_count)}` : `Delete ${c.name}`}
                   title={c.run_count > 0 ? runsReason(c.run_count) : 'Delete'}
                   aria-disabled={c.run_count > 0 ? true : undefined} data-action="delete"
                   onclick={() => { if (c.run_count === 0) open({ kind: 'delete', course: c }); }} />

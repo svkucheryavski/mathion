@@ -203,3 +203,16 @@ it('Cancel closes without saving', async () => {
   expect(p.onClose).toHaveBeenCalled();
   expect(p.saveFields).not.toHaveBeenCalled();
 });
+
+it("a 422 naming the admin's email marks that field invalid and ties the sentence to it", async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'existing', full_name: 'A' }), { status: 200, headers: { 'content-type': 'application/json' } })));
+  render({ saveAdmin: vi.fn(() => Promise.reject(new ApiError(422, [{ loc: ['body', 'email'], msg: 'value is not a valid email address', type: 'value_error' }]))) });
+  await settle();
+  type(field("Admin's email"), 'nope@x');
+  save().click(); await settle();
+  const err = panel().querySelector<HTMLElement>('[role="alert"]')!;
+  expect(field("Admin's email").getAttribute('aria-invalid')).toBe('true');
+  expect(field("Admin's email").getAttribute('aria-describedby')).toBe(err.id);
+  expect(field('Course name').hasAttribute('aria-invalid')).toBe(false);
+  expect(panel().querySelector('form')!.hasAttribute('aria-describedby')).toBe(false);
+});

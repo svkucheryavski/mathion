@@ -61,3 +61,27 @@ it("a 409 shows the server's sentence and keeps the fields", async () => {
   expect(panel().querySelector('[role="alert"]')?.textContent?.trim()).toBe('An account with this email already exists');
   expect(field('Email').value).toBe('aho@uni.dk');
 });
+
+it('a 422 naming a field marks that field invalid and ties the sentence to it, not the form', async () => {
+  render({ onSave: vi.fn(() => Promise.reject(new ApiError(422, [{ loc: ['body', 'email'], msg: 'value is not a valid email address', type: 'value_error' }]))) });
+  await settle();
+  type(field('Email'), 'nope');
+  button('Create').click(); await settle();
+  const err = panel().querySelector<HTMLElement>('[role="alert"]')!;
+  expect(field('Email').getAttribute('aria-invalid')).toBe('true');
+  expect(field('Email').getAttribute('aria-describedby')).toBe(err.id);
+  expect(field('Name (optional)').hasAttribute('aria-invalid')).toBe(false);
+  expect(panel().querySelector('form')!.hasAttribute('aria-describedby')).toBe(false);
+  type(field('Email'), 'nope2');
+  expect(field('Email').hasAttribute('aria-invalid')).toBe(false);
+  expect(field('Email').hasAttribute('aria-describedby')).toBe(false);
+});
+
+it('a sentence naming no field stays described on the form', async () => {
+  render({ onSave: vi.fn(() => Promise.reject(new ApiError(409, 'An account with this email already exists'))) }); await settle();
+  type(field('Email'), 'aho@uni.dk');
+  button('Create').click(); await settle();
+  const err = panel().querySelector<HTMLElement>('[role="alert"]')!;
+  expect(panel().querySelector('form')!.getAttribute('aria-describedby')).toBe(err.id);
+  expect(field('Email').hasAttribute('aria-invalid')).toBe(false);
+});

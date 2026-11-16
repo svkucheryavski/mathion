@@ -170,9 +170,7 @@
         <Button variant="secondary" loading={testing} aria-disabled={testing || busy} onclick={() => void onTest()}>Send test email</Button>
       </div>
     {/if}
-    {#if form.result}
-      <p class="se-result" class:ok={form.result.ok} class:err={!form.result.ok} role="status" {@attach scrollIntoSight(form.result)}>{form.result.message}</p>
-    {/if}
+    <div class="live-slot" role="status">{#if form.result}<p class="se-result" class:ok={form.result.ok} class:err={!form.result.ok} {@attach scrollIntoSight(form.result)}>{form.result.message}</p>{/if}</div>
   {/if}
 </StepCard>
 

@@ -7,7 +7,7 @@
   import { untrack } from 'svelte';
   import Modal from '../ui/Modal.svelte';
   import Button from '../ui/Button.svelte';
-  import { panelError, type PanelOnAuth, type PanelUser } from '../../lib/superuser';
+  import { panelError, panelErrorField, type PanelOnAuth, type PanelUser } from '../../lib/superuser';
 
   type Body = { full_name?: string | null; email?: string };
   type Props = { user: PanelUser; onSave: (body: Body) => Promise<void>; onClose: () => void; onAuth: PanelOnAuth };
@@ -20,6 +20,10 @@
   let name = $state(untrack(() => user.full_name ?? ''));
   let email = $state(untrack(() => user.email));
   let error = $state<string | null>(null);
+  let errorField = $state<string | null>(null);
+  // A 422 naming a field ties the sentence to that field, not the form.
+  const bad = $derived(error && (errorField === 'email' || errorField === 'full_name') ? errorField : null);
+  const mark = (f: string) => (bad === f ? { 'aria-invalid': 'true' as const, 'aria-describedby': errId } : {});
   let busy = $state(false);
 
   const nameChanged = $derived(name.trim() !== (user.full_name ?? ''));
@@ -38,6 +42,7 @@
       await onSave(body);
     } catch (e) {
       error = panelError(e, onAuth);
+      errorField = panelErrorField(e);
     } finally {
       busy = false;
     }
@@ -57,13 +62,13 @@
 
 <Modal labelledby={titleId} width={440} maxHeight={460} onRequestClose={onClose} closeDisabled={busy} header={head} footer={foot}>
   <!-- novalidate: the server's sentence is the check (type="email" would block Enter). -->
-  <form class="ea-form" novalidate aria-describedby={error ? errId : undefined}
+  <form class="ea-form" novalidate aria-describedby={error && !bad ? errId : undefined}
     onsubmit={(e) => { e.preventDefault(); void save(); }}>
     <label class="ea-label" for="{uid}-name">Name</label>
-    <input id="{uid}-name" class="ea-input" data-autofocus bind:value={name} readonly={busy} autocomplete="off"
+    <input id="{uid}-name" class="ea-input" data-autofocus bind:value={name} readonly={busy} autocomplete="off" {...mark('full_name')}
       oninput={() => { error = null; }} />
     <label class="ea-label" for="{uid}-email">Email</label>
-    <input id="{uid}-email" class={["ea-input", user.is_superuser && "ea-locked"]} type="email" bind:value={email} readonly={busy || user.is_superuser}
+    <input id="{uid}-email" class={["ea-input", user.is_superuser && "ea-locked"]} type="email" bind:value={email} readonly={busy || user.is_superuser} {...mark('email')}
       autocomplete="off" spellcheck="false" oninput={() => { error = null; }} />
     {#if user.is_superuser}
       <p class="ea-note">A superuser's email can't be changed here.</p>

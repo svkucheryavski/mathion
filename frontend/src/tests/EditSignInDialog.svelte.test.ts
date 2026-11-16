@@ -43,7 +43,9 @@ it('is titled Edit sign-in and shows the saved rules (D12)', async () => {
 
 it('Longest sign-in is three segments: 1, 7 or 30 days (D12)', async () => {
   render(); await settle();
-  expect(panel().querySelector('[role="radiogroup"]')?.getAttribute('aria-label')).toBe('Longest sign-in');
+  const group = panel().querySelector<HTMLElement>('[role="radiogroup"]')!;
+  expect(document.getElementById(group.getAttribute('aria-labelledby')!)?.textContent).toBe('Longest sign-in');
+  expect(group.hasAttribute('aria-label')).toBe(false);
   expect([...panel().querySelectorAll('[role="radiogroup"] .segment')].map((s) => s.textContent!.trim()))
     .toEqual(['1 day', '7 days', '30 days']);
 });
