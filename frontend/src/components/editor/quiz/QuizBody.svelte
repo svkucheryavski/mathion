@@ -361,7 +361,7 @@
     {#if perms.canEditStructure}
       <!-- 5c D9 exception: in the quiz overview, adding a question is the main action. -->
       <span class="q-add">
-        <Button variant="primary" disabled={addReason !== null} title={addReason ?? undefined} onclick={() => void openAdd()}>+ Add question</Button>
+        <Button variant="primary" disabled={addReason !== null} title={addReason ?? undefined} onclick={() => void openAdd()}><span aria-hidden="true">+</span> Add question</Button>
       </span>
     {/if}
   </div>

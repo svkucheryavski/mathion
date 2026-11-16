@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   TYPE_LABEL, formatNumber, decimalsText, toleranceText, cutName, questionHints, sameNumber,
 } from './quizFormat';
@@ -37,6 +37,35 @@ describe('quizFormat', () => {
     expect(cutName('x'.repeat(40))).toBe('x'.repeat(40));
     expect(cutName('y'.repeat(41))).toBe(`${'y'.repeat(40)}…`);
     expect(cutName('  padded  ')).toBe('padded');
+  });
+
+  it('cutName leaves no space before the ellipsis', () => {
+    expect(cutName(`${'x'.repeat(39)} tail`)).toBe(`${'x'.repeat(39)}…`);
+  });
+
+  it('cutName cuts by characters as people see them: emoji, joined emoji and accents stay whole', () => {
+    expect(cutName('🙂'.repeat(45))).toBe(`${'🙂'.repeat(40)}…`);
+    const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}';
+    expect(cutName(family.repeat(45))).toBe(`${family.repeat(40)}…`);
+    const e = 'e\u0301';
+    expect(cutName(e.repeat(45))).toBe(`${e.repeat(40)}…`);
+  });
+
+  it('cutName without Intl.Segmenter (Firefox before 125) still works, by code point', async () => {
+    // Only Segmenter goes: the module also formats numbers with Intl.
+    vi.stubGlobal('Intl', new Proxy(Intl, { get: (t, k) => (k === 'Segmenter' ? undefined : Reflect.get(t, k)) }));
+    vi.resetModules();
+    try {
+      const lib = await import('./quizFormat');
+      expect(lib.cutName('🙂'.repeat(45))).toBe(`${'🙂'.repeat(40)}…`);
+      // The fallback counts code points: a joined emoji counts as five.
+      const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}';
+      expect(lib.cutName(family.repeat(10))).toBe(`${family.repeat(8)}…`);
+      expect(lib.cutName('Paris')).toBe('Paris');
+    } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
   });
 
   it('hints wait for the answers to load', () => {

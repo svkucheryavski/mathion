@@ -104,7 +104,8 @@
   const publishBlocked = $derived(violated.length > 0);
   const publishTitle = $derived(publishBlocked
     ? (violated[0].reason ?? '')
-    : runWrite && !publishing ? WAIT : undefined);
+    : publishing ? 'Wait for the publish to finish'
+    : runWrite ? WAIT : undefined);
   const footNote = $derived(
     run.is_published ? 'Published — students have access.'
     : !isAdmin ? 'A course admin publishes this run.'
@@ -295,7 +296,7 @@
           <span class="ov-label">Version</span>
           <span class="ov-value">{pinned?.label ? `${pinned.label} · ` : ''}<span class="ov-ver">v. {run.version_id}</span></span>
           <span class="ov-act">
-            <IconButton glyph="pencil" size="sm" title="The version is fixed when the run is created"
+            <IconButton glyph="pencil" size="sm" aria-label="Edit the version" title="The version is fixed when the run is created"
                         data-action="edit-version" disabled />
           </span>
         </div>

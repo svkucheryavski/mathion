@@ -27,6 +27,8 @@ function mountRow(over: Record<string, unknown> = {}) {
   return { target, props };
 }
 const count = (t: HTMLElement) => t.querySelector('[data-testid="item-question-count"]');
+/** The title as seen: without the hidden type prefix. */
+const seenTitle = (t: HTMLElement) => { const c = t.querySelector('.item-title')!.cloneNode(true) as HTMLElement; c.querySelector('.vh')?.remove(); return c.textContent; };
 
 it('a quiz item row shows its questions_count (plural)', () => {
   const { target } = mountRow({ item: item({ questions_count: 3 }) });
@@ -78,7 +80,7 @@ describe('ItemRow — 3b treatment (T6)', () => {
   it('title, and for a quiz the faint separator + mono count', () => {
     const { target } = mountRow();
     flushSync();
-    expect(target.querySelector('.item-title')!.textContent).toBe('Pop quiz');
+    expect(seenTitle(target)).toBe('Pop quiz');
     expect(target.querySelector('.sep')!.getAttribute('aria-hidden')).toBe('true');
     expect(count(target)!.classList.contains('mono')).toBe(true);
   });
@@ -120,7 +122,7 @@ describe('ItemRow — 3b treatment (T6)', () => {
   it('with no title and no slug: "(item N)" visibly, slot names end in the plain placeholder', () => {
     const { target } = mountRow({ item: item({ title: '', slug: '' }), index: 2 });
     flushSync();
-    expect(target.querySelector('.item-title')!.textContent).toBe('(item 2)');
+    expect(seenTitle(target)).toBe('(item 2)');
     expect([...target.querySelectorAll('.actions button')].map((b) => b.getAttribute('aria-label'))).toEqual([
       'Move item up: item 2', 'Move item down: item 2', 'Open item 2', 'Delete item 2',
     ]);
@@ -165,4 +167,11 @@ describe('ItemRow — Slice-5c T3', () => {
     const glyphs = [...target.querySelectorAll('button')].map((b) => b.getAttribute('data-glyph'));
     expect(glyphs).toEqual(['up', 'down', 'pencil', 'trash']);
   });
+});
+
+it('the title is read with its type first, as hidden text', () => {
+  const { target } = mountRow({ item: item({ type: 'static_page', title: 'Intro' }) });
+  // Inside the title span, so VoiceOver reads "Page: Intro" as one stop.
+  expect(target.querySelector('.item-title .vh')?.textContent).toBe('Page: ');
+  expect(target.querySelector('.item-title')?.textContent).toBe('Page: Intro');
 });

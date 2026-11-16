@@ -3,7 +3,7 @@
   // 5b modal frame with one footer Save. Read-only outside "created" (the
   // values as text, no footer). Save sends ONE PATCH with the changed fields
   // (VersionUpdate accepts any subset). R2: Info is a plain textarea.
-  import { getContext, onDestroy, untrack } from 'svelte';
+  import { getContext, onDestroy, tick, untrack } from 'svelte';
   import Modal from '../ui/Modal.svelte';
   import Button from '../ui/Button.svelte';
   import AskSlot from '../ui/AskSlot.svelte';
@@ -42,6 +42,8 @@
   let saving = $state(false);
   let alive = true;
   let saveEl = $state<HTMLButtonElement>();
+  let labelEl = $state<HTMLInputElement>();
+  let attemptsEl = $state<HTMLInputElement>();
   onDestroy(() => { alive = false; });
 
   const dirty = $derived(editable && (label !== initial.label || info !== initial.info || attempts !== initial.attempts));
@@ -108,7 +110,12 @@
     const badAttempts = !(attempts.trim() !== '' && Number.isInteger(n) && n >= 1 && n <= 10);
     if (badLabel) labelError = 'Label is required';
     if (badAttempts) attemptsError = 'Max quiz attempts must be a whole number between 1 and 10';
-    if (badLabel || badAttempts) return;
+    if (badLabel || badAttempts) {
+      // After the flush, so the field is already marked invalid when focus lands.
+      await tick();
+      if (alive) (badLabel ? labelEl : attemptsEl)?.focus();
+      return;
+    }
     const body: Record<string, unknown> = {};
     if (label !== initial.label) body.label = label;
     if (info !== initial.info) body.info_md = info;
@@ -172,7 +179,7 @@
       <div class="field-row top line">
         <span class="field-label">Label</span>
         <div class="field">
-          <input class="plain-input" data-autofocus aria-label="Label" maxlength={200} required bind:value={label} readonly={saving}
+          <input bind:this={labelEl} class="plain-input" data-autofocus aria-label="Label" maxlength={200} required bind:value={label} readonly={saving}
             aria-invalid={labelError ? 'true' : undefined}
             aria-describedby={labelError ? labelErrId : undefined}
             oninput={() => { labelError = null; }} onkeydown={onEnter} />
@@ -187,7 +194,7 @@
       <div class="field-row top line">
         <span class="field-label">Max quiz attempts</span>
         <div class="field">
-          <input class="plain-input num mono" type="number" min="1" max="10" step="1" aria-label="Max quiz attempts"
+          <input bind:this={attemptsEl} class="plain-input num mono" type="number" min="1" max="10" step="1" aria-label="Max quiz attempts"
             value={attempts} readonly={saving}
             aria-invalid={attemptsError ? 'true' : undefined}
             aria-describedby={attemptsError ? attemptsErrId : undefined}

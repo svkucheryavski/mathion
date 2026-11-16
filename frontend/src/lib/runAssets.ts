@@ -1,4 +1,4 @@
-import { api, ApiError, OFFLINE_MESSAGE, errorDetail } from './api';
+import { api, ApiError, OFFLINE_MESSAGE, REQUEST_ERROR_MESSAGE, errorDetail } from './api';
 import { emitUnauthorized } from './events';
 import type { RunAssetResponse } from './types';
 
@@ -54,7 +54,7 @@ export async function uploadRunAsset(
       // Non-JSON response (HTML error page, truncated payload) — body stays
       // undefined. Mirrors lib/api.ts non-2xx handling.
     }
-    const detail = errorDetail(r, parsedBody, 'Upload failed');
+    const detail = errorDetail(r, parsedBody, REQUEST_ERROR_MESSAGE);
     const errorCode = (parsedBody as { error_code?: string } | undefined)?.error_code;
     throw new ApiError(r.status, detail, errorCode, parsedBody);
   }
@@ -100,7 +100,7 @@ export async function replaceRunAsset(
       // Non-JSON response (HTML error page, truncated payload) — body stays
       // undefined. Mirrors lib/api.ts non-2xx handling.
     }
-    const detail = errorDetail(r, parsedBody, 'Replace failed');
+    const detail = errorDetail(r, parsedBody, REQUEST_ERROR_MESSAGE);
     const errorCode = (parsedBody as { error_code?: string } | undefined)?.error_code;
     throw new ApiError(r.status, detail, errorCode, parsedBody);
   }

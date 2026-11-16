@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
-  QuizServer, q, opt, mkVersion, renderQuiz, cleanup, settle, panel, cards, rows, byName, typeInto, press, live, toastTexts, text,
+  QuizServer, q, opt, mkVersion, renderQuiz, cleanup, settle, panel, cards, rows, byName, typeInto, press, said, toastTexts, text,
 } from './support/quizHarness.svelte';
 import { KEY_CONFIRM, DISCARD_PROMPT, WAIT_TITLE, FORBIDDEN_TITLE } from '../lib/quizEdits.svelte';
 import { versionPermissions } from '../lib/versionPermissions';
@@ -131,7 +131,7 @@ describe('Choice answers — the marker (5d T5)', () => {
     hold.release();
     await settle();
     expect(marks()).toEqual([true, false, false]);
-    expect(live()).not.toBe('Saved');
+    expect(await said()).not.toBe('Saved');
     expect(toastTexts()).toEqual([]);
   });
 
@@ -155,6 +155,8 @@ describe('Choice answers — inline text (5d T5)', () => {
     const r1 = rows(cards()[0])[0];
     expect(text(textBtn(r1))).toBe(`Edit answer ${long}`);
     expect(text(textBtn(r1).querySelector('.sr-only'))).toBe('Edit answer');
+    // No title that repeats the name; a title only carries a reason it is blocked.
+    expect(textBtn(r1).hasAttribute('title')).toBe(false);
     expect(marker(r1).getAttribute('aria-label')).toBe(`Mark "${'x'.repeat(40)}…" correct`);
     expect(byName(r1, `Delete answer "${'x'.repeat(40)}…"`)).toBeDefined();
   });
@@ -174,7 +176,7 @@ describe('Choice answers — inline text (5d T5)', () => {
     expect(text(rows(cards()[0])[1].querySelector('.ans-edit'))).toBe('Edit answer Twelve!');
     expect(marks()).toEqual([true, false, false]);
     expect(document.activeElement).toBe(textBtn(rows(cards()[0])[1]));
-    expect(live()).toBe('Saved');
+    expect(await said()).toBe('Saved');
   });
 
   it('unchanged closes silently; Esc cancels inside the modal; empty shows an error', async () => {
@@ -377,7 +379,7 @@ describe('Choice answers — add, move, delete (5d T5)', () => {
     byName(rows(cards()[0])[0], 'Move answer "Eleven" down')!.click();
     await settle();
     expect(rows(cards()[0]).map((r) => r.dataset.aId)).toEqual(['12', '11', '13']);
-    expect(live()).toBe('Answer moved to position 2 of 3');
+    expect(await said()).toBe('Answer moved to position 2 of 3');
     expect(optWrites(s).map((c) => c.body)).toEqual([{ order: [{ id: 12, order: 1 }, { id: 11, order: 2 }, { id: 13, order: 3 }] }]);
     expect(document.activeElement).toBe(byName(rows(cards()[0])[1], 'Move answer "Eleven" down'));
   });

@@ -318,6 +318,13 @@
     return `${name}, ${seq.sequence_title}: ${text}`;
   }
 
+  // Focusing a pinned sort button must not scroll the grid back to the start.
+  let gridLeft = 0;
+  function holdGridLeft(e: FocusEvent) {
+    const box = (e.currentTarget as HTMLElement).closest<HTMLElement>('.table-scroll');
+    if (box) box.scrollLeft = gridLeft;
+  }
+
   function toggleSort(key: SortKey): void {
     if (key === sortKey) {
       sortDir = sortDir === 'asc' ? 'desc' : 'asc';
@@ -419,15 +426,15 @@
     {#if data.sequences.length === 0}
       <div class="empty">No sequences in this run.</div>
     {:else}
-    <div class="table-scroll" onscroll={restoreTip}>
+    <div class="table-scroll" {@attach () => { gridLeft = 0; }} onscroll={(e) => { gridLeft = e.currentTarget.scrollLeft; restoreTip(); }}>
       <table class="progress-grid">
         <thead>
           <tr class="block-row">
             <th class="sticky-name" scope="col" rowspan="2" aria-sort={sortAria('name')}>
-              <button type="button" onclick={() => toggleSort('name')}>Student{#if sortKey === 'name'}<SortMark dir={sortDir} />{/if}</button>
+              <button type="button" onfocus={holdGridLeft} onclick={() => toggleSort('name')}>Student{#if sortKey === 'name'}<SortMark dir={sortDir} />{/if}</button>
             </th>
             <th class="sticky-group" scope="col" rowspan="2" aria-sort={sortAria('group')}>
-              <button type="button" onclick={() => toggleSort('group')}>Group{#if sortKey === 'group'}<SortMark dir={sortDir} />{/if}</button>
+              <button type="button" onfocus={holdGridLeft} onclick={() => toggleSort('group')}>Group{#if sortKey === 'group'}<SortMark dir={sortDir} />{/if}</button>
             </th>
             {#each blockGroupedSequences as bg (bg.block_id)}
               {@const bn = blockPos.get(bg.block_id)}

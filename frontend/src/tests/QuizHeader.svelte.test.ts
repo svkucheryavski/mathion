@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
-  QuizServer, q, opt, mkVersion, renderQuiz, cleanup, settle, panel, byName, typeInto, press, live, toastTexts, text, cards,
+  QuizServer, q, opt, mkVersion, renderQuiz, cleanup, settle, panel, byName, typeInto, press, said, toastTexts, text, cards,
 } from './support/quizHarness.svelte';
 import { versionPermissions } from '../lib/versionPermissions';
 import { DISCARD_PROMPT, FORBIDDEN_TITLE } from '../lib/quizEdits.svelte';
@@ -58,7 +58,7 @@ describe('Quiz header (5d T4)', () => {
     expect(itemPatches(s).map((c) => c.body)).toEqual([{ title: 'New name' }]);
     expect(text(h2())).toBe('New name');
     expect(document.activeElement).toBe(pencil());
-    expect(live()).toBe('Saved');
+    expect(await said()).toBe('Saved');
   });
 
   it('an unchanged value closes silently; Esc cancels and the modal stays open', async () => {

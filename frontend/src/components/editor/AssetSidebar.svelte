@@ -368,7 +368,7 @@
                 size="sm"
                 danger
                 title={a.is_referenced ? inUseReason : 'Remove asset'}
-                aria-label={`Delete ${a.filename}`}
+                aria-label={a.is_referenced ? `${inUseReason}: ${a.filename}` : `Delete ${a.filename}`}
                 disabled={disabled || a.is_referenced}
                 bind:element={trashEls[a.id]}
                 onclick={() => void askDelete(a.id)}

@@ -7,7 +7,7 @@
   import Button from '../ui/Button.svelte';
   import CourseFields from './fields/CourseFields.svelte';
   import { CourseForm, type CourseBody } from '../../lib/panelForms/courseForm.svelte';
-  import { panelError, type PanelOnAuth } from '../../lib/superuser';
+  import { panelError, panelErrorField, type PanelOnAuth } from '../../lib/superuser';
 
   type Props = { token: string; onSave: (body: CourseBody) => Promise<void>; onClose: () => void; onAuth: PanelOnAuth };
   let { token, onSave, onClose, onAuth }: Props = $props();
@@ -19,6 +19,9 @@
   const form = new CourseForm();
   let busy = $state(false);
 
+  // A 422 naming a field ties the sentence to that field, not the form.
+  const onField = $derived(['name', 'slug', 'admin_email'].includes(form.errorField ?? ''));
+
   async function save() {
     if (busy || !form.ready) return;
     form.error = null;
@@ -27,6 +30,7 @@
       await onSave(form.body());
     } catch (e) {
       form.error = panelError(e, onAuth);
+      form.errorField = panelErrorField(e);
     } finally {
       busy = false;
     }
@@ -44,9 +48,9 @@
 {/snippet}
 
 <Modal labelledby={titleId} width={480} maxHeight={520} onRequestClose={onClose} closeDisabled={busy} header={head} footer={foot}>
-  <form class="nc-form" novalidate aria-describedby={form.error ? errId : undefined}
+  <form class="nc-form" novalidate aria-describedby={form.error && !onField ? errId : undefined}
     onsubmit={(e) => { e.preventDefault(); void save(); }}>
-    <CourseFields {form} {uid} {busy} {token} {onAuth} />
+    <CourseFields {form} {uid} {busy} {token} {onAuth} {errId} />
     {#if form.error}<p id={errId} class="nc-err" role="alert">{form.error}</p>{/if}
     <!-- Enter in a field submits. -->
     <button type="submit" hidden aria-hidden="true" tabindex="-1"></button>

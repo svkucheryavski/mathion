@@ -231,10 +231,17 @@ export const panel = () => document.querySelector<HTMLElement>('section.modal-pa
 export const topPanel = () => { const all = document.querySelectorAll<HTMLElement>('section.modal-panel'); return all[all.length - 1]!; };
 export const cards = () => [...panel().querySelectorAll<HTMLElement>('li.qcard')];
 export const rows = (card: HTMLElement) => [...card.querySelectorAll<HTMLElement>('li.ans-row')];
-/** A button by accessible name: aria-label, else its whitespace-collapsed text. */
+/** A button's accessible name: aria-label, else its text without aria-hidden parts. */
+export function nameOf(b: HTMLElement): string {
+  const label = b.getAttribute('aria-label');
+  if (label !== null) return label;
+  const copy = b.cloneNode(true) as HTMLElement;
+  copy.querySelectorAll('[aria-hidden="true"]').forEach((n) => n.remove());
+  return copy.textContent!.replace(/\s+/g, ' ').trim();
+}
+/** A button by accessible name. */
 export function byName(root: ParentNode, name: string): HTMLButtonElement | undefined {
-  return [...root.querySelectorAll<HTMLButtonElement>('button')]
-    .find((b) => (b.getAttribute('aria-label') ?? b.textContent!.replace(/\s+/g, ' ').trim()) === name);
+  return [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => nameOf(b) === name);
 }
 export function typeInto(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
   el.value = value;
@@ -248,5 +255,11 @@ export function press(el: Element, key: string, opts: KeyboardEventInit = {}) {
   return e;
 }
 export const live = () => panel().querySelector('[data-testid="quiz-live"]')!.textContent;
+/** The live text once say()'s 150 ms delay has passed. */
+export async function said(): Promise<string | null> {
+  await new Promise((r) => setTimeout(r, 160));
+  flushSync();
+  return live();
+}
 export const toastTexts = () => toasts.list.map((t) => t.message);
 export const text = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, ' ').trim() ?? null;

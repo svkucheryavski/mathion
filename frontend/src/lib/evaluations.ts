@@ -1,4 +1,4 @@
-import { api, ApiError, OFFLINE_MESSAGE, errorDetail } from './api';
+import { api, ApiError, OFFLINE_MESSAGE, REQUEST_ERROR_MESSAGE, errorDetail } from './api';
 import { emitUnauthorized } from './events';
 
 export type EvaluationResult = 'rejected' | 'major_revision' | 'minor_revision' | 'accepted';
@@ -69,7 +69,7 @@ export async function createEvaluation(
       // Non-JSON response (HTML error page, truncated payload) — body stays
       // undefined. Mirrors lib/api.ts non-2xx handling.
     }
-    const detail = errorDetail(r, parsedBody, 'Upload failed');
+    const detail = errorDetail(r, parsedBody, REQUEST_ERROR_MESSAGE);
     const errorCode = (parsedBody as { error_code?: string } | undefined)?.error_code;
     throw new ApiError(r.status, detail, errorCode, parsedBody);
   }

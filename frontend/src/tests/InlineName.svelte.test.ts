@@ -211,6 +211,28 @@ describe('InlineName (handoff §4 Inline field editing)', () => {
     expect(host.querySelector('p.in-err')?.textContent).toBe('Title is required');
   });
 
+  it('the wait hint fills a status region that is there, empty, before it (Review Focus 4)', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    component = mount(InlineName, {
+      target: host,
+      props: { label: 'Title', value: 'A', onSave, onCancel: vi.fn(), wait: 'Wait for the current change to save' } as ComponentProps<typeof InlineName>,
+    });
+    flushSync();
+    const live = host.querySelector<HTMLElement>('.inline-name > .live-slot[role="status"]')!;
+    expect(live.textContent).toBe('');
+    // Empty, so the slot takes no flex item (and no 4px gap) under the row.
+    expect(live.matches(':empty')).toBe(true);
+    const input = host.querySelector('input.in-input') as HTMLInputElement;
+    type(input, 'B');
+    key(input, 'Enter');
+    await settle();
+    expect(host.querySelector('.inline-name > .live-slot[role="status"]')).toBe(live);
+    expect(live.querySelector('p.in-hint')?.textContent).toBe('Wait for the current change to save');
+    expect(live.querySelector('p.in-hint')!.hasAttribute('role')).toBe(false);
+  });
+
   it('the wait line is a neutral hint: no aria-invalid, no error class; it clears when the wait ends (call 16)', async () => {
     const props = $state<{ wait: string | null }>({ wait: 'Wait for the current change to save' });
     host = document.createElement('div');

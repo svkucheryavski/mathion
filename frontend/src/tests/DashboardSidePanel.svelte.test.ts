@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest';
 import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
+import { REQUEST_ERROR_MESSAGE } from '../lib/api';
 import { mount, unmount, flushSync, tick } from 'svelte';
 
 import DashboardSidePanel from '../components/runs/DashboardSidePanel.svelte';
@@ -576,6 +577,25 @@ describe('DashboardSidePanel', () => {
     pickResult('accepted');
     expect(saveBtn.disabled).toBe(false);
     expect(evalCalls(fetchMock)).toHaveLength(0);
+  });
+
+  it('a feedback-file error describes "attach PDF" while it shows', async () => {
+    mountPanel({ target: submissionTarget({ status: 'awaiting_eval' }), isAdmin: true });
+    await settle();
+    const attach = () => host.querySelector('button[data-action="attach-feedback-file"]') as HTMLButtonElement;
+    const ids = () => attach().getAttribute('aria-describedby')!.split(' ');
+    expect(ids().some((id) => id.endsWith('-file-err'))).toBe(false);
+    const fileInput = host.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, 'files', { value: [new File(['x'], 'note.txt', { type: 'text/plain' })], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const errId = ids().find((id) => id.endsWith('-file-err'));
+    expect(errId).toBeDefined();
+    expect(document.getElementById(errId!)?.textContent).toBe('Only PDF files accepted.');
+    Object.defineProperty(fileInput, 'files', { value: [], configurable: true });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(ids().some((id) => id.endsWith('-file-err'))).toBe(false);
   });
 
   // T27: file extension / empty / size / MIME
@@ -2175,7 +2195,7 @@ describe('DashboardSidePanel — the Evaluate form (6c T6, R37, R44)', () => {
     await settle();
     const banner = host.querySelector('[role="alert"].form-error')?.textContent ?? '';
     expect(banner).toContain("This file is over the server's upload limit.");
-    expect(banner).not.toContain('Upload failed');
+    expect(banner).not.toContain(REQUEST_ERROR_MESSAGE);
   });
 
   it('a chosen file shows "{name} · {size}" with its remove × focused; remove clears the input and focuses "attach PDF"', async () => {

@@ -849,7 +849,7 @@
                   type="button"
                   class="sp-link"
                   data-action="attach-feedback-file"
-                  aria-describedby="{uid}-file-label {uid}-file-help"
+                  aria-describedby="{uid}-file-label {uid}-file-help{errors.feedbackFile ? ` ${uid}-file-err` : ''}"
                   onclick={() => fileInputEl?.click()}
                 >attach PDF</button>
               {/if}
@@ -864,7 +864,7 @@
               onchange={handleFileChange}
             />
             <span class="sp-help" id="{uid}-file-help">{uploadLimit.mb === null ? 'PDF only.' : `PDF only, max ${uploadLimit.mb} MB.`}</span>
-            {#if errors.feedbackFile}<p class="sp-field-err" role="alert">{errors.feedbackFile}</p>{/if}
+            {#if errors.feedbackFile}<p class="sp-field-err" id="{uid}-file-err" role="alert">{errors.feedbackFile}</p>{/if}
           {:else if existingHasFeedbackFile}
             <p class="sp-muted">The feedback file cannot be replaced.</p>
           {/if}
@@ -1085,6 +1085,9 @@
   /* The radio is hidden with clip(), which clips its outline too. */
   @media (forced-colors: active) {
     .sp-seg-opt:has(.sp-radio:focus-visible) { outline: 2px solid Highlight; outline-offset: -2px; }
+    /* The selected fill is dropped here: an outline marks it, as in Segmented. */
+    .sp-seg-opt.checked { outline: 2px solid; outline-offset: -2px; }
+    .sp-seg-opt.locked { color: GrayText; }
   }
   .sp-radio {
     position: absolute;

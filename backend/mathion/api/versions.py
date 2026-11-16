@@ -402,6 +402,7 @@ def delete_version(version_id: int, db: Session = Depends(get_db), user: User = 
         raise HTTPException(status_code=409, detail="Can only delete versions in 'created' state")
     db.delete(version)
     db.commit()
+    shutil.rmtree(os.path.join(settings.asset_path, "courses", str(version_id)), ignore_errors=True)
 
 
 @router.post("/api/versions/{version_id}/disable", response_model=VersionResponse)

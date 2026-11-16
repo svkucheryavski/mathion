@@ -91,6 +91,22 @@ describe('VersionSettingsModal (Slice-5c T5, D12)', () => {
     footBtn('Save')!.click(); await settle();
     expect(patches()).toEqual([['/api/versions/1', { max_quiz_attempts: 4 }]]);
   });
+  it('a refused Save focuses the first invalid field: the label, then attempts', async () => {
+    render();
+    await settle();
+    type(input('Max quiz attempts'), '11');
+    // The field is already marked invalid when focus lands on it.
+    let invalidAtFocus: string | null = null;
+    input('Max quiz attempts').addEventListener('focus', (e) => { invalidAtFocus = (e.target as HTMLElement).getAttribute('aria-invalid'); }, { once: true });
+    footBtn('Save')!.focus();
+    footBtn('Save')!.click(); await settle();
+    expect(document.activeElement).toBe(input('Max quiz attempts'));
+    expect(invalidAtFocus).toBe('true');
+    type(input('Label'), '');
+    footBtn('Save')!.focus();
+    footBtn('Save')!.click(); await settle();
+    expect(document.activeElement).toBe(input('Label'));
+  });
   // The label is mandatory (user, 2026-10-08): it can't be cleared.
   it('an empty Label shows "Label is required" on the field and sends nothing', async () => {
     render();

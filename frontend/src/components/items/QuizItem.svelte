@@ -16,6 +16,9 @@
   import EmptyState from '../ui/EmptyState.svelte';
 
   let { item }: { item: QuizItem } = $props();
+  const uid = $props.id();
+  // The result card's button is described by the score and the attempt.
+  const resultDesc = `${uid}-score ${uid}-attempt`;
 
   // D83: start from the draft kept while the student was elsewhere. ItemRouter
   // keys this component on the item id (C13), so `item` never changes under it.
@@ -295,12 +298,12 @@
       {@const score = lastResult ? { correct: lastResult.score_correct, total: lastResult.score_total, attempt: lastResult.attempt_count, max: lastResult.max_attempts, canRetry: lastResult.can_retry } : revealed ? { correct: revealed.score_correct, total: revealed.score_total, attempt: revealed.attempt_count, max, canRetry: revealed.attempt_count < max } : stored ? { correct: stored.score.correct, total: stored.score.total, attempt: stored.attempt, max: stored.max, canRetry: true } : null}
       {#if score}
         <div class="result" tabindex="-1">
-          <p><strong>Score:</strong> <span class="mono">{score.correct} / {score.total}</span></p>
-          <p class="meta">Attempt <span class="mono">{score.attempt}</span> of <span class="mono">{score.max}</span></p>
+          <p id="{uid}-score"><strong>Score:</strong> <span class="mono">{score.correct} / {score.total}</span></p>
+          <p class="meta" id="{uid}-attempt">Attempt <span class="mono">{score.attempt}</span> of <span class="mono">{score.max}</span></p>
           {#if score.canRetry}
-            <Button onclick={tryAgain}>Try again</Button>
+            <Button aria-describedby={resultDesc} onclick={tryAgain}>Try again</Button>
           {:else if lastResult && !revealed}
-            <Button variant="secondary" loading={revealing} aria-disabled={revealing} onclick={revealAnswers}>Show correct answers</Button>
+            <Button variant="secondary" aria-describedby={resultDesc} loading={revealing} aria-disabled={revealing} onclick={revealAnswers}>Show correct answers</Button>
           {/if}
         </div>
       {/if}

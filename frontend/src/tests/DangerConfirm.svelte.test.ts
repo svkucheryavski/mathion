@@ -80,9 +80,9 @@ describe('DangerConfirm (handoff §4 Confirm-then-act)', () => {
     await settle();
   });
 
-  it('the group is named by its confirm label', () => {
+  it('the group is named "Confirm <label>", not the button\'s own words', () => {
     render();
-    expect(host.querySelector('.danger-confirm')?.getAttribute('aria-label')).toBe('Force delete');
+    expect(host.querySelector('.danger-confirm')?.getAttribute('aria-label')).toBe('Confirm force delete');
   });
 
   it('a rejected onConfirm also un-ticks the box', async () => {

@@ -260,6 +260,11 @@ describe('RunMiniProjectsTab', () => {
     await settle();
     const confirmBtn = target.querySelector('button[data-action="confirm-delete"]') as HTMLButtonElement;
     expect(confirmBtn).toBeTruthy();
+    // The question names its row, so the group is named once, by the question.
+    const group = confirmBtn.closest('.inline-confirm')!;
+    expect(group.querySelector('.warning')?.textContent).toBe('Delete "Block 1 — Intro"?');
+    expect(group.hasAttribute('aria-label')).toBe(false);
+    expect(document.getElementById(group.getAttribute('aria-labelledby')!)?.textContent).toBe('Delete "Block 1 — Intro"?');
 
     confirmBtn.click();
     await settle();
@@ -981,7 +986,7 @@ describe('RunMiniProjectsTab — 6a restyle', () => {
     expect(row.classList.contains('mp-panel-row')).toBe(true);
     expect(row.previousElementSibling?.getAttribute('data-role')).toBe('mp-row');
     expect(row.querySelector('td')?.getAttribute('colspan')).toBe('4');
-    expect(row.querySelector('.inline-confirm.row')?.textContent).toMatch(/Delete this mini-project\?/);
+    expect(row.querySelector('.inline-confirm.row')?.textContent).toMatch(/Delete "Block 1 — Intro"\?/);
     expect(row.querySelector('.inline-confirm')?.classList.contains('end')).toBe(true);   // under the 🗑 (D42)
     const cell = target.querySelector('tr[data-role="mp-row"] .mp-actions') as HTMLElement;
     expect(cell.querySelector('.inline-confirm')).toBeNull();

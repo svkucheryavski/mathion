@@ -11,7 +11,7 @@
   let { tone, onClose, children }: Props = $props();
 </script>
 
-<div class="note-strip {tone}" role={tone === 'error' ? 'alert' : 'status'}>
+<div class="note-strip {tone}" role={tone === 'error' ? 'alert' : undefined}>
   <div class="text">{@render children()}</div>
   {#if onClose}<IconButton glyph="close" title="Close" borderless onclick={onClose} />{/if}
 </div>

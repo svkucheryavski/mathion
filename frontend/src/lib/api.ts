@@ -50,8 +50,7 @@ export function loadFailureText(e: unknown): string {
  *  proxy's 502) says, never the raw status text. */
 export const SERVER_ERROR_MESSAGE = 'Something went wrong on the server. Try again.';
 
-/** What a 4xx with no sentence and no status text (HTTP/2 has none) says,
- *  never a blank line. */
+/** What a 4xx with no sentence of its own says, never its status text. */
 export const REQUEST_ERROR_MESSAGE = 'Something went wrong. Try again.';
 
 /** A non-2xx answer's detail: the server's own (an empty one is none), else
@@ -87,7 +86,7 @@ async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
       // undefined so callers can branch on presence without distinguishing
       // parse-failure from empty-body.
     }
-    const detail = errorDetail(res, parsedBody, res.statusText || REQUEST_ERROR_MESSAGE);
+    const detail = errorDetail(res, parsedBody, REQUEST_ERROR_MESSAGE);
     const errorCode = (parsedBody as { error_code?: string } | undefined)?.error_code;
     throw new ApiError(res.status, detail, errorCode, parsedBody);
   }

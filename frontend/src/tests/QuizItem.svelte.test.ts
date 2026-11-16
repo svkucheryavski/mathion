@@ -868,6 +868,27 @@ describe('QuizItem submit in flight (VR backlog)', () => {
     expect(document.activeElement).toBe(submitButton());
   });
 
+  // The card's button is described by the score and the attempt lines.
+  for (const [label, res, name] of [
+    ['with attempts left', { item_id: 1, attempt_count: 1, can_retry: true }, 'Try again'],
+    ['on the last attempt', { item_id: 1, attempt_count: 3, can_retry: false }, 'Show correct answers'],
+  ] as const) {
+    it(`${name} (${label}) is described by the score and the attempt`, async () => {
+      session.user = student;
+      seed({ 1: res.attempt_count - 1 });
+      render(quiz(1, 'Quiz A', 1));
+      answerAll();
+      postSpy.mockResolvedValueOnce(submitResponse(res));
+      submitButton().click();
+      await settle();
+      const ids = (buttonNamed(name).getAttribute('aria-describedby') ?? '').split(' ');
+      expect(ids).toHaveLength(2);
+      const texts = ids.map((id) => document.getElementById(id)?.textContent?.replace(/\s+/g, ' ').trim());
+      expect(texts[0]).toMatch(/^Score: \d+ \/ \d+$/);
+      expect(texts[1]).toBe(`Attempt ${res.attempt_count} of 3`);
+    });
+  }
+
   // VR-B (user, r10): on success the Submit row gives way to the result card;
   // focus that fell to the page goes to the card's button.
   for (const [label, res, name] of [

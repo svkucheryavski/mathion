@@ -212,7 +212,7 @@
 
 {#snippet head()}
   <h2 id={titleId} class="ri-heading">Import roster from CSV</h2>
-  <ol class="ri-steps">
+  <ol class="ri-steps" role="list">
     <li class="ri-step" class:ri-current={stage === 'paste'} aria-current={stage === 'paste' ? 'step' : undefined}>
       {#if stage === 'paste'}
         <span class="ri-dot ri-dot-on mono">1</span>

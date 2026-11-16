@@ -323,3 +323,46 @@ def test_api_remove_nonexistent_student(admin_client, db, superuser):
     _add_course_admin(db, course.id, superuser.id)
     response = admin_client.delete(f"/api/courses/{course.id}/students/9999")
     assert response.status_code == 404
+
+
+def test_api_enroll_rejects_a_bad_email(admin_client, db, superuser):
+    course, _version = _make_published_course(db)
+    _add_course_admin(db, course.id, superuser.id)
+    response = admin_client.post(f"/api/courses/{course.id}/enroll", json={"email": "anna"}, headers=CSRF)
+    assert (response.status_code, response.json()["detail"]) == (422, "Enter an email address")
+
+
+def test_api_enroll_batch_an_empty_address_gets_the_plain_sentence(admin_client, db, superuser):
+    course, _version = _make_published_course(db)
+    _add_course_admin(db, course.id, superuser.id)
+    response = admin_client.post(f"/api/courses/{course.id}/enroll-batch",
+                                 json={"emails": ["bo@uni.dk", "  "]}, headers=CSRF)
+    assert (response.status_code, response.json()["detail"]) == (422, "Enter an email address")
+
+
+def test_api_enroll_batch_names_the_first_bad_address_in_input_order(admin_client, db, superuser):
+    course, _version = _make_published_course(db)
+    _add_course_admin(db, course.id, superuser.id)
+    response = admin_client.post(f"/api/courses/{course.id}/enroll-batch",
+                                 json={"emails": ["x", "bo@uni.dk", "a"]}, headers=CSRF)
+    assert (response.status_code, response.json()["detail"]) == (422, "Enter an email address: x")
+
+
+def test_api_enroll_batch_a_blank_entry_does_not_hide_a_named_one(admin_client, db, superuser):
+    course, _version = _make_published_course(db)
+    _add_course_admin(db, course.id, superuser.id)
+    response = admin_client.post(f"/api/courses/{course.id}/enroll-batch",
+                                 json={"emails": ["", "anna"]}, headers=CSRF)
+    assert (response.status_code, response.json()["detail"]) == (422, "Enter an email address: anna")
+
+
+def test_api_enroll_batch_rejects_a_bad_email_and_adds_no_one(admin_client, db, superuser):
+    from sqlalchemy import select
+    course, _version = _make_published_course(db)
+    _add_course_admin(db, course.id, superuser.id)
+    response = admin_client.post(f"/api/courses/{course.id}/enroll-batch",
+                                 json={"emails": ["bo@uni.dk", "anna"]}, headers=CSRF)
+    # The reply names the address, so a long list can be fixed.
+    assert (response.status_code, response.json()["detail"]) == (422, "Enter an email address: anna")
+    db.expire_all()
+    assert db.scalar(select(User).where(User.email.in_(["bo@uni.dk", "anna"]))) is None

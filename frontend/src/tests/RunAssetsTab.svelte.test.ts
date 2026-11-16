@@ -13,7 +13,7 @@ vi.mock('../lib/runAssets', async () => {
 
 import RunAssetsTab from '../components/runs/RunAssetsTab.svelte';
 import { uploadRunAsset, replaceRunAsset, deleteRunAsset } from '../lib/runAssets';
-import { ApiError } from '../lib/api';
+import { ApiError, REQUEST_ERROR_MESSAGE } from '../lib/api';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
 import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
 import type { BlockResponse, Course, MiniProjectResponse, RunAssetResponse } from '../lib/types';
@@ -711,7 +711,7 @@ describe('RunAssetsTab — upload via file picker', () => {
   });
 
   it("upload 413 with no sentence (the proxy's) says the server's upload limit (D11a)", async () => {
-    (uploadRunAsset as any).mockRejectedValue(new ApiError(413, 'Upload failed'));
+    (uploadRunAsset as any).mockRejectedValue(new ApiError(413, REQUEST_ERROR_MESSAGE));
     component = mount(RunAssetsTab, { target, props: baseProps() });
     flushSync();
     const hiddenInput = target.querySelector('input[type="file"]') as HTMLInputElement;
@@ -1306,7 +1306,7 @@ describe('RunAssetsTab — delete (orphan)', () => {
     return target.querySelector(`button[aria-label="Delete ${filename}"]`) as HTMLButtonElement;
   }
 
-  it('clicking [×] on orphan opens "Delete this asset?" confirm; Confirm calls deleteRunAsset', async () => {
+  it('clicking [×] on orphan opens "Delete \"<file>\"?" confirm; Confirm calls deleteRunAsset', async () => {
     (deleteRunAsset as any).mockResolvedValue(undefined);
     const onRefetchAssets = vi.fn().mockResolvedValue(undefined);
     const assets = [{ ...mkAsset(1, 'orphan.pdf'), is_referenced: false }];
@@ -1318,7 +1318,9 @@ describe('RunAssetsTab — delete (orphan)', () => {
 
     findDeleteBtn('orphan.pdf').click();
     flushSync();
-    expect(target.textContent).toMatch(/Delete this asset\?/);
+    const group = target.querySelector('.delete-row .inline-confirm')!;
+    expect(group.querySelector('.warning')?.textContent).toBe('Delete "orphan.pdf"?');
+    expect(group.hasAttribute('aria-label')).toBe(false);
 
     findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
@@ -1711,7 +1713,7 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
     findDeleteBtn('doc.pdf').click();
     flushSync();
     expect(target.textContent).not.toMatch(/Replace.*doc\.pdf/);
-    expect(target.textContent).toMatch(/Delete this asset\?/);
+    expect(target.textContent).toMatch(/Delete "doc\.pdf"\?/);
   });
 });
 
@@ -2378,7 +2380,7 @@ describe('RunAssetsTab — referenced-asset force-delete role gating (T11 regres
 
     del.click();
     flushSync();
-    expect(target.textContent).toMatch(/Delete this asset\?/);
+    expect(target.textContent).toMatch(/Delete "orphan\.pdf"\?/);
     findButton(target, /^(Delete|Replace)$/)!.click();
     await settle();
     expect(deleteRunAsset).toHaveBeenCalledTimes(1);
@@ -2550,7 +2552,7 @@ describe('RunAssetsTab — 6a restyle', () => {
     expect(row.classList.contains('delete-row')).toBe(true);
     expect(row.previousElementSibling?.getAttribute('data-asset-id')).toBe('1');
     expect(row.querySelector('td')?.getAttribute('colspan')).toBe('7');
-    expect(row.querySelector('.inline-confirm.row')?.textContent).toMatch(/Delete this asset\?/);
+    expect(row.querySelector('.inline-confirm.row')?.textContent).toMatch(/Delete "a\.pdf"\?/);
     expect(target.querySelector('tr[data-asset-id="1"] .actions-cell .inline-confirm')).toBeNull();
     expect(document.activeElement?.textContent?.trim()).toBe('Cancel');
     (document.activeElement as HTMLButtonElement).click();

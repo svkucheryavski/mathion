@@ -337,7 +337,7 @@
 
       {#if canStructure}
         <!-- After the list: new items land at the end (user, T3). -->
-        <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} onclick={() => { opens++; creating = true; }}>+ Add item</button>
+        <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} onclick={() => { opens++; creating = true; }}><span aria-hidden="true">+</span> Add item</button>
       {/if}
       {#if creating}
         <NewItemModal
@@ -365,6 +365,10 @@
     background: var(--focus-0);
     border-color: var(--focus-line-strong);
     box-shadow: var(--focus-shadow);
+  }
+  /* Forced colours drop the focus shades, so the focus panel gets a ring. */
+  @media (forced-colors: active) {
+    .seq-card.focus { outline: 2px solid CanvasText; outline-offset: -1px; }
   }
   .acc-body { padding: 12px 14px; border-top: 1px solid var(--border-soft); /* ref 1578 */ }
   .add-line {

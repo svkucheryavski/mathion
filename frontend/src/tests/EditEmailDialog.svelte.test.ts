@@ -63,7 +63,7 @@ it('is titled Edit email and shows the saved values; the password field is alway
 
 it('Encryption is three segments; picking one sets the usual port, which stays editable (D7)', async () => {
   render(); await settle();
-  expect(panel().querySelector('[role="radiogroup"]')?.getAttribute('aria-label')).toBe('Encryption');
+  expect(document.getElementById(panel().querySelector('[role="radiogroup"]')!.getAttribute('aria-labelledby')!)?.textContent).toBe('Encryption');
   expect([...panel().querySelectorAll('[role="radiogroup"] .segment')].map((s) => s.textContent!.trim()))
     .toEqual(['STARTTLS', 'SSL/TLS', 'None']);
   expect(panel().textContent).toContain('Picking one sets the usual port: 587, 465 or 25.');
@@ -338,7 +338,7 @@ it('Send test email sends the form as it is now, and the result shows above the 
   const result = panel().querySelector<HTMLElement>('.ee-result')!;
   expect(result.textContent).toBe('Sent to su@uni.dk: check your inbox.');
   expect(result.classList.contains('ok')).toBe(true);
-  expect(result.getAttribute('role')).toBe('status');
+  expect(result.parentElement!.getAttribute('role')).toBe('status');
   // Above the buttons: the last thing in the body, before the footer.
   expect(result.compareDocumentPosition(panel().querySelector('footer.modal-foot')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(p.save).not.toHaveBeenCalled();
@@ -602,4 +602,29 @@ it('Cancel closes without saving', async () => {
   footButton('Cancel')!.click(); await settle();
   expect(p.onClose).toHaveBeenCalled();
   expect(p.save).not.toHaveBeenCalled();
+});
+
+it('opened with email off, focus starts on the switch (the fields are disabled)', async () => {
+  render({ email: OFF }); await settle();
+  expect(document.activeElement).toBe(sw());
+});
+
+it('the test result fills a status region that is there, empty, before it', async () => {
+  render(); await settle();
+  const live = panel().querySelector<HTMLElement>('.live-slot[role="status"]')!;
+  expect(live.textContent).toBe('');
+  expect(live.matches(':empty')).toBe(true);
+  type(field('Mail server'), 'smtp.uni.dk');
+  footButton('Send test email')!.click(); await settle();
+  expect(panel().querySelector('.live-slot[role="status"]')).toBe(live);
+  expect(live.querySelector('.ee-result')?.textContent).toBe('Sent to su@uni.dk: check your inbox.');
+  expect(live.querySelector('.ee-result')!.hasAttribute('role')).toBe(false);
+});
+
+it('the Encryption radiogroup is named by its visible caption', async () => {
+  render(); await settle();
+  const group = panel().querySelector<HTMLElement>('[role="radiogroup"]')!;
+  const id = group.getAttribute('aria-labelledby')!;
+  expect(document.getElementById(id)?.textContent).toBe('Encryption');
+  expect(group.hasAttribute('aria-label')).toBe(false);
 });

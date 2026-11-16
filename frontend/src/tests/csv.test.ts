@@ -221,3 +221,57 @@ describe('parseCsv — paste quirks, review r5', () => {
     expect(r.rows[0].parsed.group).toBe('G1');
   });
 });
+
+describe('parseCsv — over-long cells', () => {
+  it('a cell over the server limit makes its row invalid, so the batch is never refused whole', () => {
+    const long = (n: number) => 'x'.repeat(n);
+    const r = parseCsv(
+      [
+        'name,email,group',
+        `Anna,${long(250)}@x.dk,G`,
+        `${long(201)},bo@x.dk,G`,
+        `Cy,cy@x.dk,${long(81)}`,
+        `${long(200)},${long(249)}@x.dk,${long(80)}`,
+        'Ed,ed@@x.dk,G',
+        'Fa,fa@b@x.dk,G',
+      ].join('\n'),
+      [],
+      [],
+    );
+    if (!r.ok) throw new Error('expected ok');
+    expect(r.rows.map((row) => row.errors)).toEqual([
+      ['Email is too long'],
+      ['Name is too long'],
+      ['Group name is too long'],
+      [],
+      ['Invalid email format'],
+      ['Invalid email format'],
+    ]);
+    expect(r.validCount).toBe(1);
+  });
+});
+
+describe('parseCsv — a mistyped first address', () => {
+  it('a doubled @ in row 1 still reads the paste as email-first; only that row is invalid', () => {
+    const r = parseCsv('ed@@x.dk,G1\nbo@x.dk,G1', [], []);
+    if (!r.ok) throw new Error('expected ok');
+    expect(r.rows.map((row) => [row.parsed.email, row.valid])).toEqual([
+      ['ed@@x.dk', false],
+      ['bo@x.dk', true],
+    ]);
+  });
+
+  it('a blank name and a doubled @ in row 1 still reads the paste as name-first', () => {
+    const r = parseCsv(',ed@@x.dk\nbo@x.dk,G', [], []);
+    if (!r.ok) throw new Error('expected ok');
+    expect(r.rows[0].parsed.email).toBe('ed@@x.dk');
+    expect(r.rows[0].errors).toEqual(['Invalid email format']);
+  });
+
+  it('a single cell with a doubled @ is an email, not a name', () => {
+    const r = parseCsv('Anna,an@x.dk\nbo@@x.dk', [], []);
+    if (!r.ok) throw new Error('expected ok');
+    expect(r.rows[1].parsed.email).toBe('bo@@x.dk');
+    expect(r.rows[1].errors).toEqual(['Invalid email format']);
+  });
+});

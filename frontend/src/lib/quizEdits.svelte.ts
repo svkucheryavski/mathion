@@ -44,6 +44,7 @@ export class QuizEdits {
   /** The quiz's polite live-region text; QuizBody renders it. */
   message = $state('');
   #pending = $state(0);
+  #sayTimer: ReturnType<typeof setTimeout> | undefined;
 
   /** Any quiz request is in flight (structure writes and text saves alike). */
   get inFlight(): boolean { return this.#pending > 0; }
@@ -98,9 +99,10 @@ export class QuizEdits {
 
   /** Announce politely ("Saved", "Answer moved to position 2 of 3"). */
   say(text: string): void {
-    // Cleared first, so the same text twice is announced twice.
+    // Cleared first, so the same text twice is announced twice; set late, after the focus move.
     this.message = '';
-    queueMicrotask(() => { this.message = text; });
+    clearTimeout(this.#sayTimer);
+    this.#sayTimer = setTimeout(() => { this.message = text; }, 150);
   }
 
   /** Count a request toward `inFlight`. */

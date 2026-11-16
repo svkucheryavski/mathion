@@ -470,7 +470,7 @@
         </div>
       </form>
     {:else}
-      <button bind:this={addLineEl} type="button" class="add-line" disabled={busy} onclick={() => void openCreate()}>+ Add version</button>
+      <button bind:this={addLineEl} type="button" class="add-line" disabled={busy} onclick={() => void openCreate()}><span aria-hidden="true">+</span> Add version</button>
     {/if}
   {/if}
 </div>

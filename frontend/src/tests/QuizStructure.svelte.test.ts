@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
-  QuizServer, q, opt, renderQuiz, cleanup, settle, panel, topPanel, cards, rows, byName, typeInto, press, live,
+  QuizServer, q, opt, renderQuiz, cleanup, settle, panel, topPanel, cards, rows, byName, typeInto, press, said as announced,
   toastTexts, text, mkVersion,
 } from './support/quizHarness.svelte';
 import { DISCARD_PROMPT, FORBIDDEN_TITLE, WAIT_TITLE } from '../lib/quizEdits.svelte';
@@ -10,7 +10,7 @@ import { toasts } from '../stores/toasts.svelte';
 
 afterEach(cleanup);
 
-const addQ = () => byName(panel(), '+ Add question')!;
+const addQ = () => byName(panel(), 'Add question')!;
 const area = () => topPanel().querySelector<HTMLTextAreaElement>('textarea')!;
 const footBtn = (label: string) =>
   [...topPanel().querySelectorAll<HTMLButtonElement>('footer.modal-foot button')].find((b) => text(b) === label)!;
@@ -30,7 +30,7 @@ describe('Adding a question (5d T8)', () => {
     expect(addQ().disabled).toBe(false);
     cleanup();
     await renderQuiz(new QuizServer([q({ id: 1 })]), { version: { state: 'published' } });
-    expect(byName(panel(), '+ Add question')).toBeUndefined();
+    expect(byName(panel(), 'Add question')).toBeUndefined();
   });
 
   it('opens New question directly with focus on the checked type; a type change alone is not a change', async () => {
@@ -245,7 +245,7 @@ describe('Adding a question (5d T8)', () => {
     (r.props.modal as { stillOnVid: () => boolean }).stillOnVid = () => false;
     hold.release();
     await settle();
-    expect(live()).not.toBe('Saved');
+    expect(await announced()).not.toBe('Saved');
     expect(footBtn('Cancel').disabled).toBe(false);
   });
 });
@@ -268,7 +268,7 @@ describe('Moving and deleting questions (5d T8)', () => {
     byName(cards()[0], 'Move question 1 down')!.click();
     await settle();
     expect(cards().map((c) => c.dataset.qId)).toEqual(['2', '1']);
-    expect(live()).toBe('Question moved to position 2 of 2');
+    expect(await announced()).toBe('Question moved to position 2 of 2');
     expect(s.writes().map((c) => c.body)).toEqual([{ order: [{ id: 2, order: 1 }, { id: 1, order: 2 }] }]);
     expect(document.activeElement).toBe(byName(cards()[1], 'Move question 2 up'));
   });
@@ -649,7 +649,7 @@ describe('Moving and deleting questions (5d T8)', () => {
       await renderQuiz(two(), { version: v });
       expect(byName(cards()[0], 'Move question 1 down')).toBeUndefined();
       expect(byName(cards()[0], 'Delete question 1')).toBeUndefined();
-      expect(byName(panel(), '+ Add question')).toBeUndefined();
+      expect(byName(panel(), 'Add question')).toBeUndefined();
       cleanup();
     }
   });

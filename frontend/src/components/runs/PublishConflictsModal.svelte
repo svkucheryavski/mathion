@@ -63,7 +63,7 @@
 {/snippet}
 
 {#snippet emailList(emails: string[])}
-  <ul class="pc-emails">
+  <ul class="pc-emails" role="list">
     {#each emails as email (email)}
       <li title={email}>{email}</li>
     {/each}

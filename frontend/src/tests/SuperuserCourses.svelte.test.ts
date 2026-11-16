@@ -125,7 +125,7 @@ it.each([
   expect(sent).toEqual({ name: 'Statistics 101', slug: 'statistics-101', admin_email: 'aho@uni.dk' });
   expect(panel()).toBeNull();
   expect(gets()).toBe(2);
-  expect(note()?.getAttribute('role')).toBe('status');
+  expect(note()?.parentElement?.getAttribute('role')).toBe('status');
   expect(note()?.textContent?.trim()).toBe(text);
 });
 
@@ -617,3 +617,35 @@ it('a 409 from the delete-impact lookup reloads the list behind the dialog (rev 
   expect(gets()).toBe(2);
 });
 
+
+it('after a delete, focus goes to the page heading (the row and its trash are gone)', async () => {
+  routes['GET /courses/2/delete-impact'] = () => [200, { progress_students: 0 }];
+  routes['DELETE /courses/2'] = () => [204, null];
+  await render();
+  act(row('Chemometrics'), 'delete').click(); await settle();
+  type(panelInput(), 'Chemometrics');
+  footButton('Delete course').click(); await settle();
+  expect(document.activeElement).toBe(target.querySelector('h1'));
+});
+
+it("a blocked trash names its reason in its accessible name", async () => {
+  await render();
+  expect(act(row('Statistics 101'), 'delete').getAttribute('aria-label')).toBe("Delete Statistics 101: 2 runs: can't be deleted");
+  expect(act(row('Chemometrics'), 'delete').getAttribute('aria-label')).toBe('Delete Chemometrics');
+});
+
+it('the info note fills a status region that is there, empty, before it', async () => {
+  routes['POST /accounts/lookup'] = () => [200, { status: 'existing', full_name: 'Anna Holm' }];
+  routes['PUT /courses/1/admin'] = () => [200, assigned(courses()[0], 'unchanged')];
+  await render();
+  const live = target.querySelector<HTMLElement>('.live-slot[role="status"]')!;
+  expect(live).not.toBeNull();
+  expect(live.textContent).toBe('');
+  expect(live.matches(':empty')).toBe(true);
+  act(row('Statistics 101'), 'edit').click(); await settle();
+  type(panelInput("Admin's email"), 'bo@uni.dk');
+  footButton('Save').click(); await settle();
+  expect(target.querySelector('.live-slot[role="status"]')).toBe(live);
+  expect(live.querySelector('.note-strip')).not.toBeNull();
+  expect(live.querySelector('.note-strip')!.hasAttribute('role')).toBe(false);
+});

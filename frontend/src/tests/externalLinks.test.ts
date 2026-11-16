@@ -56,3 +56,30 @@ describe('externalLinks (Polish 2 D58, D59)', () => {
     expect(opensInNewTab('/courses/x')).toBe(false);
   });
 });
+
+describe('externalLinks — the new tab is said', () => {
+  it('a new-tab link ends with hidden "(opens in a new tab)"', () => {
+    const a = attach('https://example.org/x');
+    const vh = a.querySelectorAll('.vh');
+    expect(vh).toHaveLength(1);
+    expect(vh[0].textContent).toBe(' (opens in a new tab)');
+    expect(a.lastChild).toBe(vh[0]);
+  });
+  it('running twice on the same node adds it once', () => {
+    const el = document.createElement('div');
+    el.innerHTML = '<a href="https://example.org/x">x</a>';
+    externalLinks('a')(el);
+    externalLinks('b')(el);
+    expect(el.querySelectorAll('a .vh')).toHaveLength(1);
+  });
+  it('a link that stays in the tab gets no note', () => {
+    const a = attach('/courses/1');
+    expect(a.querySelector('.vh')).toBeNull();
+  });
+  it('a link holding another hidden span still gets its own note', () => {
+    const el = document.createElement('div');
+    el.innerHTML = '<a href="https://example.org/x">x<span class="vh">y</span></a>';
+    externalLinks('a')(el);
+    expect(el.querySelectorAll('a .new-tab-note')).toHaveLength(1);
+  });
+});

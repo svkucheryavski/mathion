@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createEvaluation, patchEvaluation } from '../lib/evaluations';
 import * as events from '../lib/events';
-import { OFFLINE_MESSAGE, SERVER_ERROR_MESSAGE } from '../lib/api';
+import { OFFLINE_MESSAGE, REQUEST_ERROR_MESSAGE, SERVER_ERROR_MESSAGE } from '../lib/api';
 
 function jsonResp(status: number, body: unknown, statusText = ''): Response {
   return new Response(JSON.stringify(body), {
@@ -98,11 +98,11 @@ describe('createEvaluation (multipart POST)', () => {
     });
   });
 
-  it('WT4c: throws ApiError(4xx) with "Upload failed" fallback on non-JSON body', async () => {
+  it('WT4c: a 4xx with a non-JSON body says the general sentence', async () => {
     fetchMock.mockResolvedValue(nonJsonResp(405, 'Method Not Allowed'));
     await expect(createEvaluation({ submission_id: 7, result: 'accepted' })).rejects.toMatchObject({
       status: 405,
-      detail: 'Upload failed',
+      detail: REQUEST_ERROR_MESSAGE,
     });
   });
 

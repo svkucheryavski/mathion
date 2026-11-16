@@ -92,14 +92,13 @@
   <Button variant="primary" loading={busy} aria-disabled={!form.ready && !busy} onclick={() => void onSave()}>Save</Button>
 {/snippet}
 
-<Modal labelledby={titleId} width={480} maxHeight={640} onRequestClose={onClose} closeDisabled={busy} header={head} footer={foot}>
+<!-- Email off: the fields are disabled, so focus starts on the switch. -->
+<Modal labelledby={titleId} width={480} maxHeight={640} autofocusSelector={`[data-autofocus]:not(:disabled), #${uid}-on`} onRequestClose={onClose} closeDisabled={busy} header={head} footer={foot}>
   <form class="ee-form" novalidate aria-describedby={form.error ? errId : undefined}
     onsubmit={(e) => { e.preventDefault(); void onSave(); }}>
     <EmailFields {form} {uid} {busy} />
     {#if form.error}<p id={errId} class="ee-err" role="alert" {@attach scrollIntoSight(form.error)}>{form.error}</p>{/if}
-    {#if form.result}
-      <p class="ee-result" class:ok={form.result.ok} class:err={!form.result.ok} role="status" {@attach scrollIntoSight(form.result)}>{form.result.message}</p>
-    {/if}
+    <div class="live-slot" role="status">{#if form.result}<p class="ee-result" class:ok={form.result.ok} class:err={!form.result.ok} {@attach scrollIntoSight(form.result)}>{form.result.message}</p>{/if}</div>
     <!-- Enter in a field submits. -->
     <button type="submit" hidden aria-hidden="true" tabindex="-1"></button>
   </form>

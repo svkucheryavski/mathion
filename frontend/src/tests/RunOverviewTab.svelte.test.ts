@@ -109,6 +109,10 @@ describe('Run details (10a, R31, R32)', () => {
     expect(rowText(target, 'start_date')).toBe('01 Jun 2026');
     expect(rowText(target, 'end_date')).toBe('30 Jun 2026');
     expect(rowText(target, 'version')).toBe('Spring 2026 · v. 99');
+    // Named by its action; the title stays the reason it is disabled.
+    const ver = target.querySelector('button[data-action="edit-version"]') as HTMLButtonElement;
+    expect(ver.getAttribute('aria-label')).toBe('Edit the version');
+    expect(ver.title).toBe('The version is fixed when the run is created');
     expect(target.querySelector('.ov-row[data-field="version"] .ov-ver')?.textContent).toBe('v. 99');
     unmount(cmp);
   });
@@ -529,6 +533,7 @@ describe('R32 across the run writes', () => {
     const pub = target.querySelector('button[data-action="publish"]') as HTMLButtonElement;
     expect(pub.getAttribute('aria-busy')).toBe('true');
     expect(pub.textContent?.trim()).toBe('Publishing…');
+    expect(pub.title).toBe('Wait for the publish to finish');
     unmount(cmp);
   });
 

@@ -104,6 +104,64 @@ describe('RunProgressTab', () => {
   });
 
   // T5 – Coverage mode cells
+  it('focusing a pinned sort button (Student, Group) keeps the grid where it was scrolled', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, progressMock()));
+    mountTab();
+    await settle();
+    const scroller = host.querySelector('.table-scroll') as HTMLElement;
+    Object.defineProperty(scroller, 'scrollLeft', { value: 0, writable: true });
+    for (const sel of ['th.sticky-name button', 'th.sticky-group button']) {
+      scroller.scrollLeft = 300;
+      scroller.dispatchEvent(new Event('scroll'));
+      // The browser scrolls a newly focused control into view; the handler puts it back.
+      scroller.scrollLeft = 0;
+      (host.querySelector(sel) as HTMLButtonElement).focus();
+      expect(scroller.scrollLeft).toBe(300);
+      (document.activeElement as HTMLElement).blur();
+    }
+  });
+
+  it('another run starts its grid at 0: the held offset does not carry over', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, progressMock()));
+    const props = $state({ runId: 1 });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    component = mount(RunProgressTab, { target: host, props });
+    await settle();
+    let scroller = host.querySelector('.table-scroll') as HTMLElement;
+    Object.defineProperty(scroller, 'scrollLeft', { value: 0, writable: true });
+    scroller.scrollLeft = 300;
+    scroller.dispatchEvent(new Event('scroll'));
+    props.runId = 2;
+    await settle();
+    scroller = host.querySelector('.table-scroll') as HTMLElement;
+    Object.defineProperty(scroller, 'scrollLeft', { value: 0, writable: true });
+    (host.querySelector('th.sticky-name button') as HTMLButtonElement).focus();
+    expect(scroller.scrollLeft).toBe(0);
+  });
+
+  it('a refresh that empties and refills the grid starts it at 0', async () => {
+    const bodies = [progressMock(), progressMock({ sequences: [] }), progressMock()];
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify(bodies[Math.min(n++, 2)]), { status: 200, headers: { 'Content-Type': 'application/json' } }))));
+    mountTab();
+    await settle();
+    let scroller = host.querySelector('.table-scroll') as HTMLElement;
+    Object.defineProperty(scroller, 'scrollLeft', { value: 0, writable: true });
+    scroller.scrollLeft = 300;
+    scroller.dispatchEvent(new Event('scroll'));
+    const refresh = () => (host.querySelector('button[aria-label="Refresh"]') as HTMLButtonElement).click();
+    refresh();
+    await settle();
+    expect(host.querySelector('.table-scroll')).toBeNull();
+    refresh();
+    await settle();
+    scroller = host.querySelector('.table-scroll') as HTMLElement;
+    Object.defineProperty(scroller, 'scrollLeft', { value: 0, writable: true });
+    (host.querySelector('th.sticky-name button') as HTMLButtonElement).focus();
+    expect(scroller.scrollLeft).toBe(0);
+  });
+
   it('coverage mode: cells render {covered}/{total} text', async () => {
     vi.stubGlobal('fetch', mockFetch(200, progressMock()));
     mountTab();

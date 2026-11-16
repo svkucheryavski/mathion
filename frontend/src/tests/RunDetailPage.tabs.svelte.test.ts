@@ -97,6 +97,8 @@ describe('RunDetailPage — the tab in the address', () => {
     const panel = target.querySelector('#run-panel') as HTMLElement;
     expect(panel.getAttribute('role')).toBe('tabpanel');
     expect(panel.getAttribute('aria-labelledby')).toBe('run-tab-groups');
+    // Not a tab stop: Safari would focus it on every click inside (Task 5 ruling).
+    expect(panel.hasAttribute('tabindex')).toBe(false);
   });
 
   it('an unknown tab opens Overview and rewrites the address once, keeping the rest', async () => {

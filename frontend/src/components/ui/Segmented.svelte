@@ -10,6 +10,7 @@
     value = $bindable(),
     name,
     label,
+    labelledby = undefined,
     disabled = false,
     frozen = false,
     fit = false,
@@ -19,6 +20,8 @@
     value: T;
     name: string;
     label: string;
+    // A visible caption's id: it names the group instead of `label`.
+    labelledby?: string;
     disabled?: boolean;
     frozen?: boolean;
     fit?: boolean;
@@ -44,7 +47,8 @@
   }
 </script>
 
-<div class="segmented" class:fit class:disabled role="radiogroup" aria-label={label}>
+<div class="segmented" class:fit class:disabled role="radiogroup"
+  aria-labelledby={labelledby} aria-label={labelledby ? undefined : label}>
   {#each options as o (o.value)}
     <label class="segment" class:selected={value === o.value}>
       <input type="radio" {name} value={o.value} bind:group={value} {disabled} aria-disabled={frozen ? 'true' : undefined}
@@ -75,5 +79,9 @@
   @media (forced-colors: active) {
     .segment.selected { outline: 2px solid; outline-offset: -2px; }
     .segment:has(input:focus-visible) { outline: 2px solid Highlight; outline-offset: -2px; }
+    /* The grey fill is dropped here: a disabled control greys its text and lines instead. */
+    .segmented.disabled { border-color: GrayText; }
+    .disabled .segment { color: GrayText; border-left-color: GrayText; }
+    .disabled .segment.selected { color: GrayText; }
   }
 </style>

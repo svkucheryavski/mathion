@@ -75,22 +75,27 @@ def test_off_sends_nothing_marks_nothing(db, seeded_run, mailer):
 
 def test_turn_on_skips_rows_born_off(db, seeded_run, mailer):
     # t1 (on) and t3 (after the turn-on) go; t2 (born in the off interval) never
-    # does. Task 4's turn-on marks it "skipped: email was off".
+    # does, and the dispatcher closes it as skipped.
     set_site(db, **ON, email_off_at=T0 + H, email_on_at=T0 + 3 * H)
     t1, t2, t3 = _row(db, seeded_run, T0), _row(db, seeded_run, T0 + 2 * H), _row(db, seeded_run, T0 + 4 * H)
     _tick_once(_state(), T0 + 5 * H)
     assert _sent(db, t1, t2, t3) == [True, False, True]
-    assert (t2.error, t2.retry_count) == (None, 0)
+    assert (t2.error, t2.retry_count) == (dispatcher.SKIPPED_OFF, 0)
 
 
-def test_late_commit_in_off_interval_not_sent(db, seeded_run, mailer):
+def test_late_commit_in_off_interval_is_closed_skipped(db, seeded_run, mailer):
     # A row whose transaction began in the off interval and committed after the
-    # turn-on: created_at is the transaction's start, so the select leaves it out.
+    # turn-on: never sent, and closed rather than left open.
     set_site(db, **ON, email_off_at=T0 + H, email_on_at=T0 + 3 * H)
     _tick_once(_state(), T0 + 3 * H + timedelta(minutes=1))
     late = _row(db, seeded_run, T0 + 2 * H)
     _tick_once(_state(), T0 + 4 * H)
-    assert _sent(db, late) == [False]
+    db.refresh(late)
+    assert (late.sent_at, late.error) == (None, dispatcher.SKIPPED_OFF)
+
+
+def test_skipped_off_text():
+    assert dispatcher.SKIPPED_OFF == "skipped: email was off"
 
 
 def test_off_interval_skips_only_rows_born_off(db, seeded_run, mailer):
@@ -787,3 +792,100 @@ def test_a_message_that_breaks_before_the_server_does_not_count(db, seeded_run, 
     _row_for(db, seeded_run, _other_student(db), T0 + timedelta(seconds=2))
     _tick_once(_state(), T0 + H)
     assert _fresh_view(db).send_failure_message == EVERYONE_SENTENCE
+
+
+def _refused_then(closed):
+    exc = smtplib.SMTPRecipientsRefused({"x@uni.dk": (550, b"no such user")})
+    exc.closed_after = closed
+    return exc
+
+
+def test_a_421_after_a_refusal_charges_the_refusal_and_backs_off(db, seeded_run, mailer):
+    mailer["m"] = _Mailer(fail=_refused_then(smtplib.SMTPResponseException(421, b"closing")), on_calls=[2])
+    set_site(db, **ON, email_off_at=None)
+    r1, r2, r3 = (_row(db, seeded_run, T0 + timedelta(seconds=i)) for i in range(3))
+    now = T0 + H
+    _tick_once(_state(), now)
+    for r in (r1, r2, r3):
+        db.refresh(r)
+    assert r1.sent_at is not None
+    assert r2.sent_at is None and "550" in r2.error and "try again later" not in r2.error
+    assert (r3.retry_count, r3.sent_at) == (0, None)    # never tried
+    assert mailer["m"].calls == 2
+    view = _fresh_view(db)
+    assert view.send_failure_message == "The mail server asked Mathion to try again later."
+    assert (view.send_retry_at, view.send_backoff_step) == (now + timedelta(minutes=5), 1)
+
+
+def test_a_hang_up_after_a_refusal_ends_the_batch_and_charges_no_later_row(db, seeded_run, mailer):
+    mailer["m"] = _Mailer(fail=_refused_then(smtplib.SMTPServerDisconnected("gone")), on_calls=[2])
+    set_site(db, **ON, email_off_at=None)
+    r1, r2, r3 = (_row(db, seeded_run, T0 + timedelta(seconds=i)) for i in range(3))
+    _tick_once(_state(), T0 + H)
+    for r in (r1, r2, r3):
+        db.refresh(r)
+    assert r1.sent_at is not None
+    assert r2.sent_at is None and "550" in r2.error
+    assert (r3.retry_count, r3.sent_at) == (0, None)
+    assert mailer["m"].calls == 2
+    assert _fresh_view(db).send_failure_message is None   # a hang-up is not a D9c failure
+
+
+class _InTurn(MemoryMailer):
+    """Raises the given exceptions in turn, one per send."""
+    def __init__(self, *excs):
+        super().__init__()
+        self.excs, self.calls = list(excs), 0
+
+    def send(self, msg):
+        self.calls += 1
+        raise self.excs.pop(0)
+
+
+def test_a_hang_up_after_two_refusals_is_not_everyone(db, seeded_run, mailer):
+    # The batch was cut short, so two refusals don't say the relay refuses everyone.
+    mailer["m"] = _InTurn(smtplib.SMTPRecipientsRefused({"x@uni.dk": (550, b"no")}),
+                          _refused_then(smtplib.SMTPServerDisconnected("gone")))
+    set_site(db, **ON, email_off_at=None)
+    _row(db, seeded_run, T0)
+    _row_for(db, seeded_run, _other_student(db), T0 + timedelta(seconds=1))
+    _row(db, seeded_run, T0 + timedelta(seconds=2))
+    _tick_once(_state(), T0 + H)
+    assert mailer["m"].calls == 2
+    assert _fresh_view(db).send_failure_message is None
+
+
+def test_a_refused_sender_with_a_421_at_the_reset_charges_nothing(db, seeded_run, mailer):
+    exc = smtplib.SMTPSenderRefused(550, b"no", "noreply@uni.dk")
+    exc.closed_after = smtplib.SMTPResponseException(421, b"closing")
+    mailer["m"] = _Mailer(fail=exc)
+    set_site(db, **ON, email_off_at=None)
+    r = _row(db, seeded_run, T0)
+    _tick_once(_state(), T0 + H)
+    db.refresh(r)
+    assert (r.retry_count, r.error, r.sent_at) == (0, None, None)
+    assert _fresh_view(db).send_failure_message == SENDER_SENTENCE
+
+
+def test_a_hang_up_at_the_reset_leaves_a_server_line_and_its_wait(db, seeded_run, mailer):
+    # As a mid-batch disconnect: nothing then says the server's side works.
+    mailer["m"] = _Mailer(fail=_refused_then(smtplib.SMTPServerDisconnected("gone")))
+    set_site(db, **ON, email_off_at=None, send_failure_message="The mail server refused the login.",
+             send_failure_at=T0, send_retry_at=T0, send_backoff_step=3)
+    _row(db, seeded_run, T0)
+    _tick_once(_state(), T0 + H)
+    view = _fresh_view(db)
+    assert (view.send_failure_message, view.send_retry_at, view.send_backoff_step) == (
+        "The mail server refused the login.", T0, 3)
+
+
+def test_a_body_refusal_then_a_hang_up_at_the_reset_keeps_the_refusal_line(db, seeded_run, mailer):
+    exc = smtplib.SMTPDataError(554, b"rejected")
+    exc.closed_after = smtplib.SMTPServerDisconnected("gone")
+    mailer["m"] = _Mailer(fail=exc)
+    set_site(db, **ON, email_off_at=None)
+    r1, r2 = (_row(db, seeded_run, T0 + timedelta(seconds=i)) for i in range(2))
+    _tick_once(_state(), T0 + H)
+    db.refresh(r2)
+    assert (r2.retry_count, r2.sent_at, mailer["m"].calls) == (0, None, 1)
+    assert _fresh_view(db).send_failure_message == REFUSED_SENTENCE

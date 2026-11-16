@@ -254,7 +254,8 @@ it('roleChips tip: cutting counts characters, never splitting one in two (D14 re
 });
 
 it('roleChips: without Intl.Segmenter (Firefox before 125) the panel still loads and cuts by code point', async () => {
-  vi.stubGlobal('Intl', { ...Intl, Segmenter: undefined });
+  // Only Segmenter goes: Intl's members don't spread.
+  vi.stubGlobal('Intl', new Proxy(Intl, { get: (t, k) => (k === 'Segmenter' ? undefined : Reflect.get(t, k)) }));
   vi.resetModules();
   try {
     const lib = await import('../lib/superuser');

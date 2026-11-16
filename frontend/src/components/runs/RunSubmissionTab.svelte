@@ -124,6 +124,13 @@
     return diff !== 0 ? diff : tiebreakByGroupName(a, b);
   }
 
+  // Focusing the pinned sort button must not scroll the grid back to the start.
+  let gridLeft = 0;
+  function holdGridLeft(e: FocusEvent) {
+    const box = (e.currentTarget as HTMLElement).closest<HTMLElement>('.table-scroll');
+    if (box) box.scrollLeft = gridLeft;
+  }
+
   function toggleSort(key: SortKey): void {
     if (key === sortKey) {
       sortDir = sortDir === 'asc' ? 'desc' : 'asc';
@@ -260,12 +267,12 @@
           </div>
         </div>
 
-        <div class="table-scroll">
+        <div class="table-scroll" {@attach () => { gridLeft = 0; }} onscroll={(e) => { gridLeft = e.currentTarget.scrollLeft; }}>
           <table class="submission-grid">
             <thead>
               <tr>
                 <th class="sticky-group" scope="col" aria-sort={sortAria('group')}>
-                  <button type="button" onclick={() => toggleSort('group')}>Group{#if sortKey === 'group'}<SortMark dir={sortDir} />{/if}</button>
+                  <button type="button" onfocus={holdGridLeft} onclick={() => toggleSort('group')}>Group{#if sortKey === 'group'}<SortMark dir={sortDir} />{/if}</button>
                 </th>
                 {#each data.mini_projects as mp (mp.id)}
                   <th class="mp-head" scope="col" aria-sort={sortAria(`mp:${mp.id}`)}>
@@ -294,7 +301,7 @@
                           <StatusBadge status={cell.status} label={STATUS_SHORT_LABEL[cell.status]} />
                         </button>
                       {:else}
-                        <span aria-label="No data" class="empty-cell">—</span>
+                        <span class="empty-cell" aria-hidden="true">—</span><span class="vh">No data</span>
                       {/if}
                     </td>
                   {/each}
@@ -338,7 +345,7 @@
      the pinned Group column (12rem), not under it. +4px: the status and header
      buttons keep the global outset ring (2px at a 2px offset), and focus scrolling
      aligns the button's box, not its ring. */
-  .table-scroll { overflow-x: auto; scroll-padding-left: calc(12rem + 4px); scroll-padding-right: 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  .table-scroll { position: relative; overflow-x: auto; scroll-padding-left: calc(12rem + 4px); scroll-padding-right: 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
   /* Natural width (Group 12rem, one-line headers): a run with many mini-projects
      scrolls sideways inside .table-scroll instead of squeezing the columns. */
   .submission-grid { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }

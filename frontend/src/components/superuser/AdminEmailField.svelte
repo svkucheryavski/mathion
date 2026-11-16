@@ -13,8 +13,10 @@
     oninput: (v: string) => void;
     id: string;
     readonly?: boolean;
+    // The form's error sentence, when a 422 names this field.
+    errorId?: string;
   };
-  let { token, value, onAuth, oninput, id, readonly = false }: Props = $props();
+  let { token, value, onAuth, oninput, id, readonly = false, errorId = undefined }: Props = $props();
 
   const NEW = 'No account yet: one will be created.';
   const DISABLED = "This account is disabled: they can't sign in until you enable it.";
@@ -43,6 +45,7 @@
 </script>
 
 <input {id} class="ae-input" type="email" {value} {readonly} autocomplete="off" spellcheck="false"
+  aria-invalid={errorId ? 'true' : undefined} aria-describedby={errorId}
   oninput={(e) => oninput(e.currentTarget.value)} />
 <!-- Always present, so a screen reader hears the hint when it arrives. -->
 <p class="account-hint" aria-live="polite">{hint}</p>

@@ -3,12 +3,12 @@
   // Each page renders its own, so the action can live in the page that owns it.
   import type { Snippet } from 'svelte';
 
-  let { title, actions }: { title: string; actions?: Snippet } = $props();
+  let { title, actions, heading = $bindable() }: { title: string; actions?: Snippet; heading?: HTMLElement } = $props();
 </script>
 
 <div class="panel-head">
   <!-- tabindex -1: focus lands here when a control on the page goes away. -->
-  <h1 tabindex="-1">{title}</h1>
+  <h1 tabindex="-1" bind:this={heading}>{title}</h1>
   {#if actions}{@render actions()}{/if}
 </div>
 

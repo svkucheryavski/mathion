@@ -104,3 +104,13 @@ describe('ItemIcon', () => {
     expect(btn.querySelector('.item-mark')!.classList.contains('in-strip')).toBe(true);
   });
 });
+
+describe('ItemIcon — the current item', () => {
+  it('the current item is aria-current="step"; the others have no aria-current', () => {
+    expect(render('quiz', 'current').getAttribute('aria-current')).toBe('step');
+    if (component) unmount(component); component = null;
+    expect(render('quiz', 'covered').hasAttribute('aria-current')).toBe(false);
+    if (component) unmount(component); component = null;
+    expect(render('quiz', 'not-yet').hasAttribute('aria-current')).toBe(false);
+  });
+});

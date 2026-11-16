@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 from datetime import datetime, timezone
 
@@ -7,6 +8,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
 from pydantic import BaseModel
 
@@ -23,6 +25,14 @@ from mathion.schemas import RunAssetResponse
 from mathion.site_settings import file_over_limit, load as load_site, total_over_limit
 
 router = APIRouter(tags=["run-assets"])
+
+
+def _row_gone(db: Session, run_id: int) -> HTTPException:
+    """The asset row went while its file was written; a deleted run leaves no folder."""
+    if db.get(Run, run_id) is None:
+        shutil.rmtree(os.path.dirname(run_asset_storage_dir(run_id)), ignore_errors=True)
+        return HTTPException(status_code=404, detail="Run not found")
+    return HTTPException(status_code=404, detail="Asset not found")
 
 
 @router.post("/api/runs/{run_id}/assets", status_code=201, response_model=RunAssetResponse)
@@ -65,7 +75,9 @@ def upload_run_asset(
         db.flush()
     except IntegrityError:
         db.rollback()
+        get_or_404(db, Run, run_id)
         raise HTTPException(status_code=409, detail=f"Asset '{filename}' already exists in this run")
+    new_id = asset.id
 
     # Write file via temp+rename for atomicity
     dirpath = run_asset_storage_dir(run_id)
@@ -88,7 +100,9 @@ def upload_run_asset(
         raise HTTPException(status_code=500, detail="Failed to write asset file")
 
     db.commit()
-    db.refresh(asset)
+    asset = db.get(RunAsset, new_id)
+    if asset is None:
+        raise _row_gone(db, run_id)
     resp = RunAssetResponse.model_validate(asset)
     resp.is_referenced = False
     resp.uploaded_by_email = (
@@ -177,8 +191,14 @@ def replace_run_asset(
     asset.mime_type = get_mime_type(incoming_ext)
     asset.uploaded_at = datetime.now(timezone.utc)
     asset.uploaded_by = user.id
-    db.commit()
-    db.refresh(asset)
+    try:
+        db.commit()
+    except StaleDataError:
+        db.rollback()
+        raise _row_gone(db, run_id)
+    asset = db.get(RunAsset, asset_id)
+    if asset is None:
+        raise _row_gone(db, run_id)
 
     ref_count = db.scalar(
         select(func.count()).where(RunAssetReference.run_asset_id == asset.id)

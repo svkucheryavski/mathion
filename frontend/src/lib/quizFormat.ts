@@ -1,6 +1,7 @@
 // Slice-5d display rules for the quiz overview (spec §A question card,
 // §Answers): the type chips, the Number line and the light hints.
 import { validateNumericAnswer, type AuthoringOption, type QuestionType } from './quizAuthoring';
+import { graphemes } from './graphemes';
 
 export const TYPE_LABEL: Record<QuestionType, string> = {
   single_choice: 'Single choice',
@@ -27,8 +28,8 @@ export function toleranceText(d: number): string {
 
 /** Answer text in the names of the marker, the arrows and delete. */
 export function cutName(text: string, max = 40): string {
-  const t = text.trim();
-  return t.length > max ? `${t.slice(0, max)}…` : t;
+  const t = graphemes(text.trim());
+  return t.length > max ? `${t.slice(0, max).join('').trimEnd()}…` : t.join('');
 }
 
 /** D9: light hints, in display order. `options` is null until they load. */

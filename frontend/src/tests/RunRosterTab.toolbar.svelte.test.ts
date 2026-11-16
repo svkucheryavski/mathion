@@ -140,6 +140,18 @@ describe('RunRosterTab — the add toggle and the add row (D25)', () => {
     expect(document.activeElement).toBe(toggle());
   });
 
+  it('Esc from the group select leaves the row open (the native popup owns that key)', async () => {
+    open({ groupsEnabled: true, groups: [group(1, 'Alpha')] });
+    toggle().click();
+    await settle();
+    const sel = target.querySelector('form.ro-add select') as HTMLSelectElement;
+    const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    sel.dispatchEvent(ev);
+    await settle();
+    expect(target.querySelector('form.ro-add')).not.toBeNull();
+    expect(ev.defaultPrevented).toBe(false);
+  });
+
   it('the row: hidden labels, the e-mail field, "Unassigned" and the enabled groups as "Name · n/10" (R38, R40)', async () => {
     open({
       groupsEnabled: true,
@@ -204,6 +216,24 @@ describe('RunRosterTab — the add toggle and the add row (D25)', () => {
     expect((target.querySelector('form.ro-add select') as HTMLSelectElement).value).toBe('__unassigned');
     expect(document.activeElement).toBe(field);
     expect(target.querySelector('p.ro-err')).toBeNull();
+  });
+
+  it('a successful add says "<email> added" in a status line mounted with the row; the next input clears it', async () => {
+    fetchSpy.mockImplementation(() => jres(student(9, { user_email: 'new@x.com' }), 201));
+    open();
+    toggle().click();
+    await settle();
+    const status = target.querySelector('form.ro-add p.vh[role="status"]') as HTMLElement;
+    expect(status).not.toBeNull();
+    expect(status.textContent).toBe('');
+    type(email()!, ' new@x.com ');
+    act('add-student')!.click();
+    await settle();
+    await settle();
+    expect(target.querySelector('form.ro-add p.vh[role="status"]')).toBe(status);
+    expect(status.textContent).toBe('new@x.com added');
+    type(email()!, 'n');
+    expect(status.textContent).toBe('');
   });
 
   it('a second submit during the add or its refetch sends nothing; Add is busy, not disabled; the field is read-only (R44)', async () => {
@@ -283,6 +313,20 @@ describe('RunRosterTab — the add toggle and the add row (D25)', () => {
     await settle();
     expect(email()!.value).toBe('b@x.com');
     expect(email()!.getAttribute('aria-invalid')).toBeNull();
+  });
+
+  it("a 422 for a bad address shows the server's sentence and marks the field", async () => {
+    open({ students: [] });
+    toggle().click();
+    await settle();
+    const field = email()!;
+    fetchSpy.mockImplementation(() => jres({ detail: 'Enter an email address' }, 422));
+    type(field, 'anna@x');
+    act('add-student')!.click();
+    await settle();
+    await settle();
+    expect(text(target.querySelector('p.ro-err'))).toBe('Enter an email address');
+    expect(field.getAttribute('aria-invalid')).toBe('true');
   });
 });
 
@@ -387,6 +431,59 @@ describe('RunRosterTab — the empty roster and the no-match lines', () => {
     await settle();
     expect(document.activeElement).toBe(email());
     expect(toggle().getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('an import opened from the empty-roster link and closed with no import returns focus to the link', async () => {
+    const props = $state<Record<string, unknown>>({
+      runId: 10, runIsPublished: true, isAdmin: true, courseSlug: 'test', onNavigateToTab: vi.fn(),
+      students: [], groups: [], groupsEnabled: false, rosterPrefilter: null, onPrefilterClear: vi.fn(),
+      onRefetchRosterData: vi.fn(), onRefetchGroupsOnly: vi.fn(), importOpen: false,
+    });
+    props.onOpenImport = () => { props.importOpen = true; };
+    target = document.createElement('div');
+    document.body.appendChild(target);
+    cmp = mount(RunRosterTab, { target, props: props as never });
+    flushSync();
+    act('open-import-link')!.click();
+    flushSync();
+    // The modal takes focus; on close its trap returns it to the toolbar button.
+    (document.activeElement as HTMLElement).blur();
+    props.importOpen = false;
+    act('open-import')!.focus();
+    flushSync();
+    await settle();
+    expect(document.activeElement).toBe(act('open-import-link'));
+
+    // Opened from the toolbar, the close leaves focus where the trap put it.
+    act('open-import')!.click();
+    flushSync();
+    props.importOpen = false;
+    act('open-import')!.focus();
+    flushSync();
+    await settle();
+    expect(document.activeElement).toBe(act('open-import'));
+  });
+
+  it('an import from the link that filled the roster keeps focus on the toolbar button', async () => {
+    const props = $state<Record<string, unknown>>({
+      runId: 10, runIsPublished: true, isAdmin: true, courseSlug: 'test', onNavigateToTab: vi.fn(),
+      students: [], groups: [], groupsEnabled: false, rosterPrefilter: null, onPrefilterClear: vi.fn(),
+      onRefetchRosterData: vi.fn(), onRefetchGroupsOnly: vi.fn(), importOpen: false,
+    });
+    props.onOpenImport = () => { props.importOpen = true; };
+    target = document.createElement('div');
+    document.body.appendChild(target);
+    cmp = mount(RunRosterTab, { target, props: props as never });
+    flushSync();
+    act('open-import-link')!.click();
+    flushSync();
+    props.students = [student(1)];
+    props.importOpen = false;
+    act('open-import')!.focus();
+    flushSync();
+    await settle();
+    expect(act('open-import-link')).toBeNull();
+    expect(document.activeElement).toBe(act('open-import'));
   });
 
   it('"No students match …. Clear search." clears the search and focuses it', async () => {

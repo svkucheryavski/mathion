@@ -193,6 +193,22 @@
   </button>
 {/snippet}
 
+{#snippet field()}
+  <input
+    bind:this={inputEl}
+    id={headerId}
+    class="title-input"
+    value={draft}
+    maxlength={200}
+    readonly={saving}
+    aria-label={`${Level} title`}
+    aria-invalid={error && errorIsTitle ? 'true' : undefined}
+    aria-describedby={error ? errId : undefined}
+    oninput={(e) => { draft = e.currentTarget.value; error = null; }}
+    onkeydown={onKeydown}
+  />
+{/snippet}
+
 <!-- User, 2026-10-08: a block is numbered "1. Title" (its list position);
      sequences and items are not. The accessible name stays the title, and the
      number is aria-hidden so it isn't read before the rename field either. -->
@@ -204,18 +220,8 @@
   {#if renaming}
     {@render num()}
     <div class="rename">
-      <input
-        bind:this={inputEl}
-        class="title-input"
-        value={draft}
-        maxlength={200}
-        readonly={saving}
-        aria-label={`${Level} title`}
-        aria-invalid={error && errorIsTitle ? 'true' : undefined}
-        aria-describedby={error ? errId : undefined}
-        oninput={(e) => { draft = e.currentTarget.value; error = null; }}
-        onkeydown={onKeydown}
-      />
+      <!-- The field takes the header id inside the heading: the region stays named, focus lookups find a field. -->
+      {#if level === 'block'}<h3 class="hd">{@render field()}</h3>{:else}<h4 class="hd">{@render field()}</h4>{/if}
       {#if error}<p class="err" role="alert" id={errId}>{error}</p>{/if}
     </div>
     <span class="actions">

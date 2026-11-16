@@ -2,7 +2,7 @@ import { it, expect, vi, afterEach } from 'vitest';
 import {
   uploadLimit, loadUploadLimit, overUploadLimit, overLimitSentence, resetUploadLimit, setUploadLimit, tooLargeSentence,
 } from '../lib/uploadLimit.svelte';
-import { ApiError } from '../lib/api';
+import { ApiError, REQUEST_ERROR_MESSAGE } from '../lib/api';
 
 const MB = 1024 * 1024;
 function jsonResponse(status: number, body: unknown) {
@@ -45,7 +45,7 @@ it("a 413 with the server's sentence shows that sentence (D11a)", () => {
 });
 
 it("a 413 with no sentence (a proxy's page) says the server's upload limit (D11a)", () => {
-  expect(tooLargeSentence(new ApiError(413, 'Upload failed'))).toBe("This file is over the server's upload limit.");
+  expect(tooLargeSentence(new ApiError(413, REQUEST_ERROR_MESSAGE))).toBe("This file is over the server's upload limit.");
   expect(tooLargeSentence(Object.assign(new Error('too large'), { status: 413 }))).toBe("This file is over the server's upload limit.");
 });
 

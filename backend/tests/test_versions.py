@@ -473,3 +473,13 @@ def test_student_content_excludes_label(admin_client):
     r = admin_client.get(f"/api/versions/{v['id']}/content")
     assert r.status_code == 200
     assert "label" not in r.json()["version"]
+
+
+def test_delete_created_version_removes_its_folder(admin_client, asset_tmpdir):
+    course = admin_client.post("/api/courses", json={"slug": "stats", "name": "Stats", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
+    folder = asset_tmpdir / "courses" / str(version["id"])
+    folder.mkdir(parents=True)
+    (folder / "x.png").write_bytes(b"x")
+    assert admin_client.delete(f"/api/versions/{version['id']}").status_code == 204
+    assert not folder.exists()

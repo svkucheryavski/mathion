@@ -81,7 +81,7 @@
   }
 </script>
 
-<div class="danger-confirm" role="group" aria-label={confirmLabel} aria-describedby={msgId}>
+<div class="danger-confirm" role="group" aria-label="Confirm {confirmLabel.toLowerCase()}" aria-describedby={msgId}>
   <p class="dc-msg" id={msgId}>{@render message()}</p>
   <label class="dc-ack">
     <input type="checkbox" data-role="danger-ack" bind:this={boxEl} bind:checked={armed} disabled={busy} onkeydown={onKeydown} />

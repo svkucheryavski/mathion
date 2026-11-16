@@ -86,6 +86,7 @@ class SMTPMailer(Mailer):
         self.username, self.password = username, password
         self.verify_cert, self.timeout = verify_cert, timeout
         self._smtp: smtplib.SMTP | None = None
+        self._closed_by: BaseException | None = None
 
     def _context(self) -> ssl.SSLContext:
         ctx = ssl.create_default_context()
@@ -104,6 +105,7 @@ class SMTPMailer(Mailer):
             self._smtp = smtplib.SMTP(self.host, self.port, timeout=self.timeout)
         try:
             self._stop_on_421(self._smtp)
+            self._watch_reset(self._smtp)
             # The greeting now, so a refused EHLO/HELO fails the session start
             # (D9c) instead of the first message.
             self._smtp.ehlo_or_helo_if_needed()
@@ -137,6 +139,36 @@ class SMTPMailer(Mailer):
 
         smtp.ehlo = ehlo
 
+    def _watch_reset(self, smtp) -> None:
+        """Keep a 421 or a hang-up at RSET, which smtplib drops; reset after a refused DATA."""
+        def rset_kept():
+            try:
+                code, msg = smtp.rset()
+            except smtplib.SMTPServerDisconnected as exc:
+                self._closed_by = exc
+                return
+            except smtplib.SMTPResponseException:
+                # An over-long reply: smtplib has closed the connection, so it counts as a hang-up.
+                self._closed_by = smtplib.SMTPServerDisconnected("unreadable reply to RSET")
+                return
+            if code == 421:
+                self._closed_by = smtplib.SMTPResponseException(code, msg)
+                smtp.close()
+
+        real_data = smtp.data
+
+        def data(*args, **kwargs):
+            try:
+                return real_data(*args, **kwargs)
+            except smtplib.SMTPDataError as exc:
+                # data() raises only for the DATA command; smtplib then skips its RSET.
+                if exc.smtp_code != 421:
+                    rset_kept()
+                raise
+
+        smtp._rset = rset_kept
+        smtp.data = data
+
     @staticmethod
     def _login(smtp, username: str, password: str) -> None:
         """Log in; a failure smtplib gives no class of its own gets one."""
@@ -165,7 +197,13 @@ class SMTPMailer(Mailer):
 
     def send(self, msg):
         assert self._smtp is not None, "SMTPMailer.send called outside session()"
-        self._smtp.send_message(msg)
+        self._closed_by = None
+        try:
+            self._smtp.send_message(msg)
+        except Exception as exc:
+            if self._closed_by is not None:
+                exc.closed_after = self._closed_by
+            raise
 
 
 def build_mailer(view, secret: str, mode: str) -> Mailer | None:

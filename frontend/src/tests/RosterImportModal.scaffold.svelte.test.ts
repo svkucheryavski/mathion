@@ -40,6 +40,13 @@ describe('RosterImportModal — Stage 1 paste + preview', () => {
     unmount(cmp);
   });
 
+  it('the step marker keeps its list role (Safari drops it under list-style: none)', async () => {
+    const { target, cmp } = mountModal();
+    await settle();
+    expect(target.querySelector('ol.ri-steps')?.getAttribute('role')).toBe('list');
+    unmount(cmp);
+  });
+
   it('parses pasted CSV after 200ms debounce', async () => {
     const { target, cmp } = mountModal();
     await settle();

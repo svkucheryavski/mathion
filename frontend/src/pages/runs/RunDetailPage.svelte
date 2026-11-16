@@ -503,6 +503,7 @@
           onRefetchRosterData={refetchRosterData}
           onRefetchGroupsOnly={refetchGroups}
           onOpenImport={() => (showImportModal = true)}
+          importOpen={showImportModal}
         />
       {:else if activeTab === 'groups'}
         <RunGroupsTab
@@ -600,5 +601,10 @@
      tab's line is dark. The selected rule below must stay after this one. */
   .run-tab:hover { color: var(--text); border-bottom-color: var(--border-ground); }
   .run-tab[aria-selected='true'] { color: var(--text); border-bottom-color: var(--primary); }
+  /* Forced colours paint every transparent line: at rest only the selected tab keeps one, over the row's line. */
+  @media (forced-colors: active) {
+    .run-tab { border-bottom-color: Canvas; margin-bottom: 0; }
+    .run-tab[aria-selected='true'] { border-bottom-color: Highlight; margin-bottom: -1px; }
+  }
   .run-panel { padding: 16px 0; }
 </style>

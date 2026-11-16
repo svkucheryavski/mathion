@@ -742,6 +742,11 @@
   .drop:has(input:disabled) { background: var(--disabled-bg); border-color: var(--border-faint); cursor: not-allowed; /* mathion-visual-spec.md:159 disabled recipe — tokens, no opacity */ }
   /* The label carries the disabled colour: `.drop.has-file .drop-label` (a file is always picked while submitting) would win over a colour on .drop. */
   .drop:has(input:disabled) .drop-label { color: var(--faint); }
+  /* Forced colours drop the disabled fill: the frame and label grey instead. */
+  @media (forced-colors: active) {
+    .drop:has(input:disabled) { border-color: GrayText; }
+    .drop:has(input:disabled) .drop-label { color: GrayText; }
+  }
   .submit-error { margin-top: 10px; /* 5(b): the history body gap */ }
   /* Precondition banner — mathion-visual-spec.md:289-293. */
   .precondition { border-left: 3px solid var(--primary); background: var(--surface-2); padding: 14px 16px; /* 5(b): no artboard box for this banner — matches the inline-state row, ref 1378 */ font-size: 13px; line-height: 1.55; color: var(--text-3); /* ref 1373 */ border-radius: var(--radius); }

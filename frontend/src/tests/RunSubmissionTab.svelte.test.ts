@@ -113,6 +113,53 @@ describe('RunSubmissionTab', () => {
     expect(host.querySelector('th.mp-head button')?.textContent?.trim()).toBe('B1');
   });
 
+  it('a group with no cell in a column reads "No data" as hidden text; the dash is hidden', async () => {
+    const m = submissionMock();
+    (m.mini_projects as { groups: unknown[] }[])[1]!.groups.splice(1, 1);
+    vi.stubGlobal('fetch', mockFetch(200, m));
+    mountTab();
+    await settle();
+    const cell = host.querySelector('td.status-cell .empty-cell')!.parentElement!;
+    const dash = cell.querySelector('.empty-cell')!;
+    expect(dash.getAttribute('aria-hidden')).toBe('true');
+    expect(dash.hasAttribute('aria-label')).toBe(false);
+    expect(dash.textContent).toBe('—');
+    expect(cell.querySelector('span.vh')?.textContent).toBe('No data');
+  });
+
+  it('focusing the pinned Group sort button keeps the grid where it was scrolled', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, submissionMock()));
+    mountTab();
+    await settle();
+    const scroller = host.querySelector('.table-scroll') as HTMLElement;
+    Object.defineProperty(scroller, 'scrollLeft', { value: 0, writable: true });
+    scroller.scrollLeft = 300;
+    scroller.dispatchEvent(new Event('scroll'));
+    // The browser scrolls a newly focused control into view; the handler puts it back.
+    scroller.scrollLeft = 0;
+    (host.querySelector('th.sticky-group button') as HTMLButtonElement).focus();
+    expect(scroller.scrollLeft).toBe(300);
+  });
+
+  it('another run starts its grid at 0: the held offset does not carry over', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, submissionMock()));
+    const props = $state({ runId: 1 });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    component = mount(RunSubmissionTab, { target: host, props });
+    await settle();
+    let scroller = host.querySelector('.table-scroll') as HTMLElement;
+    Object.defineProperty(scroller, 'scrollLeft', { value: 0, writable: true });
+    scroller.scrollLeft = 300;
+    scroller.dispatchEvent(new Event('scroll'));
+    props.runId = 2;
+    await settle();
+    scroller = host.querySelector('.table-scroll') as HTMLElement;
+    Object.defineProperty(scroller, 'scrollLeft', { value: 0, writable: true });
+    (host.querySelector('th.sticky-group button') as HTMLButtonElement).focus();
+    expect(scroller.scrollLeft).toBe(0);
+  });
+
   // T3 – Error state
   it('renders error banner with Retry on fetch failure', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('boom'))));

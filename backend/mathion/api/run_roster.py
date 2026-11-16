@@ -14,6 +14,7 @@ from mathion.dependencies import get_current_user
 from mathion.models import Group, Run, RunStudent
 from mathion.models_auth import User
 from mathion.schemas import (
+    BAD_EMAIL,
     RunStudentBatchRequest,
     RunStudentBatchResponse,
     RunStudentBulkDeleteRequest,
@@ -23,6 +24,7 @@ from mathion.schemas import (
     RunStudentCreate,
     RunStudentResponse,
     RunStudentUpdate,
+    email_shape_ok,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,6 +66,8 @@ def add_student(run_id: int, data: RunStudentCreate, db: Session = Depends(get_d
             raise HTTPException(status_code=400, detail="Group not in this run")
         if g.is_disabled:
             raise HTTPException(status_code=409, detail="Cannot add students to disabled group")
+    if not email_shape_ok(data.email):
+        raise HTTPException(status_code=422, detail=BAD_EMAIL)
 
     # Phase 9-A2 invariant #2 (spec §5.2): acquire ENROLLMENT(course_id) BEFORE
     # get_or_create_user so the users.email index INSERT sits INSIDE the advisory
@@ -198,6 +202,10 @@ def add_students_batch(
     visit_order = sorted(range(len(data.rows)), key=lambda i: data.rows[i].email.strip().lower())
     for i in visit_order:
         row = data.rows[i]
+        if not email_shape_ok(row.email):
+            results[i] = {"email": row.email, "status": "error",
+                          "detail": "Invalid email format", "error_code": "invalid_email"}
+            continue
         # User creation happens at the outer transaction; safe to keep even if
         # the per-row enrollment later fails (get_or_create_user is SAVEPOINT-safe).
         target = get_or_create_user(db, row.email)

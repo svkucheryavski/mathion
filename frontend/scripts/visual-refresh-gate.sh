@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3058
+EXPECTED_CHECKS=3101
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -537,8 +537,14 @@ else:
 # it beats the page pair. +3 rules (49 -> 52).
 # VR-B (2026-11-14): the four D85 selectors also match the renderer's ul/ol.loose
 # (:is(.loose,:has(>li>p))); declarations, hashes and order unchanged.
+# Beta round T5 (2026-11-16): base.css gains the shared visually hidden `.vh`
+# (b2efbc30), after the focus rules. +1 rule (52 -> 53).
+# Beta round T6: `.live-slot:empty`, a status region mounted empty that takes no box. +1 rule (53 -> 54).
+# Beta round T8: `.new-tab-note`, the hidden "(opens in a new tab)", left out of copied text. +1 rule (54 -> 55).
+# Beta round T9: forced colours grey a disabled field (GrayText); the components' own greys are dropped there. +1 rule (55 -> 56).
 WANT_FULL = [
-    ('', '*,*:before,*:after', '8d5d6c83'), ('', '.mono,code,kbd', '84a226e9'),
+    ('', '*,*:before,*:after', '8d5d6c83'), ('', '.live-slot:empty', 'bb6a43fd'), ('', '.mono,code,kbd', '84a226e9'),
+    ('', '.new-tab-note', 'c24b8404'),
     ('', '.prose', '115422ed'),
     ('', '.prose :is(h1,h2,h3,h4,h5,h6)', '9dabc362'),
     ('', '.prose :where(h1,h2,h3,h4,h5,h6)', '8f770fc2'),
@@ -568,6 +574,7 @@ WANT_FULL = [
     ('', '.prose.compact h2', 'c2943c7b'),
     ('', '.prose>:first-child,.prose :where(li,blockquote)>:first-child', 'd462248a'),
     ('', '.prose>:last-child,.prose :where(li,blockquote)>:last-child', 'ef0b7a11'),
+    ('', '.vh', 'b2efbc30'),
     ('', ':focus-visible', 'ebbf7147'),
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible', '1684b043'),
     ('', ':root', '0ca50118'),
@@ -579,8 +586,9 @@ WANT_FULL = [
     ('', 'h3', 'b36ddbd5'), ('', 'h4', 'f98d3d7e'), ('', 'html,body', '3bd2fa51'),
     ('', 'img,video', 'aa84fbab'), ('', 'p', '11696618'), ('', 'ul,ol', '99409a76'),
     ('@media (forced-colors:active)', ':focus-visible:not([tabindex="-1"])', '1ff87bb6'),
+    ('@media (forced-colors:active)', ':is(input,select,textarea):disabled', '602da9b5'),
 ]
-# Document ORDER of the same 52 rules. `a` at #9 (reset.css) and #13 (base.css)
+# Document ORDER of the same 56 rules. `a` at #9 (reset.css) and #13 (base.css)
 # are the live case: only order decides that base's --primary wins, and swapping
 # two @imports in app.css flips it while the sorted multiset stays identical.
 # The four focus rules close it, frozen in order like the rest. None depends on
@@ -595,6 +603,8 @@ WANT_ORDER = [
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible'),
     ('', '[tabindex="-1"]:focus-visible'),
     ('@media (forced-colors:active)', ':focus-visible:not([tabindex="-1"])'),
+    ('@media (forced-colors:active)', ':is(input,select,textarea):disabled'),
+    ('', '.vh'), ('', '.live-slot:empty'), ('', '.new-tab-note'),
     ('', '.prose'), ('', '.prose :is(h1,h2,h3,h4,h5,h6)'),
     ('', '.prose h1'), ('', '.prose h2'), ('', '.prose h3'), ('', '.prose h4'),
     ('', '.prose h5'), ('', '.prose h6'), ('', '.prose.compact h1'), ('', '.prose.compact h2'),
@@ -1531,7 +1541,7 @@ const SIG = {
      "path:[d=\"M8 4.6C6.4 3.5 4.6 3.1 2.6 3.3V12.7C4.6 12.5 6.4 12.9 8 14C9.6 12.9 11.4 12.5 13.4 12.7V3.3C11.4 3.1 9.6 3.5 8 4.6Z\"]",
      "line:[x1=\"8\" y1=\"4.6\" x2=\"8\" y2=\"14\"]"],
   "ItemIcon.svelte":
-    ["button:icon.{expr}[class=\"icon {istate}\" data-type={item.type} onclick title aria-label]",
+    ["button:icon.{expr}[class=\"icon {istate}\" data-type={item.type} onclick title aria-label aria-current={istate === '"'"'current'"'"' ? '"'"'step'"'"' : undefined}]",
      "ItemMark:[type={item.type} state={istate} inStrip]"],
   "SequenceLink.svelte":
     ["a:row[class=\"row\" href aria-label onclick]",
@@ -1602,10 +1612,10 @@ const SIG = {
      "Button:[variant=\"secondary\" loading={revealing} aria-disabled={revealing} onclick]", "#else:",
      "Button:[onclick loading={inflight !== null} disabled={!allAnswered || inflight !== null} title]",
      "#if:", "p:hint[class=\"hint\"]", "span:mono[class=\"mono\"]", "#else:", "#if:",
-     "div:result[class=\"result\" tabindex=\"-1\"]", "p:", "strong:", "span:mono[class=\"mono\"]",
-     "p:meta[class=\"meta\"]", "span:mono[class=\"mono\"]", "span:mono[class=\"mono\"]", "#if:",
-     "Button:[onclick]", "#else:", "#if:",
-     "Button:[variant=\"secondary\" loading={revealing} aria-disabled={revealing} onclick]"],
+     "div:result[class=\"result\" tabindex=\"-1\"]", "p:[id]", "strong:", "span:mono[class=\"mono\"]",
+     "p:meta[class=\"meta\" id]", "span:mono[class=\"mono\"]", "span:mono[class=\"mono\"]", "#if:",
+     "Button:[aria-describedby={resultDesc} onclick]", "#else:", "#if:",
+     "Button:[variant=\"secondary\" aria-describedby={resultDesc} loading={revealing} aria-disabled={revealing} onclick]"],
   // The two choice components differ in their CONTROL markup exactly as they
   // differ in their control CSS (the divergence set in section (n)): the radio
   // has a `span:dot`, the checkbox an `svg:check`. Everything else is one shape.
@@ -3698,6 +3708,9 @@ else
   # deadline with the hidden window still open reads "Overdue since" in crimson.
   d '\.deadline-overdue' '' 'color:var\(--danger\)'
   none "MiniProjectDetailPage: no soft-deadline aside (D80)" "\.deadline-soft\.${H}"
+  # Beta round T9: forced colours drop the disabled drop's fill; its frame and label grey by GrayText.
+  chk "@media \(forced-colors: ?active\)\{([^{}]*\{[^{}]*\})*\.drop\.${H}:has\(input:where\(\.${H}\):disabled\)" 'border-color:GrayText'
+  chk "@media \(forced-colors: ?active\)\{([^{}]*\{[^{}]*\})*\.drop\.${H}:has\(input:where\(\.${H}\):disabled\) \.drop-label:where\(\.${H}\)" 'color:GrayText'
   # D69 (Polish 2 Safari pass): one body grid under the header. Wide windows put the
   # group and submit cards in a 300px right column beside the assignment and the
   # history; at 880px and under it is one column in DOM order (assignment, group,
@@ -4086,6 +4099,8 @@ own block-card BlockAccordion.svelte
 uniq1 block-card
 if [[ -n $REPLY ]]; then
   N=BlockAccordion; H=$REPLY
+  # Beta round: forced colours drop the focus shades, so the focus panel gets a ring.
+  chk "@media \(forced-colors: active\)\{\.block-card\.focus\.${H},\.block-card\.parent\.${H}" 'outline:2px solid CanvasText' 'outline-offset:-1px'
   d '\.block-card' '' 'border:1px solid var\(--focus-line\)' 'border-radius:var\(--radius\)' 'background:transparent' 'overflow:hidden' 'margin-bottom:6px'
   # 5c T5 (user): a focus-level row is white on the shaded page.
   d '\.block-card\.at-focus' '' 'background:var\(--focus-0\)'
@@ -4103,6 +4118,8 @@ own seq-card SequenceAccordion.svelte
 uniq1 seq-card
 if [[ -n $REPLY ]]; then
   N=SequenceAccordion; H=$REPLY
+  # Beta round: the forced-colours ring for the focus panel.
+  chk "@media \(forced-colors: active\)\{\.seq-card\.focus\.${H}" 'outline:2px solid CanvasText' 'outline-offset:-1px'
   d '\.acc-body' '' 'padding:12px 14px' 'border-top:1px solid var\(--border-soft\)'
   none "SequenceAccordion no Items heading rules (5c T2)" "(\.items-head|h5)\.${H}"
   # "+ Add item" — a text line like + Add block / + Add sequence (user, 5c T3);
@@ -4163,8 +4180,8 @@ if [[ -n $REPLY ]]; then
   d 'label\.selected' '' 'border-color:var\(--primary\)' 'background:var\(--primary-soft\)'
   # D12 exception: the established inset ring, and the forced-colors block.
   chk "label\.${H}:has\(input:where\(\.${H}\):focus-visible\)" 'box-shadow:inset 0 0 0 2px var\(--primary\)'
-  chk "@media \(forced-colors: active\)\{label\.selected\.${H}" 'border:2px solid Highlight'
-  chk "label\.selected\.${H}\{border:2px solid Highlight\}label\.${H}:has\(input:where\(\.${H}\):focus-visible\)" 'outline:2px solid Highlight' 'outline-offset:-2px'
+  chk "@media \(forced-colors: active\)\{label\.selected\.${H}" 'outline:2px solid' 'outline-offset:-2px'
+  chk "label\.selected\.${H}\{outline:2px solid;outline-offset:-2px\}label\.${H}:has\(input:where\(\.${H}\):focus-visible\)" 'outline:2px solid Highlight' 'outline-offset:-2px'
   # Constraint 2: the radio stays the sr-only idiom (position + pointer-events), not a dim.
   chk "label\.${H} input:where\(\.${H}\)" 'position:absolute' 'opacity:0' 'pointer-events:none'
   # D12: focus styling only via :focus-visible — selector-agnostic, so a :focus /
@@ -4173,8 +4190,8 @@ if [[ -n $REPLY ]]; then
   # No outline but a Highlight one (the forced-colors block): the inset ring is the
   # only non-forced focus indicator. Per declaration, so a non-Highlight outline
   # cannot ride on a Highlight sibling in the same rule; the longhands count too
-  # (outline-offset is geometry, not a ring).
-  bad=$(grep -oE "[^{}]*\.${H}[^{}]*\{[^}]*\}" $CSS | grep -oE '[{;]outline(-(style|color|width))?:[^;}]*' | grep -v Highlight)
+  # (outline-offset is geometry, not a ring). The forced-colors selection ring is skipped.
+  bad=$(sed -E "s/@media \(forced-colors: active\)\{label\.selected\.${H}\{outline:2px solid;outline-offset:-2px\}//" $CSS | grep -oE "[^{}]*\.${H}[^{}]*\{[^}]*\}" | grep -oE '[{;]outline(-(style|color|width))?:[^;}]*' | grep -v Highlight)
   if [[ -z $bad ]]; then echo "PASS  ItemTypePicker: no outline outside forced colors (D12)"
   else echo "FAIL  ItemTypePicker: no outline outside forced colors (D12): ${(f)bad}"; fail=1; fi
   none "ItemTypePicker pre-5a .picker/.glyph gone" "\.(picker|glyph)\.${H}"
@@ -4406,6 +4423,9 @@ if grep -rqE "import QuestionTypePicker from" src --include='*.svelte' --exclude
     d '\.cards' '' 'display:flex' 'flex-wrap:wrap' 'gap:8px'
     chk "label\.${H}" 'display:flex' 'padding:6px 10px' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'color:var\(--text\)' 'font-size:13px'
     chk "label\.selected\.${H}" 'border-color:var\(--primary\)' 'background:var\(--primary-soft\)'
+    # Beta round: forced colours, a neutral ring for selection and Highlight for focus.
+    chk "@media \(forced-colors: active\)\{label\.selected\.${H}" 'outline:2px solid' 'outline-offset:-2px'
+    chk "label\.selected\.${H}\{outline:2px solid;outline-offset:-2px\}label\.${H}:has\(input:where\(\.${H}\):focus-visible\)" 'outline:2px solid Highlight' 'outline-offset:-2px'
     none "QuestionTypePicker no --accent / --accent-bg fallbacks" "\.${H}[^{]*\{[^}]*var\(--accent"
     sweep QuestionTypePicker $H
   fi
@@ -4565,6 +4585,8 @@ own inline-confirm InlineConfirm.svelte
 uniq1 inline-confirm
 if [[ -n $REPLY ]]; then
   N=InlineConfirm; H=$REPLY
+  # Beta round: a wrapped warning in an end-aligned confirm ends at the right edge too.
+  chk "\.inline-confirm\.end\.${H} \.warning:where\(\.${H}\)" 'text-align:end'
   d '\.inline-confirm\.row' '' 'flex-direction:row' 'align-items:center' 'gap:12px'
   # VR backlog T7: a confirm held by its disabledReason takes the blocked look.
   chk "\.confirm\[aria-disabled=true\]\.${H}:not\(\[aria-busy=true\]\)" 'background:var\(--disabled-bg\)' 'color:var\(--faint\)' 'cursor:not-allowed'
@@ -4792,6 +4814,9 @@ if [[ -n $REPLY ]]; then
   d '\.run-tab' ':hover' 'color:var\(--text\)' 'border-bottom-color:var\(--border-ground\)'
   check "RunDetailPage the selected-tab rule follows the hover rule (D72)" "\.run-tab\.${H}:hover\{[^}]*\}\.run-tab(\.${H})?\[aria-selected=['\"]?true['\"]?\]"
   chk "\.run-tab(\.${H})?\[aria-selected=['\"]?true['\"]?\](\.${H})?" 'color:var\(--text\)' 'border-bottom-color:var\(--primary\)'
+  # Beta round T9: forced colours paint every transparent tab line; only the selected one stays.
+  chk "@media \(forced-colors: active\)\{\.run-tab\.${H}" 'border-bottom-color:Canvas' 'margin-bottom:0'
+  chk "@media \(forced-colors: active\)\{\.run-tab\.${H}\{border-bottom-color:Canvas;margin-bottom:0\}\.run-tab(\.${H})?\[aria-selected=['\"]?true['\"]?\](\.${H})?" 'border-bottom-color:Highlight' 'margin-bottom:-1px'
   d '\.run-banner-warn' '' 'background:var\(--status-needs-revision-bg\)' 'border-left:3px solid var\(--gold\)'
   d '\.run-meta' '' 'font-family:var\(--font-mono\)' 'color:var\(--muted\)'
   # 6b browser pass (user, 2026-10-12): the run title matches authoring's page titles (18px).
@@ -4857,7 +4882,7 @@ if [[ -n $REPLY ]]; then
   # Polish 3 Task 7 (table corners): the outer border and radius sit on a scroll
   # wrapper. It clips the grey header corners and scrolls a table wider than its
   # container instead of cutting it off; the table's borders stay separate.
-  d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'position:relative'
   d '\.runs-table' '' 'border-collapse:separate' 'border-spacing:0'
   none "RunListPage .runs-table has no border or radius of its own (Polish 3)" "\.runs-table\.${H}\{[^}]*(border:|border-radius:)"
   d '\.runs-count' '' 'font-family:var\(--font-mono\)' 'color:var\(--muted\)'
@@ -4970,6 +4995,8 @@ if [[ -n $REPLY ]]; then
   # scrolling aligns the button's box, not its ring.
   # C18 (Polish 3): and 4px on the right, so a focused button's outset ring stays inside the scrollport.
   d '\.table-scroll' '' 'scroll-padding-left:calc\(12rem ?\+ ?4px\)' 'scroll-padding-right:4px'
+  # Beta round T5: hidden text in a cell stays inside the scroller, not past the page.
+  d '\.table-scroll' '' 'position:relative'
   d '\.chip-disabled' '' 'background:var\(--state-disabled-bg\)' 'color:var\(--state-disabled-fg\)'
   # 9a centres the mini-project headers and badges; qualified so they outrank
   # `.submission-grid th, .submission-grid td { text-align: left }`.
@@ -5040,6 +5067,8 @@ own mp-table RunMiniProjectsTab.svelte
 uniq1 mp-table
 if [[ -n $REPLY ]]; then
   N=RunMiniProjectsTab; H=$REPLY
+  # Beta round: the confirm row keeps room for the focus ring.
+  chk "\.mp-panel-row\.${H} td:where\(\.${H}\)" 'padding:4px 12px 10px'
   d '\.chip-draft' '' 'background:var\(--state-created-bg\)' 'color:var\(--state-created-fg\)'
   d '\.chip-published' '' 'background:var\(--state-published-bg\)' 'color:var\(--state-published-fg\)'
   d '\.chip-locked' '' 'background:var\(--state-archived-bg\)' 'color:var\(--state-archived-fg\)'
@@ -5071,6 +5100,10 @@ own assets-table RunAssetsTab.svelte
 uniq1 assets-table
 if [[ -n $REPLY ]]; then
   N=RunAssetsTab; H=$REPLY
+  # Beta round: a long name keeps 12rem beside a long email, and confirm rows keep ring room.
+  d '\.a-name' '' 'min-width:12rem' 'overflow-wrap:anywhere'
+  d '\.num\.a-by' '' 'white-space:normal' 'overflow-wrap:anywhere'
+  chk "\.delete-row\.${H} td:where\(\.${H}\)" 'padding:4px 10px 10px'
   d '\.bulk-strip' '' 'background:var\(--surface-2\)'
   # Polish 3 Task 7 (table corners): the outer border and radius sit on a scroll
   # wrapper. It clips the grey header corners and scrolls a table wider than its
@@ -5137,6 +5170,12 @@ own switch Switch.svelte
 uniq1 switch
 if [[ -n $REPLY ]]; then
   N=Switch; H=$REPLY
+  # Beta round: forced colours draw the track and knob in system colours.
+  chk "@media \(forced-colors: active\)\{\.switch\.${H}" 'padding:1px' 'border:1px solid ButtonText'
+  chk "\.switch\.${H}\{padding:1px;border:1px solid ButtonText\}\.knob\.${H}" 'forced-color-adjust:none' 'background:ButtonText'
+  chk "@media \(forced-colors: active\)\{\.switch\.${H}\{padding:1px;border:1px solid ButtonText\}\.knob\.${H}\{forced-color-adjust:none;background:ButtonText\}\.switch\.on\.${H} \.knob:where\(\.${H}\)" 'background:Highlight'
+  chk "@media \(forced-colors: active\)\{\.switch\.${H}\{padding:1px;border:1px solid ButtonText\}\.knob\.${H}\{forced-color-adjust:none;background:ButtonText\}\.switch\.on\.${H} \.knob:where\(\.${H}\)\{background:Highlight\}\.switch\.${H}:disabled" 'border-color:GrayText'
+  chk "@media \(forced-colors: active\)\{\.switch\.${H}\{padding:1px;border:1px solid ButtonText\}\.knob\.${H}\{forced-color-adjust:none;background:ButtonText\}\.switch\.on\.${H} \.knob:where\(\.${H}\)\{background:Highlight\}\.switch\.${H}:disabled\{border-color:GrayText\}\.switch\.${H}:disabled \.knob:where\(\.${H}\)" 'background:GrayText'
   d '\.switch' '' 'width:30px' 'height:17px' 'padding:2px' 'border-radius:9px' 'background:var\(--border-strong\)'
   d '\.switch\.on' '' 'background:var\(--primary\)'
   d '\.switch' ':disabled' 'background:var\(--border-faint\)'
@@ -5204,6 +5243,8 @@ if [[ -n $REPLY ]]; then
   d '\.mpm-dirty' '' 'flex:1' 'font-size:11\.5px' 'color:var\(--status-needs-revision-fg\)'
   # C1: an error banner takes the danger panel's colours.
   d '\.mpm-banner' '' 'background:var\(--danger-panel-bg\)' 'border-left:3px solid var\(--danger\)' 'color:var\(--danger-panel-fg\)'
+  # Beta round T5: scrolled into view below the body's 14px top padding, not flush.
+  d '\.mpm-banner' '' 'scroll-margin-top:14px'
   d '\.mpm-box' '' 'padding:8px 10px' 'background:var\(--status-needs-revision-bg\)' 'border-left:3px solid var\(--gold\)' 'border-radius:0 5px 5px 0' 'color:var\(--status-needs-revision-fg\)'
   d '\.mpm-box-head' '' 'font-weight:600'
   d '\.mpm-box-list' '' 'gap:4px' 'line-height:1\.5'
@@ -5288,6 +5329,8 @@ own ro-toolbar RunRosterTab.svelte
 uniq1 ro-toolbar
 if [[ -n $REPLY ]]; then
   N=RunRosterTab; H=$REPLY
+  # Beta round: the confirm row keeps room for the focus ring.
+  chk "\.ro-confirm-row\.${H} td:where\(\.${H}\)" 'padding:4px 12px 10px'
   d '\.ro-toolbar' '' 'display:flex' 'align-items:center' 'gap:9px' 'flex-wrap:wrap'
   d '\.ro-tools-right' '' 'margin-left:auto' 'gap:8px'
   d '\.ro-search' '' 'width:230px'
@@ -5691,6 +5734,9 @@ uniq1 sp-card
 if [[ -n $REPLY ]]; then
   N=DashboardSidePanel; H=$REPLY
   chk "@media \(forced-colors: ?active\)\{\.sp-seg-opt\.${H}:has\(\.sp-radio:where\(\.${H}\):focus-visible\)" 'outline:2px solid Highlight' 'outline-offset:-2px'
+  # Beta round T9: the selected result keeps a cue once the fill is dropped; a locked one greys.
+  chk "@media \(forced-colors: ?active\)\{([^{}]*\{[^{}]*\})*\.sp-seg-opt\.checked\.${H}" 'outline:2px solid' 'outline-offset:-2px'
+  chk "@media \(forced-colors: ?active\)\{([^{}]*\{[^{}]*\})*\.sp-seg-opt\.locked\.${H}" 'color:GrayText'
 fi
 # Inset rings where a control is flush against an overflow clip (spec §Inset rings).
 uniq1 seg-btn
@@ -5933,12 +5979,43 @@ fi
 # Ruling (Task 3 review m2): the scanner's attachOn and the src_count rows pin
 # the attachment's TEXT, not what it does. The attachment may only set a link's
 # target and rel, and every content surface takes it from the lib, once, with no
-# local binding that could shadow it.
-ndo=$(grep -cE '\.style|classList|className|cssText|innerHTML|outerHTML|insertAdjacent|append|prepend|replaceWith|\.remove\(|toggleAttribute|setAttributeNS' src/lib/externalLinks.ts)
-nset=$(grep -oE 'setAttribute\([^,)]*' src/lib/externalLinks.ts | sort -u | tr '\n' ' ')
-if [[ $ndo -eq 0 && $nset == "setAttribute('rel' setAttribute('target' " ]]; then
-  echo "PASS  externalLinks only sets a link's target and rel"
-else echo "FAIL  externalLinks does more than set a link's target and rel ($ndo; $nset)"; fail=1; fi
+# local binding that could shadow it. Beta round T8: it also adds one hidden
+# "(opens in a new tab)" note. Every code line of the file (whole-line //
+# comments and blank lines aside) is pinned exactly; no /* comment and no line
+# break grep can't see (CR, U+2028, U+2029) may hide code from the pin.
+WANT_ATTACH=$(cat <<'XL'
+export function opensInNewTab(href: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(href, document.baseURI);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+  if (u.origin !== location.origin) return true;
+  return /^\/(assets|api)\//.test(u.pathname);
+}
+export function externalLinks(_html: string) {
+  return (el: HTMLElement): void => {
+    for (const a of el.querySelectorAll('a[href]')) {
+      if (!opensInNewTab(a.getAttribute('href') ?? '')) continue;
+      a.setAttribute('target', '_blank');
+      a.setAttribute('rel', 'noopener noreferrer');
+      if (a.querySelector(':scope > .new-tab-note')) continue;
+      const note = document.createElement('span');
+      note.className = 'vh new-tab-note';
+      note.textContent = ' (opens in a new tab)';
+      a.append(note);
+    }
+  };
+}
+XL
+)
+got_attach=$(grep -vE '^[[:space:]]*(//|$)' src/lib/externalLinks.ts)
+nhide=$(LC_ALL=C grep -cE $'\r|\xe2\x80[\xa8\xa9]|/\\*' src/lib/externalLinks.ts)
+if [[ "$got_attach" == "$WANT_ATTACH" && $nhide -eq 0 ]]; then
+  echo "PASS  externalLinks sets only a new-tab link's target and rel and adds the hidden note (every code line pinned)"
+else echo "FAIL  externalLinks.ts changed: every code line is pinned, with no /* comment or hidden line break ($nhide)"; fail=1; fi
 nbind=0
 for f in $CONTENT_SURFACES; do
   [[ $(grep -cE "^  import \{ externalLinks \} from '(\.\./)+lib/externalLinks';$" $f) -eq 1 ]] || nbind=$((nbind+1))
@@ -6108,6 +6185,8 @@ own u-count SuperuserUsers.svelte
 uniq1 u-table
 if [[ -n $REPLY ]]; then
   N=SuperuserUsers; H=$REPLY
+  # Beta round T6: the chips' list tooltip, fixed so the scroll box can't clip it, one line per item.
+  d '\.u-tip' '' 'position:fixed' 'white-space:pre-line' 'pointer-events:none'
   d '\.u-tools' '' 'display:flex' 'justify-content:space-between' 'flex-wrap:wrap' 'margin:0 0 12px'
   d '\.u-search' '' 'height:var\(--control-h-sm\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
   d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
@@ -6130,7 +6209,7 @@ if [[ -n $REPLY ]]; then
   none "SuperuserUsers has no Disabled column (D14 rev 8)" "\.(u-off|u-dot)\.${H}"
   d '\.row-icons' '' 'display:inline-flex' 'gap:4px'
   chk "\.u-table\.${H} td\.u-actions:where\(\.${H}\)" 'width:1%' 'white-space:nowrap'
-  chk "\.u-confirm\.${H} td:where\(\.${H}\)" 'padding:0 12px 10px' 'border-top:0'
+  chk "\.u-confirm\.${H} td:where\(\.${H}\)" 'padding:4px 12px 10px' 'border-top:0'
   d '\.u-count' '' 'margin:8px 2px 0' 'font-size:12px' 'color:var\(--muted\)'
   none "SuperuserUsers puts no flex on a table cell (the chips sit in .u-chips)" "\.u-roles\.${H}\{[^}]*display:"
   sweep SuperuserUsers $H
@@ -6243,6 +6322,10 @@ if [[ -n $REPLY ]]; then
   chk "\.fit\.${H} \.segment:where\(\.${H}\)" 'flex:none' 'padding:5px 12px'
   chk "\.disabled\.${H} \.segment:where\(\.${H}\)" 'cursor:default' 'background:var\(--surface-2\)' 'color:var\(--muted\)'
   chk "\.segment\.${H}:has\(input:where\(\.${H}\):focus-visible\)" 'box-shadow:inset 0 0 0 2px var\(--primary\)'
+  # Beta round T9: forced colours drop the grey fill, so a disabled control greys its text and lines.
+  chk "@media \(forced-colors: active\)\{([^{}]*\{[^{}]*\})*\.segmented\.disabled\.${H}" 'border-color:GrayText'
+  chk "@media \(forced-colors: active\)\{([^{}]*\{[^{}]*\})*\.disabled\.${H} \.segment:where\(\.${H}\)" 'color:GrayText' 'border-left-color:GrayText'
+  chk "@media \(forced-colors: active\)\{([^{}]*\{[^{}]*\})*\.disabled\.${H} \.segment\.selected:where\(\.${H}\)" 'color:GrayText'
   sweep Segmented $H
 fi
 

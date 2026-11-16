@@ -420,7 +420,7 @@
             </span>
           </form>
         {:else}
-          <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} aria-disabled={posting ? 'true' : undefined} title={posting ? 'Wait for the request to finish' : undefined} onclick={() => void openAdd()}>+ Add sequence</button>
+          <button bind:this={addLineEl} type="button" class="add-line" disabled={busy || parentBusy} aria-disabled={posting ? 'true' : undefined} title={posting ? 'Wait for the request to finish' : undefined} onclick={() => void openAdd()}><span aria-hidden="true">+</span> Add sequence</button>
         {/if}
       {/if}
     </div>
@@ -442,6 +442,10 @@
     background: var(--focus-0);
     border-color: var(--focus-line-strong);
     box-shadow: var(--focus-shadow);
+  }
+  /* Forced colours drop the focus shades, so the focus panel gets a ring. */
+  @media (forced-colors: active) {
+    .block-card.focus, .block-card.parent { outline: 2px solid CanvasText; outline-offset: -1px; }
   }
   .acc-body { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; /* ref 1570 */ }
   /* "+ Add sequence" (5c D9): a quiet line; its row is a field with ✓ ✕. */

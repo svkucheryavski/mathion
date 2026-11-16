@@ -3,7 +3,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from sqlalchemy import and_, not_, select
+from sqlalchemy import and_, not_, select, update
 from sqlalchemy.exc import SQLAlchemyError, PendingRollbackError, NoResultFound
 from sqlalchemy.orm import joinedload
 from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
@@ -18,7 +18,7 @@ from mathion.site_settings import get_row, load as load_site
 
 from .errors import classify
 from .mailer import DEV_MODES, build_mailer, logs_in
-from .smtp_errors import SMTP_FAILURES, SmtpFailure, closing, describe, sender_side, stops_the_batch
+from .smtp_errors import SMTP_FAILURES, SmtpFailure, closed_after, closing, describe, sender_side, stops_the_batch
 from .templates import render, _build_email_message, RenderContext, COURSE_ADMIN_ASSIGNED
 
 
@@ -52,6 +52,7 @@ def acquire_singleton_lock(settings):
             fd.close()
 
 
+SKIPPED_OFF = "skipped: email was off"
 BATCH_SIZE = 20                                # inlined (was env var in rev 1)
 MAX_ATTEMPTS = 5                               # inlined
 BACKOFF_SECONDS = [300, 1800, 7200, 21600]     # inlined: 5m, 30m, 2h, 6h (4 entries == MAX_ATTEMPTS - 1)
@@ -266,9 +267,10 @@ def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = T
     separate try blocks with explicit rollback on commit failure, so a poisoned
     session never blocks the batch.
 
-    `off_interval` (D10a) leaves out rows born while email was off. A failure
-    on the mail server's side (D9c) stops the batch without charging any
-    message (a 421 charges its own) and comes back in the result;
+    `off_interval` (D10a) leaves out rows born while email was off, and
+    closes them once email is back on. A failure on the mail server's side
+    (D9c) stops the batch without charging any message (a 421 charges its
+    own) and comes back in the result;
     `log_failures` logs it here (direct `tick()` callers), otherwise the loop
     logs it once per change (D9d)."""
     query = (
@@ -284,9 +286,19 @@ def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = T
         if on_at is not None:
             born_off = and_(born_off, NotificationLogEntry.created_at < on_at)
         # created_at is the transaction's start, so a row begun while off and
-        # committed after the turn-on is left out too. After a later turn-off
-        # (on_at < off_at) this excludes nothing.
+        # committed after the turn-on is left out and closed too. After a later
+        # turn-off (on_at < off_at) this matches nothing.
         query = query.where(not_(born_off))
+        if on_at is not None:
+            # A late commit from the off interval is closed, not left open.
+            closed = db.execute(
+                update(NotificationLogEntry)
+                .where(NotificationLogEntry.sent_at.is_(None), NotificationLogEntry.error.is_(None), born_off)
+                .values(error=SKIPPED_OFF)
+            )
+            if closed.rowcount:
+                db.commit()
+                logger.info("closed %d messages queued while email was off", closed.rowcount)
     rows = db.execute(
         query.order_by(NotificationLogEntry.created_at.asc(),
                        NotificationLogEntry.id.asc())  # PK tie-breaker for stable ordering
@@ -334,6 +346,7 @@ def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = T
     # refused at the recipient with a 5xx. Two or more addresses, every
     # message refused: the relay is refusing everyone.
     attempts, rcpt_refusals, refused_to, first_rcpt = 0, 0, set(), None
+    cut_short = False
 
     # The ids are taken while the rows are loaded: a commit expires them, and
     # a row deleted meanwhile can't be read again to name it.
@@ -434,13 +447,19 @@ def _run(db, mailer, *, now: datetime, off_interval=None, log_failures: bool = T
                 first_rcpt = first_rcpt or failure
             result.refused = refusal_on_card(send_exc, failure, sender, has_login=has_login) or result.refused
             _charge(db, row_id, send_exc, failure, now)
-            if isinstance(send_exc, smtplib.SMTPServerDisconnected):
-                # D9c: a disconnect mid-batch is charged to the message being
-                # sent and ends the batch, so the ones after it aren't charged.
-                # Nothing then says the server's side works.
-                result.connected = False
+            after = closed_after(send_exc)
+            if isinstance(after, smtplib.SMTPResponseException):
+                # A 421 at the reset: the message keeps its refusal; the batch backs off.
+                result.failure = describe(after, recipient=recipient, **_where(mailer, view))
+                if log_failures:
+                    logger.warning("notifications: sending stopped (%s): %s", row_id, result.failure.text())
                 break
-        if first_rcpt is not None and len(refused_to) >= 2 and rcpt_refusals == attempts:
+            if isinstance(send_exc, smtplib.SMTPServerDisconnected) or after is not None:
+                # D9c: a disconnect or a hang-up at the reset ends the batch.
+                result.connected = False
+                cut_short = True
+                break
+        if first_rcpt is not None and len(refused_to) >= 2 and rcpt_refusals == attempts and not cut_short:
             result.refused = SmtpFailure(first_rcpt.cls, first_rcpt.code, EVERYONE_REFUSED, False)
     finally:
         try:
