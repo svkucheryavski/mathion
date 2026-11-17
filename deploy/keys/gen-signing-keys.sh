@@ -260,10 +260,10 @@ cat <<EOF
        GPG_S_REL_PRIVATE  <- contents of s_rel.private.asc
        GPG_PASSPHRASE     <- the KEY passphrase (NOT the backup passphrase)
 
-  F) GITHUB VARIABLES — same page, Variables tab (item 2):
+  F) GITHUB VARIABLES — same page, Variables tab:
        S_REL_FPR = $S_REL_FPR
 
-  G) REPO PUBLIC FILES (item 1) — copy in and commit:
+  G) REPO PUBLIC FILES — copy in and commit:
        cp mathion-pubkey.asc       deploy/keys/mathion-pubkey.asc
        cp deploy/keys/mathion-pubkey.asc  cli/internal/selfupdate/mathion-pubkey.asc
      Then edit deploy/install.sh:
@@ -274,7 +274,7 @@ cat <<EOF
   H) Publish EXPECTED_PRIMARY_FPR out of band (website / signed announcement) so
      users can check the release key that install.sh pins.
 
-  I) Before the FIRST signed release: confirm the guard step in release-cli.yml (item 3).
+  I) Before the FIRST signed release: confirm the guard step in release-cli.yml.
      Delete the transfer-media private export once it is in GitHub secrets.
 
 ════════════════════════════════════════════════════════════════════════════

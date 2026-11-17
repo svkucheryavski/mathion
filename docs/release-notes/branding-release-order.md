@@ -42,8 +42,7 @@ already, use the next free ones.
    git tag cli-v0.9.0 && git push origin cli-v0.9.0
    ```
 
-   `release-cli.yml` builds, signs and publishes it to the curl|sh and apt
-   channels as usual.
+   `release-cli.yml` builds, signs and publishes it for curl|sh as usual.
 4. Optionally run the amd64 smoke workflow against the new CLI and image.
 
 ## What to tell operators
@@ -51,9 +50,7 @@ already, use the next free ones.
 Upgrade the CLI, then update Mathion:
 
 ```bash
-sudo mathion self-update      # a CLI installed with curl | sh
-# or, for a CLI installed from the apt repository:
-sudo apt update && sudo apt install --only-upgrade mathion
+sudo mathion self-update
 
 sudo mathion update
 ```

@@ -39,8 +39,7 @@ pushed. The tags below are examples: use the next free ones.
    ```
 
    A tag on an earlier commit would ship a CLI that still installs the old
-   image. `release-cli.yml` builds, signs and publishes it to the curl|sh and
-   apt channels as usual.
+   image. `release-cli.yml` builds, signs and publishes it for curl|sh as usual.
 4. Optionally run the amd64 smoke workflow against the new CLI and image.
 
 Then a plain update brings the new image and the 60M proxy together.
@@ -50,9 +49,7 @@ Then a plain update brings the new image and the 60M proxy together.
 Upgrade the CLI, then update Mathion:
 
 ```bash
-sudo mathion self-update      # a CLI installed with curl | sh
-# or, for a CLI installed from the apt repository:
-sudo apt update && sudo apt install --only-upgrade mathion
+sudo mathion self-update
 
 sudo mathion update
 sudo mathion version          # shows the new CLI tag and the new image tag
