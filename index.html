@@ -178,7 +178,9 @@
     padding: 12px 14px; overflow-x: auto; white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
+  .keycard .fpraw { color: var(--muted); font-size: 0.85rem; margin: 10px 0 16px; overflow-wrap: anywhere; }
   .keycard .why { color: var(--muted); font-size: 0.95rem; margin: 16px 0 0; max-width: var(--measure); }
+  @media (max-width: 540px) { .fp { white-space: normal; } .keycard .fpraw code { display: block; font-size: 0.74rem; } }
 
   /* ---- footer ---- */
   footer { border-top: 1px solid var(--line); padding: 34px 0 60px; color: var(--faint); font-size: 0.9rem; }
@@ -231,7 +233,7 @@
   <section>
     <div class="wrap">
       <p class="eyebrow">Install</p>
-      <h2>Two ways to install.</h2>
+      <h2>Read it, then run it.</h2>
       <p class="sub">The one-liner above downloads the latest release, verifies its signature and checksum, and installs <code>mathion</code> to <code>/usr/local/bin</code>. Prefer to read before you run:</p>
       <div class="term">
         <div class="term-head">
@@ -242,21 +244,6 @@
 less install.sh          <span class="cmt"># review what it does</span>
 sudo sh install.sh</code></pre>
       </div>
-      <p class="sub" style="margin-top:26px">On Debian/Ubuntu you can instead add the apt repository, so <code>mathion</code> upgrades with the rest of the system. The first keyring fetch is trust-on-first-use — <a href="#verify">verify its fingerprint</a> before relying on it.</p>
-      <div class="term">
-        <div class="term-head">
-          <span class="label"><span class="dot"></span>apt setup</span>
-          <button class="copy" type="button" data-copy aria-label="Copy apt setup commands">Copy</button>
-        </div>
-        <pre><code>sudo install -d -m 0755 /usr/share/keyrings
-curl -fsSL https://svkucheryavski.github.io/mathion/deb/mathion-archive-keyring.gpg \
-  | sudo tee /usr/share/keyrings/mathion-archive-keyring.gpg >/dev/null
-sudo chmod 0644 /usr/share/keyrings/mathion-archive-keyring.gpg
-echo "deb [signed-by=/usr/share/keyrings/mathion-archive-keyring.gpg] \
-  https://svkucheryavski.github.io/mathion/deb stable main" \
-  | sudo tee /etc/apt/sources.list.d/mathion.list
-sudo apt update && sudo apt install mathion</code></pre>
-      </div>
     </div>
   </section>
 
@@ -264,18 +251,19 @@ sudo apt update && sudo apt install mathion</code></pre>
     <div class="wrap">
       <p class="eyebrow">Trust</p>
       <h2>Verify the release key.</h2>
-      <p class="sub">Mathion's releases are signed by an offline key. Because the first keyring you receive is trusted as-is, confirm it against the fingerprint published here — an independent source from the download itself — before you rely on it. They must match exactly.</p>
+      <p class="sub">The installer carries Mathion's release key. To see which key it accepts, run the command below on the script you downloaded; the first fingerprint it prints must be this one.</p>
       <div class="keycard">
         <p class="fplabel">Primary key fingerprint</p>
-        <div class="fp">F006&nbsp;02DF&nbsp;E1BF&nbsp;8CD2&nbsp;B321&nbsp;&nbsp;FC72&nbsp;AD21&nbsp;D4AD&nbsp;294C&nbsp;31A0</div>
+        <div class="fp">F006&nbsp;02DF&nbsp;E1BF&nbsp;8CD2&nbsp;B321&nbsp; FC72&nbsp;AD21&nbsp;D4AD&nbsp;294C&nbsp;31A0</div>
+        <p class="fpraw">Without spaces: <code>F00602DFE1BF8CD2B321FC72AD21D4AD294C31A0</code></p>
         <div class="term" style="margin-bottom:0">
           <div class="term-head">
             <span class="label"><span class="dot"></span>check it</span>
             <button class="copy" type="button" data-copy aria-label="Copy verification command">Copy</button>
           </div>
-          <pre><code>gpg --show-keys /usr/share/keyrings/mathion-archive-keyring.gpg</code></pre>
+          <pre><code>sed -n '/BEGIN PGP PUBLIC KEY BLOCK/,/END PGP PUBLIC KEY BLOCK/p' install.sh | gpg --show-keys</code></pre>
         </div>
-        <p class="why">If the fingerprint printed by that command doesn't match the one above, stop — do not trust the keyring. The fingerprint is also recorded in the repository, but that copy shares an origin with the download, so this page (and any other channel you trust) is the independent check.</p>
+        <p class="why">If it prints a different fingerprint, stop. This shows the key the installer trusts, not that the rest of the script is honest: read it before you run it. The copy in <code>deploy/keys/README.md</code> lives in the repository, so it is not an independent check.</p>
       </div>
     </div>
   </section>
