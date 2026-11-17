@@ -1,4 +1,4 @@
-# Large-screen zoom — design (rev 4)
+# Large-screen zoom — design (rev 5)
 
 Rev 1 was a single `@media screen and (min-width: 1280px) { html { zoom: 1.15 } }`
 rule. Fable and Codex both reviewed it (round 1); this revision answers their
@@ -46,9 +46,10 @@ larger on wide windows; everything else unchanged.
    - `frontend/src/components/ui/Modal.svelte:230` width → `min(var(--modal-w), calc(100vw / var(--app-zoom)) - 32px)`;
      `:231` max-height → `min(var(--modal-h), calc(100vh / var(--app-zoom)) - 52px)`;
      `:248` drawer width → `min(var(--modal-w), calc(100vw / var(--app-zoom)))`;
-     `:249` drawer `height: 100dvh` is deleted: the fixed, inset-0 backdrop already
-     stretches the panel to the window height (`align-items: stretch`, `:244`),
-     which is right in every engine.
+     `:249` drawer `height: 100dvh` → `calc(100vh / var(--app-zoom))` then
+     `calc(100dvh / var(--app-zoom))`. (Rev 5, Task 1 review: rev 4 deleted it, but
+     the backdrop's flex item is FocusTrap's wrapper div, not the panel, so the
+     drawer collapsed to its content.)
    - `RunProgressTab.svelte:618` and `SuperuserUsers.svelte:412` tooltip
      `max-width: min(320px, calc(100vw - 16px))` → divide `100vw` likewise.
    These are all the `vh`/`dvh`/`vw` uses in `frontend/src` today. The

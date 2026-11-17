@@ -227,8 +227,8 @@
   /* --modal-w / --modal-h are component-local, set from props — not theme tokens. */
   .modal-panel {
     box-sizing: border-box;
-    width: min(var(--modal-w), 100vw - 32px); /* (c): 16px gutter each side */
-    max-height: min(var(--modal-h), 100vh - 52px); /* (c): 26px above and below */
+    width: min(var(--modal-w), calc(100vw / var(--app-zoom)) - 32px); /* (c): 16px gutter each side */
+    max-height: min(var(--modal-h), calc(100vh / var(--app-zoom)) - 52px); /* (c): 26px above and below */
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -245,8 +245,10 @@
     padding: 0;
   }
   .modal-panel.right {
-    width: min(var(--modal-w), 100vw);
-    height: 100dvh;
+    width: min(var(--modal-w), calc(100vw / var(--app-zoom)));
+    /* FocusTrap's wrapper div is the flex item, so the panel needs its own height. */
+    height: calc(100vh / var(--app-zoom));
+    height: calc(100dvh / var(--app-zoom));
     max-height: none;
     border-radius: 0;
     border: 0;

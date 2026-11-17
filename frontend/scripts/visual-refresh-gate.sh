@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3101
+EXPECTED_CHECKS=3106
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -530,6 +530,7 @@ else:
 # Branding D8 (2026-11-06): 17366996 -> 0ca50118: +--toast-info #0a7ea4 in a new
 # `--- toast ---` section, the info toast's fill moved out of Toast.svelte so a
 # school theme reaches it. The ONLY change (dropping it reproduces 17366996).
+# Zoom T1 (2026-11-17): 0ca50118 -> 44b2fe29, +--app-zoom 1 only; +2 rules (56 -> 58).
 # D85 (user, 2026-10-31, Polish 3 Task 6): a loose list groups by item. Inside
 # an item every block but the last (a heading keeps its em margins) takes
 # --space-2 below it, items are --space-3 apart (li+li ca5345b0 -> dc00e0ee);
@@ -577,18 +578,20 @@ WANT_FULL = [
     ('', '.vh', 'b2efbc30'),
     ('', ':focus-visible', 'ebbf7147'),
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible', '1684b043'),
-    ('', ':root', '0ca50118'),
+    ('', ':root', '44b2fe29'),
     ('', '[tabindex="-1"]:focus-visible', 'f9b4dcdb'),
     ('', 'a', '1cdc0f83'), ('', 'a', '7bb41747'), ('', 'a:hover', '36ec7417'),
     ('', 'body', '0c999c4b'), ('', 'body', '77e2fef1'), ('', 'button', 'd50dfcde'),
     ('', 'button,input,select,textarea', '790e37af'), ('', 'h1', '778e3e41'),
     ('', 'h1,h2,h3,h4,h5,h6', '610dd856'), ('', 'h2', 'a8b134e8'),
-    ('', 'h3', 'b36ddbd5'), ('', 'h4', 'f98d3d7e'), ('', 'html,body', '3bd2fa51'),
+    ('', 'h3', 'b36ddbd5'), ('', 'h4', 'f98d3d7e'), ('', 'html', '493f971e'),
+    ('', 'html,body', '3bd2fa51'),
     ('', 'img,video', 'aa84fbab'), ('', 'p', '11696618'), ('', 'ul,ol', '99409a76'),
     ('@media (forced-colors:active)', ':focus-visible:not([tabindex="-1"])', '1ff87bb6'),
     ('@media (forced-colors:active)', ':is(input,select,textarea):disabled', '602da9b5'),
+    ('@media screen and (min-width:1400px)', ':root', '23694c00'),
 ]
-# Document ORDER of the same 56 rules. `a` at #9 (reset.css) and #13 (base.css)
+# Document ORDER of the same 58 rules. `a` at #9 (reset.css) and #15 (base.css)
 # are the live case: only order decides that base's --primary wins, and swapping
 # two @imports in app.css flips it while the sorted multiset stays identical.
 # The four focus rules close it, frozen in order like the rest. None depends on
@@ -597,7 +600,8 @@ WANT_FULL = [
 WANT_ORDER = [
     ('', '*,*:before,*:after'), ('', 'html,body'), ('', 'body'), ('', 'ul,ol'),
     ('', 'h1,h2,h3,h4,h5,h6'), ('', 'p'), ('', 'button,input,select,textarea'),
-    ('', 'button'), ('', 'img,video'), ('', 'a'), ('', ':root'), ('', 'body'),
+    ('', 'button'), ('', 'img,video'), ('', 'a'), ('', ':root'),
+    ('@media screen and (min-width:1400px)', ':root'), ('', 'html'), ('', 'body'),
     ('', '.mono,code,kbd'), ('', 'a'), ('', 'a:hover'), ('', 'h1'), ('', 'h2'),
     ('', 'h3'), ('', 'h4'), ('', ':focus-visible'),
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible'),
@@ -745,7 +749,8 @@ for _f in ('src/components/course/ItemMark.svelte', 'src/components/course/ItemI
            'src/components/items/quiz/TextQuestion.svelte',
            'src/components/course/CourseCard.svelte'):
     PINNED_TOKENS |= set(re.findall(r'var\((--[\w-]+)\)', open(_f).read()))
-TOKENS = sorted(PINNED_TOKENS | {'--font-mono'})
+# --app-zoom is the one token with two definers (the 1400px override); it has its own check below.
+TOKENS = sorted((PINNED_TOKENS | {'--font-mono'}) - {'--app-zoom'})
 TOKEN_ALT = '|'.join(re.escape(t) for t in TOKENS)
 TOKEN_DECL = re.compile(r'(^|;)\s*(%s)\s*:' % TOKEN_ALT)
 definers = sorted((m, s) for s, b, m in ALL if TOKEN_DECL.search(b))
@@ -759,7 +764,7 @@ for f in sorted(set(SVELTE) | {os.path.normpath(p) for p in
     src = open(f).read()
     for m in re.finditer(r'style\s*=\s*["\'][^"\']*?(%s)\s*:' % TOKEN_ALT, src):
         inline.append('%s  style="… %s: …"' % (f, m.group(1)))
-    for m in re.finditer(r'style:(%s)\s*[=}]' % TOKEN_ALT, src):                # style:--t={v}
+    for m in re.finditer(r'style:(%s)(\|[\w|]*)?\s*[=}]' % TOKEN_ALT, src):    # style:--t={v}, style:--t|important={v}
         inline.append('%s  style:%s={…}  (Svelte directive)' % (f, m.group(1)))
     for m in re.finditer(r'setProperty\(\s*[\'"`](%s)[\'"`]' % TOKEN_ALT, src):  # imperative
         inline.append('%s  setProperty("%s", …)' % (f, m.group(1)))
@@ -778,6 +783,20 @@ else:
     for x in inline: print('        source:  %s' % x)
     if definers.count(((), ':root')) > 1:
         print('        (:root itself is declared %d times)' % definers.count(((), ':root')))
+# --app-zoom: bare :root and the 1400px screen :root, nowhere else.
+ZOOM_DECL = re.compile(r'(^|;)\s*--app-zoom\s*:')
+zoom_at = sorted((m, s) for s, b, m in ALL if ZOOM_DECL.search(b))
+zoom_src = []
+for f in sorted(set(SVELTE) | {os.path.normpath(p) for p in
+                glob.glob('src/**/*.ts', recursive=True) + glob.glob('src/**/*.js', recursive=True)}):
+    if re.search(r'style\s*=\s*["\'][^"\']*?--app-zoom\s*:|style:--app-zoom(\|[\w|]*)?\s*[=}]|setProperty\s*\(\s*[\'"`]--app-zoom[\'"`]|style\s*=\s*\{[^}]*?--app-zoom', open(f).read()):
+        zoom_src.append(f)
+zoom_want = [((), ':root'), (('@media screen and (min-width:1400px)',), ':root')]
+if zoom_at == zoom_want and not zoom_src and not re.search(r'@property\s+--app-zoom(?![\w-])', css):
+    print('PASS  --app-zoom is defined on :root and the 1400px screen :root only')
+else:
+    bad = 1
+    print('FAIL  --app-zoom definers: %s  sources: %s' % (zoom_at, zoom_src))
 # (c) A system colour outside forced-colors would ignore the theme (Constraint 1
 #     exempts it only inside such a block).
 SYSCOL = ('Canvas|CanvasText|LinkText|VisitedText|ActiveText|ButtonFace|ButtonText|'
@@ -957,6 +976,10 @@ else
 fi
 check "text field max-width:480px (the value .opts pairs with)" \
       '\.txt\.svelte-[a-z0-9]+\{([^}]*;)?max-width:480px[;}]'
+
+# Large-screen zoom (2026-11-17): 115% in windows 1400px and wider, never in print.
+check "app zoom token on wide screens" '@media screen and \(min-width: ?1400px\)\{:root\{--app-zoom: ?1\.15;?\}\}'
+check "html carries the app zoom" 'html\{zoom: ?var\(--app-zoom\);?\}'
 
 # --- (g2) STRUCTURAL: a grep cannot see a duplicate or an @media override -----
 # Section (g)'s checks are greps, and a grep still matches the ORIGINAL rule
@@ -4287,7 +4310,7 @@ uniq1 modal-panel
 if [[ -n $REPLY ]]; then
   N=Modal; H=$REPLY
   d '\.modal-backdrop' '' 'position:fixed' 'top:0' 'right:0' 'bottom:0' 'left:0' 'z-index:100' 'display:flex' 'justify-content:center' 'align-items:flex-start' 'padding-top:26px' 'background:color-mix\(in srgb,var\(--text\) 34%,transparent\)' 'backdrop-filter:blur\(1px\)'
-  d '\.modal-panel' '' 'width:min\(var\(--modal-w\),100vw - 32px\)' 'max-height:min\(var\(--modal-h\),100vh - 52px\)' 'display:flex' 'flex-direction:column' 'overflow:hidden' 'background:var\(--surface\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius-lg\)' 'box-shadow:0 16px 44px #14182338'
+  d '\.modal-panel' '' 'width:min\(var\(--modal-w\),calc\(100vw ?/ ?var\(--app-zoom\)\) - 32px\)' 'max-height:min\(var\(--modal-h\),calc\(100vh ?/ ?var\(--app-zoom\)\) - 52px\)' 'display:flex' 'flex-direction:column' 'overflow:hidden' 'background:var\(--surface\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius-lg\)' 'box-shadow:0 16px 44px #14182338'
   d '\.modal-head' '' 'display:flex' 'align-items:center' 'gap:10px' 'padding:12px 14px 12px 16px' 'border-bottom:1px solid var\(--border\)'
   # Call 8: header actions sit with ×, 6px apart (ref 1689).
   d '\.head-actions' '' 'margin-left:auto' 'display:flex' 'align-items:center' 'gap:6px'
@@ -4964,7 +4987,7 @@ if [[ -n $REPLY ]]; then
   # D79 (user, compact table): short headers, a 4rem floor per sequence column,
   # and one fixed tooltip above the header, outside the scroll box.
   chk "\.progress-grid\.${H} \.seq-header:where\(\.${H}\)" 'min-width:4rem'
-  d '\.pg-tip' '' 'position:fixed' 'z-index:10' 'transform:translateY\(-100%\)' 'max-width:min\(320px,calc\(100vw - 16px\)\)' 'overflow-wrap:anywhere' 'background:var\(--text\)' 'color:var\(--surface\)' 'pointer-events:none'
+  d '\.pg-tip' '' 'position:fixed' 'z-index:10' 'transform:translateY\(-100%\)' 'max-width:min\(320px,calc\(100vw ?/ ?var\(--app-zoom\) - 16px\)\)' 'overflow-wrap:anywhere' 'background:var\(--text\)' 'color:var\(--surface\)' 'pointer-events:none'
   # Review round 1: the tip flips below a header near the window top, keeps an
   # edge in High Contrast, and the full names stay hidden only while .sr-only does.
   d '\.pg-tip\.below' '' 'transform:none'
@@ -5372,7 +5395,7 @@ uniq1 modal-panel
 if [[ -n $REPLY ]]; then
   N=Modal; H=$REPLY
   d '\.modal-backdrop\.right' '' 'justify-content:flex-end' 'align-items:stretch' 'padding:0'
-  d '\.modal-panel\.right' '' 'width:min\(var\(--modal-w\),100vw\)' 'height:100dvh' 'max-height:none' 'border-radius:0' 'border:0' 'border-left:1px solid var\(--border-strong\)' 'box-shadow:-14px 0 40px #14182338'
+  d '\.modal-panel\.right' '' 'width:min\(var\(--modal-w\),calc\(100vw ?/ ?var\(--app-zoom\)\)\)' 'height:calc\(100vh ?/ ?var\(--app-zoom\)\)' 'height:calc\(100dvh ?/ ?var\(--app-zoom\)\)' 'max-height:none' 'border-radius:0' 'border:0' 'border-left:1px solid var\(--border-strong\)' 'box-shadow:-14px 0 40px #14182338'
 fi
 none "DashboardSidePanel's own backdrop, dialog box and close button are gone (D27)" '\.(panel-backdrop|dashboard-side-panel|panel-close)\.svelte-'
 SP=src/components/runs/DashboardSidePanel.svelte
@@ -6154,7 +6177,7 @@ own app-page App.svelte
 uniq1 shell
 if [[ -n $REPLY ]]; then
   N=App; H=$REPLY
-  d '\.shell' '' 'display:flex' 'flex-direction:column' 'min-height:100vh' 'min-height:100dvh'
+  d '\.shell' '' 'display:flex' 'flex-direction:column' 'min-height:calc\(100vh ?/ ?var\(--app-zoom\)\)' 'min-height:calc\(100dvh ?/ ?var\(--app-zoom\)\)'
   none "App .shell sets no overflow" "\.shell\.${H}\{([^}]*;)?overflow"
   d '\.app-page' '' 'flex:1'
   none "App .app-page sets no overflow" "\.app-page\.${H}\{([^}]*;)?overflow"
@@ -6186,7 +6209,7 @@ uniq1 u-table
 if [[ -n $REPLY ]]; then
   N=SuperuserUsers; H=$REPLY
   # Beta round T6: the chips' list tooltip, fixed so the scroll box can't clip it, one line per item.
-  d '\.u-tip' '' 'position:fixed' 'white-space:pre-line' 'pointer-events:none'
+  d '\.u-tip' '' 'position:fixed' 'white-space:pre-line' 'pointer-events:none' 'max-width:min\(320px,calc\(100vw ?/ ?var\(--app-zoom\) - 16px\)\)'
   d '\.u-tools' '' 'display:flex' 'justify-content:space-between' 'flex-wrap:wrap' 'margin:0 0 12px'
   d '\.u-search' '' 'height:var\(--control-h-sm\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
   d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
