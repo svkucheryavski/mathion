@@ -11,6 +11,7 @@
   import SortMark from '../ui/SortMark.svelte';
   import DashboardSidePanel from './DashboardSidePanel.svelte';
   import { loadFailureText as loadText } from '../../lib/api';
+  import { tipSpace } from '../../lib/tipSpace';
 
   let {
     runId,
@@ -243,15 +244,19 @@
     if (tipSrc?.el === e.currentTarget) hideTip();
   }
   function placeTip(el: HTMLElement, text: string) {
-    const r = el.getBoundingClientRect();
-    const box = el.closest('.table-scroll')?.getBoundingClientRect();
-    const pin = el.closest('table')?.querySelector('thead .sticky-group')?.getBoundingClientRect();
+    // Layout px: the fixed tip is placed in the zoomed space.
+    const s = tipSpace();
+    const r = s.box(el.getBoundingClientRect());
+    const boxEl = el.closest('.table-scroll');
+    const box = boxEl ? s.box(boxEl.getBoundingClientRect()) : undefined;
+    const pinEl = el.closest('table')?.querySelector('thead .sticky-group');
+    const pin = pinEl ? s.box(pinEl.getBoundingClientRect()) : undefined;
     const visL = Math.max(r.left, pin?.right ?? -Infinity, box?.left ?? -Infinity);
     const visR = Math.min(r.right, box?.right ?? Infinity);
-    if (visR < visL || r.bottom < 0 || r.top > window.innerHeight) { tip = null; return; }
+    if (visR < visL || r.bottom < 0 || r.top > s.height) { tip = null; return; }
     const below = r.top < 48;
     const top = below ? r.bottom + 6 : r.top - 6;
-    const w = window.innerWidth;
+    const w = s.width;
     tip = (visL + visR) / 2 > w / 2
       ? { text, top, below, right: Math.max(8, w - visR) }
       : { text, top, below, left: Math.max(8, visL) };

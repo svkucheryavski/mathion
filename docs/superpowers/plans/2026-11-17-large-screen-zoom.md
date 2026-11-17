@@ -100,7 +100,7 @@
 
 **Files:**
 - Create: `frontend/src/lib/tipSpace.ts`
-- Create (test): `frontend/src/tests/tipSpace.test.ts`
+- Create (test): `frontend/src/tests/tipSpace.test.ts`, `frontend/src/tests/support/zoomStubs.ts` (the shared stubs: `rect`, `stubZoom`)
 - Modify: `frontend/src/components/runs/RunProgressTab.svelte:245-258` (`placeTip`)
 - Modify: `frontend/src/pages/superuser/SuperuserUsers.svelte:183-189` (`placeTip`)
 - Modify (test): `frontend/src/tests/RunProgressTab.svelte.test.ts` (tooltip describe, ~:926-965), `frontend/src/tests/SuperuserUsers.svelte.test.ts` (~:549)
@@ -123,7 +123,7 @@
   `tipSpace.test.ts` (stub `window.getComputedStyle` so only `--app-zoom` changes; stub `Element.prototype.getBoundingClientRect` with `vi.spyOn` to return width `w` for `[data-zoom-probe]` (the components' `place` helper sets an instance property, which wins over it); `vi.stubGlobal` for `innerWidth`/`innerHeight` 1512 / 860; restore all after each):
   - `appZoom`: no value → 1; `' 1.15'` → 1.15; `'abc'`, `'0'`, `'-2'`, `'Infinity'` → 1.
   - `rectScale(1)` → 1 and no probe is ever appended.
-  - `rectScale(1.15)` with probe width 115 → 1.15, and no `[data-zoom-probe]` is left in the document.
+  - `rectScale(1.17)` with probe width 117 → 1.17, and no `[data-zoom-probe]` is left in the document.
   - bad probe → 1, not cached: `rectScale(1.3)` with width 0 → 1, then width 130 → 1.3; the same for `rectScale(1.4)` with `NaN` then 140, and `rectScale(1.5)` with `Infinity` then 150.
   - cached: `rectScale(1.2)` width 120 → 1.2; then width 100 → still 1.2, and the probe was appended once.
   - `tipSpace()` model (a), zoom 1.15, probe 115: `width` ≈ 1512/1.15, `height` ≈ 860/1.15; `box({left:115,right:230,top:57.5,bottom:115})` ≈ `{left:100,right:200,top:50,bottom:100}`.
@@ -138,7 +138,8 @@
   - (a) right clamp: box `rect(-57.5,1569.5,322,460)`, pin `rect(-115,-46,322,391)`, header `rect(1443,1558,345,379.5)` → `right` `'8px'`. A raw `innerWidth` would give ~157px.
   - (a) left clamp: same box and pin, header `rect(-46,57.5,345,379.5)` → `left` `'8px'`.
   - (b) left and right halves: the existing 100% layout rects (box `rect(0,1000,280,400)`, pin `rect(200,300,280,340)`, headers `rect(250,380)` and `rect(700,1300)`) → `left` `'300px'`, `top` `'294px'`; `right` ≈ `1512/1.16 - 1000`.
-  - (b) flip: header `rect(400,480,43.5,73.5)` → below. (b) right clamp: box `rect(-50,1353.45,280,400)`, header `rect(1250,1350)` → `right` `'8px'` (raw `innerWidth` would give 162px).
+  - (a) bottom bound: header `rect(400,480,880,914.5)` (layout top 765 > 747.8) → no tip.
+  - (b) flip: header `rect(400,480,50,80)` → not below; `rect(400,480,43.5,73.5)` → below. (b) right clamp: box `rect(-50,1353.45,280,400)`, header `rect(1250,1350)` → `right` `'8px'` (raw `innerWidth` would give 162px).
   - scroll re-placement at its own cache key, zoom 1.25 with probe 125: box `rect(0,1250,350,500)`, pin `rect(250,375,350,425)`, header `rect(312.5,475,375,412.5)`; focus the header, dispatch two `scroll` events on the scroll box → `left` `'300px'`, `top` `'294px'` after each, and the probe was appended exactly once.
 
   `SuperuserUsers.svelte.test.ts` (add the four-argument `rect` helper from `RunProgressTab.svelte.test.ts:926`):
@@ -164,7 +165,7 @@
 - [ ] **Step 5: Commit** (after the review lanes and the owner's OK)
 
   ```bash
-  git add frontend/src/lib/tipSpace.ts frontend/src/tests/tipSpace.test.ts frontend/src/components/runs/RunProgressTab.svelte frontend/src/pages/superuser/SuperuserUsers.svelte frontend/src/tests/RunProgressTab.svelte.test.ts frontend/src/tests/SuperuserUsers.svelte.test.ts
+  git add frontend/src/lib/tipSpace.ts frontend/src/tests/tipSpace.test.ts frontend/src/tests/support/zoomStubs.ts frontend/src/components/runs/RunProgressTab.svelte frontend/src/pages/superuser/SuperuserUsers.svelte frontend/src/tests/RunProgressTab.svelte.test.ts frontend/src/tests/SuperuserUsers.svelte.test.ts
   git commit -m "fix(ui): place the fixed tooltips in the zoomed space"
   ```
 

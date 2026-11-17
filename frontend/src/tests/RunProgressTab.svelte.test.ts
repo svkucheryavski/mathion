@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest';
 import { mount, unmount, flushSync, tick } from 'svelte';
 
 import RunProgressTab from '../components/runs/RunProgressTab.svelte';
+import { rect, stubZoom } from './support/zoomStubs';
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
@@ -923,8 +924,6 @@ describe('RunProgressTab', () => {
     // Round-1 review (both lanes): the tip sits on the VISIBLE part of its header
     // (right of the pinned Student + Group columns, inside the scroll box), at
     // least 8px from the window edges, and below the header near the top.
-    const rect = (left: number, right: number, top = 300, bottom = 330) =>
-      ({ left, right, top, bottom, width: right - left, height: bottom - top, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
     function place(el: Element, r: DOMRect) { (el as HTMLElement).getBoundingClientRect = () => r; }
     async function mountPlaced(header: DOMRect) {
       await mountCompact();
@@ -1085,6 +1084,93 @@ describe('RunProgressTab', () => {
       b.dispatchEvent(new MouseEvent('mouseleave'));
       flushSync();
       expect(tip()).toBeNull();
+    });
+
+    // Large-screen zoom: (a) rects scaled by the zoom (1.15), (b) layout rects (1.16).
+    describe('at the app zoom', () => {
+      afterEach(() => { vi.unstubAllGlobals(); });
+      const A_BOX = rect(0, 1150, 322, 460), A_PIN = rect(230, 345, 322, 391);
+      const B_BOX = rect(0, 1000, 280, 400), B_PIN = rect(200, 300, 280, 340);
+      // One mount per test; a later call re-hovers with new rects.
+      async function hover(box: DOMRect, pin: DOMRect, header: DOMRect) {
+        if (!component) await mountCompact();
+        place(host.querySelector('.table-scroll')!, box);
+        place(host.querySelector('thead .sticky-group')!, pin);
+        place(seqBtn(0), header);
+        seqBtn(0).dispatchEvent(new MouseEvent('mouseleave'));
+        seqBtn(0).dispatchEvent(new MouseEvent('mouseenter'));
+        flushSync();
+        return tip()!;
+      }
+
+      it('(a) left half: starts at the visible left edge', async () => {
+        stubZoom('1.15', 115);
+        const t = await hover(A_BOX, A_PIN, rect(287.5, 437, 345, 379.5));
+        expect(t.style.left).toBe('300px');
+        expect(t.style.top).toBe('294px');
+        expect(t.classList.contains('below')).toBe(false);
+      });
+
+      it('(a) right half: ends at the scroll box edge', async () => {
+        stubZoom('1.15', 115);
+        const t = await hover(A_BOX, A_PIN, rect(805, 1495, 345, 379.5));
+        expect(parseFloat(t.style.right)).toBeCloseTo(1512 / 1.15 - 1000);
+        expect(t.style.left).toBe('');
+      });
+
+      it('(a) flips below a header near the top', async () => {
+        stubZoom('1.15', 115);
+        const t = await hover(A_BOX, A_PIN, rect(460, 552, 50, 84.5));
+        expect(t.classList.contains('below')).toBe(true);
+        expect(parseFloat(t.style.top)).toBeCloseTo(84.5 / 1.15 + 6);
+      });
+
+      it('(a) keeps 8px from the right and left window edges', async () => {
+        stubZoom('1.15', 115);
+        const box = rect(-57.5, 1569.5, 322, 460), pin = rect(-115, -46, 322, 391);
+        expect((await hover(box, pin, rect(1443, 1558, 345, 379.5))).style.right).toBe('8px');
+        expect((await hover(box, pin, rect(-46, 57.5, 345, 379.5))).style.left).toBe('8px');
+      });
+
+      it('(b) left and right halves in layout px', async () => {
+        stubZoom('1.16', 100);
+        const l = await hover(B_BOX, B_PIN, rect(250, 380));
+        expect(l.style.left).toBe('300px');
+        expect(l.style.top).toBe('294px');
+        const r = await hover(B_BOX, B_PIN, rect(700, 1300));
+        expect(parseFloat(r.style.right)).toBeCloseTo(1512 / 1.16 - 1000);
+      });
+
+      it('(a) a header below the zoomed window shows no tip', async () => {
+        stubZoom('1.15', 115);
+        await hover(A_BOX, A_PIN, rect(400, 480, 880, 914.5));
+        expect(tip()).toBeNull();
+      });
+
+      it('(b) flips near the top and keeps 8px from the right edge', async () => {
+        stubZoom('1.16', 100);
+        expect((await hover(B_BOX, B_PIN, rect(400, 480, 50, 80))).classList.contains('below')).toBe(false);
+        expect((await hover(B_BOX, B_PIN, rect(400, 480, 43.5, 73.5))).classList.contains('below')).toBe(true);
+        expect((await hover(rect(-50, 1353.45, 280, 400), B_PIN, rect(1250, 1350))).style.right).toBe('8px');
+      });
+
+      it('a focused tip stays put through scrolls, measuring the zoom once', async () => {
+        const z = stubZoom('1.25', 125);
+        await mountCompact();
+        const box = host.querySelector('.table-scroll')!;
+        place(box, rect(0, 1250, 350, 500));
+        place(host.querySelector('thead .sticky-group')!, rect(250, 375, 350, 425));
+        place(seqBtn(0), rect(312.5, 475, 375, 412.5));
+        seqBtn(0).focus();
+        flushSync();
+        for (let i = 0; i < 2; i++) {
+          box.dispatchEvent(new Event('scroll'));
+          flushSync();
+          expect(tip()!.style.left).toBe('300px');
+          expect(tip()!.style.top).toBe('294px');
+        }
+        expect(z.probes()).toBe(1);
+      });
     });
   });
 
