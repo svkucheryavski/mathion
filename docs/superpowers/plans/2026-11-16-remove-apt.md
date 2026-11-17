@@ -115,21 +115,22 @@ Expected: `self-update integration PASSED (…)`. `shellcheck cli/selfupdate_int
 - [ ] **Step 1: Write the failing tests**
 
 `notices_test.go`:
-- `TestNoticesCoverCompiledModules`: for `GOOS=linux GOARCH=amd64` and `arm64`, run `go list -deps -f '{{with .Module}}{{.Path}}{{end}}' github.com/svkucheryavski/mathion/cli`, drop empty lines and the main module, and assert each module has a whole line `===== <module> =====` in `notices.Text` (match with `(?m)^===== (\S+) =====$`). Skip only when `go` is not on PATH.
-- `TestNoticesHaveGoStandardLibrary`: `notices.Text` contains the line `===== Go standard library =====`, the BSD text's `Copyright 2009 The Go Authors`, and `Additional IP Rights Grant (Patents)`.
+- `TestNoticesCoverCompiledModules`: for `GOOS=linux GOARCH=amd64` and `arm64`, run `go list -deps -f '{{with .Module}}{{.Path}}{{end}}' github.com/svkucheryavski/mathion/cli`, drop empty lines and the main module, dedupe, fail if none are left, and assert each module has a whole line `===== <module> =====` in `notices.Text` (match with `(?m)^===== (.+) =====$`). Skip only when `go` is not on PATH.
+- `TestNoticesHaveGoStandardLibrary`: `notices.Text` has the line `===== Go standard library =====`, and the text under it (up to the next header) contains `Copyright 2009 The Go Authors`, `Redistribution and use in source and binary forms` and `Additional IP Rights Grant (Patents)` (the first also appears in other sections, so the check is per section).
+- `TestNoticesStartWithAHeader`: `notices.Text` starts with `===== ` (so `licenses` prints one blank line, not two).
 
-`licenses_test.go`, `TestLicensesPrintsNotices`: run the root command with args `licenses`, an empty temp `CfgDir` (no `.env`) and a recording `Runner`; assert exit nil, stdout starts with `Mathion CLI is licensed under the Apache License 2.0 (see LICENSE in the source repository).\n\n`, then equals that line + blank line + `notices.Text`; stderr empty (no drift notice); the runner was never called.
+`licenses_test.go`, `TestLicensesPrintsNotices`: run the root command with args `licenses`, an empty temp `CfgDir` (no `.env`) and a recording `Runner`; assert exit nil, stdout starts with `Mathion CLI is licensed under the Apache License 2.0 (see LICENSE in the source repository).\n\n`, then equals that line + blank line + `notices.Text`; stderr empty (no drift notice); the runner was never called. `TestLicensesListedInHelp`: root `--help` output contains `\n  licenses `.
 
-`root_test.go`: add `licenses` to the excluded-commands cases next to `version --short`.
+`root_test.go`: add `licenses` to the `TestDriftHookExcludedPredicate` names and to the exec (seeded-drift) cases of `TestPreRunExcludedCommandsSilent`.
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `cd /Users/svkucheryavski/Documents/Developing/mathion/cli && go test ./internal/notices/ ./cmd/ -run 'Notices|Licenses|DriftHook' 2>&1 | tail -5`
+Run: `cd /Users/svkucheryavski/Documents/Developing/mathion/cli && go test ./internal/notices/ ./cmd/ -run 'Notices|Licenses|DriftHook|PreRunExcluded' 2>&1 | tail -5`
 Expected: build failure (`package notices` / `newLicensesCmd` undefined).
 
 - [ ] **Step 3: Implement**
 
-`git mv deploy/deb/THIRD_PARTY_NOTICES cli/internal/notices/THIRD_PARTY_NOTICES`; append the `===== Go standard library =====` section: the upstream Go `LICENSE` and `PATENTS`, verbatim, from the `go1.24` tag of github.com/golang/go (fetch with `curl -fsSL https://raw.githubusercontent.com/golang/go/go1.24.0/LICENSE` and `/PATENTS`). Add `notices.go`, `licenses.go` (writes the line, a blank line, `notices.Text` to `app.Out`), register it in `newRootCmd`, and add `"licenses"` to the `driftHookExcluded` switch.
+`git mv deploy/deb/THIRD_PARTY_NOTICES cli/internal/notices/THIRD_PARTY_NOTICES`; drop the file's leading blank line; append the `===== Go standard library =====` section: the upstream Go `LICENSE` and `PATENTS`, verbatim, from the `go1.24` tag of github.com/golang/go (fetch with `curl -fsSL https://raw.githubusercontent.com/golang/go/go1.24.0/LICENSE` and `/PATENTS`). Add `notices.go`, `licenses.go` (`Args: cobra.NoArgs`; writes the line, a blank line, `notices.Text` to `app.Out`), register it in `newRootCmd`, and add `"licenses"` to the `driftHookExcluded` switch.
 
 - [ ] **Step 4: Run the CLI tests**
 
