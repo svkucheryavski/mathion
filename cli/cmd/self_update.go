@@ -9,7 +9,7 @@ func newSelfUpdateCmd(app *App) *cobra.Command {
 	var yes, check bool
 	c := &cobra.Command{
 		Use:   "self-update",
-		Short: "Update the mathion CLI binary (curl|sh installs; apt installs are deferred to apt)",
+		Short: "Update a mathion CLI installed with curl | sh",
 		RunE: func(c *cobra.Command, _ []string) error {
 			return selfupdate.Run(c.Context(), selfupdate.Params{
 				Out: app.Out, Err: app.Err, In: app.In,

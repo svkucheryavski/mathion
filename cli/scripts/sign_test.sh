@@ -24,18 +24,17 @@ P
 gpg --batch --gen-key "$GH/kp" >/dev/null 2>&1
 PRIMARY="$(gpg --batch --with-colons --fingerprint | awk -F: '/^fpr:/{print $10; exit}')"
 SUBKEY="$(gpg --batch --with-colons --fingerprint "$PRIMARY" | awk -F: '$1=="sub"{s=1;next} s&&$1=="fpr"{print $10; exit}')"
-cd "$(dirname "$0")/../../cli"
+cd "$(dirname "$0")/.."   # -> cli/
 # flush the passphrase gpg-agent cached during --gen-key, so the sign below is
 # FORCED to take the passphrase via signs.stdin -> --passphrase-fd 0 (cold agent,
 # matching the prod path). Scoped: GNUPGHOME is exported to $GH, so this only
 # kills the throwaway agent, never the user's real one.
 gpgconf --kill gpg-agent
 # mirror prod exactly: --local-user <subkey>! + the passphrase fed via signs.stdin ->
-# gpg's --passphrase-fd 0 (both configured in .goreleaser.yaml, Step 3). skip nfpm
-# (this test only needs checksums signing; nfpm inputs are prod-only).
+# gpg's --passphrase-fd 0 (both configured in .goreleaser.yaml).
 GPG_FINGERPRINT="${SUBKEY}!" GPG_PASSPHRASE="$PASS" \
   CLI_TAG=cli-v0.2.0 APP_IMAGE=v0.2.0 GORELEASER_CURRENT_TAG=v0.2.0 \
-  goreleaser release --clean --skip=publish,nfpm --snapshot
+  goreleaser release --clean --skip=publish --snapshot
 test -f dist/checksums.txt.asc || { echo "FAIL: checksums.txt.asc not produced"; exit 1; }
 GNUPGHOME="$GNUPGHOME" gpg --batch --verify dist/checksums.txt.asc dist/checksums.txt \
   || { echo "FAIL: .asc does not verify"; exit 1; }

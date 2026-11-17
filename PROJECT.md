@@ -246,7 +246,7 @@ The deployment should be via Docker and docker compose. But ideally there should
 
 The system itself is located on GitHub in releases as gz file.
 
-For example the install `mathion` via `apt`, `apt-get`, `brew`, etc. And then run:
+For example install `mathion` with `curl | sh` (`deploy/install.sh`). And then run:
 
 `mathion install`
 

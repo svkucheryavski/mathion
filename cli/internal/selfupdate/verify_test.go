@@ -70,13 +70,13 @@ func signingSubkey(t *testing.T, e *openpgp.Entity) int {
 
 func TestVerifyChecksums(t *testing.T) {
 	relEntity, relKR := newSigner(t) // "S_rel" — its subkey IS in the verifying keyring
-	aptEntity, _ := newSigner(t)     // foreign key (S_apt analog) — NOT in relKR
+	siblingEntity, _ := newSigner(t) // foreign key (another subkey) — NOT in relKR
 	sums := []byte("abc123  mathion_linux_amd64.tar.gz\n")
 
 	if err := verifyChecksums(relKR, sums, armoredSig(t, relEntity, sums)); err != nil {
 		t.Fatalf("valid S_rel signature must verify: %v", err)
 	}
-	if err := verifyChecksums(relKR, sums, armoredSig(t, aptEntity, sums)); err == nil {
+	if err := verifyChecksums(relKR, sums, armoredSig(t, siblingEntity, sums)); err == nil {
 		t.Fatal("a signature from a key outside the trimmed keyring must be rejected")
 	}
 	if err := verifyChecksums(relKR, []byte("tampered  x\n"), armoredSig(t, relEntity, sums)); err == nil {
@@ -132,7 +132,7 @@ func TestVerifyChecksums_RevokedKey(t *testing.T) {
 }
 
 // §6.1 correction 5: an untrimmed keyring carrying TWO signing subkeys (e.g. a full
-// export that swept in S_apt) must be refused before any signature check — the
+// export that swept in another subkey) must be refused before any signature check — the
 // assertSingleSigningSubkey guard fires first, so even a bogus .asc never reaches
 // armor.Decode. NewEntity adds an ENCRYPTION subkey at index 0; two AddSigningSubkey
 // calls give exactly two SIGNING subkeys.

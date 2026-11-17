@@ -94,6 +94,21 @@ less install.sh          # review what it does
 sudo sh install.sh
 ```
 
+*Check the release key (out of band).* The installer carries Mathion's release
+key. To see which key it accepts, run this on the script you downloaded:
+
+```bash
+sed -n '/BEGIN PGP PUBLIC KEY BLOCK/,/END PGP PUBLIC KEY BLOCK/p' install.sh | gpg --show-keys
+```
+
+The first fingerprint it prints must be
+`F00602DFE1BF8CD2B321FC72AD21D4AD294C31A0`, the one published on the project
+site (https://svkucheryavski.github.io/mathion/) as
+`F006 02DF E1BF 8CD2 B321  FC72 AD21 D4AD 294C 31A0`. This shows the key
+the installer trusts, not that the rest of the script is honest: read it
+before you run it. The copy in `deploy/keys/README.md` lives in this
+repository, so it is not an independent check.
+
 The installer verifies the release **signature** (authenticity) before the
 **checksum** (integrity). It fetches `checksums.txt.asc` — a detached GPG
 signature over `checksums.txt` made by Mathion's release subkey (`S_rel`) — and
@@ -104,51 +119,6 @@ now-authenticated `checksums.txt`. The signing key and its fingerprints are docu
 [`deploy/keys/README.md`](deploy/keys/README.md). You can still inspect the
 script and pin a known release tag (`sudo sh install.sh cli-v0.1.0`) for a
 reproducible install.
-
-**Install via apt (Debian/Ubuntu, alternative to `curl | sh`).** This adds
-Mathion's apt repository so `mathion` upgrades with `apt upgrade` alongside the
-rest of the system. The keyring bootstrap below is **trust-on-first-use (TOFU)**:
-the first keyring fetch is trusted exactly as received, so verify its fingerprint
-out of band (see below) before relying on it.
-
-```bash
-sudo install -d -m 0755 /usr/share/keyrings
-curl -fsSL https://svkucheryavski.github.io/mathion/deb/mathion-archive-keyring.gpg \
-  | sudo tee /usr/share/keyrings/mathion-archive-keyring.gpg >/dev/null
-sudo chmod 0644 /usr/share/keyrings/mathion-archive-keyring.gpg
-echo "deb [signed-by=/usr/share/keyrings/mathion-archive-keyring.gpg] \
-  https://svkucheryavski.github.io/mathion/deb stable main" \
-  | sudo tee /etc/apt/sources.list.d/mathion.list
-sudo apt update && sudo apt install mathion
-```
-
-*Verify the key fingerprint (out of band).* Because the first fetch is TOFU, the
-maintainer publishes the primary key **fingerprint** so you can confirm the
-keyring you received is genuine before trusting it. Display the fingerprint of
-the keyring you just installed:
-
-```bash
-gpg --show-keys /usr/share/keyrings/mathion-archive-keyring.gpg
-```
-
-and compare it against the published primary fingerprint
-`F006 02DF E1BF 8CD2 B321  FC72 AD21 D4AD 294C 31A0`.
-The maintainer **records** the fingerprint in
-[`deploy/keys/README.md`](deploy/keys/README.md) (§4, "Record the fingerprints")
-once the offline key exists, but that file lives in this same repository — the
-same origin as the keyring — so it is bookkeeping, not an independent check.
-Confirm the fingerprint against a genuinely **independent channel** (the project
-website or a signed announcement) before trusting the keyring, and only proceed
-if the values match.
-
-*Use one channel, not both.* apt installs the binary to `/usr/bin/mathion`, while
-the `curl | sh` installer above installs to `/usr/local/bin/mathion`. On the
-default Debian/Ubuntu `PATH`, `/usr/local/bin` comes **before** `/usr/bin`, so a
-`curl | sh` binary **shadows** the apt-managed one — you would run the
-hand-installed copy while apt silently updates a binary that normal PATH lookup
-never selects. Pick **one channel** and stick with it. The `.deb` guards against the
-mix: its postinst emits a warning (`… will shadow this apt package`) when it
-detects a pre-existing `/usr/local/bin/mathion`.
 
 **Stand up the deployment.** The `mathion` commands manage Docker containers, so
 run them as root — prefix each with `sudo`. Pass the deployment **domain** and
@@ -200,6 +170,7 @@ or read root-owned config):
 | `mathion status` | Show stack status + `/health`. |
 | `mathion logs [app\|db]` | Show stack logs (optionally for a single service). |
 | `mathion version` | Print CLI + pinned image version. |
+| `mathion licenses` | Print the licences of Mathion and the code built into it. |
 | `mathion superuser <email>` | Create or promote a superuser account (idempotent). |
 | `mathion pin <email>` | Issue a sign-in PIN (the panel's Settings page sets how long a PIN lasts). |
 | `mathion branding reset [--all] [--yes]` | Remove the colour changes from the panel's Branding page (`--all` also resets the site name, logo and tab icon). |
@@ -264,7 +235,7 @@ allow inbound TCP 80 (ACME HTTP-01 challenge + redirect) and 443 (HTTPS).
 **Upload limit:** the superuser panel's Settings page sets the largest file, up to
 50 MB. The bundled proxy allows request bodies up to 60 MiB, enough for that
 ceiling. The compose file an older `mathion` CLI wrote allows only 25 MiB: upgrade
-the CLI (`mathion self-update`, or apt) and run `mathion update`.
+the CLI (`mathion self-update`) and run `mathion update`.
 
 **Downgrade caveat:** running an **older** `mathion` CLI's `tls enable` against a
 **newer** install rewrites the on-disk compose with the older embedded copy. That
@@ -336,21 +307,14 @@ join the compose network and target `http://app:8000`, or use host networking.
 else. It does **not** touch your deployment, its containers, or the database;
 updating the running Mathion **stack** is a separate command, `mathion update`.
 
-How it behaves depends on how the binary was installed:
+It updates the binary that `install.sh` put at `/usr/local/bin/mathion`: it
+resolves the newest verifiable `cli-v*` release, downloads its `checksums.txt`,
+verifies the detached signature against the binary's compiled-in release key
+(`S_rel`), checks the downloaded binary's SHA-256 against the now-authenticated
+checksums, and swaps it into place.
 
-- **apt-managed** (`/usr/bin/mathion`, from the apt repository) — self-update does
-  **not** replace the binary. apt owns it, so self-update just prints the apt
-  command to run and exits (this is also what `--check` does on an apt host):
-
-  ```bash
-  sudo apt update && sudo apt install --only-upgrade mathion
-  ```
-
-- **`curl | sh`** (`/usr/local/bin/mathion`, from `install.sh`) — self-update
-  resolves the newest verifiable `cli-v*` release, downloads its `checksums.txt`,
-  verifies the detached signature against the binary's compiled-in release key
-  (`S_rel`), checks the downloaded binary's SHA-256 against the now-authenticated
-  checksums, and swaps it into place.
+If a system package owns the binary (for example an old .deb), self-update
+refuses and names the package; nothing is changed.
 
 **Flags.**
 
@@ -402,9 +366,8 @@ staff-owned — so the `chgrp`/`chmod` above is what actually clears the refusal
 
 ### Applying a stack-definition change after a CLI upgrade
 
-`mathion self-update` and `apt upgrade mathion` update the CLI binary, not the
-running deployment — neither applies the bundled stack definition to the
-containers you already have running.
+`mathion self-update` updates the CLI binary, not the running deployment: it does not
+apply the bundled stack definition to the containers you already have running.
 
 `mathion update` (the in-place deployment upgrade) now **also** applies this
 release's embedded stack definition, not just the app image, so a single

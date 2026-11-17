@@ -166,7 +166,7 @@ func findCmd(root *cobra.Command, args ...string) *cobra.Command {
 // report their own next-step, teardown, self-update, and machine/first-contact surfaces.
 func TestDriftHookExcludedPredicate(t *testing.T) {
 	root := newRootCmd(&App{})
-	for _, name := range []string{"reconcile", "update", "install", "uninstall", "self-update"} {
+	for _, name := range []string{"reconcile", "update", "install", "uninstall", "self-update", "licenses"} {
 		if c := findCmd(root, name); c == nil || !driftHookExcluded(c) {
 			t.Errorf("%q must be excluded", name)
 		}
@@ -303,7 +303,7 @@ func TestPreRunExcludedCommandsSilent(t *testing.T) {
 	// mechanism B: through ExecuteContext (flag/ancestry-gated; RunE is print-only).
 	// help/completion may write their OWN text to these streams — assert the absence
 	// of the DRIFT string only, never emptiness (spec §7 line 139).
-	for _, args := range [][]string{{"version", "--short"}, {"help"}, {"completion", "bash"}} {
+	for _, args := range [][]string{{"version", "--short"}, {"help"}, {"completion", "bash"}, {"licenses"}} {
 		t.Run("exec/"+strings.Join(args, "_"), func(t *testing.T) {
 			varlibReady(t)
 			dir := seedDrift(t)

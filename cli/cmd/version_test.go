@@ -169,84 +169,15 @@ func TestVersionProbeRunningHTTP(t *testing.T) {
 	})
 }
 
-func TestMaybeWarnDualInstall(t *testing.T) {
-	origExists, origLook := binExists, lookPath
-	t.Cleanup(func() { binExists, lookPath = origExists, origLook })
-
-	// both channels present -> warn, naming the PATH-resolved binary
-	binExists = func(p string) bool { return p == aptBinPath || p == curlBinPath }
-	lookPath = func(string) (string, error) { return curlBinPath, nil }
-	var buf bytes.Buffer
-	maybeWarnDualInstall(&buf)
-	out := buf.String()
-	if !strings.Contains(out, aptBinPath) || !strings.Contains(out, curlBinPath) {
-		t.Fatalf("warning should name both paths; got %q", out)
-	}
-	if !strings.Contains(out, "your shell runs: "+curlBinPath) {
-		t.Fatalf("warning should name the PATH-resolved binary; got %q", out)
-	}
-
-	// only one channel -> silent
-	binExists = func(p string) bool { return p == curlBinPath }
-	buf.Reset()
-	maybeWarnDualInstall(&buf)
-	if buf.Len() != 0 {
-		t.Fatalf("no warning expected for a single install; got %q", buf.String())
-	}
-}
-
-// TestMaybeWarnDualInstall_NilWriter reproduces the exact panic scenario: a real
-// dual-install host (both binExists checks pass) with a nil writer — as when an
-// App is built without Err. maybeWarnDualInstall must be total and never panic.
-func TestMaybeWarnDualInstall_NilWriter(t *testing.T) {
-	orig := binExists
-	t.Cleanup(func() { binExists = orig })
-	binExists = func(string) bool { return true } // simulate dual-install
-	maybeWarnDualInstall(nil)                     // must not panic
-}
-
-// TestVersionCmdDualInstallWarningRouting drives newVersionCmd's RunE with the
-// dual-install seam active and separate Out/Err buffers, proving the warning lands
-// on stderr (Err) and NOT on stdout (Out), and that stdout still carries the
-// `mathion <version>` line — even on the not-installed (.env absent) early-return path.
-func TestVersionCmdDualInstallWarningRouting(t *testing.T) {
-	origExists, origLook := binExists, lookPath
-	t.Cleanup(func() { binExists, lookPath = origExists, origLook })
-	binExists = func(string) bool { return true } // dual-install
-	lookPath = func(string) (string, error) { return curlBinPath, nil }
-	stubRunningProbe(t, "")
-
-	var out, errb bytes.Buffer
-	app := &App{CfgDir: t.TempDir(), Out: &out, Err: &errb} // no .env → REAL ENOENT
-	cmd := newVersionCmd(app)
-	if err := cmd.RunE(cmd, nil); err != nil {
-		t.Fatal(err)
-	}
-	so, se := out.String(), errb.String()
-	if !strings.Contains(so, "mathion "+buildVersion) {
-		t.Fatalf("stdout should carry the cli version line; got %q", so)
-	}
-	if !strings.Contains(so, "not installed") {
-		t.Fatalf("stdout should carry the not-installed line; got %q", so)
-	}
-	if strings.Contains(so, "installed via BOTH") {
-		t.Fatalf("dual-install warning must NOT appear on stdout; got %q", so)
-	}
-	if !strings.Contains(se, "installed via BOTH") || !strings.Contains(se, "your shell runs: "+curlBinPath) {
-		t.Fatalf("dual-install warning must appear on stderr; got %q", se)
-	}
-}
-
 func TestVersionShort_PrintsOnlyBuildVersion(t *testing.T) {
 	// Fail the side-effect seams so the test proves --short never touches them.
-	oldEnv, oldProbe, oldBin := versionEnvReader, versionRunningProbe, binExists
-	t.Cleanup(func() { versionEnvReader, versionRunningProbe, binExists = oldEnv, oldProbe, oldBin })
+	oldEnv, oldProbe := versionEnvReader, versionRunningProbe
+	t.Cleanup(func() { versionEnvReader, versionRunningProbe = oldEnv, oldProbe })
 	versionEnvReader = func(string) (map[string]string, error) {
 		t.Fatal(".env must NOT be read under --short")
 		return nil, nil
 	}
 	versionRunningProbe = func(context.Context) string { t.Fatal("/version must NOT be probed under --short"); return "" }
-	binExists = func(string) bool { t.Fatal("dual-install check must NOT run under --short"); return false }
 
 	var out, errb bytes.Buffer
 	app := &App{Out: &out, Err: &errb}

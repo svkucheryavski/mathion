@@ -106,7 +106,7 @@ func resolveProject() string {
 // driftHookExcluded reports whether the compose-drift pre-run notice must be SUPPRESSED
 // for the executing command c (spec §4.1): commands that re-materialize the embedded
 // compose and report their own next-step (reconcile/update/install), teardown (uninstall),
-// self-update (owns its post-swap line), and machine/first-contact surfaces (version
+// self-update (owns its post-swap line), and machine/first-contact surfaces (licenses, version
 // --short, the completion machinery by ancestry, help, __complete). --help and
 // non-runnable parents short-circuit to flag.ErrHelp BEFORE the pre-run, so they need no
 // entry here.
@@ -117,7 +117,7 @@ func driftHookExcluded(c *cobra.Command) bool {
 		}
 	}
 	switch c.Name() {
-	case "__complete", "help", "reconcile", "update", "install", "uninstall", "self-update":
+	case "__complete", "help", "reconcile", "update", "install", "uninstall", "self-update", "licenses":
 		return true
 	case "version":
 		short, _ := c.Flags().GetBool("short") // flags are parsed before the pre-run runs
@@ -148,6 +148,7 @@ func newRootCmd(app *App) *cobra.Command {
 		newLogsCmd(app), newPinCmd(app), newSuperuserCmd(app), newVersionCmd(app),
 		newUninstallCmd(app), newBackupCmd(app), newRestoreCmd(app), newUpdateCmd(app),
 		newSelfUpdateCmd(app), newTLSCmd(app), newReconcileCmd(app), newBrandingCmd(app),
+		newLicensesCmd(app),
 	)
 	return root
 }

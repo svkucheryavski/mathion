@@ -2,21 +2,19 @@
 #
 # gen-signing-keys.sh — one-time, OFFLINE generation of Mathion's signing keys.
 #
-# Creates the offline certification-only PRIMARY key plus two signing subkeys —
-# S_rel (binary-release / self-update channel) and S_apt (apt channel) — then
-# exports, in one sitting, every artifact the go-live procedure needs:
+# Creates the offline certification-only PRIMARY key plus one signing subkey,
+# S_rel (binary release / self-update), then exports, in one sitting, every
+# artifact the go-live procedure needs:
 #
 #   PUBLIC   -> repo:            mathion-pubkey.asc  (primary + S_rel only)
-#                               mathion-apt-keyring.asc (primary + S_apt only)
 #   SECRET   -> GitHub secrets:  s_rel.private.asc   (GPG_S_REL_PRIVATE)
-#                               s_apt.private.asc   (GPG_S_APT_PRIVATE)
 #   OFFLINE  -> encrypted media: primary-secret.asc.gpg (root of trust; symmetric-
 #                               wrapped with an INDEPENDENT backup passphrase)
 #                               primary.rev         (revocation certificate)
 #   REFERENCE:                  FINGERPRINTS.txt    (public — safe to share)
 #
-# Two DISTINCT passphrases are used (channel-separation for secrets):
-#   * KEY passphrase    — protects the signing key + the CI subkey exports; becomes
+# Two DISTINCT passphrases are used:
+#   * KEY passphrase    — protects the signing key + the CI subkey export; becomes
 #                         the GitHub GPG_PASSPHRASE secret. Lives (encrypted) in CI.
 #   * BACKUP passphrase — a SECOND, independent layer around the offline primary
 #                         backup only. Never goes to CI, so a CI-secret leak alone
@@ -120,7 +118,7 @@ unset KP1 KP2 BK1 BK2
 # All KEY-passphrase secret operations run through this base invocation.
 GPG_SECRET=(gpg --batch --pinentry-mode loopback --passphrase-file "$PPFILE")
 
-# ── 1. Primary (certification-only, no expiry) + two signing subkeys ──────────
+# ── 1. Primary (certification-only, no expiry) + the S_rel signing subkey ─────
 echo
 echo "==> Generating certification-only primary key ..."
 "${GPG_SECRET[@]}" --quick-generate-key "$KEY_UID" ed25519 cert never
@@ -129,19 +127,12 @@ PRIMARY_FPR="$(gpg --list-keys --with-colons | awk -F: '/^fpr:/{print $10; exit}
 [ -n "$PRIMARY_FPR" ] || die "could not read primary fingerprint after generation."
 echo "    primary fpr: $PRIMARY_FPR"
 
-# Bind each subkey to its channel by the KEY_CREATED status of ITS OWN add, not by
-# list position (colon-record order is not a documented GnuPG contract).
+# Read the subkey fpr from the KEY_CREATED status of its own add, not by list position.
 echo "==> Adding S_rel signing subkey (release / self-update, expiry $SUBKEY_EXPIRY) ..."
 S_REL_FPR="$("${GPG_SECRET[@]}" --status-fd 1 --quick-add-key "$PRIMARY_FPR" ed25519 sign "$SUBKEY_EXPIRY" 2>/dev/null \
              | awk '$2=="KEY_CREATED"{print $4; exit}')"
 [ -n "$S_REL_FPR" ] || die "could not capture S_rel subkey fpr from KEY_CREATED status."
-echo "==> Adding S_apt signing subkey (apt, expiry $SUBKEY_EXPIRY) ..."
-S_APT_FPR="$("${GPG_SECRET[@]}" --status-fd 1 --quick-add-key "$PRIMARY_FPR" ed25519 sign "$SUBKEY_EXPIRY" 2>/dev/null \
-             | awk '$2=="KEY_CREATED"{print $4; exit}')"
-[ -n "$S_APT_FPR" ] || die "could not capture S_apt subkey fpr from KEY_CREATED status."
-[ "$S_REL_FPR" != "$S_APT_FPR" ] || die "S_rel and S_apt fingerprints are identical — aborting."
 echo "    S_rel fpr:   $S_REL_FPR  (release / self-update)"
-echo "    S_apt fpr:   $S_APT_FPR  (apt)"
 
 # ── 2. Revocation certificate for the primary ────────────────────────────────
 echo "==> Recording the primary revocation certificate ..."
@@ -171,7 +162,7 @@ gpg --batch --yes --pinentry-mode loopback --passphrase-file "$BPFILE" \
 rm -f "$OUTDIR/primary-secret.asc"   # keep ONLY the backup-passphrase-wrapped copy
 
 # Prove the wrapped backup decrypts (BACKUP passphrase), re-imports (KEY passphrase),
-# and yields a USABLE primary (sec field 15 '+', not a stub) with both subkeys.
+# and yields a USABLE primary (sec field 15 '+', not a stub) with its subkey.
 VH="$(mktemp -d)"; THROWAWAY_HOMES+=("$VH")
 if ! { gpg --batch --pinentry-mode loopback --passphrase-file "$BPFILE" --decrypt "$OUTDIR/primary-secret.asc.gpg" 2>/dev/null \
        | "${GPG_SECRET[@]}" --homedir "$VH" --import >/dev/null 2>&1; }; then
@@ -181,16 +172,14 @@ secline="$(gpg --homedir "$VH" --with-colons --list-secret-keys "$PRIMARY_FPR" 2
 secavail="$(printf '%s\n' "$secline" | awk -F: '$1=="sec"{print $15; exit}')"
 [ "$secavail" = "+" ] || die "restored primary secret is not usable (sec field 15 = '$secavail', expected '+')."
 nssb="$(printf '%s\n' "$secline" | grep -c '^ssb:' || true)"
-[ "$nssb" = 2 ] || die "restored key has $nssb secret subkeys, expected 2."
-echo "    primary-secret backup: decrypt + import + usable OK (primary present, 2 subkeys)"
+[ "$nssb" = 1 ] || die "restored key has $nssb secret subkeys, expected 1."
+echo "    primary-secret backup: decrypt + import + usable OK (primary present, 1 subkey)"
 
-# ── 4. Export the two TRIMMED public keyrings (channel separation) ────────────
-echo "==> Exporting trimmed public keyrings ..."
+# ── 4. Export the TRIMMED public keyring ─────────────────────────────────────
+echo "==> Exporting the trimmed public keyring ..."
 gpg --armor --export "${PRIMARY_FPR}!" "${S_REL_FPR}!" > "$OUTDIR/mathion-pubkey.asc"
-gpg --armor --export "${PRIMARY_FPR}!" "${S_APT_FPR}!" > "$OUTDIR/mathion-apt-keyring.asc"
 
-# Assert: primary + EXACTLY ONE signing subkey, and it is the CORRECT channel's
-# fingerprint (a count-only check would miss a fpr typo shipping the wrong subkey).
+# Assert: primary + EXACTLY ONE signing subkey, and it is the expected fingerprint.
 check_one_sub() {  # $1 = keyring file, $2 = expected signing-subkey fpr, $3 = label
   local h subs
   h="$(mktemp -d)"; THROWAWAY_HOMES+=("$h")
@@ -198,18 +187,15 @@ check_one_sub() {  # $1 = keyring file, $2 = expected signing-subkey fpr, $3 = l
   subs="$(gpg --homedir "$h" --with-colons --with-subkey-fingerprint --list-keys \
           | awk -F: '$1=="sub"{s=1;next} s&&$1=="fpr"{print $10; s=0}')"
   [ "$(printf '%s\n' "$subs" | grep -c .)" = 1 ] || die "$3: $1 must hold exactly one subkey, got [$subs]"
-  [ "$subs" = "$2" ] || die "$3: $1 subkey $subs != expected $2 (wrong channel — fpr typo?)"
+  [ "$subs" = "$2" ] || die "$3: $1 subkey $subs != expected $2 (fpr typo?)"
   echo "    OK $3: primary + $2 only"
 }
 check_one_sub "$OUTDIR/mathion-pubkey.asc"      "$S_REL_FPR" "S_rel public keyring"
-check_one_sub "$OUTDIR/mathion-apt-keyring.asc" "$S_APT_FPR" "S_apt public keyring"
 
-# ── 5. Export the two PRIVATE signing subkeys (for CI), asserting one ssb each ─
-echo "==> Exporting per-channel private signing subkeys (for GitHub secrets) ..."
-# The trailing '!' exports ONLY that subkey's secret; without it gpg exports
-# EVERY subkey secret and leaks both channels' signing power into one file.
+# ── 5. Export the PRIVATE signing subkey (for CI), asserting one ssb ─────────
+echo "==> Exporting the private signing subkey (for GitHub secrets) ..."
+# The trailing '!' exports ONLY that subkey's secret, never any other subkey's.
 "${GPG_SECRET[@]}" --armor --export-secret-subkeys "${S_REL_FPR}!" > "$OUTDIR/s_rel.private.asc"
-"${GPG_SECRET[@]}" --armor --export-secret-subkeys "${S_APT_FPR}!" > "$OUTDIR/s_apt.private.asc"
 
 assert_one_ssb() {  # $1 = private export file, $2 = expected subkey fpr, $3 = label
   local h n ssbfpr
@@ -218,14 +204,13 @@ assert_one_ssb() {  # $1 = private export file, $2 = expected subkey fpr, $3 = l
   "${GPG_SECRET[@]}" --homedir "$h" --import "$1" >/dev/null 2>&1 || die "$3: $1 did not import."
   n="$(gpg --homedir "$h" --with-colons --list-secret-keys | grep -c '^ssb:' || true)"
   [ "$n" = 1 ] || die "$3: $1 must contain exactly one secret subkey (ssb), found $n."
-  # Confirm the one ssb is the expected fingerprint (not the wrong channel).
+  # Confirm the one ssb is the expected fingerprint.
   ssbfpr="$(gpg --homedir "$h" --with-colons --with-subkey-fingerprint --list-secret-keys \
             | awk -F: '$1=="ssb"{s=1;next} s&&$1=="fpr"{print $10; s=0}')"
   [ "$ssbfpr" = "$2" ] || die "$3: $1 ssb $ssbfpr != expected $2."
   echo "    OK $3: exactly one ssb = $2"
 }
 assert_one_ssb "$OUTDIR/s_rel.private.asc" "$S_REL_FPR" "S_rel private subkey"
-assert_one_ssb "$OUTDIR/s_apt.private.asc" "$S_APT_FPR" "S_apt private subkey"
 
 # ── 6. Record the fingerprints (public — safe to share) ──────────────────────
 cat > "$OUTDIR/FINGERPRINTS.txt" <<EOF
@@ -234,7 +219,6 @@ Generated for UID: $KEY_UID
 
 EXPECTED_PRIMARY_FPR = $PRIMARY_FPR
 S_REL_FPR            = $S_REL_FPR   # release / self-update subkey
-S_APT_FPR            = $S_APT_FPR   # apt subkey
 EOF
 chmod 600 "$OUTDIR"/*   # owner-only for every artifact
 
@@ -248,7 +232,6 @@ cat <<EOF
   Fingerprints (PUBLIC):
     EXPECTED_PRIMARY_FPR = $PRIMARY_FPR
     S_REL_FPR            = $S_REL_FPR
-    S_APT_FPR            = $S_APT_FPR
 
   ══ PHASE 1 — do ALL of this while STILL OFFLINE ══════════════════════════
 
@@ -261,8 +244,7 @@ cat <<EOF
 
   B) TRANSFER MEDIA — copy these onto SEPARATE encrypted media to carry to a
      networked machine in Phase 2 (no primary secret among them):
-       $OUTDIR/s_rel.private.asc  $OUTDIR/s_apt.private.asc
-       $OUTDIR/mathion-pubkey.asc  $OUTDIR/mathion-apt-keyring.asc
+       $OUTDIR/s_rel.private.asc  $OUTDIR/mathion-pubkey.asc
        $OUTDIR/FINGERPRINTS.txt
 
   C) VERIFY the copies from the ACTUAL media (not from this disk).
@@ -276,16 +258,13 @@ cat <<EOF
 
   E) GITHUB SECRETS — repo Settings > Secrets and variables > Actions > Secrets:
        GPG_S_REL_PRIVATE  <- contents of s_rel.private.asc
-       GPG_S_APT_PRIVATE  <- contents of s_apt.private.asc
        GPG_PASSPHRASE     <- the KEY passphrase (NOT the backup passphrase)
 
-  F) GITHUB VARIABLES — same page, Variables tab (item 2):
+  F) GITHUB VARIABLES — same page, Variables tab:
        S_REL_FPR = $S_REL_FPR
-       S_APT_FPR = $S_APT_FPR
 
-  G) REPO PUBLIC FILES (item 1) — copy in and commit:
+  G) REPO PUBLIC FILES — copy in and commit:
        cp mathion-pubkey.asc       deploy/keys/mathion-pubkey.asc
-       cp mathion-apt-keyring.asc  deploy/keys/mathion-apt-keyring.asc
        cp deploy/keys/mathion-pubkey.asc  cli/internal/selfupdate/mathion-pubkey.asc
      Then edit deploy/install.sh:
        EXPECTED_PRIMARY_FPR="$PRIMARY_FPR"
@@ -293,12 +272,10 @@ cat <<EOF
        mathion_embedded_key()  <- paste the SAME block as deploy/keys/mathion-pubkey.asc
 
   H) Publish EXPECTED_PRIMARY_FPR out of band (website / signed announcement) so
-     users can independently verify the keyring they received.
+     users can check the release key that install.sh pins.
 
-  I) Before the FIRST signed release: confirm the apt-publish prerequisites exist
-     (a gh-pages branch + the PAGES_DEPLOY_TOKEN secret), and add the guard to
-     release-cli.yml (item 3). Delete the transfer-media private exports once
-     they are in GitHub secrets.
+  I) Before the FIRST signed release: confirm the guard step in release-cli.yml.
+     Delete the transfer-media private export once it is in GitHub secrets.
 
 ════════════════════════════════════════════════════════════════════════════
 EOF

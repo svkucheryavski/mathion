@@ -8,7 +8,7 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT_DIR/cli"
 CLI_TAG=cli-v0.0.0-test APP_IMAGE=v0.1.1 GORELEASER_CURRENT_TAG=v0.0.0-test \
-  goreleaser release --clean --skip=publish,sign,nfpm --snapshot
+  goreleaser release --clean --skip=publish,sign --snapshot
 test -f dist/mathion_linux_amd64.tar.gz || { echo "FAIL: amd64 archive missing"; exit 1; }
 test -f dist/mathion_linux_arm64.tar.gz || { echo "FAIL: arm64 archive missing"; exit 1; }
 test -f dist/checksums.txt || { echo "FAIL: checksums.txt missing (name_template not pinned)"; exit 1; }
@@ -40,7 +40,7 @@ cd ..
 # ---- authenticity: drive install.sh's REAL verify_sig with a throwaway key ----
 command -v gpg >/dev/null 2>&1 || { echo "SKIP: gpg not present"; exit 0; }
 TKH="$(mktemp -d)"; export GNUPGHOME="$TKH"; chmod 700 "$TKH"
-# throwaway: primary (cert-only) + sub_rel (the pinned channel); sub_apt added below.
+# throwaway: primary (cert-only) + sub_rel (the pinned subkey); a sibling subkey added below.
 cat > "$TKH/kp" <<'PARAMS'
 %no-protection
 Key-Type: eddsa
@@ -56,11 +56,11 @@ Expire-Date: 0
 PARAMS
 gpg --batch --gen-key "$TKH/kp" >/dev/null 2>&1
 PRIMARY="$(gpg --batch --with-colons --fingerprint | awk -F: '/^fpr:/{print $10; exit}')"
-# sub_apt (wrong channel) — quick-add-key needs loopback+empty-passphrase to run non-interactively
+# sibling subkey (not pinned) — quick-add-key needs loopback+empty-passphrase to run non-interactively
 gpg --batch --pinentry-mode loopback --passphrase '' --quick-add-key "$PRIMARY" ed25519 sign 0 >/dev/null 2>&1
 SUBS="$(gpg --batch --with-colons --fingerprint "$PRIMARY" | awk -F: '$1=="sub"{s=1;next} s&&$1=="fpr"{print $10; s=0}')"
 SUB_REL="$(printf '%s\n' "$SUBS" | sed -n 1p)"
-SUB_APT="$(printf '%s\n' "$SUBS" | sed -n 2p)"
+SUB_SIBLING="$(printf '%s\n' "$SUBS" | sed -n 2p)"
 printf 'checksum-content\n' > "$TKH/checksums.txt"
 sign_with() { gpg --batch --yes --armor --local-user "${1}!" --detach-sign -o "$TKH/checksums.txt.asc" "$TKH/checksums.txt"; }
 
@@ -76,9 +76,9 @@ verify_sig "$TKH/checksums.txt.asc" "$TKH/checksums.txt" || { echo "FAIL: good S
 printf 'tampered\n' >> "$TKH/checksums.txt"
 if verify_sig "$TKH/checksums.txt.asc" "$TKH/checksums.txt"; then echo "FAIL: tampered file accepted"; exit 1; fi
 printf 'checksum-content\n' > "$TKH/checksums.txt"
-# 3) signed by the OTHER subkey (simulates an S_apt-signed forge) -> rejected (channel separation)
-sign_with "$SUB_APT"
-if verify_sig "$TKH/checksums.txt.asc" "$TKH/checksums.txt"; then echo "FAIL: wrong-channel (S_apt) signature accepted"; exit 1; fi
+# 3) signed by a sibling subkey of the same primary -> rejected
+sign_with "$SUB_SIBLING"
+if verify_sig "$TKH/checksums.txt.asc" "$TKH/checksums.txt"; then echo "FAIL: sibling-subkey signature accepted"; exit 1; fi
 # 4) EXPIRED pinned key -> rejected (EXPKEYSIG, no GOODSIG). A single pinned subkey can't
 #    be both valid (cases 1-3) and expired, so build a SEPARATE throwaway whose primary +
 #    sub_rel were created in the PAST with a short expiry, sign while it was valid (faked
