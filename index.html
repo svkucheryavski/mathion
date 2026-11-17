@@ -263,7 +263,7 @@ sudo sh install.sh</code></pre>
           </div>
           <pre><code>sed -n '/BEGIN PGP PUBLIC KEY BLOCK/,/END PGP PUBLIC KEY BLOCK/p' install.sh | gpg --show-keys</code></pre>
         </div>
-        <p class="why">If it prints a different fingerprint, stop. This shows the key the installer trusts, not that the rest of the script is honest: read it before you run it. The copy in <code>deploy/keys/README.md</code> lives in the repository, so it is not an independent check.</p>
+        <p class="why">If it prints a different fingerprint, stop. This shows the key the installer trusts, not that the rest of the script is honest: read it before you run it.</p>
       </div>
     </div>
   </section>
