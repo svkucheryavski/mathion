@@ -200,7 +200,7 @@ the repo where they are consumed:
 
 Publish the primary fingerprint **out of band** (the project site, a signed
 announcement) so users can check it against the key embedded in `install.sh`
-(README, "Check the release key (out of band)"), not against a keyring. Never
+(README, "Check the release key (out of band)"). Never
 rely solely on the copy shipped in the repo.
 
 ---
@@ -303,16 +303,12 @@ consumes **`S_REL_EMBEDDED_FPR`** (= the **incoming K2**, distinct from the
 outgoing signing `S_REL_FPR` = K1) during a crossing; `S_REL_EMBEDDED_FPR` is
 unset in steady state and defaults to `S_REL_FPR` via the Actions `||` idiom.
 
-**Go-live task — gate publication with the self-update guard.**
-`cli/scripts/selfupdate-ci-guards.sh` runs in main CI (`ci.yml`) but does **not**
-yet gate the release publish job. At go-live — when the first signed release
-ships — add a step running `sh cli/scripts/selfupdate-ci-guards.sh` (with
-`S_REL_FPR` / `S_REL_EMBEDDED_FPR` in its env, exactly as `ci.yml` passes them)
-to `.github/workflows/release-cli.yml`'s `release` job **before** the
-Build+sign step, and verify it with that first signed release — so the guard
-gates publication, not only main CI. Until keygen the fingerprint pin skips (the
-go-live caveat), so there is no signed release to exercise the gate against
-before then.
+**The self-update guard gates publication.** `cli/scripts/selfupdate-ci-guards.sh`
+runs in main CI (`ci.yml`) and again in `release-cli.yml`'s `release` job, before
+the signing key is imported, with `S_REL_FPR` / `S_REL_EMBEDDED_FPR` in its env.
+A release with the test build tag, an archive holding more than the binary, a
+missing or extra architecture, or a wrong signing subkey in the shipped keyring
+(`deploy/keys/mathion-pubkey.asc`) is never built or published.
 
 ---
 

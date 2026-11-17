@@ -170,7 +170,7 @@ or read root-owned config):
 | `mathion status` | Show stack status + `/health`. |
 | `mathion logs [app\|db]` | Show stack logs (optionally for a single service). |
 | `mathion version` | Print CLI + pinned image version. |
-| `mathion licenses` | Print the licences of Mathion and the code built into it. |
+| `mathion licenses` | Print the licenses of Mathion and the code built into it. |
 | `mathion superuser <email>` | Create or promote a superuser account (idempotent). |
 | `mathion pin <email>` | Issue a sign-in PIN (the panel's Settings page sets how long a PIN lasts). |
 | `mathion branding reset [--all] [--yes]` | Remove the colour changes from the panel's Branding page (`--all` also resets the site name, logo and tab icon). |

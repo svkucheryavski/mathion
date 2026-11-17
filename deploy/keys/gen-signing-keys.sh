@@ -274,8 +274,7 @@ cat <<EOF
   H) Publish EXPECTED_PRIMARY_FPR out of band (website / signed announcement) so
      users can check the release key that install.sh pins.
 
-  I) Before the FIRST signed release: confirm the guard step in release-cli.yml.
-     Delete the transfer-media private export once it is in GitHub secrets.
+  I) Delete the transfer-media private export once it is in GitHub secrets.
 
 ════════════════════════════════════════════════════════════════════════════
 EOF

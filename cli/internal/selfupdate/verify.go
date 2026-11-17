@@ -19,9 +19,8 @@ var embeddedKeyring []byte
 // allowedHashes is the EXACT digest set self-update accepts — reject SHA-1/MD5. §6.1.
 var allowedHashes = []crypto.Hash{crypto.SHA256, crypto.SHA384, crypto.SHA512}
 
-// loadKeyring parses the embedded primary + S_rel keyring. Returns an error while
-// mathion-pubkey.asc is the placeholder (keygen is a 4a go-live prereq, §12); the
-// injectable keyring seam (Task 8) is what tests and integration use. The
+// loadKeyring parses the embedded primary + S_rel keyring; tests and integration
+// use the injectable keyring seam (Task 8) instead. The
 // single-signing-subkey assertion (§6.1 correction 5) rejects an untrimmed asset
 // at load time — before any signature is ever checked against it.
 func loadKeyring() (openpgp.EntityList, error) {

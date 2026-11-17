@@ -6,8 +6,8 @@
 #      (the strict single-binary extractor in extractSingleBinary depends on it);
 #  (3) the committed keyring's single signing subkey fingerprint must equal the
 #      expected S_rel fpr (§6.1 build-time pin) — catches a WRONG single subkey that
-#      runtime membership + the load-time single-subkey assertion cannot. Gated on the
-#      fpr env being set, so it skips the pre-keygen placeholder (like 4a's fpr pins).
+#      runtime membership + the load-time single-subkey assertion cannot. Skips when
+#      neither fpr env var is set.
 set -eu
 cd "$(dirname "$0")/.."   # -> cli/
 
@@ -69,10 +69,9 @@ if [ "$norm_seen" != "$norm_expected" ]; then
   exit 1
 fi
 
-# (3) fingerprint pin (§6.1). Only enforced once maintainer keys exist: when S_REL_FPR
-# (steady) or S_REL_EMBEDDED_FPR (transition — the INCOMING key the asset embeds, which
-# during a rotation differs from the outgoing signing key) is set. Pre-keygen the asset
-# is a placeholder that cannot be parsed as a keyring, so skip — the go-live caveat.
+# (3) fingerprint pin (§6.1). Enforced when S_REL_FPR (steady) or S_REL_EMBEDDED_FPR
+# (transition — the INCOMING key the asset embeds, which during a rotation differs from
+# the outgoing signing key) is set; skipped when neither is.
 EXPECT="${S_REL_EMBEDDED_FPR:-${S_REL_FPR:-}}"
 if [ -n "$EXPECT" ]; then
   command -v gpg >/dev/null 2>&1 || { echo "FAIL: gpg required for the fingerprint pin" >&2; exit 1; }
@@ -103,7 +102,7 @@ if [ -n "$EXPECT" ]; then
   fi
   echo "fingerprint pin OK ($sigfprs)"
 else
-  echo "SKIP fingerprint pin: neither S_REL_FPR nor S_REL_EMBEDDED_FPR set (pre-keygen placeholder)"
+  echo "SKIP fingerprint pin: neither S_REL_FPR nor S_REL_EMBEDDED_FPR set"
 fi
 
 echo "self-update CI guards PASSED ($n binary-only archive(s))"

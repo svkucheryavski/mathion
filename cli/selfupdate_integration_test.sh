@@ -1,6 +1,6 @@
 #!/bin/sh
 # self-update integration: throwaway OpenPGP keys + REAL shell-launched binaries.
-# Covers the §9.2 scenarios: happy path, rotation crossing, package-owned refusal, sibling-subkey reject,
+# Covers the §9.2 scenarios: happy path, rotation crossing, package-owned refusal, foreign-key reject,
 # and the staged-exec bound + fd-hygiene legs (past-deadline abort + fork-orphan i/ii).
 set -eu
 [ "${MATHION_SELFUPDATE_E2E:-}" = 1 ] || { echo "SKIP: set MATHION_SELFUPDATE_E2E=1 (mutates /usr/local/bin/mathion + /usr/bin/mathion)"; exit 0; }
@@ -107,7 +107,7 @@ v="$(/usr/local/bin/mathion version --short)"
 m="$(stat -c %a /usr/local/bin/mathion)"
 [ "$m" = 755 ] || { echo "FAIL(happy): installed mode $m != 755"; exit 1; }
 
-# === LEG 2: SIBLING-SUBKEY REJECTION (re-sign with K2, which the K1 client does not trust) ==
+# === LEG 2: FOREIGN-KEY REJECTION (re-sign with K2, which the K1 client does not trust) ====
 publish cli-v0.9.0 "$WORK/rel090_k1" "$K2"    # foreign signature
 install -m0755 "$WORK/client_k1" /usr/local/bin/mathion
 if /usr/local/bin/mathion self-update --yes; then echo "FAIL(reject): foreign-key sig accepted"; exit 1; fi
