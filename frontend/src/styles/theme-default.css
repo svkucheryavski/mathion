@@ -146,7 +146,9 @@
      against the page and push the text to 2.7:1. */
 }
 
-/* 115% in windows 1400px and wider; print keeps 100%. */
+/* 115% in windows 1400px and wider; print and browsers without CSS zoom keep 100%. */
 @media screen and (min-width: 1400px) {
-  :root { --app-zoom: 1.15; }
+  @supports (zoom: 1) {
+    :root { --app-zoom: 1.15; }
+  }
 }

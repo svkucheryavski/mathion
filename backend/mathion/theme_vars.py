@@ -113,4 +113,5 @@ NON_COLOUR_NAMES: frozenset[str] = frozenset({
     '--space-4',
     '--space-6',
     '--page-max',
+    '--app-zoom',
 })

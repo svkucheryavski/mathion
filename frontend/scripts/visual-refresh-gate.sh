@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3106
+EXPECTED_CHECKS=3113
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -531,6 +531,7 @@ else:
 # `--- toast ---` section, the info toast's fill moved out of Toast.svelte so a
 # school theme reaches it. The ONLY change (dropping it reproduces 17366996).
 # Zoom T1 (2026-11-17): 0ca50118 -> 44b2fe29, +--app-zoom 1 only; +2 rules (56 -> 58).
+# Zoom final review (2026-11-17): the 1400px :root moved under @supports (zoom:1), hash 23694c00 unchanged.
 # D85 (user, 2026-10-31, Polish 3 Task 6): a loose list groups by item. Inside
 # an item every block but the last (a heading keeps its em margins) takes
 # --space-2 below it, items are --space-3 apart (li+li ca5345b0 -> dc00e0ee);
@@ -589,7 +590,7 @@ WANT_FULL = [
     ('', 'img,video', 'aa84fbab'), ('', 'p', '11696618'), ('', 'ul,ol', '99409a76'),
     ('@media (forced-colors:active)', ':focus-visible:not([tabindex="-1"])', '1ff87bb6'),
     ('@media (forced-colors:active)', ':is(input,select,textarea):disabled', '602da9b5'),
-    ('@media screen and (min-width:1400px)', ':root', '23694c00'),
+    ('@media screen and (min-width:1400px) >> @supports (zoom:1)', ':root', '23694c00'),
 ]
 # Document ORDER of the same 58 rules. `a` at #9 (reset.css) and #15 (base.css)
 # are the live case: only order decides that base's --primary wins, and swapping
@@ -601,7 +602,7 @@ WANT_ORDER = [
     ('', '*,*:before,*:after'), ('', 'html,body'), ('', 'body'), ('', 'ul,ol'),
     ('', 'h1,h2,h3,h4,h5,h6'), ('', 'p'), ('', 'button,input,select,textarea'),
     ('', 'button'), ('', 'img,video'), ('', 'a'), ('', ':root'),
-    ('@media screen and (min-width:1400px)', ':root'), ('', 'html'), ('', 'body'),
+    ('@media screen and (min-width:1400px) >> @supports (zoom:1)', ':root'), ('', 'html'), ('', 'body'),
     ('', '.mono,code,kbd'), ('', 'a'), ('', 'a:hover'), ('', 'h1'), ('', 'h2'),
     ('', 'h3'), ('', 'h4'), ('', ':focus-visible'),
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible'),
@@ -783,7 +784,7 @@ else:
     for x in inline: print('        source:  %s' % x)
     if definers.count(((), ':root')) > 1:
         print('        (:root itself is declared %d times)' % definers.count(((), ':root')))
-# --app-zoom: bare :root and the 1400px screen :root, nowhere else.
+# --app-zoom: bare :root and the 1400px screen :root (where zoom is supported), nowhere else.
 ZOOM_DECL = re.compile(r'(^|;)\s*--app-zoom\s*:')
 zoom_at = sorted((m, s) for s, b, m in ALL if ZOOM_DECL.search(b))
 zoom_src = []
@@ -791,7 +792,7 @@ for f in sorted(set(SVELTE) | {os.path.normpath(p) for p in
                 glob.glob('src/**/*.ts', recursive=True) + glob.glob('src/**/*.js', recursive=True)}):
     if re.search(r'style\s*=\s*["\'][^"\']*?--app-zoom\s*:|style:--app-zoom(\|[\w|]*)?\s*[=}]|setProperty\s*\(\s*[\'"`]--app-zoom[\'"`]|style\s*=\s*\{[^}]*?--app-zoom', open(f).read()):
         zoom_src.append(f)
-zoom_want = [((), ':root'), (('@media screen and (min-width:1400px)',), ':root')]
+zoom_want = [((), ':root'), (('@media screen and (min-width:1400px)', '@supports (zoom:1)'), ':root')]
 if zoom_at == zoom_want and not zoom_src and not re.search(r'@property\s+--app-zoom(?![\w-])', css):
     print('PASS  --app-zoom is defined on :root and the 1400px screen :root only')
 else:
@@ -977,8 +978,8 @@ fi
 check "text field max-width:480px (the value .opts pairs with)" \
       '\.txt\.svelte-[a-z0-9]+\{([^}]*;)?max-width:480px[;}]'
 
-# Large-screen zoom (2026-11-17): 115% in windows 1400px and wider, never in print.
-check "app zoom token on wide screens" '@media screen and \(min-width: ?1400px\)\{:root\{--app-zoom: ?1\.15;?\}\}'
+# Large-screen zoom (2026-11-17): 115% in windows 1400px and wider, never in print or without CSS zoom.
+check "app zoom token on wide screens" '@media screen and \(min-width: ?1400px\)\{@supports \(zoom: ?1\)\{:root\{--app-zoom: ?1\.15;?\}\}\}'
 check "html carries the app zoom" 'html\{zoom: ?var\(--app-zoom\);?\}'
 
 # --- (g2) STRUCTURAL: a grep cannot see a duplicate or an @media override -----
@@ -4889,7 +4890,7 @@ if [[ -n $REPLY ]]; then
   # Polish 3 Task 7 (table corners): the outer border and radius sit on a scroll
   # wrapper. It clips the grey header corners and scrolls a table wider than its
   # container instead of cutting it off; the table's borders stay separate.
-  d '\.table-scroll' '' 'overflow-x:auto' 'margin-top:14px' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.table-scroll' '' 'overflow-x:auto' 'margin-top:14px' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'position:relative'
   d '\.teach-table' '' 'border-collapse:separate' 'border-spacing:0'
   none "TeacherRunListPage .teach-table has no border, radius or margin of its own (Polish 3)" "\.teach-table\.${H}\{[^}]*(border:|border-radius:|margin-top:)"
   # 6a Safari pass (user, 2026-10-11): one centred column for the whole site, --page-max.
@@ -4981,7 +4982,9 @@ if [[ -n $REPLY ]]; then
   d '\.progress-grid' '' 'width:max-content'
   # D73 (Polish 2 Safari pass): keyboard focus scrolls a cell into view beside the
   # pinned Student + Group columns (14rem + 6rem), not under them.
-  d '\.table-scroll' '' 'scroll-padding-left:20rem'
+  # Zoom final review: positioned, so the headers' .sr-only spans stay inside its clip
+  # (a wide table no longer scrolls the whole page sideways); the other table wrappers too.
+  d '\.table-scroll' '' 'scroll-padding-left:20rem' 'position:relative'
   chk "\.progress-grid\.${H} \.block-header:where\(\.${H}\)" 'padding:6px 12px' 'font-family:var\(--font-mono\)' 'text-transform:uppercase' 'white-space:nowrap'
   chk "\.progress-grid\.${H} \.seq-header:where\(\.${H}\)" 'white-space:nowrap'
   # D79 (user, compact table): short headers, a 4rem floor per sequence column,
@@ -5101,7 +5104,7 @@ if [[ -n $REPLY ]]; then
   # container instead of cutting it off; the table's borders stay separate.
   # Under separate borders the header's line and the first row's would both
   # draw, so the first body row drops its top border.
-  d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'position:relative'
   d '\.mp-table' '' 'border-collapse:separate' 'border-spacing:0'
   none "RunMiniProjectsTab .mp-table has no border or radius of its own (Polish 3)" "\.mp-table\.${H}\{[^}]*(border:|border-radius:)"
   chk "\.mp-table\.${H} tbody:where\(\.${H}\) tr:where\(\.${H}\):first-child td:where\(\.${H}\)" 'border-top:0'
@@ -5133,7 +5136,7 @@ if [[ -n $REPLY ]]; then
   # container instead of cutting it off; the table's borders stay separate.
   # The first body row drops its top border (the header line draws once), and
   # the drag-over outline marks the wrapper.
-  d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'position:relative'
   d '\.assets-table' '' 'border-collapse:separate' 'border-spacing:0'
   none "RunAssetsTab .assets-table has no border or radius of its own (Polish 3)" "\.assets-table\.${H}\{[^}]*(border:|border-radius:)"
   chk "\.assets-table\.${H} tbody:where\(\.${H}\) tr:where\(\.${H}\):first-child td:where\(\.${H}\)" 'border-top:0'
@@ -5373,7 +5376,7 @@ if [[ -n $REPLY ]]; then
   d '\.ro-banner-ok' '' 'background:var\(--status-accepted-bg\)' 'border-left-color:var\(--success\)' 'color:var\(--status-accepted-fg\)'
   d '\.ro-banner-warn' '' 'background:var\(--status-needs-revision-bg\)' 'border-left-color:var\(--gold\)' 'color:var\(--status-needs-revision-fg\)'
   d '\.ro-retry' '' 'text-decoration:underline' 'color:inherit'
-  d '\.ro-table-wrap' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.ro-table-wrap' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'position:relative'
   chk "\.ro-table\.${H} th:where\(\.${H}\)" 'background:var\(--surface-2\)' 'font-size:12px' 'font-weight:600'
   chk "\.ro-table\.${H} td:where\(\.${H}\)" 'border-top:1px solid var\(--border-soft\)'
   d '\.ro-selected' '' 'background:var\(--primary-soft\)'
@@ -6212,7 +6215,7 @@ if [[ -n $REPLY ]]; then
   d '\.u-tip' '' 'position:fixed' 'white-space:pre-line' 'pointer-events:none' 'max-width:min\(320px,calc\(100vw ?/ ?var\(--app-zoom\) - 16px\)\)'
   d '\.u-tools' '' 'display:flex' 'justify-content:space-between' 'flex-wrap:wrap' 'margin:0 0 12px'
   d '\.u-search' '' 'height:var\(--control-h-sm\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
-  d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'position:relative'
   d '\.u-table' '' 'border-collapse:separate' 'border-spacing:0'
   chk "\.u-table\.${H} th:where\(\.${H}\)" 'padding:8px 12px' 'background:var\(--surface-2\)' 'color:var\(--text-3\)' 'font-size:12px' 'font-weight:600'
   chk "\.u-table\.${H} td:where\(\.${H}\)" 'padding:8px 12px' 'border-top:1px solid var\(--border-soft\)' 'font-size:13px' 'color:var\(--text-2\)'
@@ -6258,7 +6261,7 @@ own c-table SuperuserCourses.svelte
 uniq1 c-table
 if [[ -n $REPLY ]]; then
   N=SuperuserCourses; H=$REPLY
-  d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
+  d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'position:relative'
   d '\.c-table' '' 'border-collapse:separate' 'border-spacing:0'
   chk "\.c-table\.${H} th:where\(\.${H}\)" 'padding:8px 12px' 'background:var\(--surface-2\)' 'color:var\(--text-3\)' 'font-size:12px' 'font-weight:600'
   chk "\.c-table\.${H} td:where\(\.${H}\)" 'padding:8px 12px' 'border-top:1px solid var\(--border-soft\)' 'font-size:13px' 'color:var\(--text-2\)'

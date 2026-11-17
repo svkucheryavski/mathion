@@ -1172,7 +1172,9 @@
   .ro-dismiss { color: inherit; }
 
   /* The 6a table look; the wrapper scrolls sideways on a narrow window. */
+  /* Positioned, so the hidden .vh spans stay inside its clip. */
   .ro-table-wrap {
+    position: relative;
     overflow-x: auto;
     border: 1px solid var(--border);
     border-radius: var(--radius);

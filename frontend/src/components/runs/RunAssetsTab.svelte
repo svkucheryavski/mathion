@@ -947,7 +947,8 @@
   /* Polish 3 (table corners): the outer border and radius sit on a scroll wrapper,
      as on Progress and Submissions. It clips the grey header corners, which a
      table's own radius does not, and scrolls a table wider than its container. */
-  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  /* Positioned, so the hidden .vh spans stay inside its clip. */
+  .table-scroll { position: relative; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
   .assets-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
   .assets-table th {
     padding: 8px 10px;

@@ -1,4 +1,4 @@
-# Large-screen zoom — design (rev 5)
+# Large-screen zoom — design (rev 6)
 
 Rev 1 was a single `@media screen and (min-width: 1280px) { html { zoom: 1.15 } }`
 rule. Fable and Codex both reviewed it (round 1); this revision answers their
@@ -20,7 +20,9 @@ larger on wide windows; everything else unchanged.
    next to the other tokens:
    ```css
    :root { --app-zoom: 1; }
-   @media screen and (min-width: 1400px) { :root { --app-zoom: 1.15; } }
+   @media screen and (min-width: 1400px) {
+     @supports (zoom: 1) { :root { --app-zoom: 1.15; } }
+   }
    ```
    and in `frontend/src/styles/base.css` (or reset.css):
    ```css
@@ -29,6 +31,11 @@ larger on wide windows; everything else unchanged.
    `html` covers the app and any future body-mounted portal; Mathion's modals are
    `<section role="dialog">` inside the tree (no native `<dialog>`, no portals).
    `screen` only, so print is unaffected.
+   Rev 6, whole-branch review: `@supports` keeps a browser without CSS `zoom`
+   at 100%; otherwise every length divided by the token would shrink there.
+   Also fixed on this branch (pre-existing, the owner's call): every horizontal
+   table box is `position: relative`, so its hidden screen-reader spans no longer
+   widen the page.
 
 2. **Threshold 1400 CSS px** (was 1280). Gets 115%: MacBook Air 13 (1470; older 1440), Air 15 (1710),
    MacBook Pro 14/16 (1512/1728), 1536x864 Windows, 1920+ monitors. Stays at 100%:
@@ -107,7 +114,8 @@ Current Chrome/Edge, current Firefox, Safari 26.4+ (the owner's is 27.2). The
 tooltip helper is written for pre-26.4 Safari's rect model too (unit-tested), but
 older Safari is not browser-tested: on a window 1400px or wider it still gets
 the zoom and stays usable, with possible cosmetic gaps. iPads stay below 1400px,
-so iPad Safari is never affected.
+so iPad Safari is never affected. A browser without CSS `zoom` (Firefox
+before 126) keeps 100%.
 
 ## Testing
 - Unit: the tooltip helper (both engine models, appZoom 1 and 1.15, clamps,

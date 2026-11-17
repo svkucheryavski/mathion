@@ -32,8 +32,9 @@ def test_theme_vars_match_css():
 
 def test_counts():
     assert len(THEME_VARS) == 73
-    assert len(NON_COLOUR_NAMES) == 23
+    assert len(NON_COLOUR_NAMES) == 24
     assert "--focus-shadow" in NON_COLOUR_NAMES
+    assert "--app-zoom" in NON_COLOUR_NAMES
     assert BY_NAME["--toast-info"].heading == "Toast"
     assert BY_NAME["--toast-info"].default == "#0a7ea4"
     assert BY_NAME["--focus-0"].default == "var(--surface)"
@@ -91,3 +92,8 @@ def test_generator_writes_under_its_root(tmp_path):
     gen = _generator(":root {\n  /* --- toast --- */\n  --toast-info: #0a7ea4;\n}\n", tmp_path)
     assert gen.main() == 0
     assert "ThemeVar('--toast-info', '#0a7ea4', 'Toast')" in (tmp_path / "mathion" / "theme_vars.py").read_text()
+
+
+def test_generator_lists_a_redeclared_variable_once(tmp_path):
+    gen = _generator(":root {\n  --z: 1;\n}\n@media (min-width: 9px) {\n  :root { --z: 2; }\n}\n", tmp_path)
+    assert gen.read() == ([], ["--z"])
