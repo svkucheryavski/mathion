@@ -56,6 +56,12 @@ jobs:
         env:
           S_REL_FPR: ${{ vars.S_REL_FPR }}   # assert install.sh's pin == the release signer
         run: sh cli/scripts/release-embedded-key-guard.sh
+      # Same guards as main CI, so they gate publication too.
+      - name: self-update release guards
+        env:
+          S_REL_FPR: ${{ vars.S_REL_FPR }}
+          S_REL_EMBEDDED_FPR: ${{ vars.S_REL_EMBEDDED_FPR }}
+        run: sh cli/scripts/selfupdate-ci-guards.sh
       - name: Import S_rel + enable loopback
         env:
           S_REL: ${{ secrets.GPG_S_REL_PRIVATE }}

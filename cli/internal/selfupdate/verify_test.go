@@ -70,14 +70,14 @@ func signingSubkey(t *testing.T, e *openpgp.Entity) int {
 
 func TestVerifyChecksums(t *testing.T) {
 	relEntity, relKR := newSigner(t) // "S_rel" — its subkey IS in the verifying keyring
-	siblingEntity, _ := newSigner(t) // foreign key (another subkey) — NOT in relKR
+	foreignEntity, _ := newSigner(t) // a separate key — NOT in relKR
 	sums := []byte("abc123  mathion_linux_amd64.tar.gz\n")
 
 	if err := verifyChecksums(relKR, sums, armoredSig(t, relEntity, sums)); err != nil {
 		t.Fatalf("valid S_rel signature must verify: %v", err)
 	}
-	if err := verifyChecksums(relKR, sums, armoredSig(t, siblingEntity, sums)); err == nil {
-		t.Fatal("a signature from a key outside the trimmed keyring must be rejected")
+	if err := verifyChecksums(relKR, sums, armoredSig(t, foreignEntity, sums)); err == nil {
+		t.Fatal("a signature from a separate key must be rejected")
 	}
 	if err := verifyChecksums(relKR, []byte("tampered  x\n"), armoredSig(t, relEntity, sums)); err == nil {
 		t.Fatal("a signature over different bytes must be rejected")
@@ -86,6 +86,32 @@ func TestVerifyChecksums(t *testing.T) {
 	bad[len(bad)/2] ^= 0xFF // corrupt the armored signature
 	if err := verifyChecksums(relKR, sums, bad); err == nil {
 		t.Fatal("a corrupted .asc must be rejected")
+	}
+}
+
+// A second signing subkey of the same primary, absent from the shipped keyring, is refused.
+func TestVerifyChecksums_SiblingSubkeyRejected(t *testing.T) {
+	relEntity, relKR := newSigner(t) // relKR holds the primary + S_rel only
+	if err := relEntity.AddSigningSubkey(nil); err != nil {
+		t.Fatal(err)
+	}
+	sibling := relEntity.Subkeys[len(relEntity.Subkeys)-1].PublicKey.KeyId
+	sums := []byte("abc123  mathion_linux_amd64.tar.gz\n")
+	sig := armoredSigConfig(t, relEntity, sums, &packet.Config{SigningKeyId: sibling})
+
+	// Control: the same signature verifies when the sibling is the keyring's only signing subkey.
+	onlySibling := *relEntity
+	onlySibling.Subkeys = nil
+	for _, sk := range relEntity.Subkeys {
+		if sk.PublicKey.KeyId == sibling || !sk.Sig.FlagSign {
+			onlySibling.Subkeys = append(onlySibling.Subkeys, sk)
+		}
+	}
+	if err := verifyChecksums(entityKeyring(t, &onlySibling), sums, sig); err != nil {
+		t.Fatalf("control: the sibling's signature must verify against a keyring that trusts it: %v", err)
+	}
+	if err := verifyChecksums(relKR, sums, sig); err == nil {
+		t.Fatal("a sibling subkey of the same primary must be rejected")
 	}
 }
 
