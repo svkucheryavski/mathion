@@ -19,14 +19,7 @@ fi
 
 # (2) build a REAL snapshot and assert single-member archives.
 # `goreleaser build` only compiles binaries (it produces NO archives), so the
-# archive assertion requires `goreleaser release --snapshot` — which also runs
-# nfpm, whose `contents:` inputs (the .gz variants + a placeholder keyring) are
-# not in git. Materialize them first, exactly as deploy/deb/deb_test.sh does.
-gzip -9nkf ../deploy/man/mathion.1
-gzip -9nkf ../deploy/deb/changelog.Debian
-gzip -9nkf ../deploy/deb/THIRD_PARTY_NOTICES
-[ -f ../deploy/keys/mathion-archive-keyring.gpg ] || printf 'placeholder' > ../deploy/keys/mathion-archive-keyring.gpg
-
+# archive assertion requires `goreleaser release --snapshot`.
 CLI_TAG=cli-v0.0.0 APP_IMAGE=v0.0.0 GORELEASER_CURRENT_TAG=v0.0.0 \
   goreleaser release --clean --skip=publish,sign --snapshot >/dev/null
 
