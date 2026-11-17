@@ -11,14 +11,14 @@ DL="https://github.com/${REPO}/releases/download"
 DEST="/usr/local/bin/mathion"
 
 # Authenticity (Slice 4a). EXPECTED_SIGNING_FPR pins the S_rel SUBKEY (VALIDSIG's
-# first field), so a compromise of the apt-only S_apt cannot forge this channel.
+# first field), so no other subkey of the same primary can forge a release.
 EXPECTED_PRIMARY_FPR="F00602DFE1BF8CD2B321FC72AD21D4AD294C31A0"
 EXPECTED_SIGNING_FPR="06AAFF0CB03A5678149093D42243DC4FF7FDFF35"
 
 # HTTPS-only, even across redirects — a redirect can never downgrade to http.
 dl() { curl -fsSL --proto '=https' --proto-redir '=https' "$@"; }
 
-# Embedded public key = primary + S_rel ONLY (channel separation). Filled by the
+# Embedded public key = primary + S_rel ONLY (no other subkey). Filled by the
 # manual key prereq from deploy/keys/mathion-pubkey.asc. Tests override this.
 mathion_embedded_key() {
   cat <<'MATHION_PUBKEY'
@@ -88,13 +88,6 @@ main() {
     *) echo "unsupported architecture: $arch" >&2; exit 1 ;;
   esac
   ASSET="mathion_linux_${ARCH}.tar.gz"
-
-  # dual-install warning: an apt-managed copy at /usr/bin is shadowed by this
-  # curl|sh install to /usr/local/bin (PATH precedence). Warn, never delete.
-  if command -v dpkg >/dev/null 2>&1 && LC_ALL=C dpkg -S /usr/bin/mathion >/dev/null 2>&1; then
-    echo "warning: an apt-managed mathion exists at /usr/bin/mathion; this curl|sh install to" >&2
-    echo "         ${DEST} will shadow it on PATH. Use one channel only (see README)." >&2
-  fi
 
   TAG="${1:-}"
   if [ -z "$TAG" ]; then
