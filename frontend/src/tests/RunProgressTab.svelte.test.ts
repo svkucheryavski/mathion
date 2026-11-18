@@ -924,7 +924,12 @@ describe('RunProgressTab', () => {
     // Round-1 review (both lanes): the tip sits on the VISIBLE part of its header
     // (right of the pinned Student + Group columns, inside the scroll box), at
     // least 8px from the window edges, and below the header near the top.
-    function place(el: Element, r: DOMRect) { (el as HTMLElement).getBoundingClientRect = () => r; }
+    // A header's own label (.seq-n / .blk-n) gets `label`, or the header's rect.
+    function place(el: Element, r: DOMRect, label?: DOMRect) {
+      (el as HTMLElement).getBoundingClientRect = () => r;
+      const n = el.querySelector(':scope > .seq-n, :scope > .blk-n') as HTMLElement | null;
+      if (n) n.getBoundingClientRect = () => label ?? r;
+    }
     async function mountPlaced(header: DOMRect) {
       await mountCompact();
       place(host.querySelector('.table-scroll')!, rect(0, 1000, 280, 400));
@@ -963,6 +968,71 @@ describe('RunProgressTab', () => {
       const t = await mountPlaced(rect(400, 480, 20, 50));
       expect(t.classList.contains('below')).toBe(true);
       expect(t.style.top).toBe('56px');
+    });
+
+    it('the tip sits 6px above the label text, not the header cell edge', async () => {
+      await mountCompact();
+      place(host.querySelector('.table-scroll')!, rect(0, 1000, 280, 400));
+      place(host.querySelector('thead .sticky-group')!, rect(200, 300, 280, 340));
+      place(seqBtn(0), rect(400, 480, 300, 340), rect(410, 430, 309, 325));
+      seqBtn(0).dispatchEvent(new MouseEvent('mouseenter'));
+      flushSync();
+      expect(tip()!.style.top).toBe('303px');
+      expect(tip()!.style.left).toBe('400px');
+    });
+
+    it('near the top it flips to 6px below the label text', async () => {
+      await mountCompact();
+      place(host.querySelector('.table-scroll')!, rect(0, 1000, 20, 400));
+      place(host.querySelector('thead .sticky-group')!, rect(200, 300, 20, 60));
+      place(seqBtn(0), rect(400, 480, 20, 60), rect(410, 430, 29, 45));
+      seqBtn(0).dispatchEvent(new MouseEvent('mouseenter'));
+      flushSync();
+      expect(tip()!.classList.contains('below')).toBe(true);
+      expect(tip()!.style.top).toBe('51px');
+    });
+
+    it('the label top, not the header top, decides the flip', async () => {
+      await mountCompact();
+      place(host.querySelector('.table-scroll')!, rect(0, 1000, 40, 400));
+      place(host.querySelector('thead .sticky-group')!, rect(200, 300, 40, 80));
+      place(seqBtn(0), rect(400, 480, 40, 80), rect(410, 430, 49, 65));
+      seqBtn(0).dispatchEvent(new MouseEvent('mouseenter'));
+      flushSync();
+      expect(tip()!.classList.contains('below')).toBe(false);
+      expect(tip()!.style.top).toBe('43px');
+    });
+
+    it('a flipped tip keeps 6px from the window top when the label has scrolled off', async () => {
+      await mountCompact();
+      place(host.querySelector('.table-scroll')!, rect(0, 1000, -40, 400));
+      place(host.querySelector('thead .sticky-group')!, rect(200, 300, -40, 4));
+      place(seqBtn(0), rect(400, 480, -40, 4), rect(410, 430, -31, -15));
+      seqBtn(0).dispatchEvent(new MouseEvent('mouseenter'));
+      flushSync();
+      expect(tip()!.classList.contains('below')).toBe(true);
+      expect(tip()!.style.top).toBe('6px');
+    });
+
+    it('a keyboard focus tip is placed from the label too', async () => {
+      await mountCompact();
+      place(host.querySelector('.table-scroll')!, rect(0, 1000, 280, 400));
+      place(host.querySelector('thead .sticky-group')!, rect(200, 300, 280, 340));
+      place(seqBtn(0), rect(400, 480, 300, 340), rect(410, 430, 309, 325));
+      seqBtn(0).dispatchEvent(new FocusEvent('focus'));
+      flushSync();
+      expect(tip()!.style.top).toBe('303px');
+    });
+
+    it('a block header tip sits 6px above its B label', async () => {
+      await mountCompact();
+      place(host.querySelector('.table-scroll')!, rect(0, 1000, 250, 400));
+      place(host.querySelector('thead .sticky-group')!, rect(200, 300, 250, 340));
+      const bh = host.querySelectorAll('th.block-header')[1] as HTMLElement;
+      place(bh, rect(400, 600, 250, 280), rect(410, 430, 257, 270));
+      bh.dispatchEvent(new MouseEvent('mouseenter'));
+      flushSync();
+      expect(tip()!.style.top).toBe('251px');
     });
 
     it('Escape anywhere hides a hover tip; a page scroll hides it too', async () => {
@@ -1092,11 +1162,11 @@ describe('RunProgressTab', () => {
       const A_BOX = rect(0, 1150, 322, 460), A_PIN = rect(230, 345, 322, 391);
       const B_BOX = rect(0, 1000, 280, 400), B_PIN = rect(200, 300, 280, 340);
       // One mount per test; a later call re-hovers with new rects.
-      async function hover(box: DOMRect, pin: DOMRect, header: DOMRect) {
+      async function hover(box: DOMRect, pin: DOMRect, header: DOMRect, label?: DOMRect) {
         if (!component) await mountCompact();
         place(host.querySelector('.table-scroll')!, box);
         place(host.querySelector('thead .sticky-group')!, pin);
-        place(seqBtn(0), header);
+        place(seqBtn(0), header, label);
         seqBtn(0).dispatchEvent(new MouseEvent('mouseleave'));
         seqBtn(0).dispatchEvent(new MouseEvent('mouseenter'));
         flushSync();
@@ -1109,6 +1179,12 @@ describe('RunProgressTab', () => {
         expect(t.style.left).toBe('300px');
         expect(t.style.top).toBe('294px');
         expect(t.classList.contains('below')).toBe(false);
+      });
+
+      it('(a) the label anchor is converted from zoomed px too', async () => {
+        stubZoom('1.15', 115);
+        const t = await hover(A_BOX, A_PIN, rect(287.5, 437, 345, 379.5), rect(299, 322, 356.5, 374));
+        expect(parseFloat(t.style.top)).toBeCloseTo(356.5 / 1.15 - 6);
       });
 
       it('(a) right half: ends at the scroll box edge', async () => {

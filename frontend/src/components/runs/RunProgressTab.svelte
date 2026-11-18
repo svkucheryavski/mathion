@@ -217,8 +217,8 @@
   // Placed on the header's VISIBLE part (right of the pinned Student + Group
   // columns, inside the scroll box): it starts at that part's left edge, or ends
   // at its right edge when the part's centre is on the window's right half, and
-  // keeps 8px from the window edge. Within 48px of the window top (the tip is
-  // one or two 17px lines plus padding) it flips below the header.
+  // keeps 8px from the window edge. It sits 6px above the header's label; within
+  // 48px of the window top (one or two 17px lines plus padding) it flips below it.
   // A scroll or resize hides a hover tip. A focus tip follows its header
   // instead: focusing an out-of-view header scrolls it in, and that scroll event
   // comes AFTER the focus (round 2, both lanes). While no part of the header
@@ -254,8 +254,11 @@
     const visL = Math.max(r.left, pin?.right ?? -Infinity, box?.left ?? -Infinity);
     const visR = Math.min(r.right, box?.right ?? Infinity);
     if (visR < visL || r.bottom < 0 || r.top > s.height) { tip = null; return; }
-    const below = r.top < 48;
-    const top = below ? r.bottom + 6 : r.top - 6;
+    // The 6px gap is measured from the label text, not the padded cell.
+    const labelEl = el.querySelector(':scope > .seq-n, :scope > .blk-n');
+    const lab = labelEl ? s.box(labelEl.getBoundingClientRect()) : r;
+    const below = lab.top < 48;
+    const top = below ? Math.max(6, lab.bottom + 6) : lab.top - 6;
     const w = s.width;
     tip = (visL + visR) / 2 > w / 2
       ? { text, top, below, right: Math.max(8, w - visR) }
@@ -447,7 +450,7 @@
                 <th class="block-header" scope="colgroup" colspan={bg.sequences.length}>{bg.block_title}</th>
               {:else}
                 <th class="block-header" scope="colgroup" colspan={bg.sequences.length}
-                    onmouseenter={(e) => showTip(e, blockLabel(bg.block_id, bg.block_title))} onmouseleave={restoreTip}>B{bn}<span class="sr-only">{` · ${bg.block_title}`}</span></th>
+                    onmouseenter={(e) => showTip(e, blockLabel(bg.block_id, bg.block_title))} onmouseleave={restoreTip}><span class="blk-n">B{bn}</span><span class="sr-only">{` · ${bg.block_title}`}</span></th>
               {/if}
             {/each}
           </tr>
@@ -616,7 +619,7 @@
     border: 0;
   }
   /* D79: the header tooltip, above its header (translateY -100%), on top of the
-     sticky header cells. Its place comes from the header's on-screen box. */
+     sticky header cells. Its place comes from the header's and its label's on-screen boxes. */
   .pg-tip {
     position: fixed;
     z-index: 10;
