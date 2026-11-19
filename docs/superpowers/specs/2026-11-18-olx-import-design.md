@@ -1,4 +1,28 @@
-# Open edX course import — design (rev 6)
+# Open edX course import — design (rev 10)
+
+Rev 10 (plan review round 2): every Delete the import offers goes through a
+guarded discard call that waits for the version lock and deletes only a
+draft that is still unfinished and empty, so a late-committing build is
+never deleted.
+
+Rev 9 folds in the plan review (Codex): a timed-out build is checked with a
+lock-aware status call before Delete is offered; the leave-the-page question
+is asked inside the import modal; the check returns the linked files.
+
+Rev 8 folds in the rev 7 re-check (and its three wording notes): `static` entries say why a file was
+skipped; the 4xx rule spares 409 and 429; the control-space trim counts
+backslashes; old-site links to skipped files; no database connection is held
+while the body streams.
+
+Rev 7 folds in the rev 6 pre-plan check (no owner questions):
+- one whitespace-file rule; one question-text rule, with the inputs named;
+- whitespace inside formulas becomes single spaces; kept link schemes are
+  written in lowercase;
+- the build body and the check's `label` are defined;
+- smaller rules: every stored video URL is `https:`, Graasta matching,
+  `course.xml` pointers, iframe and old-site links, link destinations,
+  `\text` in scripts, formula trimming, upload status codes, the body
+  dependency's order, skipped files in `static`, the slug cut.
 
 Rev 6 folds in the rev 5 delta check:
 - a question's text excludes its solution and hints;
@@ -150,8 +174,9 @@ opens a modal (edits open modals, per the project rule) with four states.
      107 videos, 11 pages, 22 apps, 27 quizzes; 20 files, 95 MB"), every
      report line, and **Import** and **Cancel**. The file count is the number
      the progress line will count to.
-   - Problems that stop an import show here and disable Import:
-     - no `course.xml`;
+   - Problems that stop an import show here and disable Import, including:
+     - no `course.xml`, or a broken `course.xml`, chapter or sequential;
+     - nothing left to import;
      - more than 8 blocks, or more than 8 sequences in a block;
      - over the version file limit;
      - a linked file or a used app file over the per-file limit;
@@ -166,7 +191,8 @@ opens a modal (edits open modals, per the project rule) with four states.
       returned, one at a time with a progress line
       ("Uploading files: 7 of 20").
       - Each file is tried up to 3 times.
-      - A 409 (the name already exists) counts as done.
+      - A 409 (the name already exists) counts as done when the listed size
+        matches (Smaller details › Uploads).
       - If a file still fails, the modal shows **Retry**. Retry first reads
         `GET /api/versions/{vid}/assets` and resumes from the first file not
         yet there.
@@ -177,17 +203,32 @@ opens a modal (edits open modals, per the project rule) with four states.
 4. **Done or failed.**
    - **Done:** the report, a **Save report** button (downloads a `.txt`), and
      **Open the draft** (goes to the version editor in the same tab).
-   - **Failed:** what failed, then **Delete the unfinished draft** (existing
-     `DELETE /api/versions/{vid}`) or **Keep it**. Keep says the import cannot
-     be resumed.
-   - **Build failed with a network error or timeout:** before offering
-     Delete, the modal re-reads the version. If it now has blocks, the build
-     committed: the modal shows Done, says the report could not be loaded,
-     and offers no Delete.
+   - **Failed:** what failed, then **Delete the unfinished draft** or **Keep
+     it**. Keep says the import cannot be resumed. Delete calls
+     `POST /api/versions/{vid}/olx-import/discard`, not the plain version
+     delete. It waits for the version lock, then deletes only when the
+     version is still `created`, still has the `Open edX (unfinished):`
+     label and has no blocks. Otherwise it answers 409 and the modal shows
+     the draft as built (Done, report could not be loaded). A build that
+     finds its version gone answers 404 and writes nothing.
+   - **Build failed with a network error, a timeout, or a proxy 502/504:** before offering
+     Delete, the modal calls `GET /api/versions/{vid}/olx-import/status`.
+     It tries to lock the version without waiting (`FOR UPDATE NOWAIT`):
+     - `running` (the lock is held, so the build may still commit): the
+       modal says the import is still being built and offers **Check
+       again**, never Delete;
+     - `built` (the version has blocks): the build committed; the modal
+       shows Done, says the report could not be loaded, and offers no
+       Delete;
+     - `empty`: no build holds the lock and nothing is built; the Failed
+       state with Delete. A build can still start after this answer;
+       the guarded discard is what keeps that build safe.
 
 While an import runs, the modal cannot be closed by Esc or backdrop, and
-leaving the page asks for confirmation (the existing dirty guard on
-`VersionsPage`, plus `Modal`'s `closeDisabled`). A tab closed mid-import
+leaving the page asks for confirmation. The existing dirty guard on
+`VersionsPage` asks its question inside the import modal while an import
+runs (its usual question sits in the create-version form, which is not on
+screen then), plus `Modal`'s `closeDisabled` and `closeOnBackdrop=false`. A tab closed mid-import
 leaves a draft whose label says "unfinished".
 
 ### Reading the archive in the browser (`frontend/src/lib/olx/`)
@@ -227,18 +268,31 @@ leaves a draft whose label says "unfinished".
     stops with a plain message.
 - **Files:** every regular file under `static/` is kept as a `Blob`, so the
   archive is never held twice.
-  - Zero-byte files, and files up to 64 bytes that hold only whitespace (the
-    upload route refuses both), are skipped and reported.
+  - Zero-byte files, and files under 1 MB that hold only ASCII whitespace
+    (the upload route's `bytes.strip()` refuses both), are skipped and
+    reported.
   - App files come from the second input.
 - No file content is executed or rendered while reading.
 
 ### The server calls (`backend/mathion/olx/`, new package; routes in `backend/mathion/api/olx_import.py`)
 
 - **`POST /api/courses/{course_id}/olx-import/check`**
-  - Body: `{files: {path: text}, static: [{path, size}], apps: [{name, size}]}`.
+  - Body: `{files: {path: text}, static: [{path, size, skipped}], apps: [{name, size}]}`.
+    `static` lists every regular file under `static/`, including the ones
+    the browser skipped, so the server can classify links to them.
+    `skipped` is `null` for a file the browser will upload, else `"empty"`
+    (zero bytes or whitespace only), `"type"` (disallowed) or `"size"` (over
+    the per-file limit). Only `null` entries are planned for upload. A link
+    to an `"empty"` or `"type"` file loses its link, reported; a relative
+    or static-form link to a `"size"` file blocks, as under Files › Limits
+    (absolute old-site links never block, see Links and images).
   - Course admin only.
   - Returns `{summary, report: [...], uploads: [{source, target, kind:
-    "static"|"app"}], max_quiz_attempts, label, blocking: bool}`.
+    "static"|"app"}], linked: [target], max_quiz_attempts, label, blocking:
+    bool}`. `label` is the unfinished label (`Open edX (unfinished): …`),
+    already cut to 200. `linked` lists the upload targets a page links to,
+    or an app item uses, so the browser knows which refusals fail the
+    import.
   - Writes nothing.
   - **When something fails:**
     - A malformed or missing component or unit (bad XML, a missing pointer
@@ -260,7 +314,9 @@ leaves a draft whose label says "unfinished".
       uses its own slug fallback (`block-N`, …), so it follows the columns,
       not the editors' title rules.
 - **`POST /api/versions/{version_id}/olx-import/build`**
-  - The same body.
+  - Body: the check body plus the browser's report lines and its local date:
+    `{files, static, apps, report: [...], date: "YYYY-MM-DD"}`. The final
+    label uses `date`.
   - Course admin of the version's course.
   - It locks the version row (`SELECT … FOR UPDATE`) and requires
     `state == "created"`, not disabled (403, as in the other version routes),
@@ -293,11 +349,17 @@ leaves a draft whose label says "unfinished".
   get one. The routes declare **no** Pydantic body parameter: FastAPI would
   read the whole body before any dependency ran. They validate the
   dependency's bytes with `model_validate_json`.
+  - The body dependency runs after `get_current_user` and the course admin
+    check, so the server never reads 45 MB for someone who may not import.
+    The sync admin-check dependency ends with `db.rollback()`, so no database
+    connection is held while a slow client streams the body, and the async
+    body dependency makes no database call.
   - An async dependency first refuses a `Content-Length` over 45 MB (413).
   - It then reads the body stream, counting against 45 MB, and hands the
     bytes on.
   - The route itself stays a sync `def`, which parses the JSON and converts
     in the thread pool, so a 20 MB conversion never blocks the event loop.
+    A `ValidationError` from `model_validate_json` answers 422, not 500.
 
   45 MB is above the browser's 40 MB stop and below the proxy's 60 MB. The
   40 MB stop is measured in UTF-8 bytes for both the check and the build
@@ -319,7 +381,9 @@ leaves a draft whose label says "unfinished".
 - **Pointer vs inline.** An element with a `url_name` and no children and no
   other attributes than `url_name` is a pointer: it is loaded from
   `<tag>/<url_name>.xml`. Otherwise it is inline. An `html` component's
-  `filename` attribute loads `html/<filename>.html`.
+  `filename` attribute loads `html/<filename>.html`. `course.xml` always
+  points to `course/<url_name>.xml`; its `org` and `course` attributes do
+  not make it inline.
 
 ### Mapping
 
@@ -329,7 +393,7 @@ leaves a draft whose label says "unfinished".
 | chapter | Block | Title = `display_name`; slug rules below. Max 8 per version (`MAX_BLOCKS`, `backend/mathion/api/blocks.py`): more stops the import at check, naming the chapters past the 8th (owner's call: teachers restructure in Studio and re-export) |
 | sequential | Sequence | Title = `display_name`; `format`, `graded` and dates are ignored. Max 8 per block (`MAX_SEQUENCES`): more stops the import at check, naming the chapter. The caps count only chapters and subsections left after skipping; staff-only and empty ones don't count. `apply()` writes rows directly, so it enforces both caps itself |
 | vertical (unit) | one Item per supported component, in order | See titles below. A unit with no supported component is reported ("empty unit") |
-| `video` | video item | `youtube_id_1_0`, checked against `^[A-Za-z0-9_-]{11}$`, → `https://www.youtube.com/embed/<id>`; the start time becomes `?start=<seconds>`. Otherwise the first `html5_sources` URL that the YouTube or Vimeo branch of `normalizeVideoUrl` turns into an embed URL; those branches are ported to Python, and a test pins the Python output to the TS function's on shared cases. Otherwise skipped and reported. End times, transcripts and download settings are dropped and reported once per course |
+| `video` | video item | `youtube_id_1_0`, checked against `^[A-Za-z0-9_-]{11}$`, → `https://www.youtube.com/embed/<id>`; the start time becomes `?start=<seconds>`. Otherwise the first `html5_sources` URL that the YouTube or Vimeo branch of `normalizeVideoUrl` turns into an embed URL (a `player.vimeo.com/video/<id>` URL it passes through unchanged counts); those branches are ported to Python, and a test pins the Python output to the TS function's on shared cases. Otherwise skipped and reported. End times, transcripts and download settings are dropped and reported once per course |
 | `html` that is only an iframe to `https://graasta.com/apps/<name>/` | interactive app item | App file `<name>.js` from the picked app files. If it is missing, the item is still made, empty, and reported with its Graasta address |
 | `html` that is only a YouTube or Vimeo iframe | video item | A URL already in embed form (`www.youtube.com/embed/<id>`, `www.youtube-nocookie.com/embed/<id>`, `player.vimeo.com/video/<id>`) is kept, with a protocol-relative `//…` or an `http:` scheme turned into `https:` and the scheme lowercased. Any other YouTube or Vimeo URL goes through the same embed rule |
 | any other `html` | page (`static_page`) | HTML → Markdown, below. A page that comes out empty is skipped and reported |
@@ -348,8 +412,9 @@ leaves a draft whose label says "unfinished".
 
 **Slugs** (blocks, sequences, items):
 - made from the title with the existing `slugify` (`text_utils.py`);
-- cut at a dash to at most 76 characters, which leaves room for a `-NN`
-  suffix within the 80-character columns;
+- cut to at most 76 characters, at the last dash within the first 76, or at
+  76 if there is none; this leaves room for a `-NN` suffix within the
+  80-character columns;
 - if empty (a title with no Latin letters or digits), `block-N`,
   `sequence-N` or `item-N` instead;
 - made unique within their parent by `-2`, `-3`, ….
@@ -358,9 +423,14 @@ leaves a draft whose label says "unfinished".
 - The page's only meaningful content is one `<iframe>` whose `src` matches
   `^https://graasta\.com/apps/([a-z0-9-]+)/?$`. Fallback text inside the
   iframe element is ignored.
+- Before matching, a `//…` or `http:` src becomes `https:`, and the host is
+  compared in lowercase without a leading `www.`. A query string or any
+  other path is not a match. (The owner's sample uses only the canonical
+  form.)
 - An iframe to any other site (except the YouTube/Vimeo row above), or an
   iframe inside other content, stays in a page as a plain link
-  (`[<iframe title or host>](<src>)`) and is reported.
+  (`[<iframe title or host>](<src>)`) and is reported. Its `src` goes
+  through the link classifier below like any `href`.
 
 **App file matching.**
 - App file names and Graasta names are both compared in `sanitize_filename`
@@ -386,7 +456,9 @@ leaves a draft whose label says "unfinished".
 - **Superscripts and subscripts:**
   - `<sup>`/`<sub>` holding digits and signs become a formula script, so `R²`
     keeps its meaning: `R<sup>2</sup>` → `R$^{2}$`.
-  - Holding other text, they become `$^{\text{…}}$` / `$_{\text{…}}$`.
+  - Holding other text, they become `$^{\text{…}}$` / `$_{\text{…}}$`, but
+    only when that text has no `\ { } $ % & # ^ _ ~`; otherwise the text is
+    kept as plain text, reported. A test pins both.
   - Digits directly before the formula are pulled into it (see math below).
   - Reported once per course.
 - **Dropped with their content:** `script` and `style`, reported once per
@@ -398,8 +470,10 @@ leaves a draft whose label says "unfinished".
      before any escaping. Text inside `code` and `pre` is left out, as
      MathJax does.
   2. Formula bodies are written verbatim: no Markdown escaping and no entity
-     re-encoding inside them. The one exception is a bare `$`, which is
-     written `\$` so it does not end the formula.
+     re-encoding inside them. Two exceptions: every whitespace run inside a
+     body, newlines included, becomes one space (the converter ignores
+     whitespace outside `\text`, and a body can then never start a Markdown
+     block); and a bare `$` is written `\$` so it does not end the formula.
   3. Then only the text between formulas is escaped.
 - **Text escaping:**
   - Whitespace outside `pre` is collapsed, so no line ever starts with four
@@ -416,8 +490,10 @@ leaves a draft whose label says "unfinished".
     token-based `extract_asset_filenames` guarantees this, and a test pins
     `\[a\](b)` and `` `[x](y)` ``.
 - **Links and images.** Every `href`/`src` is classified:
-  - `http:`, `https:` and `mailto:` links stay. `#…` anchors become their
-    text.
+  - `http:`, `https:` and `mailto:` links stay, written with the scheme in
+    lowercase (`HTTPS://…` → `https://…`), because `extract_asset_filenames`
+    skips only lowercase schemes. A protocol-relative `//host/…` is read as
+    `https://host/…`. `#…` anchors become their text.
   - **Static files.** These forms are static links:
     - `/static/<path>`, `../static/<path>` and `static/<path>`;
     - `/c4x/<org>/<course>/asset/<name>`;
@@ -428,23 +504,36 @@ leaves a draft whose label says "unfinished".
     matched, relative to `static/`, against the source path of an uploaded
     file. A match becomes that file's **target name** from the check, so
     subfolders and `-2` suffixes resolve exactly.
+
+    The same forms are also matched in the path of an absolute `http(s)` URL
+    (a link to the old Open edX site's asset). One that matches no uploaded
+    file, or matches a skipped one, stays a web link and is reported with
+    the URL's host; it never blocks.
   - Anything else (no match, a disallowed file type, `data:`, `tel:`,
     `javascript:`, a relative `page.html`, a bare `www.…`, and root-relative
     Open edX links such as `/jump_to_id/…` or `/courses/…`) keeps its text,
     loses the link, and is reported. An image becomes its alt text.
   - `target` attributes are dropped (Mathion's own external-link rule
     applies).
+  - Link and image destinations are written in `<…>` form, with `<` and `>`
+    percent-encoded, so spaces and parentheses in a URL are safe.
 - **Math** (pages, question text, explanations, choices):
   - `\(…\)` and `[mathjaxinline]…[/mathjaxinline]` → `$…$`.
   - `\[…\]` and `[mathjax]…[/mathjax]` → `$$…$$`. In the middle of a
     paragraph this is display math, which the math feature renders correctly.
   - The math inside is trimmed (`\( x \)` → `$x$`), because Mathion's dollar
-    rule needs no space just inside the `$`. An empty formula is dropped.
+    rule needs no space just inside the `$`. A trailing control space `\ `
+    is removed with the trim (`\( x\ \)` → `$x$`), so a body never ends in a
+    backslash that would escape the closer. It counts as a control space only
+    when an odd run of backslashes precedes the space (`\\ ` at the end is
+    `\\`, kept). An empty formula is dropped.
   - For **inline** formulas only, a whole number touching a formula on either
     side is moved inside it, as matched by `\d+([.,]\d+)*`. So
     `95\(\%\)` → `$95\%$`, and `0.05\(x\)` → `$0.05x$`. Mathion's dollar
     rule refuses a digit next to `$`; `$$` has no digit test.
   - Touching inline formulas are merged into one: `\(a\)\(b\)` → `$a{}b$`.
+    An import test pins that `a{}b` and `\alpha{}b` typeset (the converter
+    reads `{}` as an empty group).
     The same applies to a formula and a sup/sub script, so
     `\(x\)<sup>2</sup>` → `$x^{2}$`. Rev 5 of the math feature never reads a
     `$` next to another `$` as a single-dollar delimiter, so `$a$$b$` would
@@ -461,9 +550,10 @@ leaves a draft whose label says "unfinished".
 An OLX `problem` holds one or more questions. Each response element starts a
 question.
 - **Question text** is HTML → Markdown of all text since the previous
-  response, plus the response's own text children (`label`, `description`,
-  `p`). Studio templates put them inside the response; older exports, like
-  the sample, put them before it as siblings.
+  response, plus the response's own children except those listed under
+  Smaller details › Quizzes (inputs, solution, hints). Studio templates put
+  the text inside the response; older exports, like the sample, put it
+  before it as siblings.
 - **The explanation** is the `<solution>` inside the response or right after
   it, minus a leading paragraph that says only "Explanation".
 - A question whose text comes out empty is skipped and reported.
@@ -539,8 +629,18 @@ question.
   - a linked file or a used app file is over the per-file limit.
 
   An unlinked over-limit file is skipped and reported, without blocking.
-- **Upload errors.** A 4xx refusal of an unlinked file during upload becomes
-  a report line, not a failed import.
+- **Upload errors.**
+  - A refusal (400, 413, 415, 422) of an unlinked file becomes a report
+    line, not a failed import.
+  - A refusal of a linked file or a used app file fails the import at once.
+  - Any other 4xx (401, 403, 404, …) except 409 and 429 fails the import at
+    once; 429 is retried and 409 follows its size rule.
+  - "Fails the import at once" goes straight to the Failed state (Delete or
+    Keep, no Retry). Retry is only for a file that still fails after its
+    retries, or a 409 whose size does not match.
+  - A 4xx after a retry that followed a network error is checked by
+    re-listing the version's assets first: a file now listed with the right
+    size counts as done.
 - `course_image` and other policy-referenced files are not treated specially.
 
 ### The report
@@ -559,21 +659,25 @@ question.
 - **Video:**
   - `start_time` (`HH:MM:SS`) becomes seconds, and a zero start is omitted.
   - YouTube takes `?start=N` on every path; Vimeo takes `#t=Ns`.
+  - Every video URL the import stores is `https:`: a `//…` or `http:` URL is
+    turned into `https:` before the embed rule, in every path above.
   - The cases the TS and Python video tests share live in one fixture file,
     `frontend/src/lib/videoUrlCases.json`, read by both suites.
 - **Static links:**
   - In the `/c4x/` and `asset-v1:` forms, Open edX writes a subfolder `/` as
     `_`, so those are matched against the source path with `/` → `_`.
-  - Link schemes are compared in lowercase (`HTTPS://` is a web link).
+  - Link schemes are compared in lowercase (`HTTPS://` is a web link) and
+    written in lowercase.
 - **Numeric answers:**
   - "tolerance narrowed" is reported when even p = 0 is far tighter than
     the Open edX tolerance (t > 0.5);
   - an answer of 0 is never reported as widened;
   - trailing zeros are normalised before the 10-decimal test;
-  - a range midpoint is rounded to p + 1 decimals.
+  - a range midpoint is rounded to min(p + 1, 10) decimals.
 - **Quizzes:**
   - A question's text takes the response's children except:
-    - the inputs;
+    - the inputs: `choicegroup`, `checkboxgroup`, `optioninput`, `textline`,
+      `formulaequationinput`;
     - `solution`, which becomes the explanation;
     - the hint elements: `correcthint`, `choicehint`, `stringequalhint`,
       `optionhint`, `hintgroup`, `demandhint`;
@@ -590,17 +694,18 @@ question.
     file counts as failed and shows Retry.
   - The build does not repeat a report line for a file the browser already
     reported.
-  - Whitespace-only files under 1 MB are skipped, as the server's
-    `bytes.strip()` refuses them; the browser reads only those. A larger one
-    gets the server's 400 and is handled as an upload refusal.
+  - Files under 1 MB holding only ASCII whitespace are skipped, as the
+    server's `bytes.strip()` refuses them; the browser reads only those. A
+    larger one gets the server's 400 and is handled as an upload refusal.
   - Names with `-N` suffixes stay within 255 characters.
   - Static files are processed sorted by path, so suffixes are stable.
 - **Labels:**
   - Both labels cut the course name, never the date, to fit 200.
   - The date is the browser's local date.
   - The import modal, when opened, lists the course's drafts whose label
-    starts with `Open edX (unfinished):`, each with a Delete button. This
-    is how an abandoned tab's draft is offered for deletion.
+    starts with `Open edX (unfinished):`, each with a Delete button, which
+    uses the same guarded discard. This is how an abandoned tab's draft is
+    offered for deletion.
 - **Item titles:** the base title is cut, never its `(2)` suffix.
 - **Encoding:** a text file that is not valid UTF-8 is skipped and reported.
 
@@ -623,8 +728,8 @@ question.
 
 - Exact modal copy and layout, within the existing modal and form styles.
 - Module boundaries inside `backend/mathion/olx/` and `frontend/src/lib/olx/`.
-- Whether the build call takes the bundle again or the check call returns a
-  token. Re-sending the bundle is the default.
+- Whether the build call takes the bundle again (the body above, the
+  default) or the check call returns a token.
 - **Test fixtures:**
   - a small synthetic course written for the tests, shaped like the sample:
     a few units of each kind, both quiz layouts (sibling and inside the
