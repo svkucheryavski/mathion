@@ -21,8 +21,8 @@ no new dependency.
 - Frontend: Svelte 5, Vite, vitest.
 - Gate: the zsh visual-refresh CSS gate.
 
-**Spec:** `docs/superpowers/specs/2026-11-18-math-typesetting-design.md` (rev 5).
-Plan rev 5 answers Codex round 4 (`\middle` fence, `makeItem` string). Plan rev 4 answers Codex round 3: whole-body structure checks, nested `_tree` with NBSP, nested-script depth, an independent allowlist map, and fixed component examples. Plan rev 3 answers Codex round 2: tree-based sanitiser checks, full structure trees, NBSP for every `\text` space, depth 40/41, executable component tests, and the full browser repeat. Plan rev 2 answers the Codex plan review: executable tests, the real test
+**Spec:** `docs/superpowers/specs/2026-11-18-math-typesetting-design.md` (rev 6).
+Plan rev 6 folds in Task 1's rulings (spec rev 6): the accent forms (`math-acc` class, `\hat` U+02C6, CSS over/underline), the new sanitiser classes, the exact look values, and STIX Two Math. Plan rev 5 answers Codex round 4 (`\middle` fence, `makeItem` string). Plan rev 4 answers Codex round 3: whole-body structure checks, nested `_tree` with NBSP, nested-script depth, an independent allowlist map, and fixed component examples. Plan rev 3 answers Codex round 2: tree-based sanitiser checks, full structure trees, NBSP for every `\text` space, depth 40/41, executable component tests, and the full browser repeat. Plan rev 2 answers the Codex plan review: executable tests, the real test
 helpers, the migration harness, gate section (n), a full three-browser matrix
 in Task 1, and wider converter and sanitiser coverage.
 Every task reads the spec section it names; the spec is binding where this
@@ -363,9 +363,12 @@ STRUCT = [  # each expected string is the whole body inside the top <mrow>
     (r"\max(a,b)", '<mo movablelimits="true" lspace="0em" rspace="0em">max</mo><mo stretchy="false">(</mo><mi>a</mi><mo>,</mo><mi>b</mi><mo stretchy="false">)</mo>'),
     (r"\lim_{n\to\infty}", '<munder><mo movablelimits="true" lspace="0em" rspace="0em">lim</mo><mrow><mi>n</mi><mo>→</mo><mi>∞</mi></mrow></munder>'),
     (r"\operatorname{Var}(X)", '<mi>Var</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>X</mi><mo stretchy="false">)</mo>'),
-    (r"\bar{x}", '<mover accent="true"><mi>x</mi><mo stretchy="false">¯</mo></mover>'),
-    (r"\overline{xy}", '<mover accent="true"><mrow><mi>x</mi><mi>y</mi></mrow><mo stretchy="true">‾</mo></mover>'),
-    (r"\underline{x}", '<munder accentunder="true"><mi>x</mi><mo stretchy="true">̲</mo></munder>'),
+    (r"\bar{x}", '<mover accent="true"><mi>x</mi><mo class="math-acc" stretchy="false">¯</mo></mover>'),
+    (r"\hat{X}", '<mover accent="true"><mi>X</mi><mo class="math-acc" stretchy="false">ˆ</mo></mover>'),
+    (r"\vec{v}", '<mover accent="true"><mi>v</mi><mo stretchy="false">→</mo></mover>'),
+    (r"\widehat{xy}", '<mover accent="true"><mrow><mi>x</mi><mi>y</mi></mrow><mo stretchy="true">̂</mo></mover>'),
+    (r"\overline{xy}", '<mrow class="math-overline"><mi>x</mi><mi>y</mi></mrow>'),
+    (r"\underline{x}", '<mrow class="math-underline"><mi>x</mi></mrow>'),
     (r"\overset{iid}{\sim}", "<mover><mo>∼</mo><mrow><mi>i</mi><mi>i</mi><mi>d</mi></mrow></mover>"),
     (r"\left(\frac{a}{b}\right)", '<mrow><mo stretchy="true" fence="true">(</mo><mfrac><mi>a</mi><mi>b</mi></mfrac><mo stretchy="true" fence="true">)</mo></mrow>'),
     (r"\left.x\right|", '<mrow><mi>x</mi><mo stretchy="true" fence="true">|</mo></mrow>'),
@@ -415,7 +418,8 @@ Also add the `\sqrt`-chain depth case to `test_errors`.
 Every expected string in `CASES` and `STRUCT` is the **whole** body of the
 top `<mrow>`, so a missing argument, a misplaced child or a style leaking past
 its group fails. Also add each remaining accent of the spec's Accents row to
-`STRUCT` as a full body.
+`STRUCT` as a full body: `\tilde \dot \ddot` carry `class="math-acc"`,
+`\widetilde` is `stretchy="true"` U+02DC with no class.
 
 Add these to `test_errors`:
 - `\frac{a}` → "`\frac` needs 2 arguments";
@@ -560,10 +564,13 @@ def test_sanitiser_keeps_mathml_and_drops_unknown_classes():
     out = _clean('<span class="evil math-error" title="r">x</span><math><mi onclick="x">a</mi></math>')
     assert 'class="math-error"' in out and "evil" not in out and "onclick" not in out and 'title="r"' in out
     assert "<math><mi>a</mi></math>" in out
+    out = _clean('<math><mo class="math-acc evil">a</mo><mrow class="math-overline math-underline evil">b</mrow><mi class="math-acc">c</mi></math>')
+    assert '<mo class="math-acc">' in out and '<mrow class="math-overline math-underline">' in out
+    assert "evil" not in out and '<mi class' not in out
 
 SANITISE = ACCEPTANCE + [r"\binom{n}{k}", r"\big(\dfrac{a}{b}\big)", r"\underline{x}",
     r"\lim_{n\to\infty}", r"a\,b", r"\sqrt[3]{x}", r"\text{a b}", r"\mathrm{d}x", r"\tfrac12",
-    r"\left(-x\right)", r"\hat{\beta}", r"\sum\limits_i"]
+    r"\left(-x\right)", r"\hat{\beta}", r"\sum\limits_i", r"\overline{x}", r"\bar{x}"]
 
 def _tree(markup):                       # nested tags, attributes, exact text and tails
     def walk(e):
@@ -640,8 +647,9 @@ Expected: the new tests FAIL; old wrapper output is still produced.
   - **Sanitiser maps:**
     - add the per-tag MathML map from the spec;
     - remove `class` from `span`/`div` attributes;
-    - `_ALLOWED_CLASSES` gains `span: {math-display, math-error}` and
-      `div: {math-display, math-error}`.
+    - `_ALLOWED_CLASSES` gains `span: {math-display, math-error}`,
+      `div: {math-display, math-error}`, `mo: {math-acc}` and
+      `mrow: {math-overline, math-underline}`.
   - **Asset extraction:** `extract_asset_filenames` reads `link_open` and
     `image` tokens from `_md.parse(text)` instead of the raw `_LINK_REF`
     regex. That way math, code spans, `pre` and escaped brackets never count
@@ -882,9 +890,8 @@ git commit -m "feat(math): show typeset answer choices"
 ### Task 7: Look, font and caching
 
 **Files:**
-- Create: `frontend/src/styles/fonts/<chosen-math-font>.woff2` (STIX Two
-  Math) or `.otf` (Latin Modern Math, per Task 1's ruling), with its licence
-  file next to it.
+- Create: `frontend/src/styles/fonts/STIXTwoMath-Regular.woff2` (Task 1's
+  ruling: STIX Two Math) with its licence `STIXTwoMath-OFL.txt` next to it.
 - Create: `docs/release-notes/math-typesetting.md` (one paragraph: "re-save
   or re-publish to typeset existing formulas").
 - Modify:
@@ -892,10 +899,15 @@ git commit -m "feat(math): show typeset answer choices"
   - `frontend/src/styles/content.css`: add top-level rules for `math`,
     `.math-display` (div and span), `.math-display > math`, `.math-error` and
     `.prose p:has(math)`, and add `div.math-display, div.math-error` to the
-    four `.prose :where(…, div.math)` spacing lists, keeping `div.math`;
+    four `.prose :where(…, div.math)` spacing lists, keeping `div.math`.
+    Values from Task 1: `.math-display` `padding-block: 0.5em`;
+    `.prose p:has(math)` `padding: 0.35em 4px; margin-inline: -4px`;
+    `mrow.math-overline { border-top: 0.06em solid; padding-top: 0.08em }`,
+    `mrow.math-underline { border-bottom: 0.06em solid; padding-bottom: 0.08em }`;
+    `@supports (font: -apple-system-body) { mo.math-acc { position: relative; top: 0.2em } }`;
   - `SingleChoiceQuestion.svelte` / `MultiChoiceQuestion.svelte`:
-    `.opt-text { overflow-x: auto; min-width: 0 }`;
-  - `ChoiceRow.svelte`: `.ans-text` overflow;
+    `.opt-text { overflow-x: auto; min-width: 0; padding-block: 0.35em }`;
+  - `ChoiceRow.svelte`: `.ans-text` overflow and `padding-block: 0.35em`;
   - `frontend/src/components/editor/MarkdownEditor.svelte`:
     `.preview :global(.math-error)::after { display: block; content: attr(title); }`;
   - `frontend/scripts/visual-refresh-gate.sh`:

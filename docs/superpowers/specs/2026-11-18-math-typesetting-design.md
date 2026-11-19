@@ -1,4 +1,4 @@
-# Math typesetting — design (rev 5)
+# Math typesetting — design (rev 6)
 
 Rev 2 answered the builder check: the stricter dollar rule (owner's call), and
 no backfill before the beta, per the owner's recorded rule VR-B12.
@@ -18,6 +18,13 @@ Rev 5 folds in the rev 4 re-review: `$$` has no space or digit tests, and a
 `$` next to another `$` never opens or closes a single-dollar formula; the
 block wrapper's fall-through cleanup; plain component selectors; the gate's
 choice-template pins; and small look details.
+Rev 6 records the font task (plan Task 1) in Chrome, Firefox and Safari. The
+owner picked STIX Two Math. `\hat` uses U+02C6, because U+005E hits capitals.
+`\widehat` uses U+0302. Safari draws narrow accents 0.2em too high, so they
+get a marker class and a Safari-only nudge. `\overline` and `\underline`
+become a CSS line on an `mrow`, because their stretchy glyphs break in Safari
+and in Latin Modern. Exact paddings: 0.35em on inline boxes, 0.5em on display
+math, 4px inline on `p:has(math)` for the focus ring.
 
 ## Intent
 
@@ -152,7 +159,7 @@ Safari render MathML natively, so the browser loads no script.
 | Functions | `\log \ln \lg \exp \sin \cos \tan \cot \sec \csc \arcsin \arccos \arctan \sinh \cosh \tanh \det \dim \ker \deg \hom \arg \Pr \gcd`, `\operatorname{Var}` | `<mi>` (multi-letter, so upright) + `<mo>` U+2061. U+2061 follows the whole scripted unit (`<msub><mi>log</mi><mn>2</mn></msub><mo>⁡</mo>`). An `<mspace width="0.1667em"/>` follows unless the next token is an opening or closing bracket, `\left`, a relation, punctuation, or the end of the group |
 | Limit-style functions | `\lim \limsup \liminf \max \min \sup \inf \argmax \argmin` | `<mo movablelimits="true" lspace="0em" rspace="0em">lim</mo>` (not in the operator dictionary, so spacing is set explicitly; no U+2061) with `<munder>` like `\sum`; the same `<mspace>` rule as functions follows |
 | Unary signs | `+ - \pm \mp` at the start of a group, or after an opening bracket, a relation, an operator, punctuation, a function, a big operator or `\left` | `<mo lspace="0em" rspace="0em">` (TeX's rule). A braced group of one operator (`0{,}05`) is spaced the same way |
-| Accents | `\bar` (U+00AF), `\overline` (U+203E, stretchy), `\hat` (U+005E), `\widehat` (stretchy), `\tilde` (U+02DC), `\widetilde` (stretchy), `\vec` (U+2192), `\dot` (U+02D9), `\ddot` (U+00A8), `\underline` (U+0332, stretchy) | `<mover accent="true">` / `<munder accentunder="true">`; non-wide accents `stretchy="false"` |
+| Accents | `\bar` (U+00AF), `\hat` (U+02C6), `\tilde` (U+02DC), `\dot` (U+02D9), `\ddot` (U+00A8), `\vec` (U+2192), `\widehat` (U+0302, stretchy), `\widetilde` (U+02DC, stretchy; only Firefox stretches it, others show a normal tilde); `\overline` / `\underline` | `<mover accent="true">base<mo stretchy="false">…</mo></mover>`; the five narrow accents `\bar \hat \tilde \dot \ddot` add `class="math-acc"` to their `mo` (Safari nudge, see Look), `\vec` does not; wide accents `stretchy="true"`; `\overline{x}` → `<mrow class="math-overline">x</mrow>`, `\underline{x}` → `<mrow class="math-underline">x</mrow>` (a CSS line, no glyph) |
 | Stacked | `\overset{a}{b}`, `\underset{a}{b}`, `\stackrel{a}{b}` | `<mover>` / `<munder>` |
 | Growing brackets | `\left( … \right)`, also `[ ] \{ \} \| \vert \Vert \langle \rangle \lfloor \rfloor \lceil \rceil .` and `\middle\|` | `<mrow>` with `<mo stretchy="true" fence="true">`; `\left.`/`\right.` emit nothing |
 | Fixed big brackets | `\big \Big \bigg \Bigg` (+ `l`/`r` forms) before a bracket | `<mo stretchy="true" minsize="1.2em/1.8em/2.4em/3em" maxsize="…">` |
@@ -252,7 +259,8 @@ never a 500.
     - `mspace`: `width`
   - **Classes:**
     - `class` moves from the `span`/`div` attribute sets to `allowed_classes`
-      (`span: {math-display, math-error}`, `div: {math-display, math-error}`, plus the
+      (`span: {math-display, math-error}`, `div: {math-display, math-error}`,
+      `mo: {math-acc}`, `mrow: {math-overline, math-underline}`, plus the
       existing `ul`/`ol: {loose}`).
     - ammonia panics if `class` is in both maps.
   - **`title`** survives through nh3's generic attributes (checked with
@@ -343,13 +351,15 @@ never a 500.
 ### Font and caching
 
 - One free OpenType math font is bundled as a `woff2` file under
-  `frontend/src/styles/fonts/`, with its licence. GUST publishes Latin Modern
-  Math only as `.otf`, and converting it would need a tool Mathion does not
-  have. So if the owner picks it, the upstream `.otf` ships instead (rev 5
-  note, from the plan review). It is cached immutably and loaded only on
-  pages with formulas.
+  `frontend/src/styles/fonts/`, with its licence. It is cached immutably and
+  loaded only on pages with formulas.
+  - **Chosen (owner, rev 6): STIX Two Math**, `STIXTwoMath-Regular.woff2`
+    from the stipub/stixfonts tag `v2.13b171`
+    (`fonts/static_otf_woff2/`), 551 908 bytes, sha256
+    `094191335def3f0452c81ec0713cfc2f29bb6af8cecbf79b60881fbf2db97562`;
+    licence `OFL.txt` from the same tag.
   - It is declared in `fonts.css` with `font-display: swap`, and used by
-    `math { font-family: "<chosen>", math }` only. Where the browser supports
+    `math { font-family: "STIX Two Math", math }` only. Where the browser supports
     the generic `math` family, it covers the swap period with a system math
     font. Formulas shift once on the first visit,
     then the font comes from the cache.
@@ -398,9 +408,22 @@ never a 500.
   - List items, table cells and headings get no overflow rule, because it
     would hide outside list markers. A long inline formula there can widen
     the line; authors use display math for long formulas.
-  - If the first browser task finds link focus rings clipped in such a
-    paragraph, the rule adds 3px inline padding with a matching negative
-    margin.
+  - The first browser task found a link focus ring at the start of such a
+    paragraph clipped (the app ring reaches 4px out), so the rule adds
+    `padding-inline: 4px` with `margin-inline: -4px`.
+  - `.prose p:has(math)`, `.opt-text` and `.ans-text` get
+    `padding-block: 0.35em`; at 0.3em an inline `\dfrac` still overflows
+    by 1px in STIX.
+- **Accents in Safari:** WebKit places a non-stretchy `mover` accent about
+  0.2em too high, in every font; Chrome and Firefox are right. `content.css`
+  adds `@supports (font: -apple-system-body) { mo.math-acc { position:
+  relative; top: 0.2em } }`. Only Safari (every WebKit) supports that font
+  keyword. If WebKit fixes its layout, the accents would touch their base;
+  the fix is to drop the rule.
+- **Over- and underline:** `mrow.math-overline { border-top: 0.06em solid;
+  padding-top: 0.08em }`, `mrow.math-underline { border-bottom: 0.06em solid;
+  padding-bottom: 0.08em }`. Screen readers lose the word "overline"; the
+  TeX annotation keeps it.
 - **Display math** (`.math-display`, both the `div` and the in-paragraph
   `span`; the span adds `display: block` and margins `var(--space-2) 0`):
   - centred;
@@ -410,7 +433,7 @@ never a 500.
     sideways inside its own box;
   - `.math-display > math { width: max-content; margin-inline: auto }`, so
     an over-wide formula starts at the left edge and stays reachable;
-  - a small `padding-block`, so `overflow-y: hidden` does not clip accents
+  - `padding-block: 0.5em`, so `overflow-y: hidden` does not clip accents
     or integral signs;
   - if the first browser task finds a browser ignoring `width` on `<math>`,
     the fallback is `.math-display { display: flex; justify-content: safe center }`.
