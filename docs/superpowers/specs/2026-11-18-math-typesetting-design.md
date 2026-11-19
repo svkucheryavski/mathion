@@ -1,4 +1,4 @@
-# Math typesetting — design (rev 6)
+# Math typesetting — design (rev 7)
 
 Rev 2 answered the builder check: the stricter dollar rule (owner's call), and
 no backfill before the beta, per the owner's recorded rule VR-B12.
@@ -25,6 +25,13 @@ get a marker class and a Safari-only nudge. `\overline` and `\underline`
 become a CSS line on an `mrow`, because their stretchy glyphs break in Safari
 and in Latin Modern. Exact paddings: 0.35em on inline boxes, 0.5em on display
 math, 4px inline on `p:has(math)` for the focus ring.
+Rev 7 records the Task 2 review. Operators inside scripts are tight, as in
+LaTeX (owner). A typed symbol gives the same node as its command. `\partial`
+and `\nabla` are upright. The ellipses, `\$`, `\#` and `.` get no
+operator spacing. Input is NFC-normalised and invisible format characters
+are dropped. Other control characters are an error. Typed brackets
+(`⟨ ⌊ ‖`) act like their commands; a pasted en dash is a minus and a curly
+apostrophe a prime.
 
 ## Intent
 
@@ -130,7 +137,10 @@ Safari render MathML natively, so the browser loads no script.
     or not, so `\sqrt\sqrt\sqrt…` and nested scripts `x^{x^{…}}` hit the limit before Python's
     recursion limit.
 - **Whitespace:** spaces and newlines between tokens are ignored, as in LaTeX,
-  except inside `\text{…}`.
+  except inside `\text{…}`. A backslash before a space or newline is a
+  control space. Before parsing, the source is NFC-normalised and invisible
+  format characters (U+200B, U+FEFF) are dropped, except the joiners
+  U+200C/U+200D that `\text` needs; the annotation keeps it as typed.
 - **Unbraced arguments:** an unbraced argument of a script or command is one
   character or one command, as in LaTeX. So `\frac12` = ½, `\sqrt2`, `x^\alpha`
   and `x^10` = x¹0. The tokeniser splits a number when it is taken as an
@@ -141,15 +151,15 @@ Safari render MathML natively, so the browser loads no script.
 
 | Kind | LaTeX | MathML |
 |---|---|---|
-| Letters | `a`–`z`, `A`–`Z`, and any other Unicode letter (`μ`, `æ`, `ж`) typed directly | `<mi>`, italic by default; a non-Latin letter gets `mathvariant="normal"` except Greek lowercase |
+| Letters | `a`–`z`, `A`–`Z`, and any other Unicode letter (`μ`, `æ`, `ж`) typed directly | `<mi>`, italic by default; a non-Latin letter gets `mathvariant="normal"` except Greek lowercase (any lowercase Greek letter, accented or symbol forms too; the micro sign `µ` becomes `μ`) |
 | Numbers | `12`, `3.14` | one `<mn>` per number (split when taken as an unbraced argument) |
-| Operators, relations, punctuation | `+ - = < > ( ) [ ] , ; : ! / . * ? "` and the vertical bar, and any other non-letter Unicode symbol typed directly (`≤`, `−`, `±`) | `<mo>`; `-` → U+2212; `/` and a plain bar are ordinary symbols (`lspace="0em" rspace="0em"`), as in TeX, so `-t^2/2` and `P(\lvert Z\rvert<z)` keep tight spacing |
+| Operators, relations, punctuation | `+ - = < > ( ) [ ] , ; : ! / . * ? "` and the vertical bar, and any other non-letter Unicode symbol typed directly (`≤`, `−`, `±`) | `<mo>`; `-` → U+2212, `*` → ∗ U+2217; `/`, `.` and a plain bar are ordinary symbols (`lspace="0em" rspace="0em"`), as in TeX, so `-t^2/2` and `P(\lvert Z\rvert<z)` keep tight spacing. A typed symbol from the Symbols row gives the same node as its command (`∞` → `<mi>∞</mi>`, `°` is ordinary); any other typed maths symbol (Unicode Sm, such as `≲` or `⊕`) is a binary operator, and the rest are ordinary (`lspace="0em" rspace="0em"`, so `5€` stays tight) |
 | Brackets | plain `( ) [ ] \{ \}` and the bar character, `\langle \rangle \lfloor \rfloor \lceil \rceil \vert \Vert \lvert \rvert \lVert \rVert`, and backslash-bar (the LaTeX double bar ‖) | `<mo stretchy="false">`; they never grow. Every bar form also gets `lspace="0em" rspace="0em"` |
 | Primes | `f'`, `f''`, `f'''`, `x_i'`, `f'^2` | `<msup>` with ′ ″ ‴; a prime merges with a following `^` (`<msup>` with `<mrow>′ 2</mrow>`) and with a preceding `_` (`<msubsup>`) |
 | Greek | `\alpha`…`\omega` and `\Gamma`…`\Omega` | `<mi>`; capitals get `mathvariant="normal"` (upright) |
 | Greek variants | `\epsilon` → ϵ U+03F5, `\varepsilon` → ε U+03B5, `\phi` → ϕ U+03D5, `\varphi` → φ U+03C6, `\vartheta` → ϑ, `\varrho` → ϱ, `\varsigma` → ς, `\varpi` → ϖ | `<mi>` |
-| Symbols | `\approx \neq \ne \leq \le \geq \ge \ll \gg \lt \gt \pm \mp \times \cdot \div \ast \star \infty \partial \nabla \sim \simeq \cong \equiv \propto \in \notin \ni \subset \subseteq \supset \supseteq \cup \cap \setminus \emptyset \varnothing \forall \exists \neg \lnot \land \lor \wedge \vee \to \rightarrow \leftarrow \Rightarrow \Leftarrow \Leftrightarrow \iff \implies \mapsto \mid \parallel \perp \top \bot \ell \hbar \ldots \cdots \dots \vdots \ddots \prime \circ \degree \bullet` | `<mo>`, or `<mi>` for `\infty \partial \nabla \emptyset \ell \hbar \top \bot` (upright), with the Unicode character |
-| Scripts | `x^2`, `x_i`, `x_i^2`, `x^{n+1}`, `{}^{14}C`, `^2` at the start | `<msup>`, `<msub>`, `<msubsup>`; an empty base is `<mrow/>` |
+| Symbols | `\approx \neq \ne \leq \le \geq \ge \ll \gg \lt \gt \pm \mp \times \cdot \div \ast \star \infty \partial \nabla \sim \simeq \cong \equiv \propto \in \notin \ni \subset \subseteq \supset \supseteq \cup \cap \setminus \emptyset \varnothing \forall \exists \neg \lnot \land \lor \wedge \vee \to \rightarrow \leftarrow \Rightarrow \Leftarrow \Leftrightarrow \iff \implies \mapsto \mid \parallel \perp \top \bot \ell \hbar \ldots \cdots \dots \vdots \ddots \prime \circ \degree \bullet` | `<mo>`, or `<mi>` for `\infty \partial \nabla \emptyset \varnothing \ell \hbar \top \bot` (upright; `\partial` and `\nabla` carry `mathvariant="normal"`, since browsers italicise them), with the Unicode character. `\ldots \cdots \dots` get `lspace="0em" rspace="0em"`, so the neighbouring comma or `+` sets the gap, as in LaTeX |
+| Scripts | `x^2`, `x_i`, `x_i^2`, `x^{n+1}`, `{}^{14}C`, `^2` at the start | `<msup>`, `<msub>`, `<msubsup>`; an empty base is `<mrow/>`. Binary, relation and punctuation operators inside a script get `lspace="0em" rspace="0em"`, as in LaTeX (owner, rev 7): `\chi^2_{n-1}`, `\sum_{i=1}^n` |
 | Fractions | `\frac{a}{b}`, `\dfrac`, `\tfrac`, `{a \over b}` | `<mfrac>`; `\dfrac`/`\tfrac` wrap it in `<mstyle displaystyle="true"/"false">` |
 | Binomial | `\binom{n}{k}`, `{n \choose k}` | `<mrow><mo>(</mo><mfrac linethickness="0">…</mfrac><mo>)</mo></mrow>`; these brackets stretch |
 | Roots | `\sqrt{x}`, `\sqrt[3]{x}` | `<msqrt>`, `<mroot>` (base first, then index) |
@@ -163,10 +173,10 @@ Safari render MathML natively, so the browser loads no script.
 | Stacked | `\overset{a}{b}`, `\underset{a}{b}`, `\stackrel{a}{b}` | `<mover>` / `<munder>` |
 | Growing brackets | `\left( … \right)`, also `[ ] \{ \} \| \vert \Vert \langle \rangle \lfloor \rfloor \lceil \rceil .` and `\middle\|` | `<mrow>` with `<mo stretchy="true" fence="true">`; `\left.`/`\right.` emit nothing |
 | Fixed big brackets | `\big \Big \bigg \Bigg` (+ `l`/`r` forms) before a bracket | `<mo stretchy="true" minsize="1.2em/1.8em/2.4em/3em" maxsize="…">` |
-| Text | `\text{…}` (any Unicode, spaces kept), `\mbox{…}` | `<mtext>` |
+| Text | `\text{…}` (any Unicode, spaces kept), `\mbox{…}` | `<mtext>`; bare braces inside are grouping only; `\, \: \;` give a thin space, `\quad` an em space, `\!` nothing |
 | Letter fonts | `\mathrm \mathit \mathbf \boldsymbol \mathbb \mathcal \mathsf \mathtt` | The content is math (scripts allowed, spaces ignored); the font is applied to its letters. `\mathrm{Var}` → `<mi>Var</mi>`; `\mathrm{d}` → `<mi mathvariant="normal">d</mi>`; other fonts map letters to Unicode Mathematical Alphanumeric Symbols, including the Letterlike gaps (ℝℂℕℚℤℍℙ, ℬℰℱℋℐℒℳℛ, italic ℎ). `\boldsymbol` gives bold italic for italic letters and bold upright for upright capital Greek; `\mathbf` leaves lowercase Greek unbolded, as LaTeX does |
 | Spacing | `\, \: \; \quad \qquad \!`, `\ ` and `~` | `<mspace width=…>` (`\!` is negative; Chrome ignores it, which is harmless) |
-| Escapes | `\{ \} \$ \% \& \# \_` | the character |
+| Escapes | `\{ \} \$ \% \& \# \_` | the character; `\{ \}` are plain brackets; `\$` and `\#` get `lspace="0em" rspace="0em"` |
 
 **Errors.** Each of these raises a `LatexError` naming the problem:
 
@@ -181,6 +191,8 @@ Safari render MathML natively, so the browser loads no script.
 | `\left` without `\right` (or the reverse) | "missing `\right`" |
 | an empty formula | "empty formula" |
 | a bare `&`, `#` or `%` inside math | "write `\&` for a literal `&`" (likewise `\#`, `\%`) |
+| a missing script argument (`x^`) | "`^` needs 1 argument" |
+| a control, private-use or unassigned character, or a combining mark with no letter to join (`x` + U+0302) | "unsupported character U+0001" |
 
 Any other exception inside the converter is caught by the render rule and
 shown as the error span, with the reason "formula could not be read". It is
