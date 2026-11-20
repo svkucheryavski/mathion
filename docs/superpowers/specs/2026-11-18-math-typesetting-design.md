@@ -1,4 +1,4 @@
-# Math typesetting — design (rev 12)
+# Math typesetting — design (rev 13)
 
 Rev 2 answered the builder check: the stricter dollar rule (owner's call), and
 no backfill before the beta, per the owner's recorded rule VR-B12.
@@ -50,6 +50,8 @@ Rev 10 (owner's round after the Task 3 commit): explicit styles reset the script
 Rev 11 (Task 4 review): a formula never ends inside a code span (owner), so `The fee is $5. In R use `df$col`` keeps its code; a `$$` block stops at a list item's edge; a trailing control space (`a\ `) is kept.
 
 Rev 12 (Task 8 browser pass): WebKit list-marker rules (the first paragraph of an item gets no scroll box; a display formula opening an item is an inline-block), `overflow-y: hidden` on the inline scroll boxes, and the preview reason inline after a failed in-sentence formula (owner).
+
+Rev 13 (whole-branch review): choices skip the code-span check, since backticks are plain text there.
 
 ## Intent
 
@@ -335,6 +337,8 @@ never a 500.
     Mathion's inline dollar rule, called with `renderInline`, then `_clean`;
   - so the text is escaped, each `$…$` becomes inline MathML (same converter,
     same error span, same dollar rule), and `\$` is a literal dollar;
+  - backticks are plain text: choices have no code spans, so the dollar
+    rule skips its code-span check (whole-branch review);
   - `$$…$$` in an option renders inline (options are one line);
   - no other Markdown;
   - the `escape` rule also turns `\*` into `*`.

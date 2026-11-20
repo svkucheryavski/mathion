@@ -269,14 +269,14 @@ def _in_code(src: str, start: int, end: int) -> bool:
     return False
 
 
-def math_inline_rule(state: StateInline, silent: bool) -> bool:
+def math_inline_rule(state: StateInline, silent: bool, code_spans: bool = True) -> bool:
     """Mathion's dollar rule: `$$…$$` first, then a pandoc-like `$…$`."""
     src, pos = state.src, state.pos
     if src[pos] != "$":
         return False
     if src.startswith("$$", pos):
         close = _next_dollar(src, pos + 2, "$$")
-        if close == -1 or _in_code(src, pos + 2, close):
+        if close == -1 or (code_spans and _in_code(src, pos + 2, close)):
             return False                              # an unclosed $$ stays text
         kind, mark = "math_inline_double", "$$"
     else:
@@ -286,7 +286,7 @@ def math_inline_rule(state: StateInline, silent: bool) -> bool:
         if (pos and _digit(src[pos - 1])) or not after or after.isspace():
             return False
         close = _next_dollar(src, pos + 1, "$")
-        if close == -1 or close >= state.posMax or src[close - 1].isspace() or _in_code(src, pos + 1, close):
+        if close == -1 or close >= state.posMax or src[close - 1].isspace() or (code_spans and _in_code(src, pos + 1, close)):
             return False
         if close + 1 < len(src) and (src[close + 1] == "$" or _digit(src[close + 1])):
             return False
@@ -443,7 +443,7 @@ def render_markdown(text: str | None) -> str:
 
 
 _opt = MarkdownIt("zero")
-_opt.inline.ruler.push("math_inline", math_inline_rule)
+_opt.inline.ruler.push("math_inline", lambda st, sl: math_inline_rule(st, sl, code_spans=False))   # backticks are text here
 _opt.enable(["escape", "text", "math_inline"])
 _opt.add_render_rule("math_inline", _render_inline)
 _opt.add_render_rule("math_inline_double",           # inline, but a broken one shows its $$

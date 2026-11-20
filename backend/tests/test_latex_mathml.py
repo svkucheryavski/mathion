@@ -1264,3 +1264,60 @@ def test_operatorname_keeps_one_function_mark():
 
 def test_stack_over_a_spaced_sum_keeps_the_top_above():
     assert "<mi></mi></mrow><mi>a</mi></mover>" in latex_to_mathml(r"\overset{a}{\sum\,}", False)
+
+
+_ATOMS = ["x", "1", "23.5", r"\alpha", r"\Gamma", "é", r"\infty", "+", "-", "=", ",", "|", "(", ")", "[", "]", r"\{",
+          r"\}", "<", r"\le", "'", r"\,", r"\quad", r"\ldots", r"\$", "∑", "⟨", "−", r"\lvert", r"\langle", r"\sin",
+          r"\lim", r"\max", r"\sum", r"\int", r"\det", r"\colon", r"\not=", r"\mid"]
+
+
+def _grammar(rng, d=0):
+    if d > 8 or rng.random() < 0.3:
+        return rng.choice(_ATOMS)
+    def arg():
+        return "{" + _grammar(rng, d + 1) + "}" if rng.random() < .6 else " " + rng.choice(["x", "2", r"\alpha", r"\frac12"])
+    forms = [
+        lambda: "{" + _grammar(rng, d + 1) + "}^" + arg() + "_" + arg(),
+        lambda: rng.choice([r"\frac", r"\dfrac", r"\tfrac", r"\binom", r"\overset", r"\underset", r"\stackrel"]) + arg() + arg(),
+        lambda: r"\sqrt[" + _grammar(rng, d + 1) + "]" + arg(),
+        lambda: "{" + _grammar(rng, d + 1) + rng.choice([r" \over ", r" \choose "]) + _grammar(rng, d + 1) + "}",
+        lambda: r"\left" + rng.choice(["(", "[", "|", ".", r"\langle"]) + _grammar(rng, d + 1)
+                + rng.choice(["", r"\middle|"]) + r"\right" + rng.choice([")", "]", ".", r"\rangle"]),
+        lambda: rng.choice([r"\big", r"\Bigg", r"\bigl", r"\bigm"]) + rng.choice(["(", "|", r"\|", r"\{"]),
+        lambda: rng.choice([r"\hat", r"\vec", r"\widehat", r"\overline", r"\underline", r"\ddot"]) + arg(),
+        lambda: rng.choice([r"\mathrm", r"\mathbf", r"\bm", r"\boldsymbol", r"\mathbb", r"\mathcal", r"\mathsf"]) + arg(),
+        lambda: r"\operatorname" + rng.choice(["", "*"]) + "{" + rng.choice(["Var", "f-g", r"\bm{a.}", "f'"]) + "}_" + arg(),
+        lambda: rng.choice([r"\sum", r"\int", r"\lim"]) + rng.choice(["", r"\limits", r"\nolimits"]) + "_" + arg() + "^" + arg(),
+        lambda: r"\text{" + rng.choice(["if ", "a {b} c", "é 😀"]) + "}",
+        lambda: rng.choice([r"\displaystyle ", r"\textstyle "]) + _grammar(rng, d + 1),
+        lambda: _grammar(rng, d + 1) + "'" * rng.randrange(1, 4) + "^2",
+    ]
+    return " ".join(rng.choice(forms)() for _ in range(rng.randrange(1, 3)))
+
+
+def _events(markup):
+    """Tags, attributes and decoded text, so <a/> equals <a></a> and entities equal their characters."""
+    from html.parser import HTMLParser
+    out = []
+    class P(HTMLParser):
+        def handle_starttag(self, tag, attrs): out.append(("<", tag, sorted(attrs)))
+        def handle_endtag(self, tag): out.append(("/", tag))
+        def handle_startendtag(self, tag, attrs): self.handle_starttag(tag, attrs); self.handle_endtag(tag)
+        def handle_data(self, data): out.append(("t", data))
+    P().feed(markup)
+    return out
+
+
+def test_grammar_fuzz_gives_mathml_the_sanitiser_keeps():
+    from mathion.markdown import _clean
+    rng, typeset = random.Random(2011), 0
+    for _ in range(400):
+        src = _grammar(rng)
+        try:
+            out = latex_to_mathml(src, display=bool(rng.getrandbits(1)))
+        except LatexError:
+            continue
+        typeset += 1
+        ET.fromstring(out)
+        assert _events(_clean(out)) == _events(out), src   # the sanitiser strips nothing
+    assert typeset > 200                                 # the grammar mostly builds valid formulas

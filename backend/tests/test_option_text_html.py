@@ -169,3 +169,9 @@ def test_publish_locks_the_questions_before_any_item_or_answer_row(admin_client,
     first_item = next(i for i, q in enumerate(seen) if q.startswith("UPDATE items"))
     write = next(i for i, q in enumerate(seen) if q.startswith("UPDATE answer_options"))
     assert lock < first_item < write
+
+
+def test_option_text_backticks_are_plain_text():          # choices have no code spans
+    got = render_option_text("$\\text{it`s}$ or `x`")
+    assert got.startswith("<math") and got.endswith(" or `x`")
+    assert render_option_text("$a`b$ c`").startswith("<math")   # a code span would have hidden the closer
