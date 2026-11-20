@@ -92,7 +92,7 @@
   .ans-mark.multi { border-radius: 3px; }
   .ans-mark.on { border-color: var(--status-accepted-fg); background: var(--status-accepted-fg); }
   .ans-mark:focus-visible, .ans-edit:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-  .ans-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; overflow-x: auto; padding-block: 0.35em; }
+  .ans-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; overflow-x: auto; overflow-y: hidden; padding-block: 0.35em; }
   .ans-edit { border: 0; padding-inline: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: text; }
   .ans-edit:disabled { cursor: default; }
   .ans-ok { flex: 0 0 auto; font-size: 11px; font-weight: 500; }

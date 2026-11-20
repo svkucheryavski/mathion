@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3109
+EXPECTED_CHECKS=3113
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -428,9 +428,9 @@ GLOBAL_ALLOW = {
     # components render INSIDE a .q-block, a level below, so it never reaches
     # them. :global so EmptyState's root (the empty-quiz branch) keeps the cap.
     ('src/components/items/QuizItem.svelte', '*'),
-    # Math plan T7: the editor preview shows a failed formula's reason under it.
-    # Descendant of the hashed `.preview`, which holds only the preview HTML, never a quiz.
-    ('src/components/editor/MarkdownEditor.svelte', '.math-error'),
+    # Math plan T7/T8: the preview shows a failed formula's reason (only preview HTML, never a quiz).
+    ('src/components/editor/MarkdownEditor.svelte', 'div.math-error'),
+    ('src/components/editor/MarkdownEditor.svelte', 'span.math-error'),
 }
 def global_payloads(style):
     """(payload, …) for every `:global(...)` and `:global{…}`, balanced."""
@@ -546,6 +546,7 @@ else:
 # Beta round T8: `.new-tab-note`, the hidden "(opens in a new tab)", left out of copied text. +1 rule (54 -> 55).
 # Beta round T9: forced colours grey a disabled field (GrayText); the components' own greys are dropped there. +1 rule (55 -> 56).
 # Math plan T7: content.css gains the 12 maths rules (font, display, error, lines, accents); the four spacing lists add div.math-display/div.math-error with unchanged declarations. +12 rules (56 -> 68).
+# Math plan T8: a display formula that opens a list item is an inline-block (WebKit marker). +1 rule (68 -> 69).
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.live-slot:empty', 'bb6a43fd'),
     ('', '.math-display', 'e509f3e9'), ('', '.math-display>math', '6e31cced'), ('', '.math-error', '380f2da4'),
@@ -569,7 +570,7 @@ WANT_FULL = [
     ('', '.prose h5', 'a838c678'),
     ('', '.prose h6', 'fdbae480'),
     ('', '.prose hr', 'a216bc6c'),
-    ('', '.prose ol>li', 'd67e9248'),
+    ('', '.prose li>.math-display:first-child,.prose li>:is(p,blockquote):first-child>.math-display:first-child', '9532048b'), ('', '.prose ol>li', 'd67e9248'),
     ('', '.prose pre', 'bd339863'),
     ('', '.prose pre code', 'f4859c1f'),
     ('', '.prose ul>li', '20d7366f'),
@@ -582,7 +583,7 @@ WANT_FULL = [
     ('', '.prose>:last-child,.prose :where(li,blockquote)>:last-child', 'ef0b7a11'),
     ('', '.vh', 'b2efbc30'),
     ('', ':focus-visible', 'ebbf7147'),
-    ('', ':is(.prose.compact,.prose) p:has(math)', '68cd2a9a'),
+    ('', ':is(.prose.compact,.prose) p:has(math):not(li>p:first-child,li>blockquote:first-child>p:first-child)', '06fbf886'),
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible', '1684b043'),
     ('', ':root', '0ca50118'),
     ('', '[tabindex="-1"]:focus-visible', 'f9b4dcdb'),
@@ -631,8 +632,8 @@ WANT_ORDER = [
     ('', '.prose :where(ul,ol)'), ('', '.prose ul>li'), ('', '.prose ol>li'),
     ('', '.prose blockquote'), ('', '.prose hr'), ('', '.prose code'),
     ('', '.prose pre'), ('', '.prose pre code'), ('', '.prose a'), ('', '.prose a:hover'),
-    ('', 'math'), ('', ':is(.prose.compact,.prose) p:has(math)'), ('', '.math-display'), ('', 'span.math-display'),
-    ('', '.math-display>math'), ('', '.math-error'), ('', 'mrow.math-overline'), ('', 'mrow.math-underline'),
+    ('', 'math'), ('', ':is(.prose.compact,.prose) p:has(math):not(li>p:first-child,li>blockquote:first-child>p:first-child)'), ('', '.math-display'), ('', 'span.math-display'),
+    ('', '.math-display>math'), ('', '.prose li>.math-display:first-child,.prose li>:is(p,blockquote):first-child>.math-display:first-child'), ('', '.math-error'), ('', 'mrow.math-overline'), ('', 'mrow.math-underline'),
     ('', 'mo.math-acc'), ('', 'mo.math-vec'),
     ('@supports (font:-apple-system-body)', 'mo.math-acc'), ('@supports (font:-apple-system-body)', 'mo.math-vec'),
 ]
@@ -3086,7 +3087,7 @@ def want(h, ctl_radius, selected_ctl, dot):
         ('.opt%s:has(input:where(%s):focus-visible)' % (W, W),
          'outline:2px solid Highlight;outline-offset:-2px', FC),
         # Math plan T7: a formula scrolls inside its own text box; padding keeps tall signs unclipped.
-        ('.opt-text' + W, 'overflow-x:auto;min-width:0;padding-block:.35em', ()),
+        ('.opt-text' + W, 'overflow-x:auto;overflow-y:hidden;min-width:0;padding-block:.35em', ()),
     ]
     if dot:
         L.insert(11, ('.ctl%s .dot:where(%s)' % (W, W),
@@ -4687,7 +4688,7 @@ if [[ -n $REPLY ]]; then
   d '\.ans-mark' '' 'width:15px' 'height:15px' 'border:1\.5px solid var\(--muted\)' 'border-radius:50%'
   d '\.ans-ok' '' 'font-size:11px' 'font-weight:500'
   # Math plan T7: a formula scrolls inside the answer text; padding keeps tall signs unclipped.
-  d '\.ans-text' '' 'min-width:0' 'overflow-x:auto' 'padding-block:\.35em'
+  d '\.ans-text' '' 'min-width:0' 'overflow-x:auto' 'overflow-y:hidden' 'padding-block:\.35em'
   # Owner (Task 7): rows keep today's height; the text's padding replaces the row's, so .ans-edit zeroes only the sides.
   d '\.ans-edit' '' 'padding-inline:0'
   none "ChoiceRow .ans-edit keeps the text's padding-block (no shorthand or block longhand)" "\.ans-edit\.${H}\{([^}]*;)?padding(-block|-top|-bottom)?:"
@@ -5998,7 +5999,10 @@ if [[ -n $REPLY ]]; then
   d '\.preview\.pv-prompt' '' 'font-size:14\.5px' 'line-height:1\.6' 'color:var\(--text-2\)'
   d '\.preview\.pv-explanation' '' 'font-size:13px' 'color:var\(--text-2\)'
   # Math plan T7: the preview alone shows why a formula failed (students see the marked source).
-  d '\.preview' ' \.math-error:after' 'display:block' 'content:attr\(title\)'
+  d '\.preview' ' div\.math-error:after' 'display:block' 'content:attr\(title\)'
+  # Owner (math T8): inside a sentence the reason follows on the same line.
+  d '\.preview' ' span\.math-error:after' 'content:" \(" attr\(title\) "\)"' 'font-size:\.85em'
+  none "MarkdownEditor inline error reason never breaks the line" "\.preview\.${H} span\.math-error:after\{[^}]*display:"
   none "MarkdownEditor .preview sets no type metrics of its own (the variant does)" "\.preview\.${H}\{[^}]*(font-size|color):"
 fi
 # Ruling (Task 3 review m2): the scanner's attachOn and the src_count rows pin

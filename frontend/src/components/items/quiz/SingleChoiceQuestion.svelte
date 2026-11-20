@@ -156,7 +156,7 @@
   }
   /* A formula cannot wrap: it scrolls inside its own text box; the padding keeps tall signs unclipped
      and is the row's height (owner, Task 7: rows keep today's height). */
-  .opt-text { overflow-x: auto; min-width: 0; padding-block: 0.35em; }
+  .opt-text { overflow-x: auto; overflow-y: hidden; min-width: 0; padding-block: 0.35em; }
   /* mechanism: visually-hidden native input — the real focusable/checkable
      control, NOT a disabled treatment (Constraint 2 exemption). */
   .opt input { position: absolute; width: 1px; height: 1px; opacity: 0; margin: -1px; }

@@ -1,4 +1,4 @@
-# Math typesetting — design (rev 11)
+# Math typesetting — design (rev 12)
 
 Rev 2 answered the builder check: the stricter dollar rule (owner's call), and
 no backfill before the beta, per the owner's recorded rule VR-B12.
@@ -48,6 +48,8 @@ smaller arrow, and big operators carry TeX's thin spaces as `mspace`.
 Rev 10 (owner's round after the Task 3 commit): explicit styles reset the script size and keep their operator spacing, `\det \gcd \Pr` take limits, `\operatorname` treats `- * ' . :` as amsmath does, `\bm` inside an outer alphabet leaves that alphabet's letters, and bold `\mathsf` capital Greek is bold sans.
 
 Rev 11 (Task 4 review): a formula never ends inside a code span (owner), so `The fee is $5. In R use `df$col`` keeps its code; a `$$` block stops at a list item's edge; a trailing control space (`a\ `) is kept.
+
+Rev 12 (Task 8 browser pass): WebKit list-marker rules (the first paragraph of an item gets no scroll box; a display formula opening an item is an inline-block), `overflow-y: hidden` on the inline scroll boxes, and the preview reason inline after a failed in-sentence formula (owner).
 
 ## Intent
 
@@ -453,6 +455,19 @@ never a 500.
   - List items, table cells and headings get no overflow rule, because it
     would hide outside list markers. A long inline formula there can widen
     the line; authors use display math for long formulas.
+  - The browser pass (Task 8) found WebKit drops a list marker beside any
+    scroll box in the item's first line. So the paragraph rule leaves out
+    `li > p:first-child` and `li > blockquote:first-child > p:first-child`
+    (later paragraphs of an item still scroll), and a display formula that
+    opens an item, or the item's first paragraph or quote, is a full-width
+    `inline-block`, middle-aligned (`.prose li > .math-display:first-child`
+    and `.prose li > :is(p, blockquote):first-child > .math-display:first-child`).
+    `:first-child` ignores text, so a display formula after text (in a tight
+    item, or in a loose item's first paragraph or quote) matches too; it looks
+    the same.
+  - The paragraph rule, `.opt-text` and `.ans-text` also get
+    `overflow-y: hidden`: Chrome rounds a tall formula's scroll height up by
+    1px, which would show a vertical scrollbar.
   - The first browser task found a link focus ring at the start of such a
     paragraph clipped (the app ring reaches 4px out), so the rule adds
     `padding-inline: 4px` with `margin-inline: -4px`.
@@ -501,10 +516,13 @@ never a 500.
 - **`.math-error`:**
   - the source in the mono font on a soft danger tint (`--danger-panel-bg`,
     text `--danger-panel-fg`), with the reason in its `title`;
-  - in the editor's Markdown preview only, the reason is also shown under the
-    formula: `.preview :global(.math-error)::after { display: block; content: attr(title) }`
-    in `MarkdownEditor.svelte`. It must be `:global` because the preview HTML
-    comes from `{@html}`;
+  - in the editor's Markdown preview only, the reason is also shown:
+    under a failed display formula
+    (`.preview :global(div.math-error)::after { display: block; content: attr(title) }`),
+    and on the same line after a failed formula inside a sentence
+    (`.preview :global(span.math-error)::after { content: " (" attr(title) ")"; font-size: .85em }`;
+    owner, Task 8), in `MarkdownEditor.svelte`. They must be `:global`
+    because the preview HTML comes from `{@html}`;
   - students see the marked source only.
 - There is no dark theme, so there is no dark-mode work.
 - **The visual-refresh CSS gate** (`frontend/scripts/visual-refresh-gate.sh`)
@@ -516,8 +534,9 @@ never a 500.
     `div.math-display` and `div.math-error` added to the four
     `.prose :where(…, div.math)` spacing lists and their hashes.
   - Section (b3) fails any new `:global` by design, so the preview rule needs
-    its own `GLOBAL_ALLOW` entry
-    (`('src/components/editor/MarkdownEditor.svelte', '.math-error')`).
+    its own `GLOBAL_ALLOW` entries
+    (`('src/components/editor/MarkdownEditor.svelte', 'div.math-error')` and
+    `'span.math-error'`).
   - The gate also pins both choice components' templates: the node and tag
     lists, the DOM-order signature, the `label:opt…` expression pins, and
     ChoiceRow's `own ans-row` section. The new `.opt-text` span and
