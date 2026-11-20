@@ -47,10 +47,10 @@
   {:else if canText}
     <button type="button" class="ans-text ans-edit" title={textReason ?? undefined}
             disabled={textReason !== null} onclick={onEdit}>
-      <span class="sr-only">Edit answer</span> {opt.text}
+      <span class="sr-only">Edit answer</span> {@html opt.text_html}
     </button>
   {:else}
-    <span class="ans-text">{opt.text}</span>
+    <span class="ans-text">{@html opt.text_html}</span>
   {/if}
 
   {#if opt.is_correct && !edit}<span class="ans-ok">correct</span>{/if}

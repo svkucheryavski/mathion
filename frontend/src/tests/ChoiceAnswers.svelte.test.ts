@@ -179,6 +179,20 @@ describe('Choice answers — inline text (5d T5)', () => {
     expect(await said()).toBe('Saved');
   });
 
+  it('a saved answer shows the typeset html from the echo', async () => {
+    const s = single();
+    await renderQuiz(s);
+    textBtn(rows(cards()[0])[1]).click();
+    await settle();
+    const f = field(rows(cards()[0])[1]);
+    typeInto(f, 'p = $x$');
+    press(f, 'Enter');
+    await settle();
+    const b = textBtn(rows(cards()[0])[1]);
+    expect(b.querySelector('math mi')!.textContent).toBe('x');
+    expect(b.innerHTML).toContain('p = <math>');
+  });
+
   it('unchanged closes silently; Esc cancels inside the modal; empty shows an error', async () => {
     const s = single();
     const r = await renderQuiz(s);
@@ -662,7 +676,12 @@ describe('Choice answers — version states (5d T5)', () => {
   });
 
   it('archived: a static marker (no button, no aria-pressed), plain text, "correct" in text', async () => {
-    await renderQuiz(single(), { version: { state: 'archived' } });
+    const s = single();
+    s.options.push(opt(14, 1, 'a < $y$'));
+    await renderQuiz(s, { version: { state: 'archived' } });
+    const typeset = rows(cards()[0])[3].querySelector('span.ans-text')!;
+    expect(typeset.querySelector('math mi')!.textContent).toBe('y');     // read-only rows typeset too
+    expect(typeset.innerHTML.startsWith('a &lt; <math>')).toBe(true);
     const r1 = rows(cards()[0])[0];
     expect(r1.querySelector('button')).toBeNull();
     expect(r1.querySelector('span.ans-mark')!.hasAttribute('aria-pressed')).toBe(false);

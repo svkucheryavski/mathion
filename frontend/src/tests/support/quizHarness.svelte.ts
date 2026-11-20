@@ -32,8 +32,13 @@ export function q(over: Partial<AuthoringQuestion> & { id: number }): AuthoringQ
     ...over,
   };
 }
+// The server's option renderer in its real shape: escaped text, $…$ as MathML with its LaTeX annotation.
+export const optHtml = (text: string) => text
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/\$([^$]+)\$/g,
+    '<math><semantics><mi>$1</mi><annotation encoding="application/x-tex">$1</annotation></semantics></math>');
 export function opt(id: number, question_id: number, text: string, is_correct = false, order = id): AuthoringOption {
-  return { id, question_id, text, is_correct, order };
+  return { id, question_id, text, text_html: optHtml(text), is_correct, order };
 }
 export function mkVersion(over: Partial<AdminTreeVersion> = {}): AdminTreeVersion {
   return {
@@ -171,6 +176,7 @@ export class QuizServer {
         return resp({ detail: 'At least one option must be correct' }, 422);
       }
       Object.assign(o, body);
+      if ('text' in body) o.text_html = optHtml(body.text);
       if (body.is_correct === true && qq.type === 'single_choice') {
         for (const x of this.#opts(qq.id)) if (x !== o) x.is_correct = false;
       }

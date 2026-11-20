@@ -5,7 +5,7 @@ import {
 import type { AuthoringOption } from './quizAuthoring';
 
 const opt = (id: number, is_correct: boolean): AuthoringOption =>
-  ({ id, question_id: 1, text: `A${id}`, is_correct, order: id });
+  ({ id, question_id: 1, text: `A${id}`, text_html: `A${id}`, is_correct, order: id });
 
 describe('quizFormat', () => {
   it('chip labels (and the picker) use the four sans names', () => {

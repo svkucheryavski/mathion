@@ -1624,7 +1624,8 @@ const SIG = {
      "div:opts[class=\"opts\"]", "#each:",
      "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral[class=\"opt\"]",
      "input:[type=\"radio\" name value={opt.id} checked={isChosen} {disabled} onchange]",
-     "span:ctl[class=\"ctl\"]", "#if:", "span:dot[class=\"dot\"]", "#if:",
+     "span:ctl[class=\"ctl\"]", "#if:", "span:dot[class=\"dot\"]",
+     "span:opt-text[class=\"opt-text\"]", "@html:opt.text_html", "#if:",
      "svg:mark[class=\"mark\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:",
      "svg:mark[class=\"mark\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
@@ -1685,7 +1686,8 @@ const SIG = {
      "input:[type=\"checkbox\" value={opt.id} checked={isChosen} {disabled} onchange]",
      "span:ctl[class=\"ctl\"]", "#if:",
      "svg:check[class=\"check\" width=\"11\" height=\"11\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
-     "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#if:",
+     "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]",
+     "span:opt-text[class=\"opt-text\"]", "@html:opt.text_html", "#if:",
      "svg:mark[class=\"mark\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:",
      "svg:mark[class=\"mark\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
@@ -1758,20 +1760,16 @@ const TEXT = {
      "p:meta:Attempt", "span:mono:{expr}", "p:meta:of", "span:mono:{expr}", "Button::Try again",
      "Button::Show correct answers"],
   // No LITERAL entry on purpose in either -- the entries below are `{expr}`
-  // markers. Every option label is `{opt.text}` from the API, so a LITERAL here
-  // means someone hard-coded question copy into the markup.
+  // markers. Every option label is `{@html opt.text_html}` from the API (pinned
+  // in the markup signature), so a LITERAL here means hard-coded question copy.
   // The `.sr-only` reveal WORDING is built in script; the ExpressionTag that
   // renders it is now marked here in position, so removing or duplicating it
   // reds, but what it says stays out of scope by construction, not by oversight
   // -- see the SCOPE note above.
   "SingleChoiceQuestion.svelte":
-    [
-     "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral:{expr}",
-     "span:sr-only:{expr}"],
+    ["span:sr-only:{expr}"],
   "MultiChoiceQuestion.svelte":
-    [
-     "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral:{expr}",
-     "span:sr-only:{expr}"],
+    ["span:sr-only:{expr}"],
   "PageItem.svelte": ["h2::{expr}"],
   "VideoItem.svelte": ["h2::{expr}", "Button::Mark as watched", "p:watched:Marked as watched"],
   "InteractiveAppItem.svelte":

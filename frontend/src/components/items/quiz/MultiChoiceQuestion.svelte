@@ -66,7 +66,7 @@
             </svg>
           {/if}
         </span>
-        {opt.text}
+        <span class="opt-text">{@html opt.text_html}</span>
         {#if isRevealCorrect || isMissedCorrect}
           <svg class="mark" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
             stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
