@@ -407,6 +407,8 @@
   .preview.pv-prompt { font-size: 14.5px; line-height: 1.6; color: var(--text-2); /* the quiz prompt */ }
   .preview.pv-explanation { font-size: 13px; color: var(--text-2); /* QuizItem .exp */ }
   .preview.err { color: var(--danger); }
+  /* The preview alone shows why a formula failed; students see the marked source only. */
+  .preview :global(.math-error)::after { display: block; content: attr(title); }
   .plain-src {
     margin: 0;
     padding: 12px 14px;

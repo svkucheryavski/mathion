@@ -32,7 +32,7 @@ export function q(over: Partial<AuthoringQuestion> & { id: number }): AuthoringQ
     ...over,
   };
 }
-// The server's option renderer in its real shape: escaped text, $…$ as MathML with its LaTeX annotation.
+// Close to the server's option renderer: escaped text, $…$ as MathML with its LaTeX annotation (no <mrow>).
 export const optHtml = (text: string) => text
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/\$([^$]+)\$/g,

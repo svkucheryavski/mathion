@@ -222,14 +222,17 @@ describe('Choice answers — inline text (5d T5)', () => {
     await renderQuiz(s);
     const r = () => rows(cards()[0])[0];
     expect(r().classList.contains('editing')).toBe(false);
+    expect(r().classList.contains('edit-err')).toBe(false);
     textBtn(r()).click();
     await settle();
     expect(r().classList.contains('editing')).toBe(true);
+    expect(r().classList.contains('edit-err')).toBe(false);
     typeInto(field(cards()[0]), ' ');
     press(field(cards()[0]), 'Enter');
     await settle();
     expect(text(cards()[0].querySelector('.inline-err'))).toBe('Enter the answer text');
     expect(r().classList.contains('editing')).toBe(false);
+    expect(r().classList.contains('edit-err')).toBe(true);     // math T7: its own padding, the text box is gone
   });
 
   it('a failed save keeps the field with its text and error, and re-fetches the answers', async () => {

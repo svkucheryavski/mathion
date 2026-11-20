@@ -99,3 +99,24 @@ def test_unmarked_page_is_served_unfilled(tmp_path, monkeypatch):
     importlib.reload(mathion.main)
     response = TestClient(mathion.main.app).get("/courses")
     assert response.status_code == 200 and response.text == "<!doctype html><html>SPA</html>"
+
+
+def test_hashed_app_files_are_immutable(tmp_path, monkeypatch):
+    c = _client_with_dist(tmp_path, monkeypatch)
+    r = c.get("/_app/bundle.js")
+    assert r.text == "console.log('hi')"
+    assert r.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+
+def test_other_paths_keep_their_headers(tmp_path, monkeypatch):
+    c = _client_with_dist(tmp_path, monkeypatch)
+    (tmp_path / "dist" / "robots.txt").write_text("x")
+    assert "immutable" not in c.get("/robots.txt").headers.get("cache-control", "")
+    missing = c.get("/_app/missing.js")                 # SPA fallback page
+    assert "immutable" not in missing.headers.get("cache-control", "")
+    assert c.get("/").headers["cache-control"] == "no-cache"
+    assert c.get("/index.html").headers["cache-control"] == "no-cache"
+    assert c.get("/_app/..%2Findex.html").headers["cache-control"] == "no-cache"
+    escaped = c.get("/_app/..%2Frobots.txt")                # a dist-root file reached through _app/
+    assert escaped.text == "x" and "immutable" not in escaped.headers.get("cache-control", "")
+    assert c.get("/superuser").headers["cache-control"] == "no-store"

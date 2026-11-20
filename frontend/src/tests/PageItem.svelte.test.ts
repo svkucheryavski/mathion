@@ -20,6 +20,12 @@ beforeEach(() => { target = document.createElement('div'); document.body.appendC
 afterEach(() => { if (component) { unmount(component); component = null; } target.remove(); });
 
 describe('PageItem authored content (Polish 2)', () => {
+  it('math plan T7: old stored div.math content still renders', () => {
+    component = mount(PageItem, { target, props: { item: makeItem('<div class="math block">x</div>') } });
+    flushSync();
+    expect(target.querySelector('.prose div.math')!.textContent).toBe('x');
+  });
+
   it('D51: the content renders in the page-scale prose box', () => {
     component = mount(PageItem, { target, props: { item: makeItem('<p>x</p>') } });
     flushSync();

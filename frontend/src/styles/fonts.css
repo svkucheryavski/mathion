@@ -20,3 +20,8 @@
   font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500;
   font-display: swap; src: url('./fonts/ibm-plex-mono-latin-500-normal.woff2') format('woff2');
 }
+/* Maths only; the browser fetches it on pages that show a formula. */
+@font-face {
+  font-family: 'STIX Two Math'; font-style: normal; font-weight: 400;
+  font-display: swap; src: url('./fonts/STIXTwoMath-Regular.woff2') format('woff2');
+}
