@@ -1,4 +1,4 @@
-# Math typesetting — design (rev 10)
+# Math typesetting — design (rev 11)
 
 Rev 2 answered the builder check: the stricter dollar rule (owner's call), and
 no backfill before the beta, per the owner's recorded rule VR-B12.
@@ -46,6 +46,8 @@ carry an invisible strut, accents get one CSS offset per engine, `\vec` a
 smaller arrow, and big operators carry TeX's thin spaces as `mspace`.
 
 Rev 10 (owner's round after the Task 3 commit): explicit styles reset the script size and keep their operator spacing, `\det \gcd \Pr` take limits, `\operatorname` treats `- * ' . :` as amsmath does, `\bm` inside an outer alphabet leaves that alphabet's letters, and bold `\mathsf` capital Greek is bold sans.
+
+Rev 11 (Task 4 review): a formula never ends inside a code span (owner), so `The fee is $5. In R use `df$col`` keeps its code; a `$$` block stops at a list item's edge; a trailing control space (`a\ `) is kept.
 
 ## Intent
 
@@ -246,6 +248,12 @@ never a 500.
   - So `$5 and $10`, `$5-$10`, `2$x$` and `$ x $` stay text, while
     `$y = x^\alpha$`, `$n$ … 30` and `$\alpha$=0.05` work.
   - `\$` is a literal dollar.
+  - A formula never ends inside a code span (owner, rev 11): a `$` or `$$`
+    closer that sits inside a code span opened after the opener (backtick runs
+    paired by length as markdown-it pairs them; no escapes inside code) is no
+    closer, and, as for any failed closer, no formula starts at that opener.
+    So `The fee is $5. In R use `df$col`.` keeps text and code, while a stray
+    backtick (`$a ` b$`) does not block a formula.
   - `$$…$$` inside a paragraph is display math (as in LaTeX). The plugin's
     block rule does not end a paragraph, so `text\n$$x$$` also takes this
     path. It renders as a block-styled **`span`** (see the render rules),
@@ -266,7 +274,9 @@ never a 500.
     `$$a$$ and $$b$$` becomes one block with content `a$$ and $$b`; with the
     wrapper it becomes two in-paragraph display formulas.
   - A `$$` block that spans several lines is one formula; the newlines are
-    whitespace.
+    whitespace. Its scan stops at a line outdented past the block's indent (the
+    next list item) or a blank line, so `- $$a\n- b$$` stays two items and a
+    long list of items stays linear.
 - **Render rules** (`md.add_render_rule`, replacing the plugin's wrappers):
   - **Inline success:** the `<math>` element, bare.
   - **Display success, own block:** `<div class="math-display"><math display="block">…</math></div>`.

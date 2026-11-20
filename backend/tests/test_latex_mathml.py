@@ -1091,6 +1091,7 @@ def test_operatorname_last_punctuation_has_no_space_after(src):
     (r"\operatorname{\left(a.\right.}d", True),
     (r"\operatorname{x{\left.a.\right.}}d", True),
     (r"\operatorname{\left[a.\right.}", True),
+    (r"\operatorname\bm{a.}d", False),              # a one-token argument ends the name too
 ])
 def test_operatorname_list_ends_for_punctuation(src, spaced):
     out = latex_to_mathml(src, display=False)

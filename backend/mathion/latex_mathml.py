@@ -1196,7 +1196,7 @@ def _operatorname(parser: Parser, name: str, depth: int) -> Node:
         parser.opname = saved
     parts = [p for p in _inner(arg) if p.tag != "mo" or p.kind != "auto"]
     if not arg.group:
-        _end_punct(parts)                             # a one-token argument such as \\operatorname.
+        _end_punct(parts)                             # a one-token argument such as \\operatorname\\bm{a.}
     for part in parts:
         _drop_marks(part)
     while parts and parts[-1].kind == "auto":
