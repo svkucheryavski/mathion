@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3101
+EXPECTED_CHECKS=3113
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -428,6 +428,9 @@ GLOBAL_ALLOW = {
     # components render INSIDE a .q-block, a level below, so it never reaches
     # them. :global so EmptyState's root (the empty-quiz branch) keeps the cap.
     ('src/components/items/QuizItem.svelte', '*'),
+    # Math plan T7/T8: the preview shows a failed formula's reason (only preview HTML, never a quiz).
+    ('src/components/editor/MarkdownEditor.svelte', 'div.math-error'),
+    ('src/components/editor/MarkdownEditor.svelte', 'span.math-error'),
 }
 def global_payloads(style):
     """(payload, …) for every `:global(...)` and `:global{…}`, balanced."""
@@ -542,16 +545,20 @@ else:
 # Beta round T6: `.live-slot:empty`, a status region mounted empty that takes no box. +1 rule (53 -> 54).
 # Beta round T8: `.new-tab-note`, the hidden "(opens in a new tab)", left out of copied text. +1 rule (54 -> 55).
 # Beta round T9: forced colours grey a disabled field (GrayText); the components' own greys are dropped there. +1 rule (55 -> 56).
+# Math plan T7: content.css gains the 12 maths rules (font, display, error, lines, accents); the four spacing lists add div.math-display/div.math-error with unchanged declarations. +12 rules (56 -> 68).
+# Math plan T8: a display formula that opens a list item is an inline-block (WebKit marker). +1 rule (68 -> 69).
 WANT_FULL = [
-    ('', '*,*:before,*:after', '8d5d6c83'), ('', '.live-slot:empty', 'bb6a43fd'), ('', '.mono,code,kbd', '84a226e9'),
+    ('', '*,*:before,*:after', '8d5d6c83'), ('', '.live-slot:empty', 'bb6a43fd'),
+    ('', '.math-display', 'e509f3e9'), ('', '.math-display>math', '6e31cced'), ('', '.math-error', '380f2da4'),
+    ('', '.mono,code,kbd', '84a226e9'),
     ('', '.new-tab-note', 'c24b8404'),
     ('', '.prose', '115422ed'),
     ('', '.prose :is(h1,h2,h3,h4,h5,h6)', '9dabc362'),
     ('', '.prose :where(h1,h2,h3,h4,h5,h6)', '8f770fc2'),
-    ('', '.prose :where(p,ul,ol,pre,blockquote,hr,div.math)', '13af6f60'),
+    ('', '.prose :where(p,ul,ol,pre,blockquote,hr,div.math,div.math-display,div.math-error)', '13af6f60'),
     ('', '.prose :where(ul,ol)', '17bebee9'),
     ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li+li', 'dc00e0ee'),
-    ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)', 'd9f228dd'),
+    ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math,div.math-display,div.math-error):not(:last-child)', 'd9f228dd'),
     ('', '.prose a', '0be0b8c6'),
     ('', '.prose a:hover', '98e62ed4'),
     ('', '.prose blockquote', '5fe22df0'),
@@ -563,19 +570,20 @@ WANT_FULL = [
     ('', '.prose h5', 'a838c678'),
     ('', '.prose h6', 'fdbae480'),
     ('', '.prose hr', 'a216bc6c'),
-    ('', '.prose ol>li', 'd67e9248'),
+    ('', '.prose li>.math-display:first-child,.prose li>:is(p,blockquote):first-child>.math-display:first-child', '9532048b'), ('', '.prose ol>li', 'd67e9248'),
     ('', '.prose pre', 'bd339863'),
     ('', '.prose pre code', 'f4859c1f'),
     ('', '.prose ul>li', '20d7366f'),
-    ('', '.prose.compact :where(p,ul,ol,pre,blockquote,hr,div.math)', 'e291811a'),
+    ('', '.prose.compact :where(p,ul,ol,pre,blockquote,hr,div.math,div.math-display,div.math-error)', 'e291811a'),
     ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li+li', 'ca5345b0'),
-    ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)', '4a789cab'),
+    ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math,div.math-display,div.math-error):not(:last-child)', '4a789cab'),
     ('', '.prose.compact h1', 'a5b38d68'),
     ('', '.prose.compact h2', 'c2943c7b'),
     ('', '.prose>:first-child,.prose :where(li,blockquote)>:first-child', 'd462248a'),
     ('', '.prose>:last-child,.prose :where(li,blockquote)>:last-child', 'ef0b7a11'),
     ('', '.vh', 'b2efbc30'),
     ('', ':focus-visible', 'ebbf7147'),
+    ('', ':is(.prose.compact,.prose) p:has(math):not(li>p:first-child,li>blockquote:first-child>p:first-child)', '06fbf886'),
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible', '1684b043'),
     ('', ':root', '0ca50118'),
     ('', '[tabindex="-1"]:focus-visible', 'f9b4dcdb'),
@@ -584,11 +592,15 @@ WANT_FULL = [
     ('', 'button,input,select,textarea', '790e37af'), ('', 'h1', '778e3e41'),
     ('', 'h1,h2,h3,h4,h5,h6', '610dd856'), ('', 'h2', 'a8b134e8'),
     ('', 'h3', 'b36ddbd5'), ('', 'h4', 'f98d3d7e'), ('', 'html,body', '3bd2fa51'),
-    ('', 'img,video', 'aa84fbab'), ('', 'p', '11696618'), ('', 'ul,ol', '99409a76'),
+    ('', 'img,video', 'aa84fbab'), ('', 'math', '310b11ba'), ('', 'mo.math-acc', 'a7fe4fea'),
+    ('', 'mo.math-vec', '31c8ba13'), ('', 'mrow.math-overline', '500c6089'), ('', 'mrow.math-underline', 'bc788dc0'),
+    ('', 'p', '11696618'), ('', 'span.math-display', '772d9310'), ('', 'ul,ol', '99409a76'),
     ('@media (forced-colors:active)', ':focus-visible:not([tabindex="-1"])', '1ff87bb6'),
     ('@media (forced-colors:active)', ':is(input,select,textarea):disabled', '602da9b5'),
+    ('@supports (font:-apple-system-body)', 'mo.math-acc', 'b4408b9e'),
+    ('@supports (font:-apple-system-body)', 'mo.math-vec', '61d29603'),
 ]
-# Document ORDER of the same 56 rules. `a` at #9 (reset.css) and #13 (base.css)
+# Document ORDER of the same 68 rules. `a` at #9 (reset.css) and #13 (base.css)
 # are the live case: only order decides that base's --primary wins, and swapping
 # two @imports in app.css flips it while the sorted multiset stays identical.
 # The four focus rules close it, frozen in order like the rest. None depends on
@@ -608,18 +620,22 @@ WANT_ORDER = [
     ('', '.prose'), ('', '.prose :is(h1,h2,h3,h4,h5,h6)'),
     ('', '.prose h1'), ('', '.prose h2'), ('', '.prose h3'), ('', '.prose h4'),
     ('', '.prose h5'), ('', '.prose h6'), ('', '.prose.compact h1'), ('', '.prose.compact h2'),
-    ('', '.prose :where(p,ul,ol,pre,blockquote,hr,div.math)'),
+    ('', '.prose :where(p,ul,ol,pre,blockquote,hr,div.math,div.math-display,div.math-error)'),
     ('', '.prose :where(h1,h2,h3,h4,h5,h6)'),
-    ('', '.prose.compact :where(p,ul,ol,pre,blockquote,hr,div.math)'),
+    ('', '.prose.compact :where(p,ul,ol,pre,blockquote,hr,div.math,div.math-display,div.math-error)'),
     ('', '.prose>:first-child,.prose :where(li,blockquote)>:first-child'),
     ('', '.prose>:last-child,.prose :where(li,blockquote)>:last-child'),
-    ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)'),
+    ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math,div.math-display,div.math-error):not(:last-child)'),
     ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li+li'),
-    ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)'),
+    ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math,div.math-display,div.math-error):not(:last-child)'),
     ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li+li'),
     ('', '.prose :where(ul,ol)'), ('', '.prose ul>li'), ('', '.prose ol>li'),
     ('', '.prose blockquote'), ('', '.prose hr'), ('', '.prose code'),
     ('', '.prose pre'), ('', '.prose pre code'), ('', '.prose a'), ('', '.prose a:hover'),
+    ('', 'math'), ('', ':is(.prose.compact,.prose) p:has(math):not(li>p:first-child,li>blockquote:first-child>p:first-child)'), ('', '.math-display'), ('', 'span.math-display'),
+    ('', '.math-display>math'), ('', '.prose li>.math-display:first-child,.prose li>:is(p,blockquote):first-child>.math-display:first-child'), ('', '.math-error'), ('', 'mrow.math-overline'), ('', 'mrow.math-underline'),
+    ('', 'mo.math-acc'), ('', 'mo.math-vec'),
+    ('@supports (font:-apple-system-body)', 'mo.math-acc'), ('@supports (font:-apple-system-body)', 'mo.math-vec'),
 ]
 def dhash(b):
     return hashlib.sha1(';'.join(sorted(decls(b))).encode()).hexdigest()[:8]
@@ -721,7 +737,8 @@ for _f in ('src/components/course/ItemMark.svelte', 'src/components/course/ItemI
            # 2108). An ancestor redefining either -- the
            # `.block { --border-soft: transparent }` attack this guard was built
            # from -- retunes them with sections (m) and (n) still reading the
-           # pinned `var(...)` and the whole gate green.
+           # pinned `var(...)` and the whole gate green. (Math T7: `.opt` padding
+           # is now the literal `0 9px`, so only --faint is left of that pair.)
            'src/pages/SequencePlayer.svelte',
            'src/components/items/QuizItem.svelte',
            'src/components/items/quiz/SingleChoiceQuestion.svelte',
@@ -1624,7 +1641,8 @@ const SIG = {
      "div:opts[class=\"opts\"]", "#each:",
      "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral[class=\"opt\"]",
      "input:[type=\"radio\" name value={opt.id} checked={isChosen} {disabled} onchange]",
-     "span:ctl[class=\"ctl\"]", "#if:", "span:dot[class=\"dot\"]", "#if:",
+     "span:ctl[class=\"ctl\"]", "#if:", "span:dot[class=\"dot\"]",
+     "span:opt-text[class=\"opt-text\"]", "@html:opt.text_html", "#if:",
      "svg:mark[class=\"mark\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:",
      "svg:mark[class=\"mark\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
@@ -1685,7 +1703,8 @@ const SIG = {
      "input:[type=\"checkbox\" value={opt.id} checked={isChosen} {disabled} onchange]",
      "span:ctl[class=\"ctl\"]", "#if:",
      "svg:check[class=\"check\" width=\"11\" height=\"11\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
-     "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#if:",
+     "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]",
+     "span:opt-text[class=\"opt-text\"]", "@html:opt.text_html", "#if:",
      "svg:mark[class=\"mark\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:",
      "svg:mark[class=\"mark\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
@@ -1758,20 +1777,16 @@ const TEXT = {
      "p:meta:Attempt", "span:mono:{expr}", "p:meta:of", "span:mono:{expr}", "Button::Try again",
      "Button::Show correct answers"],
   // No LITERAL entry on purpose in either -- the entries below are `{expr}`
-  // markers. Every option label is `{opt.text}` from the API, so a LITERAL here
-  // means someone hard-coded question copy into the markup.
+  // markers. Every option label is `{@html opt.text_html}` from the API (pinned
+  // in the markup signature), so a LITERAL here means hard-coded question copy.
   // The `.sr-only` reveal WORDING is built in script; the ExpressionTag that
   // renders it is now marked here in position, so removing or duplicating it
   // reds, but what it says stays out of scope by construction, not by oversight
   // -- see the SCOPE note above.
   "SingleChoiceQuestion.svelte":
-    [
-     "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral:{expr}",
-     "span:sr-only:{expr}"],
+    ["span:sr-only:{expr}"],
   "MultiChoiceQuestion.svelte":
-    [
-     "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral:{expr}",
-     "span:sr-only:{expr}"],
+    ["span:sr-only:{expr}"],
   "PageItem.svelte": ["h2::{expr}"],
   "VideoItem.svelte": ["h2::{expr}", "Button::Mark as watched", "p:watched:Marked as watched"],
   "InteractiveAppItem.svelte":
@@ -2989,8 +3004,8 @@ def want(h, ctl_radius, selected_ctl, dot):
     Everything here is shared by both; the three parameters ARE the divergence
     set, asserted as such below. Values a reviewer would otherwise 'tidy':
 
-      `.opt` padding is var(--btn-pad-sm), the shared small-control padding, NOT
-      a literal -- ref 2126. `border-color: var(--border-strong)`, not --border:
+      `.opt` padding is `0 9px`: ref 2126's sides; `.opt-text`'s padding-block
+      gives the row height (owner, math T7). `border-color: var(--border-strong)`, not --border:
       an option is an interactive target, and the faint line reads as disabled.
       `overflow-wrap: anywhere` on both `.opt` and `.text` is the I2 reflow fix
       (long unbroken option/prompt text used to push the page into horizontal
@@ -3027,7 +3042,7 @@ def want(h, ctl_radius, selected_ctl, dot):
         ('.opts' + W, 'display:flex;flex-direction:column;gap:8px;max-width:480px', ()),
         ('.opt' + W,
          'position:relative;display:flex;align-items:center;gap:10px;'
-         'padding:var(--btn-pad-sm);border:1px solid var(--border-strong);'
+         'padding:0 9px;border:1px solid var(--border-strong);'
          'border-radius:var(--radius);background:var(--surface);font-size:14px;'
          'color:var(--text-2);cursor:pointer;overflow-wrap:anywhere', ()),
         ('.opt%s input:where(%s)' % (W, W),
@@ -3071,6 +3086,8 @@ def want(h, ctl_radius, selected_ctl, dot):
         ('.opt.selected' + W, 'outline:2px solid;outline-offset:-2px', FC),
         ('.opt%s:has(input:where(%s):focus-visible)' % (W, W),
          'outline:2px solid Highlight;outline-offset:-2px', FC),
+        # Math plan T7: a formula scrolls inside its own text box; padding keeps tall signs unclipped.
+        ('.opt-text' + W, 'overflow-x:auto;overflow-y:hidden;min-width:0;padding-block:.35em', ()),
     ]
     if dot:
         L.insert(11, ('.ctl%s .dot:where(%s)' % (W, W),
@@ -4661,13 +4678,20 @@ own ans-row ChoiceRow.svelte
 uniq1 ans-row
 if [[ -n $REPLY ]]; then
   N=ChoiceRow; H=$REPLY
-  d '\.ans-row' '' 'display:flex' 'align-items:center' 'gap:8px' 'padding:4px 8px' 'border-radius:var\(--radius\)' 'font-size:13\.5px' 'color:var\(--text-2\)'
+  d '\.ans-row' '' 'display:flex' 'align-items:center' 'gap:8px' 'padding:0 8px' 'border-radius:var\(--radius\)' 'font-size:13\.5px' 'color:var\(--text-2\)'
   d '\.ans-row\.ok' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
   # Call 9: an answer row keeps its height when its field opens (30px field + 1px each side).
   d '\.ans-row' '' 'min-height:calc\(var\(--control-h\) \+ 2px\)'
   d '\.ans-row\.editing' '' 'padding-block:1px'
+  # Math plan T7: the error state has no .ans-text, so it keeps today's 4px itself.
+  d '\.ans-row\.edit-err' '' 'padding-block:4px'
   d '\.ans-mark' '' 'width:15px' 'height:15px' 'border:1\.5px solid var\(--muted\)' 'border-radius:50%'
   d '\.ans-ok' '' 'font-size:11px' 'font-weight:500'
+  # Math plan T7: a formula scrolls inside the answer text; padding keeps tall signs unclipped.
+  d '\.ans-text' '' 'min-width:0' 'overflow-x:auto' 'overflow-y:hidden' 'padding-block:\.35em'
+  # Owner (Task 7): rows keep today's height; the text's padding replaces the row's, so .ans-edit zeroes only the sides.
+  d '\.ans-edit' '' 'padding-inline:0'
+  none "ChoiceRow .ans-edit keeps the text's padding-block (no shorthand or block longhand)" "\.ans-edit\.${H}\{([^}]*;)?padding(-block|-top|-bottom)?:"
   none "ChoiceRow no --success leftovers (the theme has none)" "\.${H}[^{]*\{[^}]*var\(--success"
   none "ChoiceRow no em/rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+r?em"
   sweep ChoiceRow $H
@@ -5974,6 +5998,11 @@ if [[ -n $REPLY ]]; then
   d '\.preview\.pv-page' '' 'font-size:14px' 'line-height:1\.6' 'color:var\(--text-2\)'
   d '\.preview\.pv-prompt' '' 'font-size:14\.5px' 'line-height:1\.6' 'color:var\(--text-2\)'
   d '\.preview\.pv-explanation' '' 'font-size:13px' 'color:var\(--text-2\)'
+  # Math plan T7: the preview alone shows why a formula failed (students see the marked source).
+  d '\.preview' ' div\.math-error:after' 'display:block' 'content:attr\(title\)'
+  # Owner (math T8): inside a sentence the reason follows on the same line.
+  d '\.preview' ' span\.math-error:after' 'content:" \(" attr\(title\) "\)"' 'font-size:\.85em'
+  none "MarkdownEditor inline error reason never breaks the line" "\.preview\.${H} span\.math-error:after\{[^}]*display:"
   none "MarkdownEditor .preview sets no type metrics of its own (the variant does)" "\.preview\.${H}\{[^}]*(font-size|color):"
 fi
 # Ruling (Task 3 review m2): the scanner's attachOn and the src_count rows pin

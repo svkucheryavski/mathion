@@ -114,3 +114,29 @@ def test_angle_bracket_target_is_unwrapped():
 def test_backslash_escapes_are_removed():
     # VR-B: markdown drops a backslash before punctuation in a link target.
     assert extract_asset_filenames("[x](my\\_file.pdf) [a](\\/courses)") == {"my_file.pdf"}
+
+
+def test_extraction_ignores_code_blocks():
+    assert extract_asset_filenames("```\n[a](x.pdf)\n```\n\n    [b](y.pdf)") == set()
+
+
+def test_extraction_reads_reference_links_and_images_in_links():
+    assert extract_asset_filenames("[a][r]\n\n[r]: file.pdf") == {"file.pdf"}
+    assert extract_asset_filenames("[![a](i.png)](f.pdf)") == {"i.png", "f.pdf"}
+
+
+def test_extracted_names_are_the_rendered_targets():
+    # validation and resolve_asset_urls must agree, so no decoding
+    assert extract_asset_filenames("![chart](p%69c.png)") == {"p%69c.png"}
+    for md in ("![chart](p%69c.png)", "[a](<my file.pdf>)", "![x](a.png) [y](b.pdf)"):
+        out = render_markdown(md)
+        assert all(f'src="{n}"' in out or f'href="{n}"' in out for n in extract_asset_filenames(md))
+
+
+def test_reference_link_inside_image_alt_is_not_an_asset():
+    assert extract_asset_filenames("![[caption][r]](pic.png)\n\n[r]: missing.pdf") == {"pic.png"}
+
+
+def test_capitalised_url_schemes_are_not_assets():
+    md = "see <Https://example.org/a> and <HTTPS://EXAMPLE.ORG> and [a](Https://x.org) <Mailto:a@b.c>"
+    assert extract_asset_filenames(md) == set()

@@ -272,8 +272,10 @@
     if (!(await edits.requestStructure())) return;   // D10 first (#14); deletes follow their locks alone
     let idx = questions.findIndex((x) => x.id === qid);
     if (quizLock || busyQuestions.has(qid) || !live() || idx < 0) return;
-    // Inert parse (no image loads), so entities read as characters.
-    const plain = new DOMParser().parseFromString(questions[idx]!.text_html, 'text/html').body.textContent ?? '';
+    // Inert parse (no image loads), so entities read as characters; no LaTeX annotations.
+    const body = new DOMParser().parseFromString(questions[idx]!.text_html, 'text/html').body;
+    body.querySelectorAll('annotation').forEach((a) => a.remove());
+    const plain = body.textContent ?? '';
     const title = plain.replace(/\s+/g, ' ').trim().slice(0, 80) || `Question ${idx + 1}`;
     const trash = () => rootEl?.querySelector<HTMLElement>(`[data-q-id="${qid}"] .qhead button[data-glyph="trash"]`) ?? null;
     // The trash, or the §Focus fallback while it is disabled or gone (never <body>).

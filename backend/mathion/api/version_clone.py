@@ -105,6 +105,7 @@ def clone_version_content(db: Session, source, new) -> None:
     run for `new`. Slugs copy verbatim — uniqueness is scoped to the fresh empty
     parents, so no collision is possible."""
     from mathion.api.asset_render import render_with_assets, sync_asset_references, sync_script_reference
+    from mathion.markdown import render_markdown
     from mathion.models import AnswerOption, Block, Item, Question, Sequence
 
     src_blocks = db.execute(
@@ -112,7 +113,7 @@ def clone_version_content(db: Session, source, new) -> None:
     ).scalars().all()
     for sb in src_blocks:
         nb = Block(version_id=new.id, title=sb.title, slug=sb.slug, order=sb.order,
-                   info=sb.info, info_html=sb.info_html)
+                   info=sb.info, info_html=render_markdown(sb.info or ""))
         db.add(nb)
         db.flush()
 

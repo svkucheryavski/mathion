@@ -54,7 +54,7 @@
           onchange={() => onanswer([opt.id])}
         />
         <span class="ctl">{#if isChosen}<span class="dot"></span>{/if}</span>
-        {opt.text}
+        <span class="opt-text">{@html opt.text_html}</span>
         {#if isRevealCorrect || isMissedCorrect}
           <svg class="mark" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
             stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -142,7 +142,7 @@
     display: flex;
     align-items: center;
     gap: 10px; /* ref 2127 */
-    padding: var(--btn-pad-sm); /* 4px 9px — ref 2127 */
+    padding: 0 9px; /* ref 2127's 9px sides; .opt-text's padding-block gives the height */
     border: 1px solid var(--border-strong); /* ref 2127 */
     border-radius: var(--radius);
     background: var(--surface);
@@ -150,12 +150,13 @@
     color: var(--text-2);
     cursor: pointer;
     /* mechanism: an unbreakable option token would otherwise cross the row's
-       painted border and scroll the page (WCAG 1.4.10 reflow). `anywhere`, NOT
-       `break-word`: only `anywhere` reduces the automatic minimum size of the
-       anonymous flex item holding the option text, and that item has no element
-       to give `min-width:0` to. */
+       painted border and scroll the page (WCAG 1.4.10 reflow); `.opt-text`'s
+       `min-width:0` lets the text box shrink so the word can break. */
     overflow-wrap: anywhere;
   }
+  /* A formula cannot wrap: it scrolls inside its own text box; the padding keeps tall signs unclipped
+     and is the row's height (owner, Task 7: rows keep today's height). */
+  .opt-text { overflow-x: auto; overflow-y: hidden; min-width: 0; padding-block: 0.35em; }
   /* mechanism: visually-hidden native input — the real focusable/checkable
      control, NOT a disabled treatment (Constraint 2 exemption). */
   .opt input { position: absolute; width: 1px; height: 1px; opacity: 0; margin: -1px; }

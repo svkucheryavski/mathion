@@ -863,3 +863,11 @@ describe('MarkdownEditor — a named card when there is no field to name', () =>
     expect(target.querySelector('textarea')?.getAttribute('aria-label')).toBe('Content');
   });
 });
+
+describe('MarkdownEditor math preview (math plan T7)', () => {
+  it('preview keeps the error span and its reason title', async () => {
+    vi.mocked(stubCtx.renderPreview).mockResolvedValue({ html: '<p><span class="math-error" title="unknown command `\\foo`">$\\foo$</span></p>' });
+    const { target } = mountEditor({ readOnly: true });
+    await vi.waitFor(() => expect(target.querySelector('.preview .math-error')?.getAttribute('title')).toBe('unknown command `\\foo`'));
+  });
+});

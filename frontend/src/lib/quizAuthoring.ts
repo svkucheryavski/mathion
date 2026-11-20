@@ -4,7 +4,7 @@ export type QuestionType =
   | 'single_choice' | 'multiple_choice' | 'numeric_answer' | 'text_answer';
 
 export interface AuthoringOption {
-  id: number; question_id: number; text: string; is_correct: boolean; order: number;
+  id: number; question_id: number; text: string; text_html: string; is_correct: boolean; order: number;
 }
 
 // Mirrors the flat QuestionResponse — options are NOT embedded (§3.4). Each

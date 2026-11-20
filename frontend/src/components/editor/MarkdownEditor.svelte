@@ -407,6 +407,9 @@
   .preview.pv-prompt { font-size: 14.5px; line-height: 1.6; color: var(--text-2); /* the quiz prompt */ }
   .preview.pv-explanation { font-size: 13px; color: var(--text-2); /* QuizItem .exp */ }
   .preview.err { color: var(--danger); }
+  /* Preview only: a failed formula's reason, under a block, beside a span. */
+  .preview :global(div.math-error)::after { display: block; content: attr(title); }
+  .preview :global(span.math-error)::after { content: " (" attr(title) ")"; font-size: .85em; }
   .plain-src {
     margin: 0;
     padding: 12px 14px;

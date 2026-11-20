@@ -388,6 +388,7 @@ class OptionResponse(BaseModel):
     id: int
     question_id: int
     text: str
+    text_html: str
     is_correct: bool
     order: int
 

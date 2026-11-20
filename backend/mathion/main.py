@@ -259,6 +259,8 @@ if _frontend_dist.is_dir():
         headers = _panel_cache_headers(full_path)
         index = _frontend_dist.resolve() / "index.html"
         if candidate.is_file() and candidate != index:
+            if candidate.is_relative_to(_frontend_dist.resolve() / "_app"):   # hashed names never change
+                headers = {**(headers or {}), "Cache-Control": "public, max-age=31536000, immutable"}
             return FileResponse(candidate, headers=headers)
         if _index is None:
             return FileResponse(index, headers=headers)

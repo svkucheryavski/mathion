@@ -33,8 +33,8 @@ function question(id: number, order: number): Question {
     text_md: '',
     text_html: `<p>Prompt ${id}</p>`,
     options: [
-      { id: id * 10 + 1, text: 'First' },
-      { id: id * 10 + 2, text: 'Second' },
+      { id: id * 10 + 1, text: 'First', text_html: 'First' },
+      { id: id * 10 + 2, text: 'Second', text_html: 'Second' },
     ],
   };
 }
@@ -62,9 +62,9 @@ function mixedQuiz(id: number): QuizItemType {
     type: 'quiz',
     questions: [
       { id: 201, order: 1, type: 'single_choice', text_md: '', text_html: '<p>Single</p>',
-        options: [{ id: 2011, text: 'First' }, { id: 2012, text: 'Second' }] },
+        options: [{ id: 2011, text: 'First', text_html: 'First' }, { id: 2012, text: 'Second', text_html: 'Second' }] },
       { id: 202, order: 2, type: 'multiple_choice', text_md: '', text_html: '<p>Multi</p>',
-        options: [{ id: 2021, text: 'First' }, { id: 2022, text: 'Second' }] },
+        options: [{ id: 2021, text: 'First', text_html: 'First' }, { id: 2022, text: 'Second', text_html: 'Second' }] },
       { id: 203, order: 3, type: 'numeric_answer', text_md: '', text_html: '<p>Numeric</p>' },
       { id: 204, order: 4, type: 'text_answer', text_md: '', text_html: '<p>Text</p>' },
     ],

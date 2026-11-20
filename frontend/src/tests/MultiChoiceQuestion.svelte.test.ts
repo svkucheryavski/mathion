@@ -13,10 +13,10 @@ function question(): MultipleChoiceQuestion {
     text_md: '',
     text_html: '<p>Which of these are even?</p>',
     options: [
-      { id: 21, text: 'Two' },
-      { id: 22, text: 'Three' },
-      { id: 23, text: 'Six' },
-      { id: 24, text: 'Nine' },
+      { id: 21, text: 'Two', text_html: 'Two' },
+      { id: 22, text: 'Three', text_html: 'Three' },
+      { id: 23, text: 'Six', text_html: 'Six' },
+      { id: 24, text: 'Nine', text_html: 'Nine' },
     ],
   };
 }
@@ -106,6 +106,12 @@ function toggle(index: number): void {
 }
 
 describe('MultiChoiceQuestion structure (T2)', () => {
+  it('shows typeset option html inside one opt-text span', () => {
+    const host = render({ question: { ...question(), options: [{ id: 1, text: '$x$', text_html: 'a <math><mi>x</mi></math> b' }] } });
+    const span = host.querySelector('.opt .opt-text')!;
+    expect(span.innerHTML).toContain('<math>');
+    expect(span.textContent).toBe('a x b');          // spaces kept around the formula
+  });
   it('Polish 2: the prompt is compact prose; an external link opens in a new tab, a Mathion page link stays', () => {
     render({ question: { ...question(), text_html: `<p><a href="https://example.org/x">ext</a> <a href="${location.origin}/courses/x">page</a></p>` } });
     const text = host.querySelector('.text')!;

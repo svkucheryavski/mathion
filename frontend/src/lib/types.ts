@@ -119,12 +119,12 @@ type QuestionBase = {
 
 export type SingleChoiceQuestion = QuestionBase & {
   type: 'single_choice';
-  options: { id: number; text: string }[];
+  options: { id: number; text: string; text_html: string }[];
 };
 
 export type MultipleChoiceQuestion = QuestionBase & {
   type: 'multiple_choice';
-  options: { id: number; text: string }[];
+  options: { id: number; text: string; text_html: string }[];
 };
 
 export type NumericQuestion = QuestionBase & {

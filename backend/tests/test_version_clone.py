@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from mathion.api.version_clone import clone_version_content, collect_referenced_filenames, copy_version_assets
 from mathion.config import settings
+from mathion.markdown import render_markdown
 from mathion.models import AnswerOption, Asset, AssetReference, Block, CourseVersion, Item, Question, Sequence
 
 
@@ -172,7 +173,7 @@ def test_clone_version_content_full_fidelity(admin_client, db):
     new_blocks = db.query(Block).filter(Block.version_id == new.id).all()
     assert len(new_blocks) == 1
     nb = new_blocks[0]
-    assert nb.title == "Blk" and nb.info_html == "<p>Block info</p>"  # verbatim block html
+    assert nb.title == "Blk" and nb.info_html == render_markdown("Block info")  # re-rendered
     items = db.query(Item).join(Sequence).filter(Sequence.block_id == nb.id).order_by(Item.order).all()
     assert [i.type for i in items] == ["static_page", "video", "quiz", "interactive_app"]
 

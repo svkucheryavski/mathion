@@ -101,7 +101,7 @@ it('quiz → quiz remounts: B opens unanswered and unlocked, and B posts only it
   const { __test__setSlots, clearCourse } = await import('../stores/currentCourse.svelte');
   const q = (id: number) => ({
     id, order: 1, type: 'single_choice' as const, text_md: '', text_html: `<p>Q${id}</p>`,
-    options: [{ id: id * 10 + 1, text: 'A' }, { id: id * 10 + 2, text: 'B' }],
+    options: [{ id: id * 10 + 1, text: 'A', text_html: 'A' }, { id: id * 10 + 2, text: 'B', text_html: 'B' }],
   });
   const quiz = (id: number): Item => ({
     id, sequence_id: 1, title: `Quiz ${id}`, slug: `q${id}`, order: id, type: 'quiz', questions: [q(id * 100)],
