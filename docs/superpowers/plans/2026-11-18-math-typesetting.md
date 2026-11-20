@@ -21,7 +21,8 @@ no new dependency.
 - Frontend: Svelte 5, Vite, vitest.
 - Gate: the zsh visual-refresh CSS gate.
 
-**Spec:** `docs/superpowers/specs/2026-11-18-math-typesetting-design.md` (rev 6).
+**Spec:** `docs/superpowers/specs/2026-11-18-math-typesetting-design.md` (rev 9).
+Plan rev 7 (Task 3 review, owner's Chrome-vs-Safari pass): Task 4's sanitiser map and class test and Task 7's accent CSS take spec rev 9's values. Task 3's expected strings below are its starting point; the committed tests and the spec rows are authoritative.
 Plan rev 6 folds in Task 1's rulings (spec rev 6): the accent forms (`math-acc` class, `\hat` U+02C6, CSS over/underline), the new sanitiser classes, the exact look values, and STIX Two Math. Plan rev 5 answers Codex round 4 (`\middle` fence, `makeItem` string). Plan rev 4 answers Codex round 3: whole-body structure checks, nested `_tree` with NBSP, nested-script depth, an independent allowlist map, and fixed component examples. Plan rev 3 answers Codex round 2: tree-based sanitiser checks, full structure trees, NBSP for every `\text` space, depth 40/41, executable component tests, and the full browser repeat. Plan rev 2 answers the Codex plan review: executable tests, the real test
 helpers, the migration harness, gate section (n), a full three-browser matrix
 in Task 1, and wider converter and sanitiser coverage.
@@ -365,7 +366,7 @@ STRUCT = [  # each expected string is the whole body inside the top <mrow>
     (r"\operatorname{Var}(X)", '<mi>Var</mi><mo>⁡</mo><mo stretchy="false">(</mo><mi>X</mi><mo stretchy="false">)</mo>'),
     (r"\bar{x}", '<mover accent="true"><mi>x</mi><mo class="math-acc" stretchy="false">¯</mo></mover>'),
     (r"\hat{X}", '<mover accent="true"><mi>X</mi><mo class="math-acc" stretchy="false">ˆ</mo></mover>'),
-    (r"\vec{v}", '<mover accent="true"><mi>v</mi><mo stretchy="false">→</mo></mover>'),
+    (r"\vec{v}", '<mover accent="true"><mi>v</mi><mo class="math-vec" stretchy="false" lspace="0em" rspace="0em">→</mo></mover>'),
     (r"\widehat{xy}", '<mover accent="true"><mrow><mi>x</mi><mi>y</mi></mrow><mo stretchy="true">̂</mo></mover>'),
     (r"\overline{xy}", '<mrow class="math-overline"><mi>x</mi><mi>y</mi></mrow>'),
     (r"\underline{x}", '<mrow class="math-underline"><mi>x</mi></mrow>'),
@@ -373,7 +374,7 @@ STRUCT = [  # each expected string is the whole body inside the top <mrow>
     (r"\left(\frac{a}{b}\right)", '<mrow><mo stretchy="true" fence="true">(</mo><mfrac><mi>a</mi><mi>b</mi></mfrac><mo stretchy="true" fence="true">)</mo></mrow>'),
     (r"\left.x\right|", '<mrow><mi>x</mi><mo stretchy="true" fence="true">|</mo></mrow>'),
     (r"\left(a\middle|b\right)", '<mrow><mo stretchy="true" fence="true">(</mo><mi>a</mi><mo stretchy="true" fence="true">|</mo><mi>b</mi><mo stretchy="true" fence="true">)</mo></mrow>'),
-    (r"\big(", '<mo stretchy="true" minsize="1.2em" maxsize="1.2em">(</mo>'),
+    (r"\big(", '<mrow><mspace height="0.85em" depth="0.35em"/><mo stretchy="true" minsize="1.2em" maxsize="1.2em">(</mo></mrow>'),
     (r"\mathbb{R}", "<mi>ℝ</mi>"), (r"\mathcal{L}", "<mi>ℒ</mi>"),
     (r"\mathbb{R}^2", "<msup><mi>ℝ</mi><mn>2</mn></msup>"),
     (r"\mathrm{d}", '<mi mathvariant="normal">d</mi>'),
@@ -567,10 +568,12 @@ def test_sanitiser_keeps_mathml_and_drops_unknown_classes():
     out = _clean('<math><mo class="math-acc evil">a</mo><mrow class="math-overline math-underline evil">b</mrow><mi class="math-acc">c</mi></math>')
     assert '<mo class="math-acc">' in out and '<mrow class="math-overline math-underline">' in out
     assert "evil" not in out and '<mi class' not in out
+    assert '<mo class="math-vec">' in _clean('<math><mo class="math-vec evil">→</mo></math>')
 
 SANITISE = ACCEPTANCE + [r"\binom{n}{k}", r"\big(\dfrac{a}{b}\big)", r"\underline{x}",
     r"\lim_{n\to\infty}", r"a\,b", r"\sqrt[3]{x}", r"\text{a b}", r"\mathrm{d}x", r"\tfrac12",
-    r"\left(-x\right)", r"\hat{\beta}", r"\sum\limits_i", r"\overline{x}", r"\bar{x}"]
+    r"\left(-x\right)", r"\hat{\beta}", r"\sum\limits_i", r"\overline{x}", r"\bar{x}",
+    r"\vec{v}", r"\Big(x\Big)"]
 
 def _tree(markup):                       # nested tags, attributes, exact text and tails
     def walk(e):
@@ -585,7 +588,7 @@ def test_sanitiser_keeps_every_emitted_tag_and_attribute(src, display):
 
 SPEC_MAP = {   # copied from the spec's sanitiser map, independent of markdown.py
     "math": {"display"}, "semantics": set(), "annotation": {"encoding"}, "mrow": set(),
-    "mi": {"mathvariant"}, "mn": set(), "mtext": set(), "mspace": {"width"},
+    "mi": {"mathvariant"}, "mn": set(), "mtext": set(), "mspace": {"width", "height", "depth"},
     "mo": {"stretchy", "largeop", "movablelimits", "fence", "form", "lspace", "rspace", "minsize", "maxsize"},
     "msup": set(), "msub": set(), "msubsup": set(), "mfrac": {"linethickness"}, "msqrt": set(),
     "mroot": set(), "mover": {"accent"}, "munder": {"accentunder"}, "munderover": set(),
@@ -648,7 +651,7 @@ Expected: the new tests FAIL; old wrapper output is still produced.
     - add the per-tag MathML map from the spec;
     - remove `class` from `span`/`div` attributes;
     - `_ALLOWED_CLASSES` gains `span: {math-display, math-error}`,
-      `div: {math-display, math-error}`, `mo: {math-acc}` and
+      `div: {math-display, math-error}`, `mo: {math-acc, math-vec}` and
       `mrow: {math-overline, math-underline}`.
   - **Asset extraction:** `extract_asset_filenames` reads `link_open` and
     `image` tokens from `_md.parse(text)` instead of the raw `_LINK_REF`
@@ -904,7 +907,9 @@ git commit -m "feat(math): show typeset answer choices"
     `.prose p:has(math)` `padding: 0.35em 4px; margin-inline: -4px`;
     `mrow.math-overline { border-top: 0.06em solid; padding-top: 0.08em }`,
     `mrow.math-underline { border-bottom: 0.06em solid; padding-bottom: 0.08em }`;
-    `@supports (font: -apple-system-body) { mo.math-acc { position: relative; top: 0.2em } }`;
+    the spec's "Accent placement" values: `mo.math-acc { position: relative; top: -0.06em }`,
+    `mo.math-vec { font-size: 0.6em; position: relative; top: -0.12em }`,
+    `@supports (font: -apple-system-body) { mo.math-acc { top: 0.48em } mo.math-vec { top: -0.05em } }`;
   - `SingleChoiceQuestion.svelte` / `MultiChoiceQuestion.svelte`:
     `.opt-text { overflow-x: auto; min-width: 0; padding-block: 0.35em }`;
   - `ChoiceRow.svelte`: `.ans-text` overflow and `padding-block: 0.35em`;

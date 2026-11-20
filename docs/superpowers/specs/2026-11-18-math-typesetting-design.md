@@ -1,4 +1,4 @@
-# Math typesetting — design (rev 7)
+# Math typesetting — design (rev 9)
 
 Rev 2 answered the builder check: the stricter dollar rule (owner's call), and
 no backfill before the beta, per the owner's recorded rule VR-B12.
@@ -32,6 +32,18 @@ operator spacing. Input is NFC-normalised and invisible format characters
 are dropped. Other control characters are an error. Typed brackets
 (`⟨ ⌊ ‖`) act like their commands; a pasted en dash is a minus and a curly
 apostrophe a prime.
+Rev 8 records Task 3, measured in Chrome and Safari's engine. Chrome gives
+every growing bracket the width of its widest size, so `\left…\right`
+brackets grow only around tall content, as TeX sizes them. A function also
+gets a thin space before it after an ordinary atom, as in TeX. A stacked
+relation carries `form="infix"`, because Chrome drops the spacing of `∼`
+there. Fonts and limit functions gain details; the Errors table gains the
+structure errors. The Task 3 review adds: a binary atom with nothing before it is ordinary
+(TeX), stacked operators never stretch, script towers count as tall, and
+`\lbrace \bm \coth \not \colon \bigm` and long arrows.
+Rev 9 makes Chrome and Safari agree (owner, measured in both): sized brackets
+carry an invisible strut, accents get one CSS offset per engine, `\vec` a
+smaller arrow, and big operators carry TeX's thin spaces as `mspace`.
 
 ## Intent
 
@@ -153,28 +165,28 @@ Safari render MathML natively, so the browser loads no script.
 |---|---|---|
 | Letters | `a`–`z`, `A`–`Z`, and any other Unicode letter (`μ`, `æ`, `ж`) typed directly | `<mi>`, italic by default; a non-Latin letter gets `mathvariant="normal"` except Greek lowercase (any lowercase Greek letter, accented or symbol forms too; the micro sign `µ` becomes `μ`) |
 | Numbers | `12`, `3.14` | one `<mn>` per number (split when taken as an unbraced argument) |
-| Operators, relations, punctuation | `+ - = < > ( ) [ ] , ; : ! / . * ? "` and the vertical bar, and any other non-letter Unicode symbol typed directly (`≤`, `−`, `±`) | `<mo>`; `-` → U+2212, `*` → ∗ U+2217; `/`, `.` and a plain bar are ordinary symbols (`lspace="0em" rspace="0em"`), as in TeX, so `-t^2/2` and `P(\lvert Z\rvert<z)` keep tight spacing. A typed symbol from the Symbols row gives the same node as its command (`∞` → `<mi>∞</mi>`, `°` is ordinary); any other typed maths symbol (Unicode Sm, such as `≲` or `⊕`) is a binary operator, and the rest are ordinary (`lspace="0em" rspace="0em"`, so `5€` stays tight) |
-| Brackets | plain `( ) [ ] \{ \}` and the bar character, `\langle \rangle \lfloor \rfloor \lceil \rceil \vert \Vert \lvert \rvert \lVert \rVert`, and backslash-bar (the LaTeX double bar ‖) | `<mo stretchy="false">`; they never grow. Every bar form also gets `lspace="0em" rspace="0em"` |
+| Operators, relations, punctuation | `+ - = < > ( ) [ ] , ; : ! / . * ? "` and the vertical bar, and any other non-letter Unicode symbol typed directly (`≤`, `−`, `±`) | `<mo>`; `-` → U+2212, `*` → ∗ U+2217; `/`, `.` and a plain bar are ordinary symbols (`lspace="0em" rspace="0em"`), as in TeX, so `-t^2/2` and `P(\lvert Z\rvert<z)` keep tight spacing. A typed symbol from the Symbols row gives the same node as its command (`∞` → `<mi>∞</mi>`, `°` is ordinary); any other typed maths symbol (Unicode Sm, such as `≲` or `⊕`) is a binary operator, and the rest are ordinary (`lspace="0em" rspace="0em"`, so `5€` stays tight). Two relations side by side get no space between them, as in TeX (`a:=b` → `<mo lspace="0.2778em" rspace="0em">:</mo><mo lspace="0em">=</mo>`: a joined `:` keeps relation spacing outside, since the browser spaces a lone `:` as punctuation). After punctuation a relation gets `lspace="0em"` and `\colon`'s space becomes thin, as in TeX |
+| Brackets | plain `( ) [ ] \{ \}` and the bar character, `\langle \rangle \lfloor \rfloor \lceil \rceil \vert \Vert \lvert \rvert \lVert \rVert \lbrace \rbrace \lbrack \rbrack`, and backslash-bar (the LaTeX double bar ‖) | `<mo stretchy="false">`; they never grow. Every bar form also gets `lspace="0em" rspace="0em"` |
 | Primes | `f'`, `f''`, `f'''`, `x_i'`, `f'^2` | `<msup>` with ′ ″ ‴; a prime merges with a following `^` (`<msup>` with `<mrow>′ 2</mrow>`) and with a preceding `_` (`<msubsup>`) |
 | Greek | `\alpha`…`\omega` and `\Gamma`…`\Omega` | `<mi>`; capitals get `mathvariant="normal"` (upright) |
 | Greek variants | `\epsilon` → ϵ U+03F5, `\varepsilon` → ε U+03B5, `\phi` → ϕ U+03D5, `\varphi` → φ U+03C6, `\vartheta` → ϑ, `\varrho` → ϱ, `\varsigma` → ς, `\varpi` → ϖ | `<mi>` |
-| Symbols | `\approx \neq \ne \leq \le \geq \ge \ll \gg \lt \gt \pm \mp \times \cdot \div \ast \star \infty \partial \nabla \sim \simeq \cong \equiv \propto \in \notin \ni \subset \subseteq \supset \supseteq \cup \cap \setminus \emptyset \varnothing \forall \exists \neg \lnot \land \lor \wedge \vee \to \rightarrow \leftarrow \Rightarrow \Leftarrow \Leftrightarrow \iff \implies \mapsto \mid \parallel \perp \top \bot \ell \hbar \ldots \cdots \dots \vdots \ddots \prime \circ \degree \bullet` | `<mo>`, or `<mi>` for `\infty \partial \nabla \emptyset \varnothing \ell \hbar \top \bot` (upright; `\partial` and `\nabla` carry `mathvariant="normal"`, since browsers italicise them), with the Unicode character. `\ldots \cdots \dots` get `lspace="0em" rspace="0em"`, so the neighbouring comma or `+` sets the gap, as in LaTeX |
+| Symbols | `\approx \neq \ne \leq \le \geq \ge \ll \gg \lt \gt \pm \mp \times \cdot \div \ast \star \infty \partial \nabla \sim \simeq \cong \equiv \propto \in \notin \ni \subset \subseteq \supset \supseteq \cup \cap \setminus \emptyset \varnothing \forall \exists \neg \lnot \land \lor \wedge \vee \to \rightarrow \leftarrow \Rightarrow \Leftarrow \Leftrightarrow \iff \implies \mapsto \mid \parallel \perp \top \bot \ell \hbar \ldots \cdots \dots \vdots \ddots \prime \circ \degree \bullet \leftrightarrow \longrightarrow \longleftarrow \Longrightarrow \Longleftarrow \Longleftrightarrow \leqslant \geqslant`; `\not` before `= < > \in \ni \le \ge \subset \supset \subseteq \supseteq \equiv \sim \simeq \approx \cong \mid \parallel` gives the negated relation (`≠ ∉ ≰ …`); `\colon` is punctuation with a space after | `<mo>`, or `<mi>` for `\infty \partial \nabla \emptyset \varnothing \ell \hbar \top \bot` (upright; `\partial` and `\nabla` carry `mathvariant="normal"`, since browsers italicise them), with the Unicode character. `\ldots \cdots \dots` get `lspace="0em" rspace="0em"`, so the neighbouring comma or `+` sets the gap, as in LaTeX |
 | Scripts | `x^2`, `x_i`, `x_i^2`, `x^{n+1}`, `{}^{14}C`, `^2` at the start | `<msup>`, `<msub>`, `<msubsup>`; an empty base is `<mrow/>`. Binary, relation and punctuation operators inside a script get `lspace="0em" rspace="0em"`, as in LaTeX (owner, rev 7): `\chi^2_{n-1}`, `\sum_{i=1}^n` |
 | Fractions | `\frac{a}{b}`, `\dfrac`, `\tfrac`, `{a \over b}` | `<mfrac>`; `\dfrac`/`\tfrac` wrap it in `<mstyle displaystyle="true"/"false">` |
 | Binomial | `\binom{n}{k}`, `{n \choose k}` | `<mrow><mo>(</mo><mfrac linethickness="0">…</mfrac><mo>)</mo></mrow>`; these brackets stretch |
-| Roots | `\sqrt{x}`, `\sqrt[3]{x}` | `<msqrt>`, `<mroot>` (base first, then index) |
-| Big operators | `\sum \prod \coprod \bigcup \bigcap` | `<munderover>` (or `<munder>`/`<mover>`) with `<mo largeop="true" movablelimits="true">`. The browser puts limits under/over in display style and beside in inline style, inside fractions and in scripts, as LaTeX does |
-| Integrals | `\int \iint \iiint \oint` | `<msubsup>` (limits always beside) with `<mo largeop="true">` |
+| Roots | `\sqrt{x}`, `\sqrt[3]{x}` | `<msqrt>`, `<mroot>` (base first, then index); the index is tight like a script |
+| Big operators | `\sum \prod \coprod \bigcup \bigcap`, and `∑ ∏ ∐ ⋃ ⋂` typed directly | `<munderover>` (or `<munder>`/`<mover>`) with `<mo largeop="true" movablelimits="true">`. The browser puts limits under/over in display style and beside in inline style, inside fractions and in scripts, as LaTeX does. The operator gets `lspace="0em" rspace="0em"` and TeX's thin spaces are written out as `<mspace width="0.1667em"/>`: after it unless a relation, an opening or closing bracket (`(`, `\bigl(`, `\bigr)`) or punctuation follows — a `\left…\right` group and a plain `\big(` (ordinary in TeX) do get it, though inside scripts not before a `\left…\right` group (TeX's Op–Inner); before it after an ordinary atom, a unary sign, `∀ ∃ ¬`, a closing bracket or a `\left…\right` group. Safari applies only one of the operator's own two spaces and Chrome both (measured); written out, both engines match. A big operator used as a one-token argument (`\frac\sum x`) carries the zero spacing too |
+| Integrals | `\int \iint \iiint \oint`, and `∫ ∬ ∭ ∮` typed directly | `<msubsup>` (limits always beside) with `<mo largeop="true" lspace="0em" rspace="0em">` and the Big operators row's thin spaces |
 | Limit control | `\limits`, `\nolimits`, `\displaystyle`, `\textstyle` | `\limits` → `movablelimits="false"` (`\int\limits` → `<munderover>`); `\nolimits` → `<msubsup>`; styles → `<mstyle displaystyle>` around the rest of the group |
-| Functions | `\log \ln \lg \exp \sin \cos \tan \cot \sec \csc \arcsin \arccos \arctan \sinh \cosh \tanh \det \dim \ker \deg \hom \arg \Pr \gcd`, `\operatorname{Var}` | `<mi>` (multi-letter, so upright) + `<mo>` U+2061. U+2061 follows the whole scripted unit (`<msub><mi>log</mi><mn>2</mn></msub><mo>⁡</mo>`). An `<mspace width="0.1667em"/>` follows unless the next token is an opening or closing bracket, `\left`, a relation, punctuation, or the end of the group |
-| Limit-style functions | `\lim \limsup \liminf \max \min \sup \inf \argmax \argmin` | `<mo movablelimits="true" lspace="0em" rspace="0em">lim</mo>` (not in the operator dictionary, so spacing is set explicitly; no U+2061) with `<munder>` like `\sum`; the same `<mspace>` rule as functions follows |
-| Unary signs | `+ - \pm \mp` at the start of a group, or after an opening bracket, a relation, an operator, punctuation, a function, a big operator or `\left` | `<mo lspace="0em" rspace="0em">` (TeX's rule). A braced group of one operator (`0{,}05`) is spaced the same way |
-| Accents | `\bar` (U+00AF), `\hat` (U+02C6), `\tilde` (U+02DC), `\dot` (U+02D9), `\ddot` (U+00A8), `\vec` (U+2192), `\widehat` (U+0302, stretchy), `\widetilde` (U+02DC, stretchy; only Firefox stretches it, others show a normal tilde); `\overline` / `\underline` | `<mover accent="true">base<mo stretchy="false">…</mo></mover>`; the five narrow accents `\bar \hat \tilde \dot \ddot` add `class="math-acc"` to their `mo` (Safari nudge, see Look), `\vec` does not; wide accents `stretchy="true"`; `\overline{x}` → `<mrow class="math-overline">x</mrow>`, `\underline{x}` → `<mrow class="math-underline">x</mrow>` (a CSS line, no glyph) |
-| Stacked | `\overset{a}{b}`, `\underset{a}{b}`, `\stackrel{a}{b}` | `<mover>` / `<munder>` |
-| Growing brackets | `\left( … \right)`, also `[ ] \{ \} \| \vert \Vert \langle \rangle \lfloor \rfloor \lceil \rceil .` and `\middle\|` | `<mrow>` with `<mo stretchy="true" fence="true">`; `\left.`/`\right.` emit nothing |
-| Fixed big brackets | `\big \Big \bigg \Bigg` (+ `l`/`r` forms) before a bracket | `<mo stretchy="true" minsize="1.2em/1.8em/2.4em/3em" maxsize="…">` |
+| Functions | `\log \ln \lg \exp \sin \cos \tan \cot \sec \csc \arcsin \arccos \arctan \sinh \cosh \tanh \det \dim \ker \deg \hom \arg \Pr \gcd`, `\operatorname{Var}` | `<mi>` (multi-letter, so upright) + `<mo>` U+2061. U+2061 follows the whole scripted unit (`<msub><mi>log</mi><mn>2</mn></msub><mo>⁡</mo>`). An `<mspace width="0.1667em"/>` follows unless the next token is an opening or closing bracket, `\left`, a relation, punctuation, or the end of the group. One also comes before the function after an ordinary atom, a unary sign, `∀ ∃ ¬`, a closing bracket or a `\left…\right` group, as in TeX (`x\sin y`, `\frac12\exp x`, `-\sin x`); a big operator brings its own. Explicit spaces in between count as nothing (`\sin\,(x)` gets only the `\,`). Inside `\operatorname{…}` the converter's own function marks are dropped at every depth; the name brings one |
+| Limit-style functions | `\lim \limsup \liminf \max \min \sup \inf \argmax \argmin`, `\operatorname*{…}` | `<mo movablelimits="true" lspace="0em" rspace="0em">lim</mo>` (not in the operator dictionary, so spacing is set explicitly; no U+2061) with `<munder>` like `\sum`; the same `<mspace>` rules as functions apply. Two-word names have a thin space U+2009 (`lim sup`, `arg max`); `\operatorname*` takes letters and spaces only |
+| Unary signs | `+ - \pm \mp` at the start of a group, or after an opening bracket, a relation, a binary operator, punctuation, a function, a big operator or `\left`; after `∀ ∃ ¬` a sign stays binary (ordinary atoms in TeX: `\neg -x`) | `<mo lspace="0em" rspace="0em">` (TeX's rule). Any other binary operator in that place (`\sin\cdot x`, `\times x`), or one with nothing after it (before a relation, a closing bracket, punctuation or the group's end: `a + = b`, `(a+)`), is ordinary the same way, as in TeX; scripted ones too (`\sin\cdot_i x`). A braced group of one operator (`0{,}05`) is spaced the same way, and a braced big operator (`{\sum}_i`) is ordinary, so its limits go beside it. The same holds for a group whose one operator carries a script, a style or spaces (`a{\bigm|^2}b`, `a{\textstyle=}b`, `a{\,=}b`) and for a one-token argument (`a\hat=b`, `\frac=2`): its operator gets `lspace="0em" rspace="0em"` unless it is a big operator or limit function; a stack base is exempt, so `\overset{a}{=}` stays a relation |
+| Accents | `\bar` (U+00AF), `\hat` (U+02C6), `\tilde` (U+02DC), `\dot` (U+02D9), `\ddot` (U+00A8), `\vec` (U+2192), `\widehat` (U+0302, stretchy), `\widetilde` (U+02DC, stretchy; only Firefox stretches it, others show a normal tilde); `\overline` / `\underline` | `<mover accent="true">base<mo stretchy="false">…</mo></mover>`; the five narrow accents `\bar \hat \tilde \dot \ddot` add `class="math-acc"` to their `mo`, `\vec` adds `class="math-vec"` with `lspace="0em" rspace="0em"` (Safari would add the arrow's relation spacing to the width, which leaves gaps around v⃗); both classes place the accent (see Look); wide accents `stretchy="true"`; `\overline{x}` → `<mrow class="math-overline">x</mrow>`, `\underline{x}` → `<mrow class="math-underline">x</mrow>` (a CSS line, no glyph). MathML Core's dictionary makes `∏ ∐ ∑ ⋀ ⋁ ⋂ ⋃ ⨀–⨊ ⨝ ⨞ ⫼ ⫿` movable by default (not the integrals), so such an operator or a big operator directly under an accent or a stack top gets `movablelimits="false"` (`\hat\sum`, `\overset{a}{{\sum}}`), and a group around one (`\hat{\sum_i}`, `\hat{\textstyle\sum}`) is wrapped as `<mrow>…<mi></mi></mrow>`, so the accent stays above |
+| Stacked | `\overset{a}{b}`, `\underset{a}{b}`, `\stackrel{a}{b}` | `<mover>` / `<munder>`, base first; the top or bottom is tight like a script. An operator as the base never stretches (`stretchy="false"`, or the label floats above an arrow in Chrome); a relation or binary operator keeps its spacing, judged in the surrounding formula, and carries `form="infix"` (Chrome drops the spacing of `∼` without it); a big operator gets `movablelimits="false"`. A base wrapped in a style, a fraction or another stack is treated by its operator (MathML Core's embellished operators); a big operator or limit that already has its own scripts, or sits inside a fraction or a spaced group, keeps them and is wrapped in `<mrow>…<mi></mi></mrow>`, so the top stays above (an embellished base would carry it aside). `\overset`/`\underset` over anything but a relation or a binary operator is an ordinary atom, as in amsmath (its `\binrel@@` is `\relax`, so the braces make an Ord; checked with pdflatex widths): no thin spaces beside it (`W\overset{a}{X} Z`, `x\overset{a}{|}y`, `\overset{a}{\sum} x`, `\underset{x}{\lim} f`), a sign after it is binary (`\underset{\sim}{x} - \underset{\sim}{y}`), and a base operator gets `lspace="0em" rspace="0em"`. `\stackrel` is always a relation: an operator base gets relation spacing (`lspace="0.2778em" rspace="0.2778em"`), any other base thick spaces beside it, left out next to another relation, an opening or closing bracket, after punctuation, at the group's edge and inside scripts |
+| Growing brackets | `\left( … \right)`, also `[ ] \{ \} \| \vert \Vert \langle \rangle \lfloor \rfloor \lceil \rceil < > / .`, typed `⟨ ⟩ ⌊ ⌋ ⌈ ⌉ ‖`, and `\middle\|` | `<mrow>` with `<mo stretchy="true" fence="true">` around tall content (a fraction, root, big operator, sized bracket, or a tower of three script levels such as `e^{x^{2^k}}`), reaching at least the largest `\big` size inside. Limits under a name (`\lim_n` in display, or `\lim\limits_n`) count as tall; a limit beside its name (`\lim\nolimits_n`, or inline) counts as slightly tall. Around slightly tall content (a wide accent, a stacked label, a limit beside its name, or two script levels such as `x^{2^k}`) it gets the `\big` size (`minsize="1.2em" maxsize="1.2em"`, plus the 1.2em strut for Safari: after the opening bracket, or first when there is none, and only when the group has a bracket, a `\middle` one included), as LaTeX picks. Otherwise `stretchy="false"`, the size TeX gives, because Chrome reserves the widest size's width for a growing bracket. Bars and `/` get `lspace="0em" rspace="0em"` (`\middle\|` too, as in TeX); `\left.`/`\right.` emit nothing |
+| Fixed big brackets | `\big \Big \bigg \Bigg` (+ `l`/`r`/`m` forms) before a bracket | `<mrow><mspace height="S/2+0.25em" depth="S/2−0.25em"/><mo stretchy="true" minsize="S" maxsize="S">…</mo></mrow>` with S = 1.2em/1.8em/2.4em/3em: Chrome uses the size, Safari grows the bracket to the invisible strut (without it Safari grows it upwards from the baseline, so the content sits in its bottom part; `symmetric` does not help, measured); the plain form is ordinary, `l`/`r` open and close, `m` a relation with thick spacing (`\bigm\|`). The `<mrow>` also lets Chrome size the bracket when it carries a script. Known limit: with STIX Two Math, Safari draws bars (`\| \Vert`) at normal size whatever is asked; parentheses and brackets grow |
 | Text | `\text{…}` (any Unicode, spaces kept), `\mbox{…}` | `<mtext>`; bare braces inside are grouping only; `\, \: \;` give a thin space, `\quad` an em space, `\!` nothing |
-| Letter fonts | `\mathrm \mathit \mathbf \boldsymbol \mathbb \mathcal \mathsf \mathtt` | The content is math (scripts allowed, spaces ignored); the font is applied to its letters. `\mathrm{Var}` → `<mi>Var</mi>`; `\mathrm{d}` → `<mi mathvariant="normal">d</mi>`; other fonts map letters to Unicode Mathematical Alphanumeric Symbols, including the Letterlike gaps (ℝℂℕℚℤℍℙ, ℬℰℱℋℐℒℳℛ, italic ℎ). `\boldsymbol` gives bold italic for italic letters and bold upright for upright capital Greek; `\mathbf` leaves lowercase Greek unbolded, as LaTeX does |
+| Letter fonts | `\mathrm \mathit \mathbf \boldsymbol \mathbb \mathcal \mathsf \mathtt` | The content is math (scripts allowed, spaces ignored); the font is applied to its letters. `\mathrm{Var}` → `<mi>Var</mi>`; `\mathrm{d}` → `<mi mathvariant="normal">d</mi>`; other fonts map letters to Unicode Mathematical Alphanumeric Symbols, including the Letterlike gaps (ℝℂℕℚℤℍℙ, ℬℰℱℋℐℒℳℛ, italic ℎ). `\boldsymbol` gives bold italic for italic letters and bold upright for upright capital Greek; `\mathbf` leaves lowercase Greek unbolded, as LaTeX does. `\mathit` maps Latin letters (and capital Greek) to Mathematical Italic; `\mathbf` makes capital Greek bold upright; digits become bold, double-struck, sans or monospace under `\mathbf`/`\boldsymbol`, `\mathbb`, `\mathsf`, `\mathtt`. An inner font wins over an outer one. `\bm` is `\boldsymbol`. Both switch to bold math, as `\boldmath` does: function names, limit functions and `\operatorname` letters become Mathematical Bold (`\bm{\sin}` → `<mi>𝐬𝐢𝐧</mi>`, `\bm{\lim}` → `<mo …>𝐥𝐢𝐦</mo>`), and an inner `\mathrm`, `\mathit`, `\mathcal` or `\mathsf` takes its bold style (`\bm{\mathrm{Var}}` → `<mi>𝐕𝐚𝐫</mi>`; `\mathbb` and `\mathtt` have none); `\mathbf{\sin}` stays upright, as the operator font wins in LaTeX. As bm unpacks its argument, a script after a scripted bold atom joins it (`\bm{x_i}^2` is one `<msubsup>`, `\bm{\sum_i}^n` one `<munderover>`; a braced `{x_i}^2` keeps its own, and a stack or accent keeps its own under/over); a prime takes a following `^` (`\bm{x'}^2` as `x'^2`), and any other clashing script nests, as amsmath's `\boldsymbol` and MathJax do (`\bm{x_i}_j`, `\boldsymbol{\beta^*}^T` render). `\limits`/`\nolimits` may also come after the scripts (`\sum_i\limits^n`), as in TeX. Upright fonts (`\mathrm`, `\mathbf`, `\mathsf`, `\mathtt`, `\mathbb`) keep accented Latin letters upright too (`\mathrm{aéb}` → `<mi>aéb</mi>`, `\bm{\mathrm{aéb}}` → `<mi>𝐚é𝐛</mi>`, as Unicode has no bold é); both keep the class of the one atom inside, also through `\textstyle`, and that atom is the outermost one (`a\boldsymbol{\times}b` spaces like `a\times b`, `a\bm{\textstyle\sum}x` like `a\sum x` with `\limits`, `\bm{\overset{a}{\sum}}` stays an ordinary stack); the walk stops at an inner braced group and at a `\left…\right` group, as bm.sty keeps them whole (`\bm{{\textstyle\sum}}_i` is Ord), and a styled operator places its limits by its own style, as TeX does (display `\bm{\textstyle\sum}_i` beside, inline `\bm{\displaystyle\sum}_i` under), as the bm package does (amsbsy alone keeps only relations and binary operators). Only the digits 0–9 are restyled, and `\nabla`/`\partial` change only under `\boldsymbol` |
 | Spacing | `\, \: \; \quad \qquad \!`, `\ ` and `~` | `<mspace width=…>` (`\!` is negative; Chrome ignores it, which is harmless) |
 | Escapes | `\{ \} \$ \% \& \# \_` | the character; `\{ \}` are plain brackets; `\$` and `\#` get `lspace="0em" rspace="0em"` |
 
@@ -187,12 +199,21 @@ Safari render MathML natively, so the browser loads no script.
 | `\\` | "line breaks are not supported yet" |
 | unbalanced brace | "missing `}`" / "unexpected `}`" |
 | a missing argument | "`\frac` needs 2 arguments" |
+| no bracket after `\left`, `\right`, `\middle` or `\big` | "`\left` needs a bracket" |
+| `\middle` outside `\left…\right` | "missing `\left`" |
+| an unclosed `\sqrt[` | "missing `]`" |
+| two `\over` or `\choose` in one group | "two `\over` in one group; add braces" |
+| `\limits` or `\nolimits` not after an operator or its scripts | "`\limits` must follow an operator" |
+| `\over`, `\displaystyle` or `\textstyle` as an unbraced argument | "misplaced `\over`" |
+| `\operatorname*` with anything but letters and spaces | "`\operatorname*` takes letters only" |
+| `\not` before anything but a listed relation | "`\not` must come before a relation such as `=`" |
 | double superscript or subscript (`x^2^3`) | "double superscript" |
 | `\left` without `\right` (or the reverse) | "missing `\right`" |
 | an empty formula | "empty formula" |
 | a bare `&`, `#` or `%` inside math | "write `\&` for a literal `&`" (likewise `\#`, `\%`) |
 | a missing script argument (`x^`) | "`^` needs 1 argument" |
-| a control, private-use or unassigned character, or a combining mark with no letter to join (`x` + U+0302) | "unsupported character U+0001" |
+| a control, private-use or unassigned character | "unsupported character U+0001" |
+| a combining mark with no letter to join (`x` + U+0302) | "unsupported combining mark U+0302; use an accent such as `\hat{x}`" |
 
 Any other exception inside the converter is caught by the render rule and
 shown as the error span, with the reason "formula could not be read". It is
@@ -268,11 +289,11 @@ never a 500.
     - `mover`: `accent`
     - `munder`: `accentunder`
     - `mstyle`: `displaystyle`
-    - `mspace`: `width`
+    - `mspace`: `width`, `height`, `depth`
   - **Classes:**
     - `class` moves from the `span`/`div` attribute sets to `allowed_classes`
       (`span: {math-display, math-error}`, `div: {math-display, math-error}`,
-      `mo: {math-acc}`, `mrow: {math-overline, math-underline}`, plus the
+      `mo: {math-acc, math-vec}`, `mrow: {math-overline, math-underline}`, plus the
       existing `ul`/`ol: {loose}`).
     - ammonia panics if `class` is in both maps.
   - **`title`** survives through nh3's generic attributes (checked with
@@ -426,12 +447,25 @@ never a 500.
   - `.prose p:has(math)`, `.opt-text` and `.ans-text` get
     `padding-block: 0.35em`; at 0.3em an inline `\dfrac` still overflows
     by 1px in STIX.
-- **Accents in Safari:** WebKit places a non-stretchy `mover` accent about
-  0.2em too high, in every font; Chrome and Firefox are right. `content.css`
-  adds `@supports (font: -apple-system-body) { mo.math-acc { position:
-  relative; top: 0.2em } }`. Only Safari (every WebKit) supports that font
-  keyword. If WebKit fixes its layout, the accents would touch their base;
-  the fix is to drop the rule.
+- **Accent placement:** measured from pixels at 80px in STIX (Math task 3):
+  Chrome sets every non-stretchy `mover` accent straight on the letter (gap
+  0), WebKit leaves a constant 0.33–0.36em, and the font's own mark
+  placement (a combining mark inside one `mi`) leaves 0.04–0.08em (0.10em
+  for the arrow). The gap is the same for short and tall letters in both
+  engines, so one offset per engine works. `content.css`:
+  - `mo.math-acc { position: relative; top: -0.06em }`;
+  - `mo.math-vec { font-size: 0.6em; position: relative; top: -0.12em }`
+    (the full-size arrow is about as wide as the letter pair);
+  - `@supports (font: -apple-system-body) { mo.math-acc { top: 0.48em }
+    mo.math-vec { top: -0.05em } }`; only Safari (every WebKit) supports
+    that font keyword.
+  - Result: 0.04–0.07em in Chrome, 0.03–0.08em in Safari. Firefox is not
+    measured here; the browser pass checks it. If WebKit fixes its layout,
+    its accents would cut into the letter; the fix is to drop the Safari
+    rule.
+  - A combining mark inside the `mi` was tried: it is identical in both
+    engines over short letters but cuts into tall ones (θ, X, β), since
+    STIX has no mark anchors for the maths italic letters.
 - **Over- and underline:** `mrow.math-overline { border-top: 0.06em solid;
   padding-top: 0.08em }`, `mrow.math-underline { border-bottom: 0.06em solid;
   padding-bottom: 0.08em }`. Screen readers lose the word "overline"; the
