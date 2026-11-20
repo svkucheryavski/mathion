@@ -21,7 +21,8 @@ no new dependency.
 - Frontend: Svelte 5, Vite, vitest.
 - Gate: the zsh visual-refresh CSS gate.
 
-**Spec:** `docs/superpowers/specs/2026-11-18-math-typesetting-design.md` (rev 9).
+**Spec:** `docs/superpowers/specs/2026-11-18-math-typesetting-design.md` (rev 10).
+Plan rev 8 (owner's round after Task 3, spec rev 10): Task 4's map allows `scriptlevel` on `mstyle`, its sanitiser samples gain explicit styles, and the browser passes check full-size styles in scripts.
 Plan rev 7 (Task 3 review, owner's Chrome-vs-Safari pass): Task 4's sanitiser map and class test and Task 7's accent CSS take spec rev 9's values. Task 3's expected strings below are its starting point; the committed tests and the spec rows are authoritative.
 Plan rev 6 folds in Task 1's rulings (spec rev 6): the accent forms (`math-acc` class, `\hat` U+02C6, CSS over/underline), the new sanitiser classes, the exact look values, and STIX Two Math. Plan rev 5 answers Codex round 4 (`\middle` fence, `makeItem` string). Plan rev 4 answers Codex round 3: whole-body structure checks, nested `_tree` with NBSP, nested-script depth, an independent allowlist map, and fixed component examples. Plan rev 3 answers Codex round 2: tree-based sanitiser checks, full structure trees, NBSP for every `\text` space, depth 40/41, executable component tests, and the full browser repeat. Plan rev 2 answers the Codex plan review: executable tests, the real test
 helpers, the migration harness, gate section (n), a full three-browser matrix
@@ -573,7 +574,7 @@ def test_sanitiser_keeps_mathml_and_drops_unknown_classes():
 SANITISE = ACCEPTANCE + [r"\binom{n}{k}", r"\big(\dfrac{a}{b}\big)", r"\underline{x}",
     r"\lim_{n\to\infty}", r"a\,b", r"\sqrt[3]{x}", r"\text{a b}", r"\mathrm{d}x", r"\tfrac12",
     r"\left(-x\right)", r"\hat{\beta}", r"\sum\limits_i", r"\overline{x}", r"\bar{x}",
-    r"\vec{v}", r"\Big(x\Big)"]
+    r"\vec{v}", r"\Big(x\Big)", r"x^{\displaystyle y}", r"\dfrac ab"]
 
 def _tree(markup):                       # nested tags, attributes, exact text and tails
     def walk(e):
@@ -592,7 +593,7 @@ SPEC_MAP = {   # copied from the spec's sanitiser map, independent of markdown.p
     "mo": {"stretchy", "largeop", "movablelimits", "fence", "form", "lspace", "rspace", "minsize", "maxsize"},
     "msup": set(), "msub": set(), "msubsup": set(), "mfrac": {"linethickness"}, "msqrt": set(),
     "mroot": set(), "mover": {"accent"}, "munder": {"accentunder"}, "munderover": set(),
-    "mstyle": {"displaystyle"},
+    "mstyle": {"displaystyle", "scriptlevel"},
 }
 
 def test_allowlist_matches_spec():
@@ -1059,6 +1060,7 @@ with the owner's OK).
   results:
   - limits placement;
   - `\dfrac`;
+  - full-size styles in scripts (`x^{\displaystyle y}`, `x^{\dfrac12}`; Safari's `scriptlevel`);
   - accents and primes;
   - brackets;
   - the scroll box;

@@ -292,8 +292,8 @@ def acc(base: str, char: str, narrow: bool = True) -> str:
 STRUCT = [  # each expected string is the whole body inside the top <mrow>
     (r"\frac12", "<mfrac><mn>1</mn><mn>2</mn></mfrac>"),
     (r"{a \over b}", "<mfrac><mi>a</mi><mi>b</mi></mfrac>"),
-    (r"\dfrac{a}{b}", '<mstyle displaystyle="true"><mfrac><mi>a</mi><mi>b</mi></mfrac></mstyle>'),
-    (r"\tfrac{a}{b}", '<mstyle displaystyle="false"><mfrac><mi>a</mi><mi>b</mi></mfrac></mstyle>'),
+    (r"\dfrac{a}{b}", '<mstyle displaystyle="true" scriptlevel="0"><mfrac><mi>a</mi><mi>b</mi></mfrac></mstyle>'),
+    (r"\tfrac{a}{b}", '<mstyle displaystyle="false" scriptlevel="0"><mfrac><mi>a</mi><mi>b</mi></mfrac></mstyle>'),
     (r"\binom{n}{k}", '<mrow><mo>(</mo><mfrac linethickness="0"><mi>n</mi><mi>k</mi></mfrac><mo>)</mo></mrow>'),
     (r"{n \choose k}", '<mrow><mo>(</mo><mfrac linethickness="0"><mi>n</mi><mi>k</mi></mfrac><mo>)</mo></mrow>'),
     (r"\sqrt[3]{x}", "<mroot><mi>x</mi><mn>3</mn></mroot>"),
@@ -333,8 +333,8 @@ STRUCT = [  # each expected string is the whole body inside the top <mrow>
     (r"\boldsymbol{\Gamma}", "<mi>\U0001d6aa</mi>"),
     (r"\mathbf{x}", "<mi>\U0001d431</mi>"),
     (r"\mathbf{\alpha}", "<mi>α</mi>"),
-    (r"x\displaystyle\sum", f'<mi>x</mi><mstyle displaystyle="true">{THIN}{SUM}</mstyle>'),
-    (r"{\textstyle\sum} x", f'<mstyle displaystyle="false">{SUM}</mstyle><mi>x</mi>'),
+    (r"x\displaystyle\sum", f'<mi>x</mi><mstyle displaystyle="true" scriptlevel="0">{THIN}{SUM}</mstyle>'),
+    (r"{\textstyle\sum} x", f'<mstyle displaystyle="false" scriptlevel="0">{SUM}</mstyle><mi>x</mi>'),
     # own additions
     (r"\sqrt{x+1}", "<msqrt><mi>x</mi><mo>+</mo><mn>1</mn></msqrt>"),
     (r"\sqrt[n+1]{x}", f"<mroot><mi>x</mi><mrow><mi>n</mi><mo{TIGHT}>+</mo><mn>1</mn></mrow></mroot>"),
@@ -365,7 +365,7 @@ STRUCT = [  # each expected string is the whole body inside the top <mrow>
     (r"\sin, x", f"<mi>sin</mi>{FN}<mo>,</mo><mi>x</mi>"),
     (r"\sin\bigl(x\bigr)", f'<mi>sin</mi>{FN}<mrow><mspace height="0.85em" depth="0.35em"/><mo stretchy="true" minsize="1.2em" maxsize="1.2em">(</mo></mrow><mi>x</mi><mrow><mspace height="0.85em" depth="0.35em"/><mo stretchy="true" minsize="1.2em" maxsize="1.2em">)</mo></mrow>'),
     (r"{\sin} x", f"<mrow><mi>sin</mi>{FN}</mrow><mi>x</mi>"),   # an ordinary group: no thin space
-    (r"\Pr(A)", f'<mi>Pr</mi>{FN}<mo stretchy="false">(</mo><mi>A</mi><mo stretchy="false">)</mo>'),
+    (r"\Pr(A)", '<mo movablelimits="true" lspace="0em" rspace="0em">Pr</mo><mo stretchy="false">(</mo><mi>A</mi><mo stretchy="false">)</mo>'),   # \\mathop as \\lim
     (r"\limsup_{n}", f'<munder><mo movablelimits="true"{TIGHT}>lim sup</mo><mi>n</mi></munder>'),
     (r"\argmax_x f", f'<munder><mo movablelimits="true"{TIGHT}>arg max</mo><mi>x</mi></munder>{THIN}<mi>f</mi>'),
     (r"\max -x", f'<mo movablelimits="true"{TIGHT}>max</mo>{THIN}{UNARY_MINUS}<mi>x</mi>'),
@@ -397,7 +397,7 @@ STRUCT = [  # each expected string is the whole body inside the top <mrow>
     (r"\left[\left(\frac ab\right)\right]", f'<mrow>{fence("[")}<mrow>{fence("(")}<mfrac><mi>a</mi><mi>b</mi></mfrac>{fence(")")}</mrow>{fence("]")}</mrow>'),
     (r"\left[\left(x\right)\right]", f'<mrow>{fence("[", False)}<mrow>{fence("(", False)}<mi>x</mi>{fence(")", False)}</mrow>{fence("]", False)}</mrow>'),
     (r"\left(a\middle|\frac bc\right)", f'<mrow>{fence("(")}<mi>a</mi>{fence("|")}<mfrac><mi>b</mi><mi>c</mi></mfrac>{fence(")")}</mrow>'),
-    (r"\left(\displaystyle a\middle|b\right)", f'<mrow>{fence("(", False)}<mstyle displaystyle="true"><mi>a</mi>{fence("|", False)}<mi>b</mi></mstyle>{fence(")", False)}</mrow>'),
+    (r"\left(\displaystyle a\middle|b\right)", f'<mrow>{fence("(", False)}<mstyle displaystyle="true" scriptlevel="0"><mi>a</mi>{fence("|", False)}<mi>b</mi></mstyle>{fence(")", False)}</mrow>'),
     (r"\left(\overset{d}{=}\right)", f'<mrow>{medium("(")}{MSTRUT}<mover><mo stretchy="false" form="infix">=</mo><mi>d</mi></mover>{medium(")")}</mrow>'),
     (r"\Big[", '<mrow><mspace height="1.15em" depth="0.65em"/><mo stretchy="true" minsize="1.8em" maxsize="1.8em">[</mo></mrow>'),
     (r"\bigg\{", '<mrow><mspace height="1.45em" depth="0.95em"/><mo stretchy="true" minsize="2.4em" maxsize="2.4em">{</mo></mrow>'),
@@ -409,8 +409,8 @@ STRUCT = [  # each expected string is the whole body inside the top <mrow>
     (r"{n+1 \over 2}", "<mfrac><mrow><mi>n</mi><mo>+</mo><mn>1</mn></mrow><mn>2</mn></mfrac>"),
     (r"{\over b}", "<mfrac><mrow/><mi>b</mi></mfrac>"),
     (r"{a \over -b}", f"<mfrac><mi>a</mi><mrow>{UNARY_MINUS}<mi>b</mi></mrow></mfrac>"),
-    (r"a \displaystyle b \textstyle c", '<mi>a</mi><mstyle displaystyle="true"><mi>b</mi></mstyle><mstyle displaystyle="false"><mi>c</mi></mstyle>'),
-    (r"\displaystyle -x", f'<mstyle displaystyle="true">{UNARY_MINUS}<mi>x</mi></mstyle>'),
+    (r"a \displaystyle b \textstyle c", '<mi>a</mi><mstyle displaystyle="true" scriptlevel="0"><mi>b</mi></mstyle><mstyle displaystyle="false" scriptlevel="0"><mi>c</mi></mstyle>'),
+    (r"\displaystyle -x", f'<mstyle displaystyle="true" scriptlevel="0">{UNARY_MINUS}<mi>x</mi></mstyle>'),
     (r"x\displaystyle", "<mi>x</mi>"),
     (r"\mathbb{N}", "<mi>ℕ</mi>"), (r"\mathbb 1", "<mn>\U0001d7d9</mn>"),
     (r"\mathcal{A}", "<mi>\U0001d49c</mi>"), (r"\mathcal{B}", "<mi>ℬ</mi>"),
@@ -451,8 +451,8 @@ STRUCT = [  # each expected string is the whole body inside the top <mrow>
     (r"\left|\overset{d}{\to}\right|", f'<mrow>{medium("|")}{MSTRUT}<mover><mo stretchy="false" form="infix">→</mo><mi>d</mi></mover>{medium("|")}</mrow>'),
     (r"\left(\underset{x}{\sum}\right)", f'<mrow>{fence("(")}<munder><mo stretchy="false" largeop="true" movablelimits="false" lspace="0em" rspace="0em">∑</mo><mi>x</mi></munder>{fence(")")}</mrow>'),
     (r"\left(\Big(x\Big)\right)", '<mrow><mo stretchy="true" fence="true" minsize="1.8em">(</mo><mrow><mspace height="1.15em" depth="0.65em"/><mo stretchy="true" minsize="1.8em" maxsize="1.8em">(</mo></mrow><mi>x</mi><mrow><mspace height="1.15em" depth="0.65em"/><mo stretchy="true" minsize="1.8em" maxsize="1.8em">)</mo></mrow><mo stretchy="true" fence="true" minsize="1.8em">)</mo></mrow>'),
-    (r"a\displaystyle+b", '<mi>a</mi><mstyle displaystyle="true"><mo form="infix">+</mo><mi>b</mi></mstyle>'),
-    (r"\displaystyle a+\textstyle b", '<mstyle displaystyle="true"><mi>a</mi><mo form="infix">+</mo></mstyle><mstyle displaystyle="false"><mi>b</mi></mstyle>'),
+    (r"a\displaystyle+b", '<mi>a</mi><mstyle displaystyle="true" scriptlevel="0"><mo form="infix">+</mo><mi>b</mi></mstyle>'),
+    (r"\displaystyle a+\textstyle b", '<mstyle displaystyle="true" scriptlevel="0"><mi>a</mi><mo form="infix">+</mo></mstyle><mstyle displaystyle="false" scriptlevel="0"><mi>b</mi></mstyle>'),
     (r"\sin\cdot x", f"<mi>sin</mi>{FN}{THIN}<mo{TIGHT}>⋅</mo><mi>x</mi>"),   # a binary atom with nothing before is ordinary
     (r"\times x", f"<mo{TIGHT}>×</mo><mi>x</mi>"),
     (r"\sin\,(x)", f'<mi>sin</mi>{FN}{THIN}<mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo>'),
@@ -469,8 +469,8 @@ STRUCT = [  # each expected string is the whole body inside the top <mrow>
     (r"a\not=b", "<mi>a</mi><mo>≠</mo><mi>b</mi>"),
     (r"x \not\in A \not\le \not\subset \not\equiv \not\sim", f'<mi>x</mi><mo>∉</mo><mi>A</mi><mo rspace="0em">≰</mo><mo{TIGHT}>⊄</mo><mo{TIGHT}>≢</mo><mo lspace="0em">≁</mo>'),
     # review round 2
-    (r"a\displaystyle+_i b", '<mi>a</mi><mstyle displaystyle="true"><msub><mo form="infix">+</mo><mi>i</mi></msub><mi>b</mi></mstyle>'),
-    (r"\overset{a}{\textstyle\sum}", '<mover><mstyle displaystyle="false"><mo stretchy="false" largeop="true" movablelimits="false" lspace="0em" rspace="0em">∑</mo></mstyle><mi>a</mi></mover>'),
+    (r"a\displaystyle+_i b", '<mi>a</mi><mstyle displaystyle="true" scriptlevel="0"><msub><mo form="infix">+</mo><mi>i</mi></msub><mi>b</mi></mstyle>'),
+    (r"\overset{a}{\textstyle\sum}", '<mover><mstyle displaystyle="false" scriptlevel="0"><mo stretchy="false" largeop="true" movablelimits="false" lspace="0em" rspace="0em">∑</mo></mstyle><mi>a</mi></mover>'),
     (r"a\overset{n}{\overset{m}{+}}b", '<mi>a</mi><mover><mover><mo stretchy="false" form="infix">+</mo><mi>m</mi></mover><mi>n</mi></mover><mi>b</mi>'),
     (r"\sin\cdot_i x", f"<mi>sin</mi>{FN}{THIN}<msub><mo{TIGHT}>⋅</mo><mi>i</mi></msub><mi>x</mi>"),
     (r"a\stackrel{n}{|}b", '<mi>a</mi><mover><mo stretchy="false" form="infix" lspace="0.2778em" rspace="0.2778em">|</mo><mi>n</mi></mover><mi>b</mi>'),
@@ -484,7 +484,7 @@ STRUCT = [  # each expected string is the whole body inside the top <mrow>
     (r"{a+ \over b}", f"<mfrac><mrow><mi>a</mi><mo{TIGHT}>+</mo></mrow><mi>b</mi></mfrac>"),
     (r"\operatorname{\sin x}", f'<mrow><mi>sin</mi>{THIN}<mi mathvariant="normal">x</mi></mrow>{FN}'),
     # review round 3
-    (r"\overset{a}{\textstyle\sum_i}", '<mover><mrow><mstyle displaystyle="false"><munder><mo largeop="true" movablelimits="true" lspace="0em" rspace="0em">∑</mo><mi>i</mi></munder></mstyle><mi></mi></mrow><mi>a</mi></mover>'),
+    (r"\overset{a}{\textstyle\sum_i}", '<mover><mrow><mstyle displaystyle="false" scriptlevel="0"><munder><mo largeop="true" movablelimits="true" lspace="0em" rspace="0em">∑</mo><mi>i</mi></munder></mstyle><mi></mi></mrow><mi>a</mi></mover>'),
     (r"\overset{a}{\sum_i}", '<mover><mrow><munder><mo largeop="true" movablelimits="true" lspace="0em" rspace="0em">∑</mo><mi>i</mi></munder><mi></mi></mrow><mi>a</mi></mover>'),
     (r"a:=b", '<mi>a</mi><mo lspace="0.2778em" rspace="0em">:</mo><mo lspace="0em">=</mo><mi>b</mi>'),   # Chrome spaces a lone : as punctuation
     (r"a=:b", '<mi>a</mi><mo rspace="0em">=</mo><mo lspace="0em" rspace="0.2778em">:</mo><mi>b</mi>'),
@@ -493,7 +493,7 @@ STRUCT = [  # each expected string is the whole body inside the top <mrow>
     (r"=\stackrel{n}{\lim_i}=", '<mo rspace="0em">=</mo><mover><mrow><munder><mo movablelimits="true" lspace="0em" rspace="0em">lim</mo><mi>i</mi></munder><mi></mi></mrow><mi>n</mi></mover><mo lspace="0em">=</mo>'),
     (r"a\stackrel{n}{\lim_i}b", '<mi>a</mi><mspace width="0.2778em"/><mover><mrow><munder><mo movablelimits="true" lspace="0em" rspace="0em">lim</mo><mi>i</mi></munder><mi></mi></mrow><mi>n</mi></mover><mspace width="0.2778em"/><mi>b</mi>'),
     (r"\overset{a}{\frac{\sum_i}{x}}", '<mover><mrow><mfrac><munder><mo largeop="true" movablelimits="true" lspace="0em" rspace="0em">∑</mo><mi>i</mi></munder><mi>x</mi></mfrac><mi></mi></mrow><mi>a</mi></mover>'),
-    (r"\left(\lim\nolimits_n a_n\right)", f'<mrow>{medium("(")}{MSTRUT}<msub><mo{TIGHT}>lim</mo><mi>n</mi></msub>{THIN}<msub><mi>a</mi><mi>n</mi></msub>{medium(")")}</mrow>'),
+    (r"\left(\lim\nolimits_n a_n\right)", f'<mrow>{fence("(", False)}<msub><mo{TIGHT}>lim</mo><mi>n</mi></msub>{THIN}<msub><mi>a</mi><mi>n</mi></msub>{fence(")", False)}</mrow>'),   # pdflatex: normal size
     (r"P = \int f", f'<mi>P</mi><mo>=</mo>{INT}{THIN}<mi>f</mi>'),
     (r"(\sum x)", f'<mo stretchy="false">(</mo>{SUM}{THIN}<mi>x</mi><mo stretchy="false">)</mo>'),
     (r"x\sum y", f'<mi>x</mi>{THIN}{SUM}{THIN}<mi>y</mi>'),
@@ -984,6 +984,177 @@ def test_bold_prime_superscript_is_not_an_apostrophe():
     assert "<msup><msup>" in latex_to_mathml(r"\bm{x^\prime}^2", display=False)   # TeX: double superscript
 
 
+@pytest.mark.parametrize("src,part", [
+    (r"x^{\displaystyle y}", '<mstyle displaystyle="true" scriptlevel="0">'),   # TeX: full size in a script
+    (r"x^{\textstyle y}", '<mstyle displaystyle="false" scriptlevel="0">'),
+    (r"x^{\dfrac12}", '<mstyle displaystyle="true" scriptlevel="0">'),
+    (r"x^{\tfrac12}", '<mstyle displaystyle="false" scriptlevel="0">'),
+])
+def test_explicit_style_resets_the_script_size(src, part):
+    assert part in latex_to_mathml(src, display=False)
+
+
+@pytest.mark.parametrize("src,display,tag", [
+    (r"\det_{x} A", True, "<munder>"), (r"\Pr_{x\sim D} A", True, "<munder>"),
+    (r"\gcd_{i} a_i", True, "<munder>"), (r"\det_{x} A", False, "<munder>"),
+])
+def test_det_gcd_pr_take_limits_as_lim(src, display, tag):
+    """amsmath makes them \\mathop with limits, as \\lim."""
+    out = _body(latex_to_mathml(src, display=display))
+    assert out.startswith(tag) and 'movablelimits="true"' in out
+
+
+@pytest.mark.parametrize("src,part", [
+    (r"\operatorname{f-g} x", "<mi>f-g</mi>"),              # amsmath: a tight text hyphen
+    (r"\operatorname{a*b} x", "<mi>a*b</mi>"),
+    (r"\operatorname*{arg-min}_x f", ">arg-min</mo>"),
+    (r"\bm{\operatorname{f-g}} x", "<mi>𝐟-𝐠</mi>"),
+    (r"\bm{\operatorname*{arg-min}}_x f", ">𝐚𝐫𝐠-𝐦𝐢𝐧</mo>"),
+    (r"\operatorname*{\det}_x A", ">det</mo>"),
+    (r"\operatorname{f'} x", "<mi>f’</mi>"),                 # a text apostrophe, not a prime
+    (r"\operatorname*{f'}_x a", ">f’</mo>"),
+    (r"\operatorname{a:b} x", '<mo lspace="0em" rspace="0.1667em">:</mo>'),   # punctuation
+    (r"\operatorname{a.b} x", '<mo lspace="0em" rspace="0.1667em">.</mo>'),
+])
+def test_operatorname_hyphen_and_star_are_text(src, part):
+    assert part in latex_to_mathml(src, display=False)
+
+
+@pytest.mark.parametrize("src", [r"x^{\displaystyle a+b}", r"x^{\textstyle a=b}", r"\sum_{\textstyle i=1}", r"e^{-\dfrac{x-\mu}{2}}"])
+def test_full_size_style_in_a_script_keeps_operator_spacing(src):
+    out = latex_to_mathml(src, display=False)
+    assert re.search(r'<mo( form="infix")?>[+=−]</mo>', out)
+
+
+@pytest.mark.parametrize("src,part", [
+    (r"\mathrm{\boldsymbol{x}}", "<mi>𝒙</mi>"),             # \\boldsymbol follows amsmath here; \\bm follows bm
+    (r"\operatorname{a.} x", '<mo lspace="0em" rspace="0em">.</mo>'),   # no space after the last punctuation
+    (r"\operatorname{f^'} x", "’"),
+    (r"\operatorname*{\alpha-\beta}_x f", ">α-β</mo>"),
+    (r"\operatorname{f}' x", "<mo>′</mo>"),                  # outside the name a prime again
+    (r"\mathrm{a-b}", "<mo>−</mo>"),
+    (r"\operatorname{e^{-x}}", '<mi mathvariant="normal">-</mi>'),
+    (r"\mathbf{\bm{\mathrm{x}}}", "<mi>𝐱</mi>"),
+])
+def test_round_two_boundaries(src, part):
+    assert part in latex_to_mathml(src, display=False)
+
+
+@pytest.mark.parametrize("src", [r"\operatorname*{a.b}", r"\operatorname*{-}"])
+def test_operatorname_star_still_wants_a_name(src):
+    with pytest.raises(LatexError):
+        latex_to_mathml(src, display=False)
+
+
+@pytest.mark.parametrize("src,grows", [
+    (r"\left(\lim_{n\to\infty} a_n\right)", False),           # pdflatex: a subscript beside is not tall
+    (r"\left(\gcd_i a\right)", False),
+    (r"\left(\lim\nolimits_n a\right)", False),
+    (r"\left(\det^{-1}A\right)", True),                         # a superscript is
+    (r"\left(\Pr^2 x\right)", True),
+])
+def test_bracket_around_a_limit_beside_its_name(src, grows):
+    assert ("minsize" in latex_to_mathml(src, display=False)) == grows
+
+
+@pytest.mark.parametrize("src,display,grows", [
+    (r"\left(\displaystyle\lim_n a\right)", False, True),            # the limit sits under the name
+    (r"\displaystyle\left(\lim_n a\right)", False, True),
+    (r"{\displaystyle\left(\lim_{n\to\infty} a_n\right)}", False, True),
+    (r"\textstyle\left(\lim_n a\right)", True, False),               # beside it again (pdflatex: normal)
+    (r"\left(\lim_n a\right)", False, False),
+])
+def test_explicit_style_decides_where_a_limit_sits_for_brackets(src, display, grows):
+    assert ('stretchy="true"' in latex_to_mathml(src, display=display)) == grows
+
+
+@pytest.mark.parametrize("src", [
+    r"\operatorname{{a.}b}", r"\operatorname{a.\,} x", r"\operatorname{a.^2}", r"\operatorname{a\textstyle.}",
+])
+def test_operatorname_last_punctuation_has_no_space_after(src):
+    out = latex_to_mathml(src, display=False)
+    assert 'rspace="0em">.</mo>' in out and 'rspace="0.1667em">.</mo>' not in out
+
+
+@pytest.mark.parametrize("src,spaced", [
+    (r"\operatorname{\left(a.\right)}", True),      # punctuation before a closing bracket keeps its space
+    (r"\operatorname{a\bm{.}b}", True),              # \\bm unpacks: the dot is still followed by b
+    (r"\operatorname{\boldsymbol{a.}b}", True),
+    (r"\operatorname{a.\over b}", False),            # a numerator is a list of its own
+    (r"\operatorname{\overset{x}{a.}b}", False),     # so is a stacked base
+    (r"\operatorname{a\bm{.}}", False),
+    (r"\operatorname{\left(a\over b.\right)c}", False),  # the denominator ends its own list first
+    (r"\operatorname{\left(a\choose b;\right)c}", False),
+    (r"\operatorname{\bm{{a.}}b}", False),           # inner braces inside \\bm are a real list
+    (r"\operatorname{\bm{a\over b.}c}", False),      # our reading: \\bm{a\\over b} is an error in bm
+    (r"\operatorname{\left.a.\right.}d", True),       # a null \\right is still a closing atom
+    (r"\operatorname{\left(a.\right.}d", True),
+    (r"\operatorname{x{\left.a.\right.}}d", True),
+    (r"\operatorname{\left[a.\right.}", True),
+])
+def test_operatorname_list_ends_for_punctuation(src, spaced):
+    out = latex_to_mathml(src, display=False)
+    assert ('rspace="0.1667em">' in out) == spaced, out
+    assert spaced or 'rspace="0em">' in out, out
+
+
+@pytest.mark.parametrize("src,display", [
+    (r"{a\over b}\left(\lim_n c\right)", True),          # display style again after the group
+    (r"\displaystyle{a\over b}\left(\lim_n c\right)", False),
+    (r"{\textstyle x}\left(\lim_n c\right)", True),
+])
+def test_display_style_returns_after_a_group(src, display):
+    assert 'stretchy="true"' in latex_to_mathml(src, display=display)
+
+
+def test_denominator_after_over_is_not_display_style():
+    out = latex_to_mathml(r"{\displaystyle a\over \left(\lim_n b\right)}", display=False)
+    assert 'stretchy="true"' not in out
+
+
+def test_operatorname_keeps_the_space_of_colon():
+    assert "0.2778em" in latex_to_mathml(r"\operatorname{a\colon}b", display=False)
+
+
+def test_minus_outside_operatorname_stays_a_sign():
+    assert "<mo>−</mo>" in latex_to_mathml(r"f-g", display=False)
+
+
+@pytest.mark.parametrize("src,part", [
+    (r"\mathrm{\bm{x}}", '<mi mathvariant="normal">x</mi>'),   # bm leaves an outer alphabet's letters
+    (r"\mathbf{\bm{x}}", "<mi>𝐱</mi>"),
+    (r"\mathbb{\bm{R}}", "<mi>ℝ</mi>"),
+    (r"\bm{\mathrm{x}}", "<mi>𝐱</mi>"),                      # an inner font still takes bold math
+    (r"\mathrm{\bm{\Gamma}}", '<mi mathvariant="normal">Γ</mi>'),
+    (r"\mathrm{\bm{2}}", "<mn>2</mn>"),
+    (r"\mathrm{\bm{\bm{x}}}", '<mi mathvariant="normal">x</mi>'),
+    # the rest is still bold math, as bm
+    (r"\mathbf{\boldsymbol{\beta}}", "<mi>𝜷</mi>"),
+    (r"\mathrm{d\bm{\mu}}", "<mi>𝝁</mi>"),
+    (r"\mathrm{\bm{\sin}} x", "<mi>𝐬𝐢𝐧</mi>"),
+    (r"\mathrm{\bm{\lim}}", ">𝐥𝐢𝐦</mo>"),
+    (r"\mathrm{\bm{\nabla}}", "<mi>𝛁</mi>"),
+    (r"\mathbf{\bm{\partial}}", "<mi>𝝏</mi>"),
+    (r"\mathrm{\bm{\mathit{x}}}", "<mi>𝒙</mi>"),
+    (r"\mathrm{\bm{\mathsf{x}}}", "<mi>𝘅</mi>"),
+    (r"\mathrm{\bm{\mathrm{x}}}", "<mi>𝐱</mi>"),
+    (r"\bm{\mathrm{\bm{x}}}", "<mi>𝐱</mi>"),
+    (r"\bm{\mathsf{\bm{\Gamma}}}", "<mi>𝝘</mi>"),
+    (r"\operatorname{\bm{\alpha}} x", "<mi>𝜶</mi>"),
+])
+def test_outer_font_around_bold_keeps_its_letters(src, part):
+    assert part in latex_to_mathml(src, display=False)
+
+
+@pytest.mark.parametrize("src,part", [
+    (r"\bm{\mathsf{\Gamma}}", "<mi>𝝘</mi>"),                  # bold sans capital Greek
+    (r"\bm{\mathsf{\alpha}}", "<mi>𝜶</mi>"),                   # lowercase Greek ignores \\mathsf
+    (r"\mathsf{\Gamma}", '<mi mathvariant="normal">Γ</mi>'),  # Unicode has no plain sans Greek
+])
+def test_bold_sans_capital_greek(src, part):
+    assert part in latex_to_mathml(src, display=False)
+
+
 def test_braced_scripted_atom_keeps_its_own_scripts():
     assert "<msup><msub>" in latex_to_mathml(r"{x_i}^2", display=False)
 
@@ -1068,11 +1239,11 @@ def test_minus_after_quantifier_is_binary(src, inner):
 
 
 @pytest.mark.parametrize("src,display,bracket", [
-    (r"\left(\lim_{n} a_n\right)", False, "medium"),     # the limit sits beside the name
+    (r"\left(\lim_{n} a_n\right)", False, "normal"),     # beside the name a subscript is not tall (pdflatex)
     (r"\left(\lim_{n} a_n\right)", True, "grow"),        # the limit sits under it
 ])
 def test_limits_under_a_name_grow_brackets_in_display(src, display, bracket):
-    left, right = (medium("(") + MSTRUT, medium(")")) if bracket == "medium" else (fence("("), fence(")"))
+    left, right = (fence("(", False), fence(")", False)) if bracket == "normal" else (fence("("), fence(")"))
     assert _body(latex_to_mathml(src, display)) == f"<mrow>{left}{LIM}{right}</mrow>"
 
 

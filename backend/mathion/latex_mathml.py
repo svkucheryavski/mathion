@@ -12,7 +12,7 @@ MAX_DEPTH = 40
 _ATTR_ORDER = (
     "display", "encoding", "class", "mathvariant", "stretchy", "largeop", "movablelimits",
     "fence", "form", "lspace", "rspace", "minsize", "maxsize", "linethickness", "accent",
-    "accentunder", "displaystyle", "width", "height", "depth",
+    "accentunder", "displaystyle", "scriptlevel", "width", "height", "depth",
 )
 _ATTR_SET = set(_ATTR_ORDER)
 _ZERO = {"lspace": "0em", "rspace": "0em"}
@@ -75,6 +75,8 @@ def row(nodes: list[Node]) -> Node:
 
 def tighten(node: Node) -> Node:
     """Script content: binary, relation and punctuation operators lose their spacing."""
+    if node.tag == "mstyle" and "scriptlevel" in node.attrs:
+        return node                                   # full size again, so spaced as in TeX
     if node.tag == "mo" and node.kind in _SCRIPT_TIGHT:
         node.attrs.update(_ZERO)
     node.children[:] = [c for c in node.children if c.kind != "relspace"]
@@ -191,11 +193,12 @@ _INTEGRALS = {"int": "∫", "iint": "∬", "iiint": "∭", "oint": "∮"}
 _TYPED_BIGOPS = {**{c: True for c in _BIGOPS.values()}, **{c: False for c in _INTEGRALS.values()}}
 _FUNCTIONS = (
     "log ln lg exp sin cos tan cot sec csc arcsin arccos arctan sinh cosh tanh "
-    "coth det dim ker deg hom arg Pr gcd"
+    "coth dim ker deg hom arg"
 ).split()
 _LIMFUNCS = {
     "lim": "lim", "limsup": "lim\u2009sup", "liminf": "lim\u2009inf", "max": "max", "min": "min",
     "sup": "sup", "inf": "inf", "argmax": "arg\u2009max", "argmin": "arg\u2009min",
+    "det": "det", "gcd": "gcd", "Pr": "Pr",
 }
 _ACCENTS = {   # name -> (character, CSS class that places it, stretchy)
     "bar": ("¯", "math-acc", False), "hat": ("ˆ", "math-acc", False), "tilde": ("˜", "math-acc", False),
@@ -238,7 +241,7 @@ _LETTERLIKE = {   # the block's holes, filled by older Letterlike Symbols
     **{("bb", c): v for c, v in zip("CHNPQRZ", "ℂℍℕℙℚℝℤ")},
 }
 _DIGIT_BASE = {"bf": 0x1D7CE, "bb": 0x1D7D8, "sf": 0x1D7E2, "bfsf": 0x1D7EC, "tt": 0x1D7F6}
-_GREEK_BASE = {"bf": 0x1D6A8, "it": 0x1D6E2, "bfit": 0x1D71C}
+_GREEK_BASE = {"bf": 0x1D6A8, "it": 0x1D6E2, "bfit": 0x1D71C, "bfsf": 0x1D756}
 _GREEK_EXTRA = {"ϴ": 17, "∇": 25, "∂": 51, "ϵ": 52, "ϑ": 53, "ϰ": 54, "ϕ": 55, "ϱ": 56, "ϖ": 57}
 
 
@@ -463,14 +466,16 @@ def _make_ordinary(node: Node | None) -> None:
 def _measure(node: Node, display: bool) -> tuple[int, int]:
     """How far a \\left bracket grows for this node (0 not, 1 to the \\big size, 2 to the
     content), and how many script levels it stacks (1 for x^2, 2 for x^{x^2})."""
+    if node.tag == "mstyle" and "displaystyle" in node.attrs:
+        display = node.attrs["displaystyle"] == "true"   # an explicit style moves the limits
     parts = [_measure(c, display) for c in node.children]
     height = max((h for h, _ in parts), default=0)
     tower = max((t for _, t in parts), default=0)
     if node.tag in _SCRIPT_TAGS:
         tower = 1 + max((t for _, t in parts[1:]), default=0)
         height = max(height, 2 if tower >= 3 else 1 if tower == 2 else 0)
-        if _core(node).kind == "limfunc":
-            height = max(height, 1)                   # a limit beside its name
+        if _core(node).kind == "limfunc" and node.tag != "msub":
+            height = max(height, 1)                   # a superscript beside a name; a subscript is not tall
     elif node.tag == "mover" and node.attrs.get("accent") == "true":
         wide = node.children[1].attrs.get("stretchy") == "true"
         height = max(1 if wide else 0, parts[0][0])
@@ -481,7 +486,8 @@ def _measure(node: Node, display: bool) -> tuple[int, int]:
     elif node.tag in _STACK_TAGS:
         core = _core(node)
         under = (core.attrs.get("movablelimits") == "false" and ("largeop" in core.attrs or core.kind == "limfunc")) or (display and core.kind == "limfunc")
-        height = max(2 if under else 1, height)    # limits under a name are tall
+        beside = core.kind == "limfunc" and not under and node.tag == "munder"   # inline: a subscript beside
+        height = max(2 if under else 0 if beside else 1, height)    # limits under a name are tall
     return height, tower
 
 
@@ -534,6 +540,8 @@ class Parser:
         self.pos = 0
         self.font: str | None = None
         self.bold = False                   # inside \\bm or \\boldsymbol: bold math
+        self.opname = False                 # inside \\operatorname: - and * are text
+        self.plain = False                  # \\bm inside an alphabet: its letters stay unbold
         self.prev: str | None = None        # the kind before the atom being parsed
 
     # tokens
@@ -572,8 +580,15 @@ class Parser:
 
     # structure
 
-    def parse_seq(self, depth: int, until: str | None = None) -> list[Node]:
+    def parse_seq(self, depth: int, until: str | None = None, closes: bool = True) -> list[Node]:
         """Nodes up to the group's end: the source end, `}`, `]` or `\\right` (`until`)."""
+        saved = self.display
+        try:
+            return self._seq(depth, until, closes)
+        finally:
+            self.display = saved                      # a style ends with its group
+
+    def _seq(self, depth: int, until: str | None, closes: bool) -> list[Node]:
         nodes: list[Node] = []
         styles: list[tuple[int, str]] = []          # (start index, displaystyle value)
         split: tuple[list[Node], str] | None = None  # numerator and `\\over` or `\\choose`
@@ -587,6 +602,8 @@ class Parser:
             if tok is None or tok in ("}", "\\right") or (tok == "]" and until == "]"):
                 _check_end(tok, until)
                 _make_ordinary(last)
+                if self.opname and (split is not None or (closes and tok != "\\right")):
+                    _end_punct(nodes)                 # \\bm's group is no list; a \\right is a closing atom
                 break
             if tok == "\\middle":
                 if until != "\\right":
@@ -605,11 +622,15 @@ class Parser:
                     raise LatexError("two `\\over` in one group; add braces")
                 self.take()
                 _make_ordinary(last)
+                if self.opname:
+                    _end_punct(nodes)                 # the numerator is a list of its own
+                self.display = False                  # so is the denominator, in text style
                 split = (_fold_styles(nodes, styles), tok)
                 nodes, styles, prev, spaced, last, rel_after, op_after = [], [], None, False, None, False, False
                 continue
             if tok in ("\\displaystyle", "\\textstyle"):
                 self.take()
+                self.display = tok == "\\displaystyle"
                 styles.append((len(nodes), "true" if tok == "\\displaystyle" else "false"))
                 continue
             self.prev = prev
@@ -657,10 +678,10 @@ class Parser:
             return [Node("mfrac", children=[row(num), row(nodes)])]
         return [binom_node(row(num), row(nodes))]
 
-    def parse_braced(self, depth: int, ordinary: bool = True) -> Node:
+    def parse_braced(self, depth: int, ordinary: bool = True, closes: bool = True) -> Node:
         """`{…}` at the given depth; alone, an operator gets TeX's ordinary spacing."""
         self.take()
-        nodes = self.parse_seq(depth, "}")
+        nodes = self.parse_seq(depth, "}", closes)
         self.take()
         if not ordinary and len(nodes) == 2 and nodes[0].kind == "func" and nodes[1].kind == "auto":
             nodes.pop()                                   # the row outside marks it again
@@ -675,14 +696,14 @@ class Parser:
         node = row(nodes)
         return Node(node.tag, node.text, node.children, node.attrs, group=ordinary)
 
-    def parse_arg(self, depth: int, owner: str, count: int = 1, ordinary: bool = True) -> Node:
+    def parse_arg(self, depth: int, owner: str, count: int = 1, ordinary: bool = True, closes: bool = True) -> Node:
         """One argument of a script or command: a braced group or one token."""
         depth = self.enter(depth + 1)
         tok = self.peek()
-        if tok is None or tok in ("}", "^", "_", "'"):
+        if tok is None or tok in ("}", "^", "_") or (tok == "'" and not self.opname):
             raise LatexError(f"`{owner}` needs {count} argument{'s' if count > 1 else ''}")
         if tok == "{":
-            return self.parse_braced(depth, ordinary)
+            return self.parse_braced(depth, ordinary, closes)
         if tok[0].isdigit():
             self.pos += 1
             return self.restyle(Node("mn", tok[0]))
@@ -696,23 +717,25 @@ class Parser:
                 node.attrs.pop("movablelimits", None)   # as a braced one: no limits under or over
         return node
 
-    def styled_arg(self, depth: int, font: str, owner: str, ordinary: bool = True) -> Node:
+    def styled_arg(self, depth: int, font: str, owner: str, ordinary: bool = True, plain: bool = False, closes: bool = True) -> Node:
         """An argument whose letters take `font`; an inner font wins."""
-        saved, self.font = self.font, font
+        saved = self.font, self.plain
+        self.font, self.plain = font, plain
         try:
-            return self.parse_arg(depth, owner, ordinary=ordinary)
+            return self.parse_arg(depth, owner, ordinary=ordinary, closes=closes)
         finally:
-            self.font = saved
+            self.font, self.plain = saved
 
     def restyle(self, leaf: Node) -> Node:
         """A letter or number in the current font."""
         if self.font is None or leaf.text is None or leaf.tag not in ("mi", "mn"):
             return leaf
         latin, digits, upper, lower = _FONTS[self.font]
-        if self.bold:
+        if self.bold and not self.plain:
+            upper = "bfsf" if latin == "sf" else {None: "bf", "it": "bfit"}.get(upper, upper)
             latin = _BOLDER.get(latin, latin)
             digits = {None: "bf", "sf": "bfsf"}.get(digits, digits)
-            upper = {None: "bf", "it": "bfit"}.get(upper, upper)
+        if self.bold:
             lower = "bfit"
         if leaf.tag == "mn":
             if digits is None:
@@ -754,14 +777,14 @@ class Parser:
 
     def parse_scripted(self, depth: int, prev: str | None) -> Node | None:
         tok = self.peek()
-        base = None if tok in ("^", "_", "'") else self.parse_atom(depth, prev)
+        base = None if tok in ("^", "_") or (tok == "'" and not self.opname) else self.parse_atom(depth, prev)
         sup: Node | None = None
         sub: Node | None = None
         primes = 0
         primes_open = True
         while True:
             tok = self.peek()
-            if tok == "'":
+            if tok == "'" and not self.opname:
                 if sup is not None or (primes and not primes_open):
                     raise LatexError("double superscript")
                 if not primes:
@@ -822,6 +845,10 @@ class Parser:
         self.take()
         if tok[0].isdigit():
             return self.restyle(Node("mn", tok))
+        if self.opname and tok in ("-", "*", "'"):
+            return mi(tok.replace("'", "’"), mathvariant="normal")   # amsmath: text characters
+        if self.opname and tok in (".", ":"):
+            return mo(tok, "punct", lspace="0em", rspace="0.1667em")
         return self.restyle(char_node(tok, prev))
 
     def parse_command(self, depth: int, prev: str | None) -> Node | None:
@@ -946,7 +973,7 @@ def _frac(parser: Parser, name: str, depth: int) -> Node:
     frac = Node("mfrac", children=[top, bottom])
     if name == "frac":
         return frac
-    return Node("mstyle", children=[frac], attrs={"displaystyle": "true" if name == "dfrac" else "false"})
+    return Node("mstyle", children=[frac], attrs={"displaystyle": "true" if name == "dfrac" else "false", "scriptlevel": "0"})
 
 
 def _sqrt(parser: Parser, name: str, depth: int) -> Node:
@@ -1054,9 +1081,11 @@ def _big(parser: Parser, name: str, depth: int) -> Node | None:
 def _font(parser: Parser, name: str, depth: int) -> Node:
     prev = parser.prev
     keep = name in ("boldsymbol", "bm")                   # the bm package keeps an operator's class
+    outer = name == "bm" and parser.font not in (None, "bm", "boldsymbol")   # bm leaves an outer alphabet's letters
+    plain = outer and (parser.plain or not parser.bold)
     saved, parser.bold = parser.bold, parser.bold or keep
     try:
-        node = parser.styled_arg(depth, name, f"\\{name}", ordinary=not keep)
+        node = parser.styled_arg(depth, (parser.font or name) if outer else name, f"\\{name}", ordinary=not keep, plain=plain, closes=not keep)
     finally:
         parser.bold = saved
     if keep and (node.kind == "func" or _lift_function(node)):
@@ -1088,7 +1117,7 @@ def _upright(node: Node) -> str | None:
     if node.tag != "mi" or not node.text or len(node.text) != 1:
         return None
     if node.attrs == {"mathvariant": "normal"}:
-        return "rm" if node.text.isascii() else "any"          # an accented letter joins either run
+        return "rm" if node.text.isascii() and node.text.isalpha() else "any"   # others join either run
     if not node.attrs and 0x1D400 <= ord(node.text) <= 0x1D433:
         return "bf"
     return None
@@ -1133,12 +1162,41 @@ def _drop_marks(node: Node) -> None:
         _drop_marks(child)
 
 
+def _end_punct(nodes: list[Node]) -> None:
+    """TeX adds no space after the last atom of a list when it is punctuation."""
+    node = next((n for n in reversed(nodes) if n.tag != "mspace"), None)
+    while node is not None:
+        if node.tag == "mo":
+            if node.kind == "punct" and node.attrs.get("rspace", "0.1667em") == "0.1667em":
+                node.attrs["rspace"] = "0em"          # \\colon keeps its own wider space
+            return
+        if node.tag in _SCRIPT_TAGS:
+            node = node.children[0]
+        elif _wrapper(node):                          # a braced list ended itself already
+            node = next((n for n in reversed(node.children) if n.tag != "mspace"), None)
+        else:
+            return
+
+
+def _named(node: Node) -> bool:
+    """Letters, text hyphens, asterisks or apostrophes: a part of a name \\operatorname* can use."""
+    text = (node.text or "").replace("\u2009", "")
+    return bool(text) and all(c.isalpha() or c in "-*’" for c in text)
+
+
 def _operatorname(parser: Parser, name: str, depth: int) -> Node:
     star = parser.peek() == "*"
     if star:
         parser.take()
     owner = "\\operatorname*" if star else "\\operatorname"
-    parts = [p for p in _inner(parser.styled_arg(depth, "mathrm", owner)) if p.tag != "mo" or p.kind != "auto"]
+    saved, parser.opname = parser.opname, True
+    try:
+        arg = parser.styled_arg(depth, "mathrm", owner)
+    finally:
+        parser.opname = saved
+    parts = [p for p in _inner(arg) if p.tag != "mo" or p.kind != "auto"]
+    if not arg.group:
+        _end_punct(parts)                             # a one-token argument such as \\operatorname.
     for part in parts:
         _drop_marks(part)
     while parts and parts[-1].kind == "auto":
@@ -1150,10 +1208,13 @@ def _operatorname(parser: Parser, name: str, depth: int) -> Node:
         return node
     parts = _inner(node)
     if not parts or any(
-        not (p.tag == "mspace" or (p.tag == "mi" and (p.text or "").isalpha())) for p in parts
+        not (p.tag == "mspace" or (p.tag in ("mi", "mo") and p.kind != "punct" and _named(p)))
+        for p in parts
     ):
         raise LatexError("`\\operatorname*` takes letters only")
-    text = "".join(p.text or "" if p.tag == "mi" else "\u2009" for p in parts)
+    text = "".join(p.text or "" if p.tag != "mspace" else "\u2009" for p in parts)
+    if not any(c.isalpha() for c in text):
+        raise LatexError("`\\operatorname*` takes letters only")
     return mo(text, "limfunc", movablelimits="true", **_ZERO)
 
 
@@ -1275,7 +1336,7 @@ def _fold_styles(nodes: list[Node], styles: list[tuple[int, str]]) -> list[Node]
                 core = _core(node)
                 if inside and core.tag == "mo" and node.kind in ("bin", "rel"):
                     core.attrs["form"] = "infix"      # the wrapper would make it a prefix or postfix
-            out.append(Node("mstyle", children=segment, attrs={"displaystyle": value}))
+            out.append(Node("mstyle", children=segment, attrs={"displaystyle": value, "scriptlevel": "0"}))
     return out
 
 
