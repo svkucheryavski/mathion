@@ -339,7 +339,7 @@ def _math_block(state: StateBlock, startLine: int, endLine: int, silent: bool) -
     return True
 
 
-def render_math(src: str, display: bool, in_paragraph: bool) -> str:
+def render_math(src: str, display: bool, in_paragraph: bool, mark: str | None = None) -> str:
     """MathML for one formula, or the escaped source in an error span or div."""
     try:
         mathml = latex_to_mathml(src, display)
@@ -352,7 +352,7 @@ def render_math(src: str, display: bool, in_paragraph: bool) -> str:
             return mathml
         tag = "span" if in_paragraph else "div"
         return f'<{tag} class="math-display">{mathml}</{tag}>'
-    mark = "$$" if display else "$"
+    mark = mark or ("$$" if display else "$")
     tag = "div" if display and not in_paragraph else "span"
     title = html.escape(reason, quote=True)
     return f'<{tag} class="math-error" title="{title}">{mark}{html.escape(src, quote=True)}{mark}</{tag}>'
@@ -440,6 +440,20 @@ def render_markdown(text: str | None) -> str:
     if not text:
         return ""
     return _clean(_md.render(text))
+
+
+_opt = MarkdownIt("zero")
+_opt.inline.ruler.push("math_inline", math_inline_rule)
+_opt.enable(["escape", "text", "math_inline"])
+_opt.add_render_rule("math_inline", _render_inline)
+_opt.add_render_rule("math_inline_double",           # inline, but a broken one shows its $$
+                     lambda self, t, i, o, e: render_math(_source(t[i].content), False, False, "$$"))
+_opt.add_render_rule("hardbreak", lambda self, t, i, o, e: "\n")   # a backslash before a newline
+
+
+def render_option_text(text: str) -> str:
+    """An answer choice: escaped text with inline math only, no other Markdown."""
+    return _clean(_opt.renderInline(text or ""))
 
 
 def _clean(rendered: str) -> str:

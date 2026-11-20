@@ -14,6 +14,7 @@ from mathion.api.version_clone import clone_version_content, collect_referenced_
 from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
+from mathion.markdown import render_markdown
 from mathion.models import AnswerOption, Asset, Block, Course, CourseAdmin, CourseVersion, Item, Question, Run, RunTeacher, Sequence
 from mathion.models_auth import StudentEnrollment, User
 from mathion.schemas import VersionCreate, VersionDuplicateRequest, VersionRenderRequest, VersionRenderResponse, VersionResponse, VersionUpdate
@@ -232,6 +233,18 @@ def publish_version(version_id: int, db: Session = Depends(get_db), user: User =
     if version.state != "created":
         raise HTTPException(status_code=409, detail=f"Cannot publish version in '{version.state}' state")
 
+    # D12: question rows first, ascending (as deletes and reorders), before any item or answer row
+    questions_to_render = db.execute(
+        select(Question)
+        .join(Item, Item.id == Question.item_id)
+        .join(Sequence, Sequence.id == Item.sequence_id)
+        .join(Block, Block.id == Sequence.block_id)
+        .where(Block.version_id == version_id)
+        .order_by(Question.id)
+        .with_for_update(of=Question)
+        .execution_options(populate_existing=True)
+    ).scalars().all()
+
     # C4: every block must have at least one sequence
     blocks = db.execute(select(Block).where(Block.version_id == version_id)).scalars().all()
     for block in blocks:
@@ -331,17 +344,23 @@ def publish_version(version_id: int, db: Session = Depends(get_db), user: User =
         item.content_html = render_with_assets(db, version_id, item.content_md)
         sync_asset_references(db, version_id, [item.content_md], {"item_id": item.id})
 
-    questions_to_render = db.execute(
-        select(Question)
-        .join(Item, Item.id == Question.item_id)
-        .join(Sequence, Sequence.id == Item.sequence_id)
-        .join(Block, Block.id == Sequence.block_id)
-        .where(Block.version_id == version_id)
-    ).scalars().all()
     for q in questions_to_render:
         q.text_html = render_with_assets(db, version_id, q.text_md)
         q.explanation_html = render_with_assets(db, version_id, q.explanation_md)
         sync_asset_references(db, version_id, [q.text_md, q.explanation_md], {"question_id": q.id})
+
+    for block in db.execute(select(Block).where(Block.version_id == version_id)).scalars():
+        block.info_html = render_markdown(block.info or "")
+    options = db.execute(
+        select(AnswerOption)
+        .join(Question, Question.id == AnswerOption.question_id)
+        .join(Item, Item.id == Question.item_id)
+        .join(Sequence, Sequence.id == Item.sequence_id)
+        .join(Block, Block.id == Sequence.block_id)
+        .where(Block.version_id == version_id)
+    ).scalars()
+    for option in options:
+        option.text = option.text                      # the setter re-renders text_html
 
     version.info_html = render_with_assets(db, version_id, version.info_md)
     sync_asset_references(db, version_id, [version.info_md], {"info_version_id": version.id})
