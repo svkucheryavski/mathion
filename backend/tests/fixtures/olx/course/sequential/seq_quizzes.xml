@@ -1,0 +1,8 @@
+<sequential display_name="Choice questions" format="Homework" graded="true">
+  <vertical url_name="u_mc"/>
+  <vertical url_name="u_checkbox"/>
+  <vertical url_name="u_dropdown"/>
+  <vertical display_name="Numbers">
+    <problem url_name="p_numeric"/>
+  </vertical>
+</sequential>

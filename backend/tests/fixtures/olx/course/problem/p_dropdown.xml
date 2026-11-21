@@ -1,0 +1,14 @@
+<problem display_name="Dropdowns">
+  <p>The capital of France is</p>
+  <optionresponse>
+    <optioninput options="('Paris','Lyon','Nice')" correct="Paris"/>
+  </optionresponse>
+  <optionresponse>
+    <label>The square root of 16 is</label>
+    <optioninput>
+      <option correct="False">2</option>
+      <option correct="True">4</option>
+      <option correct="False">8</option>
+    </optioninput>
+  </optionresponse>
+</problem>

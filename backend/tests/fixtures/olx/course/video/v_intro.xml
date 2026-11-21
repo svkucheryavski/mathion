@@ -1,0 +1,4 @@
+<video display_name="Intro video" youtube_id_1_0="AbCdEfGhIjK" start_time="00:01:05" end_time="00:05:00" download_video="true" sub="intro_subs">
+  <source src="https://example.org/intro.mp4"/>
+  <transcript language="en" src="intro-en.srt"/>
+</video>
