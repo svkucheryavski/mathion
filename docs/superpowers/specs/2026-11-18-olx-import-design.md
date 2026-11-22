@@ -1,4 +1,8 @@
-# Open edX course import — design (rev 10)
+# Open edX course import — design (rev 11)
+
+Rev 11 (Task 5 Codex review, owner's call): a range answer's accepted band never
+leaves the range; the midpoint gets more decimals (up to 10) before `p` is raised;
+an open end, `(` or `)`, is never accepted, as in Open edX.
 
 Rev 10 (plan review round 2): every Delete the import offers goes through a
 guarded discard call that waits for the version lock and deletes only a
@@ -593,6 +597,10 @@ question.
   - **Range `[a, b]` or `(a, b)`:** correct = the midpoint, and `p` = the
     smallest with `5×10^-(p+1) ≤ (b−a)/2`, reported as "range narrowed to …".
     For example `[0.026, 0.029]` → 0.0275 with p = 3 (accepts 0.0270–0.0280).
+    The accepted band never leaves the range: if the rounded midpoint's band
+    sticks out, the midpoint gets more decimals (up to 10) first, then `p` is
+    raised. `[0.06, 1.06]` → 0.56 with p = 0 (accepts 0.06–1.06). An open
+    end, `(` or `)`, is never accepted: `(1, 2)` → 1.5 with p = 1.
   - **If even p = 10 is wider than the Open edX tolerance,** it is reported
     as "tolerance widened".
   - **Scientific notation** (`1.5e-3`) is read as a number.
@@ -673,7 +681,8 @@ question.
     the Open edX tolerance (t > 0.5);
   - an answer of 0 is never reported as widened;
   - trailing zeros are normalised before the 10-decimal test;
-  - a range midpoint is rounded to min(p + 1, 10) decimals.
+  - a range midpoint is rounded to min(p + 1, 10) decimals, or to more (up to 10)
+    when its band would leave the range.
 - **Quizzes:**
   - A question's text takes the response's children except:
     - the inputs: `choicegroup`, `checkboxgroup`, `optioninput`, `textline`,
