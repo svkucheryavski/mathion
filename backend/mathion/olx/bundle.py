@@ -10,7 +10,11 @@ MAX_TEXT_BYTES = 20 * 1024 * 1024
 
 def _safe_path(path: str) -> str:
     if not path or path.startswith("/") or "\\" in path or "\x00" in path or ".." in path.split("/"):
-        raise ValueError(f"unsafe path: {path[:200]}")
+        raise ValueError(f"unsafe path: {path[:200]!r}")
+    try:
+        path.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("unsafe path: not valid text") from None
     return path
 
 
