@@ -62,6 +62,7 @@ class Plan:
     used_app_targets: set[str]
     report: Report
     summary: dict[str, int]
+    not_uploaded: set[str] = field(default_factory=set)   # filled by apply: sources missing from the draft
 
 
 def make_slug(title: str, fallback: str, taken: set[str], counters: Counters | None = None) -> str:

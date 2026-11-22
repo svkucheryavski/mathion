@@ -46,8 +46,8 @@ class ReportLineIn(BaseModel):
 class CheckBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     files: dict[str, str]
-    static: list[StaticEntry]
-    apps: list[AppEntry]
+    static: list[StaticEntry] = Field(max_length=MAX_FILES)     # a long list stops at its first error
+    apps: list[AppEntry] = Field(max_length=MAX_FILES)
 
     @model_validator(mode="after")
     def _caps(self) -> "CheckBody":
