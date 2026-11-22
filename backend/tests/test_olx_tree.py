@@ -654,3 +654,17 @@ def test_staff_only_course_blocks():
         files[path] = files[path].replace("<course ", '<course visible_to_staff_only="true" ')
         rep = Report()
         assert load_course(files, rep) is None and "staff-only" in rep.blockers[0].text, path
+
+
+def test_lone_surrogates_never_reach_names():
+    files = mini(policies__r__policy_DOT_json='{"course/r": {"display_name": "A\\ud800B\\udfffC"}}')
+    files["course/r.xml"] = '<course><chapter url_name="c1"/></course>'
+    name = load_course(files, Report()).display_name
+    assert name == "ABC"
+    name.encode("utf-8")
+
+
+def test_byte_order_marks_never_reach_names():
+    files = mini(policies__r__policy_DOT_json='{"course/r": {"display_name": "A\\ufeffB"}}')
+    files["course/r.xml"] = '<course><chapter url_name="c1"/></course>'
+    assert load_course(files, Report()).display_name == "AB"

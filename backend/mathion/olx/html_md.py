@@ -14,9 +14,11 @@ from mathion.olx.report import Report
 
 MAX_HTML_DEPTH = 100
 MAX_MD_NEST = 16                                      # the renderer stops at 20 levels; a list takes 2, a quote 1
-VOID = {"br", "img", "hr", "input", "source", "meta", "link", "wbr", "area", "base", "col", "embed", "param", "track"}
+VOID = {"br", "img", "hr", "input", "source", "meta", "link", "wbr", "area", "base", "col", "embed", "param", "track", "bgsound", "basefont"}
 DROPPED = {"script", "style"}
-SILENT_DROP = {"head"}
+SILENT_DROP = {"head", "title", "template", "noscript", "noembed", "noframes"}   # never shown (scripting on)
+# tags a browser keeps inside head; anything else closes it
+HEAD_OK = {"base", "basefont", "bgsound", "link", "meta", "title", "noscript", "noframes", "style", "script", "template", "head"}
 SPECIAL_BLOCKS = {"h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "pre", "blockquote", "hr", "table"}
 BOUNDARIES = {"p", "div", "section", "li", "html", "body", "tr", "td", "th", "thead", "tbody", "tfoot", "caption"}
 DEEP = "#deep"                                        # a too-deep link's address; no HTML tag starts with "#"
@@ -45,8 +47,11 @@ class Node:
 
 
 class _Parser(HTMLParser):
+    CDATA_CONTENT_ELEMENTS = tuple(dict.fromkeys(HTMLParser.CDATA_CONTENT_ELEMENTS + ("iframe", "noscript")))   # frame content is raw text
+
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
+        self._support_cdata = False                     # HTML reads <![CDATA[ as a comment ending at ">"
         self.root = Node("root", {}, [])
         self.stack = [self.root]
         self.excess: dict[str, int] = {}
@@ -66,7 +71,13 @@ class _Parser(HTMLParser):
             if t in stops:
                 return
 
+    def _close_head(self) -> None:
+        while self.stack[-1].tag == "head":
+            self.stack.pop()
+
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag not in HEAD_OK:
+            self._close_head()
         self._close_implied(tag)
         node = Node(tag, {}, [])
         for k, v in attrs:
@@ -82,6 +93,14 @@ class _Parser(HTMLParser):
             self.stack.append(node)
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        rcdata = getattr(self, "RCDATA_CONTENT_ELEMENTS", ())
+        foreign = any(n.tag in ("svg", "math") for n in self.stack)   # svg/math honour "/>"
+        if (tag in self.CDATA_CONTENT_ELEMENTS or tag in rcdata or tag == "plaintext") and not foreign:
+            self.handle_starttag(tag, attrs)           # in HTML a browser ignores the "/" and reads raw text
+            self.set_cdata_mode(tag, escapable=tag in rcdata)
+            return
+        if tag not in HEAD_OK:
+            self._close_head()
         node = Node(tag, {}, [])
         for k, v in attrs:
             node.attrs.setdefault(k, v or "")
@@ -97,6 +116,8 @@ class _Parser(HTMLParser):
                 return
 
     def handle_data(self, data: str) -> None:
+        if data.strip(" \t\n\f\r"):
+            self._close_head()                         # visible text closes head, as browsers do
         if data:
             self.stack[-1].children.append(Node(None, {}, [], data))
 

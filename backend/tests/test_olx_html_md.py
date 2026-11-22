@@ -625,3 +625,67 @@ def test_frame_labels_by_address_kind():
     assert md('<p><iframe src="mailto://e.com/x"></iframe></p>') == "[mailto://e.com/x](<mailto://e.com/x>)"
     assert md('<p><iframe src="https:///x"></iframe></p>') == "[https:///x](<https:///x>)"
     assert md('<p><iframe src="http://e.com/x"></iframe></p>') == "[e.com](<http://e.com/x>)"
+
+
+def test_visible_content_closes_head():
+    assert md("<head><p>Keep me</p></head><p>x</p>") == "Keep me\n\nx"
+    assert md("<head><title>T</title><meta charset='utf-8'><style>p{}</style></head><p>x</p>") == "x"
+    assert md("<head>Loose text</head>") == "Loose text"
+    assert md("<html><head><title>T</title></head><body><p>a</p></body></html>") == "a"
+
+
+def test_head_edge_shapes():
+    assert md("<head><head><p>Keep me</p></head>") == "Keep me"
+    assert md("<head><meta charset='utf-8'><head>Loose</head>") == "Loose"
+    assert md("<head><bgsound src='a.mid'><basefont size=3><p>Keep me</p></head>") == "Keep me"
+    assert md("<head><p/>Keep</head>") == "Keep"
+    assert md("<head>&nbsp;<p>x</p>") == "x"
+    assert md("<head>\n <meta charset='utf-8'><link rel=icon href=f.png><style>p{}</style><script>x()</script>"
+              "<template><p>t</p></template><noscript>n</noscript><noframes>f</noframes><base href='/'><title>T</title></head><p>b</p>") == "b"
+
+
+def test_title_and_template_never_show():
+    assert md("<head>stray text<title>T</title></head>") == "stray text"
+    assert md("<p>a</p><title>T</title><p>b</p>") == "a\n\nb"
+    assert md("<template><p>hidden</p></template><p>shown</p>") == "shown"
+
+
+def test_head_closing_pins():
+    assert md("<head>&nbsp;<noscript>n</noscript></head><p>x</p>") == "x"   # noscript is hidden wherever it sits
+    assert md("<head><base href='/'><noscript>n</noscript></head><p>b</p>") == "b"
+
+
+def test_cdata_in_html_is_a_bogus_comment():
+    out = md("<p>a</p><![CDATA[<p>Keep me</p>]]>")             # a browser shows "Keep me]]>"
+    assert out.startswith("a\n\n") and "Keep me" in out
+    assert md("<p>a<![CDATA[x]]>b</p>") == "ab"
+
+
+def test_noscript_noembed_noframes_are_raw_and_hidden():
+    assert md("<noscript><style></noscript><p>Keep me</p>") == "Keep me"
+    assert md("<p>a</p><noscript><p>Enable JavaScript</p></noscript><p>b</p>") == "a\n\nb"
+    assert md("<noembed><p>x</p></noembed><noframes><b>y</b></noframes><p>z</p>") == "z"
+
+
+def test_self_closing_raw_text_tags_open_raw_text():
+    assert md('<script src="a.js"/><!-- x </script><p>Keep me</p>') == "Keep me"
+    assert md("<noscript/><style></noscript><p>Keep me</p>") == "Keep me"
+    assert md("<style/><title></style><p>Keep me</p>") == "Keep me"
+    assert md("<p>a</p><title/>T</title><p>b</p>") == "a\n\nb"
+
+
+def test_self_closing_tags_inside_svg_and_math_stay_empty():
+    assert md('<p>a</p><svg><style/><text>Label</text></svg><p>after</p>') == "a\n\nLabel\n\nafter"
+    assert md('<svg><title/><circle r="1"/></svg><p>after</p>') == "after"
+    assert md('<svg viewBox="0 0 1 1"><script/></svg><p>after</p>') == "after"
+    assert md("<math><mi>x</mi><style/></math><p>after</p>").endswith("after")
+
+
+def test_self_closing_plaintext_and_xmp():
+    assert "Keep" in md("<plaintext/><script>var Keep = 1;</script>")
+    assert md("<xmp/>&lt;b&gt;</xmp>") == "\\&lt;b\\&gt;"               # raw text: entities stay literal
+
+
+def test_self_closing_tag_deeper_inside_svg_stays_empty():
+    out = md("<svg><g><title/><text>L</text></g></svg><p>Keep me</p>")
+    assert "L" in out and out.endswith("Keep me")

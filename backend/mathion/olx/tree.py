@@ -13,7 +13,7 @@ MAX_XML_DEPTH = 200
 SEP = " › "
 _XML_BANNED = re.compile(r"<!(DOCTYPE|ENTITY)", re.IGNORECASE)
 _HTML_BANNED = re.compile(r"<!ENTITY", re.IGNORECASE)
-_INVISIBLE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x84\x86-\x9f\u202a-\u202e\u2060-\u206f\ufeff]")
+_INVISIBLE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x84\x86-\x9f\u202a-\u202e\u2060-\u206f\ufeff\ud800-\udfff]")
 _BLANK_LETTERS = frozenset("\u115f\u1160\u3164\uffa0\u2800")
 MAX_NAME = 200
 # breaking whitespace only: no-break and ideographic spaces stay as typed
