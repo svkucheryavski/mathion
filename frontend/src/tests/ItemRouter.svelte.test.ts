@@ -2,6 +2,7 @@ import { it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import ItemRouter from '../components/items/ItemRouter.svelte';
 import type { InteractiveAppItem, Item, MiniProjectItem, VersionState } from '../lib/types';
+import { installResizeObserver } from './support/resizeObserver';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -14,7 +15,9 @@ function jres(body: unknown, status = 200) {
 }
 
 let cleanup: (() => void) | null = null;
+let ro: ReturnType<typeof installResizeObserver>;
 beforeEach(() => {
+  ro = installResizeObserver(928);
   fetchSpy.mockReset();
   fetchSpy.mockImplementation(() => jres({}));
   (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
@@ -22,6 +25,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup?.(); cleanup = null; document.body.innerHTML = '';
   (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
+  ro.restore();
 });
 
 it('dispatches an interactive_app item to InteractiveAppItem, not UnsupportedItem', () => {

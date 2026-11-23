@@ -5,7 +5,7 @@ import InteractiveFrame from '../components/items/InteractiveFrame.svelte';
 let cleanup: (() => void) | null = null;
 afterEach(() => { cleanup?.(); cleanup = null; document.body.innerHTML = ''; });
 
-function mountFrame(props: { scriptSource: string; title: string; fill?: boolean }) {
+function mountFrame(props: { scriptSource: string; title: string }) {
   const target = document.createElement('div');
   document.body.appendChild(target);
   const sprops = $state(props);
@@ -23,7 +23,7 @@ it('inlines the source into a srcdoc with #app-root and the CSP', () => {
   expect(doc).toContain("connect-src 'none'");
   expect(f.getAttribute('title')).toBe('My app');
   expect(f.hasAttribute('src')).toBe(false);   // never a URL
-  expect(f.parentElement?.classList.contains('frame')).toBe(true);  // fixed-height (600px) wrapper present; exact px is manual-smoke (jsdom has no layout)
+  expect(f.parentElement?.classList.contains('frame')).toBe(true);  // wrapper takes its parent's size; exact px is manual-smoke (jsdom has no layout)
 });
 
 it('sandbox is exactly allow-scripts (no allow-same-origin)', () => {
@@ -37,10 +37,7 @@ it('sets referrerpolicy=no-referrer and omits allowfullscreen', () => {
   expect(f.hasAttribute('allowfullscreen')).toBe(false);
 });
 
-it("fill makes the frame take its parent's height", () => {
-  const filled = mountFrame({ scriptSource: 'x', title: 't', fill: true }).parentElement!;
-  expect(filled.classList.contains('fill')).toBe(true);
-  cleanup?.(); cleanup = null;
-  const plain = mountFrame({ scriptSource: 'x', title: 't' }).parentElement!;
-  expect(plain.classList.contains('fill')).toBe(false);
+it('has no fill switch: the frame always takes its parent', () => {
+  const wrap = mountFrame({ scriptSource: 'x', title: 't' }).parentElement!;
+  expect([...wrap.classList].filter((c) => !c.startsWith('svelte-'))).toEqual(['frame']);
 });
