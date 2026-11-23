@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ALLOWED_EXTENSIONS, READ_CAPS, ReadError, readExport, type ReadCaps } from '../lib/olx/readExport';
-import type { ArchiveSource, ImportLimits } from '../lib/olx/types';
+import { blobKey, type ArchiveSource, type ImportLimits } from '../lib/olx/types';
 import { gzip, rechecksum, tar, type TarSpec } from './support/tarWriter';
 
 const MB = 1024 * 1024;
@@ -50,9 +50,9 @@ describe('readExport', () => {
       { path: 'notes.pdf', size: 586, skipped: null },
     ]);
     expect(res.body.apps).toEqual([{ name: 'sine-demo.js', size: 409 }]);
-    expect([...res.blobs.keys()].sort()).toEqual(['app:sine-demo.js', 'img/fig 1.png', 'notes.pdf']);
-    expect(res.blobs.get('img/fig 1.png')!.size).toBe(67);
-    expect(new Uint8Array(await res.blobs.get('notes.pdf')!.arrayBuffer())).toEqual(
+    expect([...res.blobs.keys()].sort()).toEqual(['app:sine-demo.js', 'static:img/fig 1.png', 'static:notes.pdf']);
+    expect(res.blobs.get(blobKey('static', 'img/fig 1.png'))!.size).toBe(67);
+    expect(new Uint8Array(await res.blobs.get(blobKey('static', 'notes.pdf'))!.arrayBuffer())).toEqual(
       new Uint8Array(fs().readFileSync('../backend/tests/fixtures/olx/course/static/notes.pdf')),
     );
     expect(res.report).toEqual([]);
@@ -134,7 +134,7 @@ describe('readExport', () => {
       { path: 'ok.pdf', size: 4, skipped: null },
       { path: 'zero.pdf', size: 0, skipped: 'empty' },
     ]);
-    expect([...res.blobs.keys()].sort()).toEqual(['.png', 'UPPER.PNG', 'edge.png', 'ok.pdf']);
+    expect([...res.blobs.keys()].sort()).toEqual(['static:.png', 'static:UPPER.PNG', 'static:edge.png', 'static:ok.pdf']);
     const texts = res.report.map((l) => l.text);
     expect(texts).toContain('The file “a.exe” has a type Mathion does not accept, so it was not uploaded; convert it to an accepted type and upload it by hand');
     expect(texts).toContain('The file “big.png” is over the per-file limit, so it was not uploaded; make it smaller and upload it by hand');
@@ -200,7 +200,7 @@ describe('readExport', () => {
       { path: 'one.pdf', size: MB, skipped: null },
       { path: 'under.pdf', size: MB - 1, skipped: 'empty' },
     ]);
-    expect(res.blobs.get('one.pdf')!.size).toBe(MB);
+    expect(res.blobs.get(blobKey('static', 'one.pdf'))!.size).toBe(MB);
   });
 
   it('stops on kept total over the limit, on the 5 GB guard, on text caps, on 40 MB JSON', async () => {
@@ -274,7 +274,25 @@ describe('readExport', () => {
     expect(res.body.files['html/a.html']).toBe('first');
     expect(res.body.static).toEqual([{ path: 's.pdf', size: 3, skipped: null }]);
     expect(res.body.apps).toEqual([{ name: 'a.js', size: 5 }]);
-    expect(res.blobs.get('app:a.js')!.size).toBe(5);
+    expect(res.blobs.get(blobKey('app', 'a.js'))!.size).toBe(5);
+  });
+
+  it('an archive file named like an app key never replaces the picked app', async () => {
+    const res = await read(course([{ path: 'c/static/app:a.js', data: 'archive code' }]), { apps: [new File(['picked'], 'a.js')] });
+    expect(await res.blobs.get(blobKey('app', 'a.js'))!.text()).toBe('picked');
+    expect(await res.blobs.get(blobKey('static', 'app:a.js'))!.text()).toBe('archive code');
+  });
+
+  it('an empty or blank app file stops the read and names it', async () => {
+    for (const data of ['', ' \n\t ']) {
+      await expect(read(course(), { apps: [new File([data], 'sine-demo.js')] })).rejects.toThrow('The app file “sine-demo.js” is empty; pick the right file.');
+    }
+  });
+
+  it('a browser that cannot unzip says so for a .tar.gz, and still reads a .tar', async () => {
+    vi.stubGlobal('DecompressionStream', undefined);
+    await expect(read(course())).rejects.toThrow('This browser cannot open .tar.gz files. Update it, or unpack the export and pick the .tar file.');
+    expect((await read(course(), { gz: false })).body.files['course.xml']).toBe('<course url_name="r"/>');
   });
 
   it('takes the first course.xml when two are equally shallow', async () => {

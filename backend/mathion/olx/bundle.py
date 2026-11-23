@@ -10,7 +10,7 @@ MAX_TEXT_BYTES = 20 * 1024 * 1024
 
 def _safe_path(path: str) -> str:
     if not path or path.startswith("/") or "\\" in path or "\x00" in path or ".." in path.split("/"):
-        raise ValueError(f"unsafe path: {path[:200]!r}")
+        raise ValueError("unsafe path")
     try:
         path.encode("utf-8")
     except UnicodeEncodeError:
@@ -57,7 +57,7 @@ class CheckBody(BaseModel):
         for path, text in self.files.items():
             _safe_path(path)
             if "\x00" in text:
-                raise ValueError(f"NUL character in {path[:200]}")
+                raise ValueError("NUL character in a text file")
             total += len(text) if text.isascii() else len(text.encode("utf-8"))
         if total > MAX_TEXT_BYTES:
             raise ValueError("more than 20 MB of text")

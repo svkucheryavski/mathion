@@ -24,7 +24,7 @@ import { readExport, ReadError } from '../lib/olx/readExport';
 import { assembleBuildBody, markPresent, reportText, uploadAll } from '../lib/olx/run';
 import { navigate } from '../lib/router.svelte';
 import type { GuardAsk } from '../lib/askInPlace.svelte';
-import type { CheckResponse, ReportLine } from '../lib/olx/types';
+import { blobKey, type CheckResponse, type ReportLine } from '../lib/olx/types';
 import type { Version } from '../lib/types';
 import { clearToasts, toasts } from '../stores/toasts.svelte';
 
@@ -122,7 +122,7 @@ const READ_LINES: ReportLine[] = [{ level: 'skipped', where: '', text: 'reader l
 function readResult() {
   return {
     body: { files: { 'course.xml': '<course/>' }, static: [{ path: 'a.pdf', size: 3, skipped: null }, { path: 'b.pdf', size: 3, skipped: null }], apps: [] },
-    blobs: new Map<string, Blob>([['a.pdf', new Blob(['abc'])], ['b.pdf', new Blob(['def'])]]),
+    blobs: new Map<string, Blob>([[blobKey('static', 'a.pdf'), new Blob(['abc'])], [blobKey('static', 'b.pdf'), new Blob(['def'])]]),
     report: READ_LINES.map((l) => ({ ...l })),
     jsonBytes: 100,
   };
@@ -201,6 +201,28 @@ describe('OlxImportModal — opening', () => {
     expect(calls.map((c) => c.key)).toEqual(['GET /api/auth/config', discardUrl(5)]);
   });
 
+  it('the unfinished list follows the page list as it reloads, and says an import in another tab shows too', async () => {
+    routes['GET /api/auth/config'] = [{ status: 200, body: CONFIG }];
+    target = document.createElement('div');
+    document.body.appendChild(target);
+    const live = $state<Props>({ courseId: 3, courseSlug: 'c', versions: [], onClose: vi.fn(), onBusyChange: vi.fn(), registerAsk: vi.fn() });
+    props = live;
+    cmp = mount(OlxImportModal, { target, props: live });
+    await settle();
+    expect(panel().querySelector('.olx-drafts')).toBeNull();
+    live.versions = [mkVersion({ id: 5, label: 'Open edX (unfinished): Chem' }), mkVersion({ id: 8, label: 'Open edX (unfinished): Phys' })];
+    flushSync();
+    const rows = () => [...panel().querySelectorAll('.olx-draft-label')].map((e) => e.textContent);
+    expect(rows()).toEqual(['Open edX (unfinished): Chem', 'Open edX (unfinished): Phys']);
+    expect(text('.olx-drafts')).toContain('An import still running in another tab shows here too; deleting it stops that import.');
+    routes[discardUrl(5)] = [{ status: 204 }];
+    panel().querySelector<HTMLButtonElement>('button[aria-label="Delete Open edX (unfinished): Chem"]')!.click();
+    await settle();
+    live.versions = [...live.versions];
+    flushSync();
+    expect(rows()).toEqual(['Open edX (unfinished): Phys']);
+  });
+
   it('Delete in the drafts list uses discard; a 409 keeps the draft and says so', async () => {
     routes[discardUrl(5)] = [{ status: 409, body: { detail: 'kept' } }];
     routes[discardUrl(8)] = [{ status: 500, body: { detail: 'Boom' } }];
@@ -257,6 +279,18 @@ describe('OlxImportModal — check', () => {
     expect(text('.olx-report')).toContain('reader line');
     expect(text('.olx-report')).toContain('Week 1: server line');
     expect(act('import')).not.toBeNull();
+  });
+
+  it('a report too large to build stops at Check, before anything is sent', async () => {
+    const r = readResult();
+    r.report = Array.from({ length: 20001 }, () => ({ level: 'note' as const, where: '', text: 'x' }));
+    vi.mocked(readExport).mockResolvedValue(r);
+    await render();
+    pick();
+    act('check')!.click();
+    await settle();
+    expect(text('.olx-error')).toBe("This export's report is too large to import. Import fewer files.");
+    expect(calls.some((c) => c.key === CHECK_URL)).toBe(false);
   });
 
   it('a read error stays in the pick state and says why', async () => {

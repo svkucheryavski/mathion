@@ -1,6 +1,6 @@
 <script lang="ts">
   // The Open edX import (spec: Flow): pick → reading → check → importing → done | failed | running.
-  import { onDestroy, onMount, tick, untrack } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import Modal from '../ui/Modal.svelte';
   import Button from '../ui/Button.svelte';
   import AskSlot from '../ui/AskSlot.svelte';
@@ -13,7 +13,7 @@
   } from '../../lib/askInPlace.svelte';
   import { readExport, ReadError, type ReadResult } from '../../lib/olx/readExport';
   import {
-    assembleBuildBody, buildStatus, checkImport, createDraft, discardDraft, localDate, markPresent, reportText, runBuild,
+    assembleBuildBody, buildStatus, checkBuildSize, checkImport, createDraft, discardDraft, localDate, markPresent, reportText, runBuild,
     uploadAll, type BuildOutcome, type UploadProgress,
   } from '../../lib/olx/run';
   import type { CheckResponse, ImportLimits, ReportLine } from '../../lib/olx/types';
@@ -62,7 +62,9 @@
   let deleting = $state(false);
   let checking = $state(false);
   let result = $state.raw<{ report: ReportLine[] | null; label: string | null } | null>(null);
-  let drafts = $state.raw<Version[]>(untrack(() => versions.filter((v) => v.state === 'created' && !v.is_disabled && v.label.startsWith(UNFINISHED))));
+  // follows the page's list, which reloads after the window closes
+  let removed = $state.raw(new Set<number>());
+  const drafts = $derived(versions.filter((v) => v.state === 'created' && !v.is_disabled && v.label.startsWith(UNFINISHED) && !removed.has(v.id)));
   let draftsNote = $state('');
   let listBusy = $state<number | null>(null);
   let footEl = $state<HTMLElement>();
@@ -152,6 +154,8 @@
     try {
       const r = await readExport(exportFile, appFiles, limits);
       if (gone) return;
+      const tooLarge = checkBuildSize(r.body, r.report);
+      if (tooLarge) throw new ReadError(tooLarge);
       const c = await checkImport(courseId, r.body);
       if (gone) return;
       read = r;
@@ -253,7 +257,7 @@
     if (gone) return;
     const at = drafts.findIndex((x) => x.id === v.id);
     if (r === 'failed') { draftsNote = `Could not delete “${v.label}”. Try again.`; return; }
-    drafts = drafts.filter((x) => x.id !== v.id);
+    removed = new Set([...removed, v.id]);
     draftsNote = r === 'built' ? `“${v.label}” was built meanwhile, so it was kept.` : `“${v.label}” was deleted.`;
     const next = drafts[at] ?? drafts[at - 1];
     void repairFocus(next ? document.getElementById(`${uid}-draft-${next.id}`)?.closest('button') : null, exportEl);
@@ -362,6 +366,7 @@
     {#if drafts.length}
       <section class="olx-drafts" aria-label="Unfinished imports">
         <h3 class="olx-group-title">Unfinished imports</h3>
+        <p class="olx-muted">An import still running in another tab shows here too; deleting it stops that import.</p>
         <ul class="olx-draft-list">
           {#each drafts as v (v.id)}
             <li class="olx-draft">

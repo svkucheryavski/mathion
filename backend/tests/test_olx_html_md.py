@@ -321,6 +321,50 @@ def test_cleaned_studio_names_match():
     assert classify_link("/static/Big_File.mp4", t, image=False).blocked
 
 
+def test_composed_and_decomposed_names_match():
+    nfd, nfc = "cafe\u0301.png", "caf\u00e9.png"
+    for stored, linked in ((nfd, nfc), (nfc, nfd)):
+        t = LinkTargets(static={f"img/{stored}": "x.png"}, skipped={f"big {stored}": "size"})
+        assert classify_link(f"/static/img/{linked}", t, image=True) == Link("asset", "x.png")
+        assert classify_link(f"asset-v1:O+C+R+type@asset+block@img_{linked}", t, image=True).url == "x.png"
+        assert classify_link(f"/static/big {linked}", t, image=False).blocked
+    # Studio cleans a decomposed name with the mark as "_", as before the NFC tier
+    t = LinkTargets(static={f"img/{nfd[:-4]} 1.png": "y.png"}, skipped={})
+    assert classify_link("asset-v1:O+C+R+type@asset+block@img_cafe__1.png", t, image=True).url == "y.png"
+    # each tier on its own: the composed form, under, clean, and both clean tries in the lookup
+    t = LinkTargets(static={f"img/{nfd}": "x.png", f"img {nfc}": "z.png"}, skipped={})
+    assert classify_link(f"/static/img/{nfc}", t, image=True).url == "x.png"
+    assert classify_link(f"asset-v1:O+C+R+type@asset+block@img_{nfc}", t, image=True).url == "x.png"
+    assert classify_link(f"/static/big {nfd}", LinkTargets(static={"big_cafe_.png": "b.png"}, skipped={}), image=True).url == "b.png"
+    assert classify_link("/static/file.png", LinkTargets(static={"\ufb01le.png": "f.png"}, skipped={}), image=True).kind == "text"
+    assert classify_link(f"asset-v1:O+C+R+type@asset+block@my_img_{nfd}", LinkTargets(static={f"my img/{nfc}": "a.png"}, skipped={}), image=True).url == "a.png"
+    assert classify_link(f"asset-v1:O+C+R+type@asset+block@my_img_{nfc}", LinkTargets(static={f"my img/{nfd}": "a.png"}, skipped={}), image=True).url == "a.png"
+    # a folder holding both spellings: the exact spelling wins
+    twins = LinkTargets(static={f"a/{nfd}": "d.png", f"a/{nfc}": "c.png"}, skipped={})
+    assert classify_link(f"asset-v1:O+C+R+type@asset+block@a_{nfc}", twins, image=True).url == "c.png"
+    assert classify_link(f"asset-v1:O+C+R+type@asset+block@a_{nfd}", twins, image=True).url == "d.png"
+    # a flattened folder name in its exact spelling beats a composed top-level twin
+    flat = LinkTargets(static={f"x_{nfd}": "p1.png", f"x/{nfc}": "p2.png"}, skipped={})
+    assert classify_link(f"asset-v1:O+C+R+type@asset+block@x_{nfc}", flat, image=True).url == "p2.png"
+    # each step in its place: under nfc before clean, clean raw before clean nfc
+    t = LinkTargets(static={f"img/{nfc}": "x.png", f"img {nfc}": "z.png"}, skipped={})
+    assert classify_link(f"asset-v1:O+C+R+type@asset+block@img_{nfd}", t, image=True).url == "x.png"
+    spaced = LinkTargets(static={f"a b/{nfd}": "d.png", f"a b/{nfc}": "c.png"}, skipped={})
+    assert classify_link(f"asset-v1:O+C+R+type@asset+block@a_b_{nfc}", spaced, image=True).url == "c.png"
+    assert classify_link(f"asset-v1:O+C+R+type@asset+block@a_b_{nfd}", spaced, image=True).url == "d.png"
+    # a skipped file in the link's own spelling stays blocked, though its twin was uploaded
+    for folder, link in (("a", "a_"), ("a b", "a_b_")):
+        mixed = LinkTargets(static={f"{folder}/{nfd}": "d.png"}, skipped={f"{folder}/{nfc}": "size"})
+        assert classify_link(f"asset-v1:O+C+R+type@asset+block@{link}{nfc}", mixed, image=True).blocked
+    # a /static/ path never uses the under tables; nfc comes before clean-nfc and before under-nfc
+    t = LinkTargets(static={f"a/{nfd}": "u.png", f"a {nfc}": "s.png"}, skipped={})
+    assert classify_link(f"/static/a_{nfc}", t, image=True).url == "s.png"
+    t = LinkTargets(static={f"img/{nfc}": "x.png", f"img {nfc}": "z.png"}, skipped={})
+    assert classify_link(f"/static/img/{nfd}", t, image=True).url == "x.png"
+    t = LinkTargets(static={f"x_{nfd}": "p1.png", f"x/{nfd}": "p2.png"}, skipped={})
+    assert classify_link(f"asset-v1:O+C+R+type@asset+block@x_{nfc}", t, image=True).url == "p1.png"
+
+
 def test_nbsp_at_emphasis_edges_and_after_breaks():
     out = md("<p><strong>Bold&nbsp;</strong>text and <em>&nbsp;it</em> x</p><p>text<br>&nbsp;</p><p>&nbsp;</p><p>next</p>")
     assert out == "**Bold**\xa0text and \xa0*it* x\n\ntext\n\nnext"

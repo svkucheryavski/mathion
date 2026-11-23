@@ -19,3 +19,6 @@ export type CheckResponse = {
 export type ImportLimits = { maxFileBytes: number; maxTotalBytes: number };
 /** A File, or a Node Blob in tests. */
 export type ArchiveSource = { name: string; size: number; stream(): ReadableStream<Uint8Array> };
+
+/** Key of a file's bytes in ReadResult.blobs; the kind prefix keeps archive and picked files apart. */
+export const blobKey = (kind: PlannedUpload['kind'], source: string): string => `${kind}:${source}`;

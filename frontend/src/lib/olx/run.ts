@@ -3,7 +3,7 @@ import { api, ApiError, failureText, REQUEST_ERROR_MESSAGE, SERVER_ERROR_MESSAGE
 import { listAssets, uploadAsset } from '../assets';
 import { scanAppSource } from '../appSourceScan';
 import type { Version } from '../types';
-import type { BuildBody, CheckBody, CheckResponse, PlannedUpload, ReportLine } from './types';
+import { blobKey, type BuildBody, type CheckBody, type CheckResponse, type PlannedUpload, type ReportLine } from './types';
 
 /** Upload statuses that refuse the file itself. */
 export const REFUSAL = new Set([400, 413, 415, 422]);
@@ -19,6 +19,7 @@ export const BUILD_CAPS = { bytes: 40 * 1024 * 1024, lines: 20000, where: 600, t
 const ATTEMPTS = 3;
 const WAITS = [1000, 2000];
 const TOO_LARGE = "This export's report is too large to build. Delete the draft and import fewer files.";
+const TOO_LARGE_AT_CHECK = "This export's report is too large to import. Import fewer files.";
 const NOT_BUILT = 'The import did not finish, and nothing was built.';
 const GONE = 'The unfinished draft no longer exists.';
 
@@ -118,7 +119,7 @@ export async function uploadAll(versionId: number, plan: PlannedUpload[], blobs:
   onProgress(count(), total);
   for (const upload of plan) {
     if (progress.outcome.has(upload.target)) continue;
-    const blob = blobs.get(upload.kind === 'app' ? `app:${upload.source}` : upload.source);
+    const blob = blobs.get(blobKey(upload.kind, upload.source));
     if (!blob) return { kind: 'failed', message: `The file “${upload.source}” was not found in the export.` };
     if (upload.kind === 'app') {
       let source: string;
@@ -156,8 +157,17 @@ export async function runBuild(versionId: number, body: BuildBody): Promise<Buil
   } catch (e) {
     const status = statusOf(e);
     if (status === 0 || status >= 500) return buildStatus(versionId); // a timeout or proxy error: the build may have committed
-    return { kind: 'failed', message: detailOf(e), canDiscard: status !== 404 && status !== 403 }; // gone, or discard refused too
+    return { kind: 'failed', message: blockedText(e) ?? detailOf(e), canDiscard: status !== 404 && status !== 403 }; // gone, or discard refused too
   }
+}
+
+/** A blocked build's 409 names up to three blockers. */
+function blockedText(e: unknown): string | null {
+  const listed = e instanceof ApiError && e.status === 409 ? (e.body as { blockers?: unknown } | undefined)?.blockers : undefined;
+  if (!Array.isArray(listed) || !listed.length) return null;
+  const named = listed.slice(0, 3).map((b: Partial<ReportLine>) => `${b.where ? `${b.where}: ` : ''}${String(b.text ?? '')}`);
+  const more = listed.length > 3 ? `; and ${listed.length - 3} more` : '';
+  return sentence(`The import is blocked: ${named.join('; ')}${more}`);
 }
 
 export async function buildStatus(versionId: number): Promise<BuildOutcome> {
@@ -205,6 +215,12 @@ export function assembleBuildBody(body: CheckBody, readerLines: ReportLine[], pr
   const build: BuildBody = { ...body, report, date };
   if (new TextEncoder().encode(JSON.stringify(build)).length > BUILD_CAPS.bytes) return { kind: 'too-large', message: TOO_LARGE };
   return { kind: 'ok', body: build };
+}
+
+/** At Check: the build body from the reader alone already over the caps, before any draft exists. */
+export function checkBuildSize(body: CheckBody, readerLines: ReportLine[]): string | null {
+  const empty: UploadProgress = { outcome: new Map(), lines: [], uncertain: new Set() };
+  return assembleBuildBody(body, readerLines, empty, localDate()).kind === 'ok' ? null : TOO_LARGE_AT_CHECK;
 }
 
 const GROUPS: [string, (l: ReportLine) => boolean][] = [

@@ -1,6 +1,6 @@
 // Read an Open edX export (.tar.gz or .tar) in the browser: the text bundle, the static files and the app files.
 import { readTar, TarError, type TarEntry } from './tar';
-import type { ArchiveSource, CheckBody, ImportLimits, ReportLine, Skipped, StaticEntry } from './types';
+import { blobKey, type ArchiveSource, type CheckBody, type ImportLimits, type ReportLine, type Skipped, type StaticEntry } from './types';
 
 /** The same values as backend/mathion/assets.py ALLOWED_EXTENSIONS. */
 export const ALLOWED_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -44,6 +44,7 @@ const TOO_MANY_FILES = 'The course has more than 20 000 files, so it cannot be i
 const TOO_LARGE_JSON = 'The course text is too large to send (over 40 MB), so it cannot be imported.';
 
 const WHITESPACE = new Set([9, 10, 11, 12, 13, 32]); // what Python's bytes.strip() removes
+const NO_GZIP = 'This browser cannot open .tar.gz files. Update it, or unpack the export and pick the .tar file.';
 const NOT_TEXT_DIRS = new Set(['static', 'drafts', 'about', 'info', 'assets', 'tabs']);
 
 const mb = (n: number) => `${(n / MB).toFixed(1)} MB`;
@@ -127,7 +128,9 @@ async function open(file: ArchiveSource, caps: ReadCaps): Promise<ReadableStream
   const { head, stream } = await peek(file.stream(), 2);
   // File.stream() chunks are ArrayBuffer-backed; the cast only narrows the type
   const bytes = stream as ReadableStream<Uint8Array<ArrayBuffer>>;
-  const raw = head[0] === 0x1f && head[1] === 0x8b ? bytes.pipeThrough(new DecompressionStream('gzip')) : bytes;
+  const gz = head[0] === 0x1f && head[1] === 0x8b;
+  if (gz && typeof DecompressionStream === 'undefined') throw new ReadError(NO_GZIP);
+  const raw = gz ? bytes.pipeThrough(new DecompressionStream('gzip')) : bytes;
   let seen = 0;
   return raw.pipeThrough(
     new TransformStream<Uint8Array, Uint8Array>({
@@ -207,9 +210,13 @@ async function extract(file: ArchiveSource, root: string, apps: (ArchiveSource &
       const shown = app.name.replace(/[\u0000-\u001f\u007f]/g, '?');
       throw new ReadError(`The app file “${shown}” has a name Mathion cannot take (no / or \\, at most 255 characters); rename it and pick it again.`);
     }
-    if (blobs.has(`app:${app.name}`)) continue;
+    if (blobs.has(blobKey('app', app.name))) continue;
+    // the server refuses a blank file, and only after the draft exists
+    if (app.size < MB && new Uint8Array(await app.arrayBuffer()).every((b) => WHITESPACE.has(b))) {
+      throw new ReadError(`The app file “${app.name.replace(/[\u0000-\u001f\u007f]/g, '?')}” is empty; pick the right file.`);
+    }
     appList.push({ name: app.name, size: app.size });
-    blobs.set(`app:${app.name}`, app);
+    blobs.set(blobKey('app', app.name), app);
   }
   if (appList.length > caps.fileEntries) throw new ReadError(TOO_MANY_FILES);
   const prefix = root ? `${root}/` : '';
@@ -266,7 +273,7 @@ async function extract(file: ArchiveSource, root: string, apps: (ArchiveSource &
       return;
     }
     kept += entry.size;
-    blobs.set(path, new Blob(chunks));
+    blobs.set(blobKey('static', path), new Blob(chunks));
   };
 
   for await (const entry of readTar(await open(file, caps))) {

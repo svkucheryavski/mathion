@@ -138,6 +138,8 @@ def plan_files(static: list[StaticEntry], apps: list[AppEntry], graasta_names: s
             reason = "size"
             report.add("skipped", "", f"The file “{entry.path}” is over the per-file limit, so it was not uploaded; "
                                       "make it smaller and upload it by hand")
+        if reason == "size" and entry.skipped is None:   # the limit may differ at build; the other names stay put
+            taken.add(unique_name(clean_name(basename), taken, counters))
         if reason is not None:
             skipped[entry.path] = reason
             continue

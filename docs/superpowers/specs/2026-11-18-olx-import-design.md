@@ -1,4 +1,16 @@
-# Open edX course import — design (rev 13)
+# Open edX course import — design (rev 14)
+
+Rev 14 (whole-branch review, owner: fix every minor now): the browser keeps an
+archive's files and the picked app files apart, so an archive entry can never
+stand in for an app. Check already stops on a report too large to build, on a
+blank app file, and on a .tar.gz in a browser that cannot unzip it. The build
+treats a draft file whose size differs from the check's plan as missing, and a
+file the server skips for size still holds its name, so the other files keep
+their names when the per-file limit changes between check and build. A
+blocked build names up to three blockers. Link and file names match whether an
+accented letter is typed as one character or two. Error answers never repeat a
+file path. The unfinished-imports list follows the page's list and says that an
+import still running in another tab shows there too.
 
 Rev 13 (Task 11, owner's calls): the summary shows a size below 1 MB in KB
 ("3 files, 240 KB"). An upload that fails three times ends with "Press Retry to

@@ -1,5 +1,6 @@
 """Classify an imported page's link or image address: a web link, an uploaded course file, or text only."""
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Literal
 from urllib.parse import unquote, urlsplit
@@ -12,10 +13,12 @@ class LinkTargets:
     _maps: dict | None = field(default=None, init=False, repr=False, compare=False)
 
     def keyed(self, how: str) -> tuple[dict[str, str], dict[str, str]]:
-        # "under": c4x/asset-v1 write a subfolder "/" as "_"; "clean": Studio's key also turns odd characters into "_"
+        # "nfc": é typed as one or two characters; "under": c4x/asset-v1 write a subfolder "/" as "_"; "clean": Studio's key also turns odd characters into "_"
         if self._maps is None:
             self._maps = {}
-            for name, fn in (("under", lambda p: p.replace("/", "_")), ("clean", lambda p: _CLEAN.sub("_", p.replace("/", "_")))):
+            # one table per key form, so an exact spelling is found before any composed one
+            for name, fn in (("nfc", _nfc), ("under", _under), ("under-nfc", lambda p: _under(_nfc(p))),
+                             ("clean", _clean), ("clean-nfc", lambda p: _clean(_nfc(p)))):
                 pair = ({}, {})
                 for table, out in ((self.static, pair[0]), (self.skipped, pair[1])):
                     for path in sorted(table):
@@ -42,6 +45,19 @@ _COURSEWARE = re.compile(r"/assets/courseware/(.+)", re.S)
 _WHY = {"empty": "the file is empty", "type": "Mathion does not allow this file type", "size": "the file is over the per-file limit"}
 
 
+def _nfc(s: str) -> str:
+    return unicodedata.normalize("NFC", s)
+
+
+def _under(s: str) -> str:
+    return s.replace("/", "_")
+
+
+def _clean(s: str) -> str:
+    # Studio's cleaned key; a decomposed accent's mark becomes "_"
+    return _CLEAN.sub("_", _under(s))
+
+
 def _static_name(path: str) -> tuple[str, str] | None:
     """("path", relative to static/) or ("under", an underscore asset name) for an Open edX static form."""
     path = unquote(path)
@@ -61,8 +77,9 @@ def _lookup(form: tuple[str, str], targets: LinkTargets) -> tuple[str, str] | No
     for table, kind in ((targets.static, "asset"), (targets.skipped, "skipped")):
         if name in table:
             return kind, name
-    for keys, key in (("under", name), ("clean", _CLEAN.sub("_", name.replace("/", "_")))):
-        if keys == "under" and how != "under":
+    for keys, key in (("under", name), ("nfc", _nfc(name)), ("under-nfc", _nfc(name)),
+                      ("clean", _clean(name)), ("clean-nfc", _clean(_nfc(name)))):
+        if keys.startswith("under") and how != "under":
             continue
         static, skipped = targets.keyed(keys)
         for table, kind in ((static, "asset"), (skipped, "skipped")):

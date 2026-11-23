@@ -11,6 +11,7 @@ from mathion.olx.convert import Plan, PlanItem, final_label
 
 
 NOT_IN_DRAFT = "was not uploaded, so it is not in the draft"
+OTHER_IN_DRAFT = "was not used: the draft holds another file under its name"
 
 
 class ApplyRefused(Exception):
@@ -41,14 +42,19 @@ def _lock(db: Session, version_id: int) -> CourseVersion:
 
 
 def _files(plan: Plan, version_id: int, db: Session) -> None:
-    present = set(db.scalars(select(Asset.filename).where(Asset.version_id == version_id)))
+    rows = db.execute(select(Asset.filename, Asset.file_size).where(Asset.version_id == version_id)).all()
+    stored = {name: size for name, size in rows}
+    planned = {u.target: u.size for u in plan.uploads}
+    # a file of another size is not the one the check planned
+    present = {name for name, size in stored.items() if planned.get(name, size) == size}
     missing = sorted((plan.linked_assets | plan.used_app_targets) - present)
     if missing:
-        raise ApplyRefused(409, "These files are linked from the course but are not in the draft: " + ", ".join(missing))
+        raise ApplyRefused(409, "These files are linked from the course but are not in the draft as checked: " + ", ".join(missing))
     for upload in plan.uploads:
         if upload.target not in present:
             plan.not_uploaded.add(upload.source)
-            plan.report.add("skipped", "", f"The file “{upload.source}” {NOT_IN_DRAFT}")
+            why = NOT_IN_DRAFT if upload.target not in stored else OTHER_IN_DRAFT
+            plan.report.add("skipped", "", f"The file “{upload.source}” {why}")
 
 
 def _item(db: Session, version_id: int, sequence_id: int, order: int, p: PlanItem) -> list[str]:

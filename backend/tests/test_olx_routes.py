@@ -701,6 +701,33 @@ def test_422_is_small_and_never_echoes(auth_client, db, test_user):
         assert e["loc"][0] == "body" and not {"input", "ctx", "url"} & set(e)
 
 
+def test_422_messages_never_echo_the_path(auth_client, db, test_user):
+    course, _ = _admin_course(db, test_user)
+    url = f"/api/courses/{course.id}/olx-import/check"
+    r = auth_client.post(url, json={**CHECK, "static": [{"path": "zz-echo/../x", "size": 5, "skipped": None}]})
+    assert r.status_code == 422 and "zz-echo" not in r.text
+    r = auth_client.post(url, json={**CHECK, "files": {**CHECK["files"], "zz-echo.xml": "a\x00b"}})
+    assert r.status_code == 422 and "zz-echo" not in r.text
+
+
+def test_build_refuses_a_linked_file_of_another_size(auth_client, db, test_user):
+    _, version = _admin_course(db, test_user)
+    _upload_all(auth_client, version.id, skip={"notes.pdf"})
+    _upload(auth_client, version.id, "notes.pdf", b"%PDF-1.4 another file")
+    r = _build(auth_client, version.id)
+    assert r.status_code == 409 and "notes.pdf" in r.json()["detail"]
+    assert _blocks(db, version.id) == 0
+
+
+def test_build_reports_an_unlinked_file_of_another_size(auth_client, db, test_user):
+    _, version = _admin_course(db, test_user)
+    _upload_all(auth_client, version.id)
+    _upload(auth_client, version.id, "kept.pdf", b"%PDF-1.4 kept")
+    body = {**BUILD, "static": BUILD["static"] + [{"path": "kept.pdf", "size": 99, "skipped": None}]}
+    report = _build(auth_client, version.id, body).json()["report"]
+    assert any("kept.pdf" in ln["text"] and "another file under its name" in ln["text"] for ln in report)
+
+
 def _editor_twin(c, db, v1, v2):
     """Rebuild v1's imported content in v2 through the editor routes; return the differences."""
     diffs, bmap, smap = [], {}, {}

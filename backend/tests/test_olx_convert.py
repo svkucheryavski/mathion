@@ -348,6 +348,22 @@ def test_repeated_names_stay_linear():
     assert time.perf_counter() - start < 2 and len({u.target for u in plan.uploads}) == 20_000
 
 
+def test_targets_stay_put_when_the_per_file_limit_changes():
+    mib = 1024 * 1024
+    static = [StaticEntry(path="a/x.png", size=3 * mib), StaticEntry(path="b/x.png", size=mib), StaticEntry(path="c/x.png", size=mib)]
+    at_check = plan_files(static, [], set(), Limits(4 * mib, 10**9), Report())
+    at_build = plan_files(static, [], set(), Limits(2 * mib, 10**9), Report())
+    targets = lambda plan: {u.source: u.target for u in plan.uploads}  # noqa: E731
+    assert targets(at_build) == {k: v for k, v in targets(at_check).items() if k != "a/x.png"}
+    assert at_build.targets.skipped == {"a/x.png": "size"}
+    t = lambda files, limit: {u.source: u.target for u in plan_files(files, [], set(), Limits(limit * mib, 10**9), Report()).uploads}  # noqa: E731
+    later_big = [StaticEntry(path="a/x.png", size=mib), StaticEntry(path="b/x.png", size=3 * mib), StaticEntry(path="c/x.png", size=mib)]
+    assert t(later_big, 2) == {k: v for k, v in t(later_big, 4).items() if k != "b/x.png"}
+    # only the server's own size skip holds a name
+    assert t([StaticEntry(path="a/x.png", size=3 * mib, skipped="size"), StaticEntry(path="b/x.png", size=mib)], 4) == {"b/x.png": "x.png"}
+    assert t([StaticEntry(path="a/x.png", size=0), StaticEntry(path="b/x.png", size=mib)], 4) == {"b/x.png": "x.png"}
+
+
 def test_long_slug_suffixes_fit_80():
     import re
     taken, counters = set(), {}

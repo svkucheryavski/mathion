@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   BUILD_CAPS, REFUSAL, assembleBuildBody, buildStatus, checkImport, createDraft, discardDraft, localDate, markPresent,
-  reportText, runBuild, uploadAll, type UploadProgress,
+  checkBuildSize, reportText, runBuild, uploadAll, type UploadProgress,
 } from '../lib/olx/run';
-import type { CheckBody, PlannedUpload, ReportLine } from '../lib/olx/types';
+import { blobKey, type CheckBody, type PlannedUpload, type ReportLine } from '../lib/olx/types';
 
 type Reply = { status: number; body?: unknown } | 'network';
 type Call = { key: string; file?: string; body?: unknown };
@@ -56,7 +56,7 @@ const st = (source: string, target = source, size = 1): PlannedUpload => ({ sour
 const app = (name: string, size = 1): PlannedUpload => ({ source: name, target: name, kind: 'app', size });
 
 function blobsFor(plan: PlannedUpload[], appSource = 'mount("app-root")'): Map<string, Blob> {
-  return new Map(plan.map((u) => (u.kind === 'app' ? [`app:${u.source}`, textBlob(appSource)] : [u.source, new Blob(['x'])])));
+  return new Map(plan.map((u) => [blobKey(u.kind, u.source), u.kind === 'app' ? textBlob(appSource) : new Blob(['x'])]));
 }
 
 const fresh = (): UploadProgress => ({ outcome: new Map(), lines: [], uncertain: new Set() });
@@ -212,7 +212,7 @@ describe('uploadAll', () => {
   it('fails plainly when an app file cannot be read', async () => {
     const plan = [app('m.js')];
     const broken = Object.assign(new Blob(['x']), { text: async () => { throw new DOMException('gone', 'NotReadableError'); } });
-    expect(await uploadAll(VID, plan, new Map([['app:m.js', broken]]), new Set(), fresh(), () => {}, noWait().wait))
+    expect(await uploadAll(VID, plan, new Map([[blobKey('app', 'm.js'), broken]]), new Set(), fresh(), () => {}, noWait().wait))
       .toEqual({ kind: 'failed', message: 'The app file “m.js” could not be read. Pick it again.' });
     expect(uploads()).toEqual([]);
   });
@@ -362,6 +362,22 @@ describe('drafts and builds', () => {
     routes['POST /api/courses/3/versions'] = [{ status: 201, body: { id: 9 } }];
     expect((await createDraft(3, 'Open edX (unfinished): C', 4)).id).toBe(9);
     expect(calls[0].body).toEqual({ info_md: '', max_quiz_attempts: 4, label: 'Open edX (unfinished): C' });
+  });
+
+  it('checkBuildSize flags a report the build could never take, before any draft exists', () => {
+    const body: CheckBody = { files: { 'course.xml': '<course/>' }, static: [], apps: [] };
+    expect(checkBuildSize(body, [])).toBeNull();
+    const many: ReportLine[] = Array.from({ length: 20001 }, () => ({ level: 'note', where: '', text: 'x' }));
+    expect(checkBuildSize(body, many)).toBe("This export's report is too large to import. Import fewer files.");
+  });
+
+  it('runBuild on a blocked 409 names the blockers, up to three', async () => {
+    const b = (t: string) => ({ level: 'skipped', where: 'Unit 1', text: t });
+    routes[BUILD] = [{ status: 409, body: { detail: 'The import is blocked: a', blockers: [b('a'), b('b'), b('c'), b('d'), b('e')] } },
+      { status: 409, body: { detail: 'The import is blocked: a', blockers: [{ level: 'skipped', where: '', text: 'a' }] } }];
+    expect(await runBuild(VID, buildBody)).toEqual({ kind: 'failed', canDiscard: true,
+      message: 'The import is blocked: Unit 1: a; Unit 1: b; Unit 1: c; and 2 more.' });
+    expect(await runBuild(VID, buildBody)).toEqual({ kind: 'failed', canDiscard: true, message: 'The import is blocked: a.' });
   });
 
   it('runBuild returns done with the report', async () => {
