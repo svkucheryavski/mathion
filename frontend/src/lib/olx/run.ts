@@ -41,6 +41,8 @@ function addOnce(progress: UploadProgress, line: ReportLine): void {
 const statusOf = (e: unknown): number => (e instanceof ApiError ? e.status : 0);
 const detailOf = (e: unknown): string => failureText(e, SERVER_ERROR_MESSAGE);
 const sentence = (s: string): string => (/[.!?]$/.test(s) ? s : `${s}.`);
+// "Press Retry" follows, so a closing "Try again." would say it twice.
+const withoutTryAgain = (s: string): string => s.replace(/\s*Try again\.$/, '') || s;
 
 const REFUSAL_REASON: Record<number, string> = {
   400: 'the server refused it', 413: 'the file is too large for the server',
@@ -79,7 +81,7 @@ async function uploadOne(versionId: number, upload: PlannedUpload, blob: Blob, l
           await wait(WAITS[attempt - 1]);
           continue;
         }
-        return { kind: 'retry', message: `The file “${upload.target}” could not be uploaded after ${ATTEMPTS} tries: ${sentence(detailOf(e))} Press Retry to go on.` };
+        return { kind: 'retry', message: `The file “${upload.target}” could not be uploaded after ${ATTEMPTS} tries: ${sentence(withoutTryAgain(detailOf(e)))} Press Retry to go on.` };
       }
       const unchecked: UploadResult = { kind: 'retry', message: `Could not check whether “${upload.target}” is already in the draft. Press Retry.` };
       if (status === 409) {

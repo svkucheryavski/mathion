@@ -237,7 +237,18 @@ describe('OlxImportModal — check', () => {
   it('the summary says one of each in the singular', async () => {
     const one = { blocks: 1, sequences: 1, items: 1, videos: 1, pages: 1, apps: 1, quizzes: 1, files: 1, bytes: 1 };
     await toCheck(checkResponse({ summary: one }));
-    expect(text('.olx-summary')).toBe('1 block, 1 sequence, 1 item: 1 video, 1 page, 1 app, 1 quiz; 1 file, 1 MB');
+    expect(text('.olx-summary')).toBe('1 block, 1 sequence, 1 item: 1 video, 1 page, 1 app, 1 quiz; 1 file, 1 KB');
+  });
+
+  it('the summary shows sizes below 1 MB in KB', async () => {
+    const sized = (bytes: number) => ({ blocks: 1, sequences: 1, items: 1, videos: 0, pages: 1, apps: 0, quizzes: 0, files: 3, bytes });
+    for (const [bytes, size] of [[0, '0 KB'], [1300, '1 KB'], [240 * 1024, '240 KB'], [1023 * 1024, '1023 KB'], [1024 * 1024 - 1, '1 MB'], [1258291, '1 MB'], [5 * 1024 * 1024, '5 MB']] as const) {
+      await toCheck(checkResponse({ summary: sized(bytes) }));
+      expect(text('.olx-summary')).toBe(`1 block, 1 sequence, 1 item: 0 videos, 1 page, 0 apps, 0 quizzes; 3 files, ${size}`);
+      if (cmp) unmount(cmp);
+      cmp = null;
+      target.remove();
+    }
   });
 
   it('reader report lines are visible in the check state before Import', async () => {
@@ -872,9 +883,9 @@ describe('OlxImportModal — review round 1', () => {
     }
   });
 
-  it('the summary rounds MB: 0 bytes, 1.5 MiB', async () => {
+  it('the summary rounds: 0 bytes in KB, 1.5 MiB in MB', async () => {
     await toCheck(checkResponse({ summary: { ...SUMMARY, bytes: 0 } }));
-    expect(text('.olx-summary')).toMatch(/; 2 files, 0 MB$/);
+    expect(text('.olx-summary')).toMatch(/; 2 files, 0 KB$/);
     unmount(cmp!);
     cmp = null;
     target.remove();

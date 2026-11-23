@@ -1,4 +1,8 @@
-# Open edX course import — design (rev 12)
+# Open edX course import — design (rev 13)
+
+Rev 13 (Task 11, owner's calls): the summary shows a size below 1 MB in KB
+("3 files, 240 KB"). An upload that fails three times ends with "Press Retry to
+go on." and never also says "Try again.".
 
 Rev 12 (Task 11 end-to-end run, owner's calls): a question text that starts
 with its own number (`1.`, `2)`), equal to its position in the quiz, loses it,
@@ -182,7 +186,8 @@ opens a modal (edits open modals, per the project rule) with four states.
      **check** call. The call converts and validates the bundle without
      writing anything, and returns the report plus the upload list.
    - The modal shows a summary ("4 blocks, 11 sequences, 167 items:
-     107 videos, 11 pages, 22 apps, 27 quizzes; 20 files, 95 MB"), every
+     107 videos, 11 pages, 22 apps, 27 quizzes; 20 files, 95 MB"; below 1 MB
+     the size is in KB), every
      report line, and **Import** and **Cancel**. The file count is the number
      the progress line will count to.
    - Problems that stop an import show here and disable Import, including:

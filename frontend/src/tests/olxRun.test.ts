@@ -102,6 +102,14 @@ describe('uploadAll', () => {
     routes[UP] = [err(503, 'Down.'), err(503, 'Down.'), err(503, 'Down.')];
     const down = await uploadAll(VID, [st('a.pdf')], blobsFor([st('a.pdf')]), new Set(), fresh(), () => {}, noWait().wait);
     expect(down).toEqual({ kind: 'retry', message: 'The file “a.pdf” could not be uploaded after 3 tries: Down. Press Retry to go on.' });
+    routes[UP] = [{ status: 500, body: {} }, { status: 502, body: {} }, { status: 500, body: {} }];
+    const bare = await uploadAll(VID, [st('a.pdf')], blobsFor([st('a.pdf')]), new Set(), fresh(), () => {}, noWait().wait);
+    expect(bare).toEqual({ kind: 'retry',   // never "Try again." next to "Press Retry"
+      message: 'The file “a.pdf” could not be uploaded after 3 tries: Something went wrong on the server. Press Retry to go on.' });
+    routes[UP] = [{ status: 429, body: {} }, { status: 429, body: {} }, { status: 429, body: {} }];
+    const busy = await uploadAll(VID, [st('a.pdf')], blobsFor([st('a.pdf')]), new Set(), fresh(), () => {}, noWait().wait);
+    expect(busy).toEqual({ kind: 'retry',
+      message: 'The file “a.pdf” could not be uploaded after 3 tries: Something went wrong. Press Retry to go on.' });
   });
 
   it('beforeAttempt runs before every attempt, outside the retry catch, and its throw stops the uploads', async () => {

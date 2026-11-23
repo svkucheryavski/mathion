@@ -279,10 +279,11 @@
   const count = (n: number | undefined, one: string, many: string) => `${n ?? 0} ${n === 1 ? one : many}`;
   function summaryLine(s: Record<string, number>): string {
     const bytes = s.bytes ?? 0;
-    const mb = bytes === 0 ? '0 MB' : `${Math.max(1, Math.round(bytes / MB))} MB`;
+    const kb = Math.round(bytes / 1024);
+    const size = kb < 1024 ? `${bytes > 0 ? Math.max(1, kb) : 0} KB` : `${Math.round(bytes / MB)} MB`;
     return `${count(s.blocks, 'block', 'blocks')}, ${count(s.sequences, 'sequence', 'sequences')}, ${count(s.items, 'item', 'items')}: `
       + `${count(s.videos, 'video', 'videos')}, ${count(s.pages, 'page', 'pages')}, ${count(s.apps, 'app', 'apps')}, `
-      + `${count(s.quizzes, 'quiz', 'quizzes')}; ${count(s.files, 'file', 'files')}, ${mb}`;
+      + `${count(s.quizzes, 'quiz', 'quizzes')}; ${count(s.files, 'file', 'files')}, ${size}`;
   }
 
   const checkLines = $derived(read && check ? [...read.report, ...check.report] : []);
