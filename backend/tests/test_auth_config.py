@@ -27,17 +27,17 @@ def test_config_matrix(client, monkeypatch, debug, email_mode, expected):
 
 def test_config_without_a_row_reports_the_defaults(client):
     assert client.get("/api/auth/config").json() == {
-        "send_pin_enabled": False, "longest_sign_in_days": 30, "max_file_mb": 20,
+        "send_pin_enabled": False, "longest_sign_in_days": 30, "max_file_mb": 20, "max_total_mb": 500,
         "branding": {"name": "Mathion", "logo": None, "icon": None, "theme": None},
     }
 
 
 def test_config_reports_longest_and_file_limit(client, db):
     # D10b: the login page and the upload checks read these (D11b, D12).
-    set_site(db, longest_sign_in_days=7, max_file_mb=33)
+    set_site(db, longest_sign_in_days=7, max_file_mb=33, max_total_mb=444)
     body = client.get("/api/auth/config").json()
-    assert (body["longest_sign_in_days"], body["max_file_mb"]) == (7, 33)
-    assert set(body) == {"send_pin_enabled", "longest_sign_in_days", "max_file_mb", "branding"}  # public: nothing else
+    assert (body["longest_sign_in_days"], body["max_file_mb"], body["max_total_mb"]) == (7, 33, 444)
+    assert set(body) == {"send_pin_enabled", "longest_sign_in_days", "max_file_mb", "max_total_mb", "branding"}  # public: nothing else
 
 
 def test_send_pin_follows_saved_switch(client, db, monkeypatch):

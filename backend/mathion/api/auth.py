@@ -69,6 +69,7 @@ def api_auth_config(db: Session = Depends(get_db)) -> AuthConfigResponse:
         send_pin_enabled=settings.debug or settings.email_mode == "file" or panel_sends,
         longest_sign_in_days=site.longest_sign_in_days,
         max_file_mb=site.max_file_mb,
+        max_total_mb=site.max_total_mb,
         branding=public,
     )
 

@@ -1,4 +1,31 @@
-# Open edX course import — design (rev 10)
+# Open edX course import — design (rev 14)
+
+Rev 14 (whole-branch review, owner: fix every minor now): the browser keeps an
+archive's files and the picked app files apart, so an archive entry can never
+stand in for an app. Check already stops on a report too large to build, on a
+blank app file, and on a .tar.gz in a browser that cannot unzip it. The build
+treats a draft file whose size differs from the check's plan as missing, and a
+file the server skips for size still holds its name, so the other files keep
+their names when the per-file limit changes between check and build. A
+blocked build names up to three blockers. Link and file names match whether an
+accented letter is typed as one character or two. Error answers never repeat a
+file path. The unfinished-imports list follows the page's list and says that an
+import still running in another tab shows there too.
+
+Rev 13 (Task 11, owner's calls): the summary shows a size below 1 MB in KB
+("3 files, 240 KB"). An upload that fails three times ends with "Press Retry to
+go on." and never also says "Try again.".
+
+Rev 12 (Task 11 end-to-end run, owner's calls): a question text that starts
+with its own number (`1.`, `2)`), equal to its position in the quiz, loses it,
+because Mathion numbers questions; reported once per course. The app-file check
+no longer counts quoted XML namespace names or Svelte's error-doc links as
+network addresses. Video frames send the site origin to YouTube/Vimeo, which
+YouTube needs to play.
+
+Rev 11 (Task 5 Codex review, owner's call): a range answer's accepted band never
+leaves the range; the midpoint gets more decimals (up to 10) before `p` is raised;
+an open end, `(` or `)`, is never accepted, as in Open edX.
 
 Rev 10 (plan review round 2): every Delete the import offers goes through a
 guarded discard call that waits for the version lock and deletes only a
@@ -171,7 +198,8 @@ opens a modal (edits open modals, per the project rule) with four states.
      **check** call. The call converts and validates the bundle without
      writing anything, and returns the report plus the upload list.
    - The modal shows a summary ("4 blocks, 11 sequences, 167 items:
-     107 videos, 11 pages, 22 apps, 27 quizzes; 20 files, 95 MB"), every
+     107 videos, 11 pages, 22 apps, 27 quizzes; 20 files, 95 MB"; below 1 MB
+     the size is in KB), every
      report line, and **Import** and **Cancel**. The file count is the number
      the progress line will count to.
    - Problems that stop an import show here and disable Import, including:
@@ -557,6 +585,12 @@ question.
 - **The explanation** is the `<solution>` inside the response or right after
   it, minus a leading paragraph that says only "Explanation".
 - A question whose text comes out empty is skipped and reported.
+- **An own question number** (a typed `1.` or `2)` and a space, at the start
+  of the text) is removed when it equals the question's position: in Mathion's
+  quiz, or in the Open edX problem when an earlier question was skipped.
+  Mathion shows its own numbers. A real list, a bold or heading number, and any
+  other leading number stay. The first line after the cut cannot start a list
+  or heading; later lines keep their own formatting. Reported once per course with the count of questions.
 
 | Response | Mathion question |
 |---|---|
@@ -593,6 +627,10 @@ question.
   - **Range `[a, b]` or `(a, b)`:** correct = the midpoint, and `p` = the
     smallest with `5×10^-(p+1) ≤ (b−a)/2`, reported as "range narrowed to …".
     For example `[0.026, 0.029]` → 0.0275 with p = 3 (accepts 0.0270–0.0280).
+    The accepted band never leaves the range: if the rounded midpoint's band
+    sticks out, the midpoint gets more decimals (up to 10) first, then `p` is
+    raised. `[0.06, 1.06]` → 0.56 with p = 0 (accepts 0.06–1.06). An open
+    end, `(` or `)`, is never accepted: `(1, 2)` → 1.5 with p = 1.
   - **If even p = 10 is wider than the Open edX tolerance,** it is reported
     as "tolerance widened".
   - **Scientific notation** (`1.5e-3`) is read as a number.
@@ -673,7 +711,8 @@ question.
     the Open edX tolerance (t > 0.5);
   - an answer of 0 is never reported as widened;
   - trailing zeros are normalised before the 10-decimal test;
-  - a range midpoint is rounded to min(p + 1, 10) decimals.
+  - a range midpoint is rounded to min(p + 1, 10) decimals, or to more (up to 10)
+    when its band would leave the range.
 - **Quizzes:**
   - A question's text takes the response's children except:
     - the inputs: `choicegroup`, `checkboxgroup`, `optioninput`, `textline`,

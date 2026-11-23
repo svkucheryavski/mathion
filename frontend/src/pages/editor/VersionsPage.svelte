@@ -13,6 +13,7 @@
   import { pushToast } from '../../stores/toasts.svelte';
   import AskSlot from '../../components/ui/AskSlot.svelte';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
+  import OlxImportModal from '../../components/editor/OlxImportModal.svelte';
   import { InPlaceAsk, DISCARD_ASK, DISCARD_NAV_ASK, refused, focusAfter, firstUsable, settleTo, moveOn, withdraw, repairFocus, type Ask, type GuardAsk } from '../../lib/askInPlace.svelte';
   import type { Version } from '../../lib/types';
   import {
@@ -88,6 +89,17 @@
     await loadVersionsPage(courseSlug);
   }
 
+  // The Open edX import modal; while it imports, its factory asks the guard's question.
+  let importOpen = $state(false);
+  let importBtn = $state<HTMLButtonElement>();
+  let importAsk: (() => GuardAsk) | null = null;
+  function closeImport() {
+    importOpen = false;
+    importAsk = null;
+    void load();
+    void repairFocus(importBtn, h1El);
+  }
+
   // Re-runs whenever `courseSlug` changes — App.svelte updates the prop in
   // place rather than remounting the component, so onMount(load) would only
   // fire on the first slug. (Same pattern as CourseView.svelte:14.)
@@ -105,6 +117,8 @@
       resetCreateForm();
       creating = false;
       duplicatingId = null;
+      importOpen = false;
+      importAsk = null;
     });
     void load();
   });
@@ -189,8 +203,9 @@
   // While the form's own question is open, the navigation is refused and focus
   // goes back to that question (R53). Not while Create's POST runs: a success
   // navigates on its own.
-  const navDirty = () => creating && !createBusy && createDirty();
+  const navDirty = () => importAsk !== null || (creating && !createBusy && createDirty());
   function askNav(): GuardAsk {
+    if (importAsk) return importAsk();
     if (createAsk.open) { createAsk.focusCancel(); return refused(); }
     const promise = createAsk.ask(DISCARD_NAV_ASK).then((a) => {
       if (a === 'cancel') void focusAfter(() => firstUsable(cancelBtn, newLabelEl));
@@ -470,7 +485,16 @@
         </div>
       </form>
     {:else}
-      <button bind:this={addLineEl} type="button" class="add-line" disabled={busy} onclick={() => void openCreate()}><span aria-hidden="true">+</span> Add version</button>
+      <div class="add-lines">
+        <button bind:this={addLineEl} type="button" class="add-line" disabled={busy} onclick={() => void openCreate()}><span aria-hidden="true">+</span> Add version</button>
+        {#if course.is_admin}
+          <button bind:this={importBtn} type="button" class="add-line" disabled={busy} onclick={() => { importOpen = true; }}>Import from Open edX</button>
+        {/if}
+      </div>
+    {/if}
+    {#if importOpen}
+      <OlxImportModal courseId={course.id} {courseSlug} {versions} onClose={closeImport}
+        onBusyChange={() => {}} registerAsk={(g) => { importAsk = g; }} />
     {/if}
   {/if}
 </div>
@@ -543,6 +567,7 @@
     cursor: pointer;
   }
   .add-line:disabled { color: var(--muted); cursor: default; }
+  .add-lines { display: flex; align-items: center; gap: 18px; }
   /* 5c follow-up (user): separate boxed rows, like the block list (BlockAccordion .block-card). */
   .vlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
   .vrow {

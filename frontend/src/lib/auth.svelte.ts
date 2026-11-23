@@ -47,7 +47,7 @@ export async function verifyPin(
 
 /** The public sign-in config (Settings D10b): nothing else is public. */
 export type AuthConfig = {
-  send_pin_enabled: boolean; longest_sign_in_days: number; max_file_mb: number;
+  send_pin_enabled: boolean; longest_sign_in_days: number; max_file_mb: number; max_total_mb: number;
   branding: BrandingPublic; // Branding D13, for the dev server's fallback
 };
 

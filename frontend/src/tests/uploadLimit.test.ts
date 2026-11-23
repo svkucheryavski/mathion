@@ -53,7 +53,7 @@ it('uses a given config answer instead of fetching again (Branding D13)', async 
   const f = vi.fn(async () => jsonResponse(200, {}));
   vi.stubGlobal('fetch', f);
   const config = Promise.resolve({
-    send_pin_enabled: true, longest_sign_in_days: 30, max_file_mb: 33,
+    send_pin_enabled: true, longest_sign_in_days: 30, max_file_mb: 33, max_total_mb: 500,
     branding: { name: 'Mathion', logo: null, icon: null, theme: null },
   });
   await loadUploadLimit(config);

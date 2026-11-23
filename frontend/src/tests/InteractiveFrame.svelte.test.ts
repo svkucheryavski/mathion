@@ -5,7 +5,7 @@ import InteractiveFrame from '../components/items/InteractiveFrame.svelte';
 let cleanup: (() => void) | null = null;
 afterEach(() => { cleanup?.(); cleanup = null; document.body.innerHTML = ''; });
 
-function mountFrame(props: { scriptSource: string; title: string; height?: number }) {
+function mountFrame(props: { scriptSource: string; title: string; fill?: boolean }) {
   const target = document.createElement('div');
   document.body.appendChild(target);
   const sprops = $state(props);
@@ -37,11 +37,10 @@ it('sets referrerpolicy=no-referrer and omits allowfullscreen', () => {
   expect(f.hasAttribute('allowfullscreen')).toBe(false);
 });
 
-it('height: the fixed modifier and --frame-h; the default has neither (Slice-5b D14)', () => {
-  const sized = mountFrame({ scriptSource: 'x', title: 't', height: 360 }).parentElement!;
-  expect(sized.classList.contains('fixed')).toBe(true);
-  expect(sized.style.getPropertyValue('--frame-h')).toBe('360px');
+it("fill makes the frame take its parent's height", () => {
+  const filled = mountFrame({ scriptSource: 'x', title: 't', fill: true }).parentElement!;
+  expect(filled.classList.contains('fill')).toBe(true);
   cleanup?.(); cleanup = null;
   const plain = mountFrame({ scriptSource: 'x', title: 't' }).parentElement!;
-  expect(plain.classList.contains('fixed')).toBe(false);
+  expect(plain.classList.contains('fill')).toBe(false);
 });

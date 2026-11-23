@@ -1,0 +1,11 @@
+<problem display_name="Text answers">
+  <p>Name the capital of Denmark.</p>
+  <stringresponse answer="Copenhagen" type="ci">
+    <additional_answer answer="København"/>
+    <textline size="20"/>
+  </stringresponse>
+  <stringresponse answer="mean" type="">
+    <label>Which statistic is the sum divided by the count?</label>
+    <textline size="20"/>
+  </stringresponse>
+</problem>

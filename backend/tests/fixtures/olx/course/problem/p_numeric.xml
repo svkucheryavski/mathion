@@ -1,0 +1,11 @@
+<problem display_name="Numbers">
+  <p>What is \(0.5 \times 160\)?</p>
+  <numericalresponse answer="80">
+    <formulaequationinput/>
+  </numericalresponse>
+  <numericalresponse answer="9.81">
+    <label>Give the acceleration of gravity in m/s<sup>2</sup>.</label>
+    <responseparam type="tolerance" default="1%"/>
+    <formulaequationinput/>
+  </numericalresponse>
+</problem>

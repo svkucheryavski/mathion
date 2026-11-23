@@ -1,0 +1,30 @@
+<problem display_name="Single choice" max_attempts="2" showanswer="finished" weight="1">
+  <p>Which number is even?</p>
+  <multiplechoiceresponse>
+    <choicegroup type="MultipleChoice">
+      <choice correct="false">3</choice>
+      <choice correct="true">4</choice>
+      <choice correct="false">\(\pi\)</choice>
+    </choicegroup>
+  </multiplechoiceresponse>
+  <solution>
+    <div class="detailed-solution">
+      <p>Explanation</p>
+      <p>4 is divisible by 2.</p>
+    </div>
+  </solution>
+  <multiplechoiceresponse>
+    <label>What is \(2 + 3\)?</label>
+    <description>Pick one.</description>
+    <choicegroup type="MultipleChoice" shuffle="true">
+      <choice correct="true">5<choicehint>Right.</choicehint></choice>
+      <choice correct="false">6</choice>
+    </choicegroup>
+    <solution>
+      <div class="detailed-solution"><p>Explanation</p><p>Add them.</p></div>
+    </solution>
+  </multiplechoiceresponse>
+  <demandhint>
+    <hint>Count on your fingers.</hint>
+  </demandhint>
+</problem>
