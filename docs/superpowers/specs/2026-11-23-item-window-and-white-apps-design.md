@@ -19,6 +19,9 @@ preview's light gray. The owner wants:
   window) instead of a fixed 360 px.
 - The video preview in the editor is 16:9 too, instead of a fixed 296 px (owner, after the
   browser check showed a wide, short strip in the larger window).
+- Both previews narrow (centred, still 16:9) so the window needs no vertical scroll, but
+  never below 800 px wide (owner, Safari pass: scrolling was needed on a laptop). On a
+  screen too short even for 800 × 450 (e.g. 1280 × 720) the body still scrolls a little.
 - Every app shows on white, in the editor preview and in the student view, independent
   of the site theme. An app that colours its own `html` or `body` keeps its colour.
 
@@ -46,6 +49,11 @@ preview's light gray. The owner wants:
   render the frame with `fill`. The app's loading placeholder keeps the same shape.
 - The white sits on InteractiveFrame's `<iframe>` element (`background: #fff`); the app
   document stays transparent, so whatever the app paints wins (review r1).
+- `.preview-area` width: `min(100%, max(800px, (min(calc(100vh / var(--app-zoom, 1)), 872px) - R) * 16 / 9))`
+  with `margin-inline: auto`, where 872px is the window's 820px cap plus Modal's 52px
+  margins, the height is divided by the large-screen zoom like Modal's (1 until that
+  branch merges), and R is the rest of the window's height plus a few px for Safari
+  (measured in Chrome: app 345px → 356, video 368px → 378).
 - The visual-refresh gate's `.preview-area` height pins and `.frame.fixed` pins change to
   the aspect-ratio and `.frame.fill` rules.
 

@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3150
+EXPECTED_CHECKS=3154
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4381,7 +4381,7 @@ if [[ -n $REPLY ]]; then
   d '\.preview-head' '' 'display:flex' 'align-items:center' 'gap:10px' 'padding:8px 12px' 'background:var\(--surface-2\)' 'border-bottom:1px solid var\(--border\)'
   d '\.preview-title' '' 'flex:1' 'font-size:12\.5px' 'font-weight:600' 'color:var\(--text\)'
   d '\.preview-meta' '' 'font-size:11\.5px' 'color:var\(--muted\)'
-  d '\.preview-area' '' 'aspect-ratio:16 / 9' 'background:var\(--surface-2\)'
+  d '\.preview-area' '' 'aspect-ratio:16 / 9' 'background:var\(--surface-2\)' 'width:min\(100%,max\(800px,\(min\(calc\(100vh / var\(--app-zoom, 1\)\),872px\) - 378px\) \* 16 / 9\)\)' 'margin-inline:auto'
   d '\.preview-empty' '' 'height:100%' 'display:flex' 'align-items:center' 'justify-content:center' 'font-size:12px' 'color:var\(--muted\)'
   d '\.preview-foot' '' 'display:flex' 'gap:12px' 'padding:8px 12px' 'border-top:1px solid var\(--border-soft\)' 'background:var\(--surface-3\)'
   d '\.preview-status' '' 'font-size:11\.5px' 'color:var\(--muted\)'
@@ -4403,7 +4403,7 @@ if [[ -n $REPLY ]]; then
   d '\.script-name' '' 'font-size:12\.5px' 'color:var\(--text\)' 'text-overflow:ellipsis'
   d '\.app-preview' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'overflow:hidden'
   d '\.preview-head' '' 'display:flex' 'padding:8px 12px' 'background:var\(--surface-2\)' 'border-bottom:1px solid var\(--border\)'
-  d '\.preview-area' '' 'aspect-ratio:16 / 9' 'background:var\(--surface-2\)'
+  d '\.preview-area' '' 'aspect-ratio:16 / 9' 'background:var\(--surface-2\)' 'width:min\(100%,max\(800px,\(min\(calc\(100vh / var\(--app-zoom, 1\)\),872px\) - 356px\) \* 16 / 9\)\)' 'margin-inline:auto'
   d '\.app-hint' '' 'margin:0' 'padding:8px 10px' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)' 'font-size:11\.5px' 'color:var\(--text-3\)'
   d '\.warnings' '' 'padding:8px 10px' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)' 'font-size:11\.5px' 'color:var\(--text-3\)'
   d '\.preview-foot' '' 'border-top:1px solid var\(--border-soft\)' 'background:var\(--surface-3\)'

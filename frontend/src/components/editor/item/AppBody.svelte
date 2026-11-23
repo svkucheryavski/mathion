@@ -333,7 +333,8 @@
   }
   .preview-title { flex: 1; font-size: 12.5px; font-weight: 600; color: var(--text); /* ref 1815 */ }
   .preview-meta { font-size: 11.5px; color: var(--muted); /* ref 1816 */ }
-  .preview-area { aspect-ratio: 16 / 9; background: var(--surface-2); /* apps are built for 16:9 */ }
+  /* 16:9, as wide as the window height allows (872px = 820 + Modal margins; 356px = the rest), at least 800px */
+  .preview-area { aspect-ratio: 16 / 9; background: var(--surface-2); width: min(100%, max(800px, (min(calc(100vh / var(--app-zoom, 1)), 872px) - 356px) * 16 / 9)); margin-inline: auto; }
   .app-hint {
     margin: 0;
     padding: 8px 10px;
