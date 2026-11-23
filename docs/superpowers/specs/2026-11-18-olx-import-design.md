@@ -1,4 +1,11 @@
-# Open edX course import — design (rev 11)
+# Open edX course import — design (rev 12)
+
+Rev 12 (Task 11 end-to-end run, owner's calls): a question text that starts
+with its own number (`1.`, `2)`), equal to its position in the quiz, loses it,
+because Mathion numbers questions; reported once per course. The app-file check
+no longer counts quoted XML namespace names or Svelte's error-doc links as
+network addresses. Video frames send the site origin to YouTube/Vimeo, which
+YouTube needs to play.
 
 Rev 11 (Task 5 Codex review, owner's call): a range answer's accepted band never
 leaves the range; the midpoint gets more decimals (up to 10) before `p` is raised;
@@ -561,6 +568,12 @@ question.
 - **The explanation** is the `<solution>` inside the response or right after
   it, minus a leading paragraph that says only "Explanation".
 - A question whose text comes out empty is skipped and reported.
+- **An own question number** (a typed `1.` or `2)` and a space, at the start
+  of the text) is removed when it equals the question's position: in Mathion's
+  quiz, or in the Open edX problem when an earlier question was skipped.
+  Mathion shows its own numbers. A real list, a bold or heading number, and any
+  other leading number stay. The first line after the cut cannot start a list
+  or heading; later lines keep their own formatting. Reported once per course with the count of questions.
 
 | Response | Mathion question |
 |---|---|

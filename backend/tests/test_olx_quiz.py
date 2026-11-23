@@ -636,3 +636,78 @@ def test_legacy_radiogroup_choiceresponse():
     assert not any("partial credit" in x for x in texts(rep))
     qs, rep = conv(mc([("a", "true"), ("b", "true"), ("c", "false")], tag="choiceresponse", group="radiogroup"))
     assert qs[0].type == "multiple_choice" and any("several correct choices" in x for x in texts(rep))
+
+
+def _numbered(*texts_):
+    body = "".join(f'<p>{t}</p><stringresponse answer="a" type="ci"><textline/></stringresponse>' for t in texts_)
+    return f"<problem>{body}</problem>"
+
+
+def test_own_question_number_matching_its_position_is_removed():
+    rep = Report()
+    qs, _ = conv(_numbered("1. First?", "2) Second?"), rep)
+    conv(_numbered("1. Third?"), rep)
+    assert [q.text_md for q in qs] == ["First?", "Second?"]
+    assert [x for x in texts(rep) if "numbers" in x] == [
+        "Question numbers at the start of the question text were removed, since Mathion numbers questions: 3 questions"]
+
+
+def test_other_leading_numbers_are_kept():
+    qs, rep = conv(_numbered("3. Starts at three?", "1. Out of order?", "1.5 is a number?", "2021. A year?"))
+    assert [q.text_md for q in qs] == ["3\\. Starts at three?", "1\\. Out of order?", "1\\.5 is a number?", "2021\\. A year?"]
+    assert not any("numbers" in x for x in texts(rep))
+
+
+def test_removing_the_number_never_exposes_a_markdown_block_marker():
+    qs, _ = conv(_numbered("1. # of apples?", "2. - x or + x?", "3. + 3 = 5?", "4. 1990) was the year?"))
+    assert [q.text_md for q in qs] == ["\\# of apples?", "\\- x or + x?", "\\+ 3 = 5?", "1990\\) was the year?"]
+
+
+def test_number_with_a_no_break_space_is_removed():
+    qs, _ = conv(_numbered("1. Studio wrote this?"))
+    assert [q.text_md for q in qs] == ["Studio wrote this?"]
+
+
+def test_number_matching_the_open_edx_position_after_a_skipped_question_is_removed():
+    xml = ('<problem><p>1. Skipped?</p><customresponse cfn="f"><textline/></customresponse>'
+           '<p>2. Second?</p><stringresponse answer="a" type="ci"><textline/></stringresponse></problem>')
+    qs, _ = conv(xml)
+    assert [q.text_md for q in qs] == ["Second?"]
+
+
+def test_a_real_list_or_a_number_in_the_text_is_never_cut_at_position_one():
+    xml = ('<problem><ol><li>Pick one</li><li>Other</li></ol>'
+           '<stringresponse answer="a" type="ci"><textline/></stringresponse></problem>')
+    qs, rep = conv(xml)
+    assert qs[0].text_md.startswith("1. Pick one")
+    for text in ("1.5 kg?", "Text 1. x?", "1.", "1  kg?"):
+        qs, rep = conv(_numbered(text))
+        assert not qs or not any("numbers" in x for x in texts(rep)), text
+
+
+def test_after_a_skipped_first_question_both_positions_count_but_no_other():
+    skip = '<p>Skipped?</p><customresponse cfn="f"><textline/></customresponse>'
+    one = '<stringresponse answer="a" type="ci"><textline/></stringresponse>'
+    qs, _ = conv(f"<problem>{skip}<p>1. B?</p>{one}</problem>")
+    assert [q.text_md for q in qs] == ["B?"]
+    qs, _ = conv(f"<problem>{skip}<p>3. B?</p>{one}</problem>")
+    assert [q.text_md for q in qs] == ["3\\. B?"]
+
+
+def test_formatting_on_later_lines_survives_the_cut():
+    one = '<stringresponse answer="a" type="ci"><textline/></stringresponse>'
+    qs, _ = conv(f"<problem><p>1. Which?</p><ul><li>a</li><li>b</li></ul>{one}"
+                 f"<p>2. Read:</p><blockquote>quoted</blockquote><h3>Part A</h3>{one}</problem>")
+    assert [q.text_md for q in qs] == ["Which?\n\n- a\n- b", "Read:\n\n> quoted\n\n### Part A"]
+
+
+def test_number_pins_spacing_width_and_skips():
+    qs, _ = conv(_numbered("1.\tTabbed?"))                 # the converter turns the tab into a space
+    assert [q.text_md for q in qs] == ["Tabbed?"]
+    qs, _ = conv(_numbered("Text 1. x?"))
+    assert [q.text_md for q in qs] == ["Text 1. x?"]
+    qs, rep = conv(_numbered(*[f"{n}. Q{n}?" for n in range(1, 13)]) .replace("<p>12. Q12?</p>", "<p>1000. Q12?</p>"))
+    assert qs[-1].text_md == "1000\\. Q12?" and qs[0].text_md == "Q1?" and qs[9].text_md == "Q10?"
+    skip = '<p>S?</p><customresponse cfn="f"><textline/></customresponse>'
+    qs, _ = conv(f'<problem>{skip}{skip}<p>2. X?</p><stringresponse answer="a" type="ci"><textline/></stringresponse></problem>')
+    assert [q.text_md for q in qs] == ["2\\. X?"]

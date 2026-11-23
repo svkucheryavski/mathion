@@ -4,14 +4,14 @@ import re
 import shlex
 import xml.etree.ElementTree as ET
 from collections.abc import Collection
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import ROUND_HALF_EVEN, Decimal, DecimalException
 from html import escape
 from typing import Literal
 
 from mathion.olx.html_md import html_to_markdown, parse_html, text_only
 from mathion.olx.links import LinkTargets
-from mathion.olx.mdtext import formula_errors, normalize_segments, render_segments, split_math
+from mathion.olx.mdtext import escape_line_starts, formula_errors, normalize_segments, render_segments, split_math
 from mathion.olx.report import Report
 
 SUPPORTED = {"multiplechoiceresponse", "optionresponse", "choiceresponse", "numericalresponse", "stringresponse"}
@@ -19,6 +19,7 @@ INPUTS = {"choicegroup", "checkboxgroup", "radiogroup", "optioninput", "textline
 HINTS = {"correcthint", "choicehint", "stringequalhint", "optionhint", "hintgroup", "demandhint", "compoundhint",
          "targetedfeedbackset", "targetedfeedback", "regexphint"}
 EXCLUDED = INPUTS | HINTS | {"solution", "solutionset", "additional_answer", "responseparam"}
+_OWN_NUMBER = re.compile(r"(\d{1,3})\\[.)][ \t\xa0]+(?=\S)")        # a typed "1. " is escaped; a real list is not
 PLAIN_TAGS = {"span", "p", "div", "br", "text"}       # choice content that carries no formatting
 OPTION_MAX = 500
 TEXT_MAX = 500
@@ -413,9 +414,20 @@ class _Quiz:
         for i, f in enumerate(found, 1):
             q = self.question(i, f["resp"], f["before"], f["pre"], f["post"], after if i == len(found) else None)
             if q:
-                out.append(q)
+                out.append(self.unnumber(q, {i, len(out) + 1}))
         self.tell()
         return out
+
+    def unnumber(self, q: PlanQuestion, positions: set[int]) -> PlanQuestion:
+        # Mathion numbers questions, so drop an own number equal to its position
+        m = _OWN_NUMBER.match(q.text_md)
+        if not m or int(m.group(1)) not in positions:
+            return q
+        self.report.once("olx-numbers", "changed",
+                         "Question numbers at the start of the question text were removed, since Mathion numbers questions",
+                         "question|questions")
+        first, nl, rest = q.text_md[m.end():].partition("\n")
+        return replace(q, text_md=escape_line_starts(first) + nl + rest)  # later lines keep their own markup
 
     def tell(self) -> None:
         if "hints" in self.flags:
