@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3113
+EXPECTED_CHECKS=3149
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -3927,6 +3927,8 @@ if [[ -n $REPLY ]]; then
   none "VersionsPage has no Versions row (.versions-head / .count / .push)" "\.(versions-head|count|push)\.${H}"
   d '\.add-line' '' 'border:0' 'background:transparent' 'color:var\(--primary\)' 'font-size:14px' 'font-weight:600'
   d '\.add-line' ':disabled' 'color:var\(--muted\)'
+  # OLX import: "Import from Open edX" sits beside "+ Add version" on one line.
+  d '\.add-lines' '' 'display:flex' 'align-items:center' 'gap:18px'
   d '\.create' '' 'margin-top:6px' 'border:1px solid var\(--border\)' 'background:var\(--surface\)'
   # 5c follow-up (user, 2026-10-08): the list reads like the block list — separate
   # boxed rows with a 6px gap on the shaded page, not one bordered box.
@@ -6570,6 +6572,36 @@ if [[ -n $REPLY ]]; then
   d '\.sc-line' '' 'color:var\(--gold-text\)'
   d '\.sc-done' '' 'color:var\(--text\)'
   sweep StepCourse $H
+fi
+
+echo
+echo "--- OLX import — the import modal on the Versions page ---"
+OLX_MODAL=src/components/editor/OlxImportModal.svelte
+emoji_scan "OlxImportModal" $OLX_MODAL
+colour_scan olx-modal $OLX_MODAL
+srcw editor/OlxImportModal.svelte 720
+# Spec Flow: no close on a backdrop click (passed explicitly), and no backdrop of its own.
+if grep -qE '^[[:space:]]*closeOnBackdrop=\{false\}' $OLX_MODAL && ! grep -qE 'class="(modal-)?backdrop"' $OLX_MODAL; then
+  echo "PASS  OlxImportModal passes closeOnBackdrop={false} and draws no backdrop"
+else
+  echo "FAIL  OlxImportModal passes closeOnBackdrop={false} and draws no backdrop"; fail=1
+fi
+own olx-summary OlxImportModal.svelte
+uniq1 olx-summary
+if [[ -n $REPLY ]]; then
+  N=OlxImportModal; H=$REPLY
+  d '\.olx-heading' '' 'font-size:15px' 'font-weight:600' 'color:var\(--text\)'
+  d '\.olx-foot' '' 'display:contents'
+  d '\.olx-foot-note' '' 'flex:1' 'font-size:12\.5px' 'color:var\(--muted\)'
+  d '\.olx-summary' '' 'padding:9px 11px' 'background:var\(--surface-2\)' 'border-radius:var\(--radius\)'
+  # The danger panel's colours, as the other modals' banners (C1).
+  chk "\.olx-error\.${H},\.olx-failed\.${H}" 'background:var\(--danger-panel-bg\)' 'border-left:3px solid var\(--danger\)' 'color:var\(--danger-panel-fg\)'
+  d '\.olx-blockers' '' 'background:var\(--danger-panel-bg\)' 'border-left:3px solid var\(--danger\)' 'color:var\(--danger-panel-fg\)'
+  d '\.olx-group-title' '' 'font-size:12\.5px' 'font-weight:600' 'color:var\(--text-3\)'
+  d '\.olx-lines' '' 'font-size:12\.5px' 'overflow-wrap:anywhere'
+  d '\.olx-drafts' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)'
+  d '\.olx-draft-label' '' 'min-width:0' 'overflow-wrap:anywhere'
+  sweep OlxImportModal $H
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

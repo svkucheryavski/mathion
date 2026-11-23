@@ -632,8 +632,67 @@ describe('VersionsPage — row actions through the slots', () => {
     for (const id of [7, 8]) expect(slots(id).every((b) => b.disabled)).toBe(true);
     expect([...target.querySelectorAll('a.vtitle')].map((a) => a.getAttribute('aria-disabled'))).toEqual(['true', 'true']);
     expect(addLine()!.disabled).toBe(true);
+    expect([...target.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Import from Open edX')!.disabled).toBe(true);
     release();
     await settle();
     expect(byLabel('Open v8')!.disabled).toBe(false);
+  });
+});
+
+describe('VersionsPage — Import from Open edX (OLX import)', () => {
+  const importBtn = () => [...target.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Import from Open edX');
+
+  it('the Import from Open edX button opens the modal for course admins', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ max_file_mb: 20, max_total_mb: 200 }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    })));
+    try {
+      const loads = vi.mocked(loadVersionsPage);
+      await render();
+      const before = loads.mock.calls.length;
+      importBtn()!.click();
+      await settle();
+      const panel = document.querySelector<HTMLElement>('section.modal-panel')!;
+      expect(document.getElementById(panel.getAttribute('aria-labelledby')!)!.textContent).toBe('Import from Open edX');
+      panel.querySelector<HTMLButtonElement>('[data-action="cancel"]')!.click();
+      await settle();
+      expect(document.querySelector('section.modal-panel')).toBeNull();
+      expect(loads.mock.calls.length).toBe(before + 1);
+      expect(document.activeElement).toBe(importBtn());
+      unmount(component!); component = null;
+      versionsPageState.course = { id: 1, slug: 'c', name: 'Applied Linear Algebra', description: '', is_admin: false };
+      await render();
+      expect(importBtn()).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('the modal lists the page’s unfinished drafts, and a course switch closes it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ max_file_mb: 20, max_total_mb: 200 }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    })));
+    try {
+      versionsPageState.versions = [mkVersion({ id: 7 }), mkVersion({ id: 8, label: 'Open edX (unfinished): Chem' })];
+      const props = $state({ courseSlug: 'c' });
+      component = mount(VersionsPage, { target, props });
+      await settle();
+      importBtn()!.click();
+      await settle();
+      expect([...document.querySelectorAll('section.modal-panel .olx-draft-label')].map((e) => e.textContent)).toEqual(['Open edX (unfinished): Chem']);
+      props.courseSlug = 'd';
+      flushSync();
+      await settle();
+      expect(document.querySelector('section.modal-panel')).toBeNull();
+      // The loader is stubbed: land the new course as it would.
+      versionsPageState.course = { id: 2, slug: 'd', name: 'D', description: '', is_admin: true };
+      versionsPageState.versions = [mkVersion({ id: 9, course_id: 2 })];
+      flushSync();
+      await settle();
+      expect(target.querySelector('h1')!.textContent).toBe('D');
+      expect(document.querySelector('section.modal-panel')).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

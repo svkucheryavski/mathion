@@ -1,5 +1,5 @@
 // The import's network steps: check, draft, uploads with retries, build, status and discard.
-import { api, ApiError, REQUEST_ERROR_MESSAGE } from '../api';
+import { api, ApiError, failureText, REQUEST_ERROR_MESSAGE, SERVER_ERROR_MESSAGE } from '../api';
 import { listAssets, uploadAsset } from '../assets';
 import { scanAppSource } from '../appSourceScan';
 import type { Version } from '../types';
@@ -39,7 +39,8 @@ function addOnce(progress: UploadProgress, line: ReportLine): void {
 }
 
 const statusOf = (e: unknown): number => (e instanceof ApiError ? e.status : 0);
-const detailOf = (e: unknown): string => (e instanceof ApiError ? e.displayMessage : 'Could not reach the server');
+const detailOf = (e: unknown): string => failureText(e, SERVER_ERROR_MESSAGE);
+const sentence = (s: string): string => (/[.!?]$/.test(s) ? s : `${s}.`);
 
 const REFUSAL_REASON: Record<number, string> = {
   400: 'the server refused it', 413: 'the file is too large for the server',
@@ -63,9 +64,10 @@ async function present(versionId: number, upload: PlannedUpload): Promise<'yes' 
 }
 
 async function uploadOne(versionId: number, upload: PlannedUpload, blob: Blob, linked: Set<string>, progress: UploadProgress,
-                         wait: (ms: number) => Promise<void>): Promise<UploadResult | 'refused' | 'done'> {
+                         wait: (ms: number) => Promise<void>, beforeAttempt: () => void): Promise<UploadResult | 'refused' | 'done'> {
   const file = new File([blob], upload.target);
   for (let attempt = 1; ; attempt++) {
+    beforeAttempt(); // may throw to stop; outside the catch so it is never retried
     let stored: string;
     try {
       stored = (await uploadAsset(versionId, file)).filename;
@@ -77,7 +79,7 @@ async function uploadOne(versionId: number, upload: PlannedUpload, blob: Blob, l
           await wait(WAITS[attempt - 1]);
           continue;
         }
-        return { kind: 'retry', message: `The file “${upload.target}” could not be uploaded after ${ATTEMPTS} tries (${detailOf(e)}). Press Retry to go on.` };
+        return { kind: 'retry', message: `The file “${upload.target}” could not be uploaded after ${ATTEMPTS} tries: ${sentence(detailOf(e))} Press Retry to go on.` };
       }
       const unchecked: UploadResult = { kind: 'retry', message: `Could not check whether “${upload.target}” is already in the draft. Press Retry.` };
       if (status === 409) {
@@ -108,7 +110,7 @@ async function uploadOne(versionId: number, upload: PlannedUpload, blob: Blob, l
 /** Upload the planned files in order, skipping targets already in progress.outcome. */
 export async function uploadAll(versionId: number, plan: PlannedUpload[], blobs: Map<string, Blob>,
                                 linked: Set<string>, progress: UploadProgress, onProgress: (done: number, total: number) => void,
-                                wait: (ms: number) => Promise<void> = sleep): Promise<UploadResult> {
+                                wait: (ms: number) => Promise<void> = sleep, beforeAttempt: () => void = () => {}): Promise<UploadResult> {
   const total = plan.length;
   const count = () => plan.filter((u) => progress.outcome.has(u.target)).length;
   onProgress(count(), total);
@@ -127,7 +129,7 @@ export async function uploadAll(versionId: number, plan: PlannedUpload[], blobs:
         addOnce(progress, { level: 'note', where: '', text: `${upload.target}: ${warning}` });
       }
     }
-    const result = await uploadOne(versionId, upload, blob, linked, progress, wait);
+    const result = await uploadOne(versionId, upload, blob, linked, progress, wait, beforeAttempt);
     if (typeof result !== 'string') return result;
     progress.outcome.set(upload.target, result);
     onProgress(count(), total);

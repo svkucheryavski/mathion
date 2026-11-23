@@ -7,6 +7,10 @@ vi.mock('../lib/versionsPageLoader.svelte', async (importOriginal) => {
   const real = await importOriginal<typeof import('../lib/versionsPageLoader.svelte')>();
   return { ...real, loadVersionsPage: vi.fn().mockResolvedValue(undefined) };
 });
+vi.mock('../lib/olx/readExport', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../lib/olx/readExport')>();
+  return { ...real, readExport: vi.fn() };
+});
 vi.mock('../lib/api', async (importOriginal) => {
   const real = await importOriginal<typeof import('../lib/api')>();
   return { ...real, api: { ...real.api, post: vi.fn(), delete: vi.fn() } };
@@ -18,6 +22,7 @@ import { versionsPageState } from '../lib/versionsPageLoader.svelte';
 import VersionsPage from '../pages/editor/VersionsPage.svelte';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
 import type { Version } from '../lib/types';
+import { readExport } from '../lib/olx/readExport';
 
 const postMock = vi.mocked(api.post);
 
@@ -269,5 +274,92 @@ describe('VersionsPage — the create form guards navigation (Polish 3 C8)', () 
     expect(target.querySelector('.inline-confirm')).toBeNull();
     resolve(mkVersion({ id: 9 }));
     await settle();
+  });
+});
+
+describe('VersionsPage — the import modal guards navigation (OLX import)', () => {
+  const CHECK = {
+    summary: { blocks: 1, sequences: 1, items: 1, videos: 1, pages: 0, apps: 0, quizzes: 0, files: 0, bytes: 0 },
+    report: [], blockers: [], uploads: [], linked: [], max_quiz_attempts: 3, label: 'Open edX (unfinished): C', blocking: false,
+  };
+  const foot = () => document.querySelector<HTMLElement>('section.modal-panel footer.modal-foot')!;
+  const askBtn = (w: 'confirm' | 'cancel') => foot().querySelector<HTMLButtonElement>(`.inline-confirm button.${w}`)!;
+
+  /** Open the modal, check an export and start an import whose draft creation never answers. */
+  async function importing() {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ max_file_mb: 20, max_total_mb: 200 }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    })));
+    vi.mocked(readExport).mockResolvedValue({ body: { files: { 'course.xml': '<course/>' }, static: [], apps: [] }, blobs: new Map(), report: [], jsonBytes: 10 });
+    postMock.mockImplementation(((url: string) => (url.endsWith('/olx-import/check') ? Promise.resolve(CHECK) : new Promise(() => {}))) as typeof api.post);
+    component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
+    await settle();
+    [...target.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Import from Open edX')!.click();
+    await settle();
+    const input = document.querySelector<HTMLInputElement>('section.modal-panel input[data-role="export"]')!;
+    Object.defineProperty(input, 'files', { value: [new File(['x'], 'c.tar.gz')], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    document.querySelector<HTMLButtonElement>('section.modal-panel [data-action="check"]')!.click();
+    await settle();
+    document.querySelector<HTMLButtonElement>('section.modal-panel [data-action="import"]')!.click();
+    await settle();
+    expect(postMock).toHaveBeenCalledWith('/api/courses/1/versions', expect.anything());
+  }
+  afterEach(() => { vi.unstubAllGlobals(); postMock.mockReset(); });
+
+  it('during an import, an in-app navigation asks in the modal; Leave navigates, Cancel stays', async () => {
+    await importing();
+    let nav = navigate('/courses');
+    await settle();
+    expect(foot().querySelector('.inline-confirm .warning')!.textContent!.trim()).toBe('An import is running. Leaving stops it and leaves an unfinished draft.');
+    expect(document.activeElement).toBe(askBtn('cancel'));
+    askBtn('cancel').click();
+    expect(await nav).toBe(false);
+    expect(currentRoute.path).toBe('/courses/c');
+    nav = navigate('/courses');
+    await settle();
+    askBtn('confirm').click();
+    expect(await nav).toBe(true);
+    expect(currentRoute.path).toBe('/courses');
+  });
+
+  it('a second navigation while the question is open shows one question and refocuses Cancel; Cancel refuses both; Leave goes to the latest destination', async () => {
+    await importing();
+    let first = navigate('/courses');
+    await settle();
+    document.querySelector<HTMLElement>('section.modal-panel')!.focus();
+    let second = navigate('/teaching');
+    await settle();
+    expect(foot().querySelectorAll('.inline-confirm')).toHaveLength(1);
+    expect(document.activeElement).toBe(askBtn('cancel'));
+    askBtn('cancel').click();
+    expect(await first).toBe(false);
+    expect(await second).toBe(false);
+    expect(currentRoute.path).toBe('/courses/c');
+    first = navigate('/courses');
+    await settle();
+    second = navigate('/teaching');
+    await settle();
+    askBtn('confirm').click();
+    expect(await first).toBe(false);
+    expect(await second).toBe(true);
+    expect(currentRoute.path).toBe('/teaching');
+  });
+
+  it('beforeunload is prevented while importing', async () => {
+    const idle = new Event('beforeunload', { cancelable: true });
+    component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
+    await settle();
+    window.dispatchEvent(idle);
+    expect(idle.defaultPrevented).toBe(false);
+    unmount(component); component = null;
+    versionsPageState.course = { id: 1, slug: 'c', name: 'Applied Linear Algebra', description: '', is_admin: true };
+    versionsPageState.versions = [mkVersion({ id: 7 })];
+    versionsPageState.loading = false;
+    await importing();
+    const busy = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(busy);
+    expect(busy.defaultPrevented).toBe(true);
   });
 });

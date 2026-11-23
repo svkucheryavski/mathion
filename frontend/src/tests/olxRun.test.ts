@@ -85,13 +85,35 @@ describe('uploadAll', () => {
     const w = noWait();
     const res = await uploadAll(VID, plan, blobsFor(plan), new Set(), fresh(), () => {}, w.wait);
     expect(res.kind).toBe('retry');
-    expect(res).toEqual({ kind: 'retry', message: 'The file “a.pdf” could not be uploaded after 3 tries (Slow down). Press Retry to go on.' });
+    expect(res).toEqual({ kind: 'retry', message: 'The file “a.pdf” could not be uploaded after 3 tries: Slow down. Press Retry to go on.' });
     expect(w.waits).toEqual([1000, 2000]);
     expect(uploads()).toEqual(['a.pdf', 'a.pdf', 'a.pdf']);
     routes[UP] = [err(500), ok('a.pdf'), ok('b.pdf')];
     const again = noWait();
     expect(await uploadAll(VID, plan, blobsFor(plan), new Set(), fresh(), () => {}, again.wait)).toEqual({ kind: 'done' });
     expect(again.waits).toEqual([1000]);
+  });
+
+  it('three network errors say the offline sentence; a 5xx with its own sentence keeps it', async () => {
+    routes[UP] = ['network', 'network', 'network'];
+    const res = await uploadAll(VID, [st('a.pdf')], blobsFor([st('a.pdf')]), new Set(), fresh(), () => {}, noWait().wait);
+    expect(res).toEqual({ kind: 'retry',
+      message: 'The file “a.pdf” could not be uploaded after 3 tries: Could not reach server. Check your connection. Press Retry to go on.' });
+    routes[UP] = [err(503, 'Down.'), err(503, 'Down.'), err(503, 'Down.')];
+    const down = await uploadAll(VID, [st('a.pdf')], blobsFor([st('a.pdf')]), new Set(), fresh(), () => {}, noWait().wait);
+    expect(down).toEqual({ kind: 'retry', message: 'The file “a.pdf” could not be uploaded after 3 tries: Down. Press Retry to go on.' });
+  });
+
+  it('beforeAttempt runs before every attempt, outside the retry catch, and its throw stops the uploads', async () => {
+    routes[UP] = [err(503), ok('a.pdf')];
+    let left = false;
+    const seen: number[] = [];
+    const wait = async () => { left = true; };
+    const beforeAttempt = () => { seen.push(calls.length); if (left) throw new Error('left'); };
+    await expect(uploadAll(VID, [st('a.pdf')], blobsFor([st('a.pdf')]), new Set(), fresh(), () => {}, wait, beforeAttempt))
+      .rejects.toThrow('left');
+    expect(uploads()).toEqual(['a.pdf']);
+    expect(seen).toEqual([0, 1]);
   });
 
   it('keeps refusals and warnings across retry → markPresent → resume, each reported once', async () => {
