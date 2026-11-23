@@ -126,7 +126,7 @@
   </div>
   <div class="preview-area">
     {#if previewUrl}
-      <VideoFrame src={previewUrl} title={item.title || 'Video preview'} height={296} />
+      <VideoFrame src={previewUrl} title={item.title || 'Video preview'} fill />
     {:else}
       <p class="preview-empty">No preview</p>
     {/if}
@@ -186,7 +186,7 @@
   }
   .preview-title { flex: 1; font-size: 12.5px; font-weight: 600; color: var(--text); /* ref 1815 */ }
   .preview-meta { font-size: 11.5px; color: var(--muted); /* ref 1816 */ }
-  .preview-area { height: 296px; background: var(--surface-2); /* ref 1818 — D13 */ }
+  .preview-area { aspect-ratio: 16 / 9; background: var(--surface-2); /* the player's own shape */ }
   .preview-empty {
     margin: 0;
     height: 100%;

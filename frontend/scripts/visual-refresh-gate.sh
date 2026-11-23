@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3149
+EXPECTED_CHECKS=3150
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -4381,7 +4381,7 @@ if [[ -n $REPLY ]]; then
   d '\.preview-head' '' 'display:flex' 'align-items:center' 'gap:10px' 'padding:8px 12px' 'background:var\(--surface-2\)' 'border-bottom:1px solid var\(--border\)'
   d '\.preview-title' '' 'flex:1' 'font-size:12\.5px' 'font-weight:600' 'color:var\(--text\)'
   d '\.preview-meta' '' 'font-size:11\.5px' 'color:var\(--muted\)'
-  d '\.preview-area' '' 'height:296px' 'background:var\(--surface-2\)'
+  d '\.preview-area' '' 'aspect-ratio:16 / 9' 'background:var\(--surface-2\)'
   d '\.preview-empty' '' 'height:100%' 'display:flex' 'align-items:center' 'justify-content:center' 'font-size:12px' 'color:var\(--muted\)'
   d '\.preview-foot' '' 'display:flex' 'gap:12px' 'padding:8px 12px' 'border-top:1px solid var\(--border-soft\)' 'background:var\(--surface-3\)'
   d '\.preview-status' '' 'font-size:11\.5px' 'color:var\(--muted\)'
@@ -4403,7 +4403,7 @@ if [[ -n $REPLY ]]; then
   d '\.script-name' '' 'font-size:12\.5px' 'color:var\(--text\)' 'text-overflow:ellipsis'
   d '\.app-preview' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'overflow:hidden'
   d '\.preview-head' '' 'display:flex' 'padding:8px 12px' 'background:var\(--surface-2\)' 'border-bottom:1px solid var\(--border\)'
-  d '\.preview-area' '' 'height:360px' 'background:var\(--surface-2\)'
+  d '\.preview-area' '' 'aspect-ratio:16 / 9' 'background:var\(--surface-2\)'
   d '\.app-hint' '' 'margin:0' 'padding:8px 10px' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)' 'font-size:11\.5px' 'color:var\(--text-3\)'
   d '\.warnings' '' 'padding:8px 10px' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)' 'font-size:11\.5px' 'color:var\(--text-3\)'
   d '\.preview-foot' '' 'border-top:1px solid var\(--border-soft\)' 'background:var\(--surface-3\)'
@@ -4414,15 +4414,16 @@ if [[ -n $REPLY ]]; then
   sweep AppBody $H
 fi
 
-# R3: the shared frames size themselves when given `height`; the student
+# R3: the shared frames fill the editor's 16:9 preview when given `fill`; the student
 # defaults (16:9, 600px) stay. Anchored on each default rule's declarations,
 # since both components author `.frame`.
 VFH=(${(f)"$(grep -oE '\.frame\.svelte-[a-z0-9]+\{position:relative;padding-bottom:56\.25%' $CSS | grep -oE 'svelte-[a-z0-9]+' | sort -u)"})
 IFH=(${(f)"$(grep -oE '\.frame\.svelte-[a-z0-9]+\{width:100%;height:600px' $CSS | grep -oE 'svelte-[a-z0-9]+' | sort -u)"})
 if [[ ${#VFH[@]} -eq 1 && ${#IFH[@]} -eq 1 ]]; then
   echo "PASS  VideoFrame and InteractiveFrame defaults resolve to one hash each"
-  N=VideoFrame; chk "\.frame\.fixed\.${VFH[1]}" 'padding-bottom:0' 'height:var\(--frame-h\)' 'margin-bottom:0'
-  N=InteractiveFrame; chk "\.frame\.fixed\.${IFH[1]}" 'height:var\(--frame-h\)' 'margin-bottom:0'
+  N=VideoFrame; chk "\.frame\.fill\.${VFH[1]}" 'padding-bottom:0' 'height:100%' 'margin-bottom:0'
+  N=InteractiveFrame; chk "\.frame\.fill\.${IFH[1]}" 'height:100%' 'margin-bottom:0'
+  N=InteractiveFrame; chk "\.frame\.${IFH[1]} iframe:where\(\.${IFH[1]}\)" 'background:#fff'
 else
   echo "FAIL  frame defaults not unique (VideoFrame ${#VFH[@]}, InteractiveFrame ${#IFH[@]})"; fail=1
 fi
@@ -4505,7 +4506,7 @@ LIT = re.compile(r'#[0-9a-fA-F]{3,8}(?![0-9a-zA-Z_-])|(?<![\w-])(?:rgba?|hsla?)\
 ALLOWED = {'Modal.svelte': {s.replace(' ', '') for s in (
     'box-shadow:0 16px 44px rgba(20,24,35,.22)',   # the centre panel (ref 1684)
     'box-shadow:-14px 0 40px rgba(20,24,35,.22)',  # the right drawer (9b)
-)}}
+)}, 'InteractiveFrame.svelte': {'background:#fff'}}   # apps always sit on white, whatever the theme
 
 def strip_comments(s):
     s = re.sub(r'/\*.*?\*/', ' ', s, flags=re.S)

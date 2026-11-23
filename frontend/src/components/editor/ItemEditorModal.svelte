@@ -449,6 +449,8 @@
 
 <Modal
   labelledby={labelId}
+  width={1120}
+  maxHeight={820}
   autofocusSelector={`#${titleEditId}, [data-autofocus], header.modal-head button[aria-label="Close"]`}
   onRequestClose={requestClose}
   closeDisabled={deleting || saving}

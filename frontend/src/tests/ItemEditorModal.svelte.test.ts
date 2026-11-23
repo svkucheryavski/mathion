@@ -746,6 +746,30 @@ describe('ItemEditorModal — ported from ItemEditPage.interactive (T3b)', () =>
     expect(panel().querySelector('input[type="url"]')).toBeNull();
   });
 
+  it('app: the frame fills the preview area', async () => {
+    serve((u) => (u.includes('/assets/')
+      ? Promise.resolve({ ok: true, status: 200, statusText: 'x', text: () => Promise.resolve("getElementById('app-root')") } as unknown as Response)
+      : undefined));
+    await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
+    const frame = panel().querySelector<HTMLElement>('.app-preview .preview-area .frame')!;
+    expect(frame.classList.contains('fill')).toBe(true);
+  });
+
+  it('app: while the script loads, the 16:9 area is already there', async () => {
+    serve((u) => (u.includes('/assets/') ? new Promise<Response>(() => {}) : undefined));
+    await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
+    expect(panel().querySelector('.app-preview .preview-area[aria-busy="true"]')).not.toBeNull();
+  });
+
+  it('the item window is 1120 × 820 for every item type', async () => {
+    for (const item of [{ type: 'static_page' as const }, { type: 'video' as const, content_md: null, video_url: 'https://www.youtube.com/embed/abc123' }, { type: 'interactive_app' as const, script_url: null }, { type: 'quiz' as const, content_md: null }]) {
+      await render({ item });
+      expect(panel().style.getPropertyValue('--modal-w')).toBe('1120px');
+      expect(panel().style.getPropertyValue('--modal-h')).toBe('820px');
+      unmount(cmp!); cmp = null;
+    }
+  });
+
   it('app: with no script the empty upload state shows', async () => {
     await render({ item: { type: 'interactive_app', script_url: null } });
     expect(panel().textContent).toContain('No app uploaded yet.');
@@ -756,13 +780,12 @@ describe('ItemEditorModal — video preview card (T4, D13)', () => {
   const EMBED = 'https://www.youtube.com/embed/abc123';
   const urlInput = () => panel().querySelector<HTMLInputElement>('input[aria-label="Video URL"]')!;
 
-  it('a resolvable URL: the 296px frame, the provider meta, "embed resolved" and Open in new tab', async () => {
+  it('a resolvable URL: the 16:9 frame, the provider meta, "embed resolved" and Open in new tab', async () => {
     await render({ item: { type: 'video', content_md: null, video_url: EMBED } });
     const card = panel().querySelector('.video-preview')!;
     expect(card.querySelector('.preview-meta')!.textContent).toBe('youtube');
     const frame = card.querySelector<HTMLElement>('.preview-area .frame')!;
-    expect(frame.classList.contains('fixed')).toBe(true);
-    expect(frame.style.getPropertyValue('--frame-h')).toBe('296px');
+    expect(frame.classList.contains('fill')).toBe(true);
     expect(card.querySelector('.preview-status')!.textContent).toBe('embed resolved');
     const link = card.querySelector<HTMLAnchorElement>('a.open-link')!;
     expect(link.textContent).toBe('Open in new tab');
@@ -1085,15 +1108,14 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     expect(dirtyText()).toBe('');
   });
 
-  it('the ready preview: the 360px frame, the meta, and the blank-preview hint in the card footer', async () => {
+  it('the ready preview: the filling frame, the meta, and the blank-preview hint in the card footer', async () => {
     serve((u) => (u.includes('/assets/') ? Promise.resolve(resp("getElementById('app-root')")) : undefined));
     await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
     await settle();
     const card = panel().querySelector('.app-preview')!;
     expect(card.querySelector('.preview-meta')!.textContent).toBe('interactive app');
     const frame = card.querySelector<HTMLElement>('.frame')!;
-    expect(frame.classList.contains('fixed')).toBe(true);
-    expect(frame.style.getPropertyValue('--frame-h')).toBe('360px');
+    expect(frame.classList.contains('fill')).toBe(true);
     expect(card.querySelector('.blank-hint')!.textContent).toContain('Blank preview?');
   });
 
