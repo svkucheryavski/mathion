@@ -26,3 +26,8 @@ it('height: the fixed modifier and --frame-h (Slice-5b D13)', () => {
   expect(f.classList.contains('fixed')).toBe(true);
   expect(f.style.getPropertyValue('--frame-h')).toBe('296px');
 });
+
+it('sends only the site origin to the video host, which YouTube needs to play', () => {
+  const f = mountFrame({ src: 'https://www.youtube.com/embed/x', title: 'V' });
+  expect(f.querySelector('iframe')!.getAttribute('referrerpolicy')).toBe('strict-origin');
+});

@@ -9,7 +9,8 @@
 </script>
 
 <div class="frame" class:fixed={height !== undefined} style:--frame-h={height !== undefined ? `${height}px` : undefined}>
-  <iframe {src} {title} allowfullscreen></iframe>
+  <!-- Origin only: YouTube refuses to play without it; the page path stays private. -->
+  <iframe {src} {title} allowfullscreen referrerpolicy="strict-origin"></iframe>
 </div>
 
 <style>
