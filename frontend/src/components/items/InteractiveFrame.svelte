@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Shared fixed-height (600px) sandboxed iframe for interactive apps. The app
+  // Shared sandboxed iframe for interactive apps; it takes its parent's size. The app
   // JS SOURCE (not a URL) is inlined into the iframe srcdoc as a classic
   // <script> (see lib/interactiveHost + the upload-model spec §6). Used by the
   // student player and the editor preview.
@@ -23,17 +23,15 @@
   // interaction telemetry it collects) — accepted because the upload is
   // admin-authored (the app legitimately observes its own in-frame interaction).
   import { buildAppSrcdoc } from '../../lib/interactiveHost';
-  // `fill` takes the parent's height (the editor's 16:9 preview) instead of the 600px default.
-  let { scriptSource, title, fill = false }: { scriptSource: string; title: string; fill?: boolean } = $props();
+  let { scriptSource, title }: { scriptSource: string; title: string } = $props();
   const srcdoc = $derived(buildAppSrcdoc(scriptSource));
 </script>
 
-<div class="frame" class:fill>
+<div class="frame">
   <iframe {srcdoc} {title} sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
 </div>
 
 <style>
-  .frame { width: 100%; height: 600px; margin-bottom: var(--space-3); }
-  .frame.fill { height: 100%; margin-bottom: 0; }
+  .frame { width: 100%; height: 100%; }
   .frame iframe { width: 100%; height: 100%; border: 0; background: #fff; /* shows wherever the app paints nothing */ }
 </style>

@@ -270,7 +270,7 @@
       </div>
       {#if status === 'ready' && source !== null}
         <div class="preview-area">
-          <InteractiveFrame scriptSource={source} title={item.title || 'Interactive app'} fill />
+          <InteractiveFrame scriptSource={source} title={item.title || 'Interactive app'} />
         </div>
         {#if editable}
           <!-- Spec §8/§10: a blank render can't be detected from JS (opaque

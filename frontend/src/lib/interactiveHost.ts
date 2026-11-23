@@ -19,6 +19,11 @@ const CSP =
   "base-uri 'none'; form-action 'none'; frame-src 'none'; child-src 'none'; " +
   "worker-src 'none'; object-src 'none'";
 
+/** Narrowest app frame, in CSS px; below it students see a note instead. */
+export const MIN_APP_WIDTH = 800;
+/** Once shown, an app stays until the width drops this much more (a classic scrollbar's width). */
+export const APP_WIDTH_SLACK = 24;
+
 export function buildAppSrcdoc(scriptSource: string): string {
   return `<!doctype html>
 <html>

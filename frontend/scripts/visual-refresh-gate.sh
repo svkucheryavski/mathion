@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3154
+EXPECTED_CHECKS=3155
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -393,12 +393,11 @@ GLOBAL_ALLOW = {
     ('src/components/ui/AskSlot.svelte', '.modal-body'),
     ('src/components/editor/ItemEditorModal.svelte', '*'),
     ('src/pages/editor/VersionEditPage.svelte', '.inline-confirm'),
-    # T5 card framing. Ancestor-scoped under .video-card/.app-card, which wrap
-    # only their own shared frame component -- never a quiz. A BARE top-level
+    # T5 card framing. Ancestor-scoped under .video-card, which wraps only its
+    # own shared frame component -- never a quiz. A BARE top-level
     # :global(.frame) is forbidden by the spec: it would also reach the
-    # deferred editor previews.
+    # deferred editor previews. (.app-card needs none: the frame fills it.)
     ('src/components/items/VideoItem.svelte', '.frame'),
-    ('src/components/items/InteractiveAppItem.svelte', '.frame'),
     # T8a. Ancestor-scoped as `ul li:last-child :global(.row)`, so the hashed part
     # pins it inside BlockGroup own panel list; the only thing a <li> there
     # contains is a SequenceLink or MiniProjectLink whose root IS `.row`. It
@@ -1039,7 +1038,7 @@ TARGETS = [
     ('video-card',            r'\.video-card\.svelte-[a-z0-9]+$', 1),
     ('app-card',              r'\.app-card\.svelte-[a-z0-9]+$', 1),
     ('video-card frame reset', r'\.video-card\.svelte-[a-z0-9]+ \.frame$', 1),
-    ('app-card frame reset',  r'\.app-card\.svelte-[a-z0-9]+ \.frame$', 1),
+    ('app-card narrow',       r'\.app-card\.narrow\.svelte-[a-z0-9]+$', 1),
     ('watched row',           r'\.watched\.svelte-[a-z0-9]+$', 1),
     ('cover-hint',            r'\.cover-hint\.svelte-[a-z0-9]+$', 1),
     ('unsupported box',       r'\.unsupported\.svelte-[a-z0-9]+$', 1),
@@ -1122,8 +1121,12 @@ h2n=$(grep -ohE "\.(page-item|video-item|interactive-app)\.svelte-[a-z0-9]+ h2:w
 # would reach the deferred editor previews.
 check "video card zeroes the shared frame margin (ancestor-scoped)" \
       '\.video-card\.svelte-[a-z0-9]+ \.frame\{([^}]*;)?margin-bottom:0[;}]'
-check "app card zeroes the shared frame margin (ancestor-scoped)" \
-      '\.app-card\.svelte-[a-z0-9]+ \.frame\{([^}]*;)?margin-bottom:0[;}]'
+# Student app card: 16:9, sized from the zoomed window height (spec 2026-11-23).
+check "app card is 16:9" \
+      '\.app-card\.svelte-[a-z0-9]+\{([^}]*;)?aspect-ratio:16 / 9[;}]'
+check "app card divides the window height by --app-zoom" \
+      '\.app-card\.svelte-[a-z0-9]+\{([^}]*;)?width:min\(100%,max\(800px,\(calc\(100vh / var\(--app-zoom, 1\)\)'
+none  "no fixed 600px app frame left" '[{;]height:600px'
 for c in video-card app-card; do
   check "$c is a bordered --surface card with overflow:hidden" \
         "\.${c}\.svelte-[a-z0-9]+\{([^}]*;)?overflow:hidden[;}]"
@@ -1454,7 +1457,8 @@ const SPEC = {
   "PageItem.svelte":        { nodes: BASE.concat("HtmlTag"), tags: ["article", "div", "h2"],
                               attachOn: { "div:content.prose": "{@attach externalLinks(item.content_html)}" } },
   "VideoItem.svelte":       { nodes: BASE, tags: ["article", "div", "h2", "p", "polyline", "svg"] },
-  "InteractiveAppItem.svelte": { nodes: BASE, tags: ["article", "div", "h2", "p"] },
+  "InteractiveAppItem.svelte": { nodes: BASE, tags: ["article", "div", "h2", "p"],
+                              attachOn: { "article:interactive-app": "{@attach measure}" } },
   "UnsupportedItem.svelte": { nodes: BASE, tags: ["div", "p"] },
   "CourseCard.svelte":      { nodes: BASE.concat("RenderTag", "SnippetBlock"),
                               tags: ["a", "div", "h3", "span"],
@@ -1661,7 +1665,9 @@ const SIG = {
   "InteractiveAppItem.svelte":
     ["article:interactive-app[class=\"interactive-app\"]", "h2:", "#if:",
      "div:app-card[class=\"app-card\"]", "InteractiveFrame:[scriptSource title]",
-     "p:cover-hint[class=\"cover-hint\"]", "#else:", "#if:", "p:notice[class=\"notice\"]",
+     "p:cover-hint[class=\"cover-hint\"]", "#else:", "#if:",
+     "div:app-card.narrow[class=\"app-card narrow\"]", "p:notice[class=\"notice\"]",
+     "#else:", "#if:", "p:notice[class=\"notice\"]",
      "#else:", "#if:", "p:notice[class=\"notice\"]"],
   "UnsupportedItem.svelte": ["div:unsupported[class=\"unsupported\"]", "p:"],
   // CourseCard is a Slice-2 component, but the gate pins its `.count` at 11.5px
@@ -1791,6 +1797,7 @@ const TEXT = {
   "VideoItem.svelte": ["h2::{expr}", "Button::Mark as watched", "p:watched:Marked as watched"],
   "InteractiveAppItem.svelte":
     ["h2::{expr}", "p:cover-hint:Marked covered once opened.",
+     "p:notice:This app needs a larger screen. Open this page on a laptop or desktop computer.",
      "p:notice:This app couldn'\''t be loaded.", "p:notice:No app uploaded yet."],
   "UnsupportedItem.svelte": ["p::This item isn'\''t available in this view yet."],
   "NumericQuestion.svelte": ["p:correct-line:Correct answer:", "strong:mono:{expr}"],
@@ -3486,8 +3493,9 @@ SPECS = [
     spec('InteractiveAppItem', ia, [
         ('.interactive-app@W@', SHELL),
         ('.interactive-app@W@ h2:where(@W@)', H2),
-        ('.app-card@W@', CARD),
-        ('.app-card@W@ .frame', 'margin-bottom:0'),
+        ('.app-card@W@', CARD + ';aspect-ratio:16 / 9;'
+         'width:min(100%,max(800px,(calc(100vh / var(--app-zoom, 1)) - 300px) * 16 / 9));margin-inline:auto'),
+        ('.app-card.narrow@W@', 'aspect-ratio:auto;width:auto;margin-inline:0;padding:var(--space-3)'),
         ('.cover-hint@W@', 'font-size:12.5px;color:var(--muted);margin:0'),
         ('.notice@W@', 'color:var(--muted);margin:0'),
     ]),
@@ -4414,15 +4422,15 @@ if [[ -n $REPLY ]]; then
   sweep AppBody $H
 fi
 
-# R3: the shared frames fill the editor's 16:9 preview when given `fill`; the student
-# defaults (16:9, 600px) stay. Anchored on each default rule's declarations,
-# since both components author `.frame`.
+# R3: VideoFrame fills the editor's 16:9 preview when given `fill` (student default
+# 16:9); InteractiveFrame always fills its parent. Anchored on each default rule's
+# declarations, since both components author `.frame`.
 VFH=(${(f)"$(grep -oE '\.frame\.svelte-[a-z0-9]+\{position:relative;padding-bottom:56\.25%' $CSS | grep -oE 'svelte-[a-z0-9]+' | sort -u)"})
-IFH=(${(f)"$(grep -oE '\.frame\.svelte-[a-z0-9]+\{width:100%;height:600px' $CSS | grep -oE 'svelte-[a-z0-9]+' | sort -u)"})
+IFH=(${(f)"$(grep -oE '\.frame\.svelte-[a-z0-9]+\{width:100%;height:100%\}' $CSS | grep -oE 'svelte-[a-z0-9]+' | sort -u)"})
 if [[ ${#VFH[@]} -eq 1 && ${#IFH[@]} -eq 1 ]]; then
   echo "PASS  VideoFrame and InteractiveFrame defaults resolve to one hash each"
   N=VideoFrame; chk "\.frame\.fill\.${VFH[1]}" 'padding-bottom:0' 'height:100%' 'margin-bottom:0'
-  N=InteractiveFrame; chk "\.frame\.fill\.${IFH[1]}" 'height:100%' 'margin-bottom:0'
+  none "InteractiveFrame has no fill switch" "\.frame\.fill\.${IFH[1]}"
   N=InteractiveFrame; chk "\.frame\.${IFH[1]} iframe:where\(\.${IFH[1]}\)" 'background:#fff'
 else
   echo "FAIL  frame defaults not unique (VideoFrame ${#VFH[@]}, InteractiveFrame ${#IFH[@]})"; fail=1

@@ -752,7 +752,7 @@ describe('ItemEditorModal — ported from ItemEditPage.interactive (T3b)', () =>
       : undefined));
     await render({ item: { type: 'interactive_app', script_url: 'app.js' } });
     const frame = panel().querySelector<HTMLElement>('.app-preview .preview-area .frame')!;
-    expect(frame.classList.contains('fill')).toBe(true);
+    expect(frame.parentElement!.classList.contains('preview-area')).toBe(true);  // the frame always fills its box (gate pins the CSS)
   });
 
   it('app: while the script loads, the 16:9 area is already there', async () => {
@@ -1115,7 +1115,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     const card = panel().querySelector('.app-preview')!;
     expect(card.querySelector('.preview-meta')!.textContent).toBe('interactive app');
     const frame = card.querySelector<HTMLElement>('.frame')!;
-    expect(frame.classList.contains('fill')).toBe(true);
+    expect(frame.closest('.preview-area')).not.toBeNull();
     expect(card.querySelector('.blank-hint')!.textContent).toContain('Blank preview?');
   });
 
