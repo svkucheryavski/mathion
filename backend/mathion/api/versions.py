@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
+from mathion.api import advisory
 from mathion.api.text_utils import bump_content_updated_at
 from mathion.api.lookups import get_or_404
 from mathion.api.authz import has_run_teacher_on_course, require_course_admin
@@ -146,6 +147,7 @@ def update_version(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    advisory.advisory_xact_lock(db, advisory.LOCK_NS_VERSION_INFO, version_id)   # before the version is read
     version = get_or_404(db, CourseVersion, version_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
@@ -157,9 +159,12 @@ def update_version(
     if not updates:
         return version
     if "info_md" in updates:
-        version.info_md = updates["info_md"]
-        version.info_html = render_with_assets(db, version.id, updates["info_md"])
+        # references first, the version row last (lock order)
+        info_html = render_with_assets(db, version.id, updates["info_md"])
         sync_asset_references(db, version.id, [updates["info_md"]], {"info_version_id": version.id})
+        advisory.interleave_hook("version_info")
+        version.info_md = updates["info_md"]
+        version.info_html = info_html
     if "max_quiz_attempts" in updates:
         version.max_quiz_attempts = updates["max_quiz_attempts"]
     if "label" in updates:
@@ -226,6 +231,7 @@ def list_versions(course_id: int, limit: int = 100, offset: int = 0, db: Session
 
 @router.post("/api/versions/{version_id}/publish", response_model=VersionResponse)
 def publish_version(version_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    advisory.advisory_xact_lock(db, advisory.LOCK_NS_VERSION_INFO, version_id)   # before the version is read
     version = get_or_404(db, CourseVersion, version_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
@@ -333,6 +339,7 @@ def publish_version(version_id: int, db: Session = Depends(get_db), user: User =
         .join(Sequence, Sequence.id == Item.sequence_id)
         .join(Block, Block.id == Sequence.block_id)
         .where(Block.version_id == version_id)
+        .order_by(Item.id)
     ).scalars().all()
     for item in items_to_render:
         if item.type == "interactive_app":
@@ -362,8 +369,9 @@ def publish_version(version_id: int, db: Session = Depends(get_db), user: User =
     for option in options:
         option.text = option.text                      # the setter re-renders text_html
 
-    version.info_html = render_with_assets(db, version_id, version.info_md)
+    info_html = render_with_assets(db, version_id, version.info_md)
     sync_asset_references(db, version_id, [version.info_md], {"info_version_id": version.id})
+    version.info_html = info_html                     # the version row last (lock order)
 
     version.state = "published"
     version.published_at = datetime.now(timezone.utc)

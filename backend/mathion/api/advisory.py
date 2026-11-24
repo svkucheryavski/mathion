@@ -9,6 +9,7 @@ LOCK_NS_ENROLLMENT = 0   # key: (course_id)
 LOCK_NS_CAPACITY = 1     # key: (run_id)
 LOCK_NS_MINIPROJECT = 2  # key: (mp_id)
 LOCK_NS_SUBMISSION = 3   # key: (mp_id, group_id)
+LOCK_NS_VERSION_INFO = 4  # key: (version_id); info edits and publish, before any row
 
 MAX_GROUP_SIZE = 10      # a group must not exceed this many RunStudents
 MAX_BATCH_SIZE = 300     # enrollment-batch input cap (UX/resource guardrail)

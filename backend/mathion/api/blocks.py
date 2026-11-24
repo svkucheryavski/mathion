@@ -225,7 +225,7 @@ def reorder_blocks(version_id: int, data: ReorderRequest, db: Session = Depends(
     if incoming_ids != real_ids:
         raise HTTPException(status_code=400, detail="Reorder list must include every block in this version")
 
-    for entry in data.order:
+    for entry in sorted(data.order, key=lambda e: e.id):   # id order, one lock order
         block = db.get(Block, entry.id)
         block.order = entry.order
     db.commit()
@@ -410,7 +410,7 @@ def reorder_sequences(block_id: int, data: ReorderRequest, db: Session = Depends
     if incoming_ids != real_ids:
         raise HTTPException(status_code=400, detail="Reorder list must include every sequence in this block")
 
-    for entry in data.order:
+    for entry in sorted(data.order, key=lambda e: e.id):   # id order, one lock order
         seq = db.get(Sequence, entry.id)
         seq.order = entry.order
     db.commit()

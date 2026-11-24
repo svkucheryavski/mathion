@@ -202,7 +202,7 @@ def reorder_questions(item_id: int, data: ReorderRequest, db: Session = Depends(
     if incoming_ids != real_ids:
         raise HTTPException(status_code=400, detail="Reorder list must include every question in this item")
 
-    for entry in data.order:
+    for entry in sorted(data.order, key=lambda e: e.id):   # id order, one lock order
         q = db.get(Question, entry.id)
         q.order = entry.order
     db.commit()
@@ -338,7 +338,7 @@ def reorder_options(question_id: int, data: ReorderRequest, db: Session = Depend
     if incoming_ids != real_ids:
         raise HTTPException(status_code=400, detail="Reorder list must include every option in this question")
 
-    for entry in data.order:
+    for entry in sorted(data.order, key=lambda e: e.id):   # id order, one lock order
         opt = db.get(AnswerOption, entry.id)
         opt.order = entry.order
     db.commit()

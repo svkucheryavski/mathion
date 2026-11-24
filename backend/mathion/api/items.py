@@ -309,7 +309,7 @@ def reorder_items(sequence_id: int, data: ReorderRequest, db: Session = Depends(
     if incoming_ids != real_ids:
         raise HTTPException(status_code=400, detail="Reorder list must include every item in this sequence")
 
-    for entry in data.order:
+    for entry in sorted(data.order, key=lambda e: e.id):   # id order, one lock order
         item = db.get(Item, entry.id)
         item.order = entry.order
     db.commit()
