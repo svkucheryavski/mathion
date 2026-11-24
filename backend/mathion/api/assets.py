@@ -4,13 +4,14 @@ import tempfile
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import func, select
+from sqlalchemy import delete as sa_delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from mathion.api import advisory
 from mathion.api.lookups import get_or_404
 from mathion.api.authz import has_run_pinned_to_version, require_course_admin
-from mathion.assets import get_mime_type, sanitize_filename, validate_extension
+from mathion.assets import commit_delete, get_mime_type, sanitize_filename, validate_extension
 from mathion.config import settings
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
@@ -217,6 +218,7 @@ def delete_asset(
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
         raise HTTPException(status_code=403, detail="Version is disabled")
+    advisory.advisory_xact_lock(db, advisory.LOCK_NS_VERSION_INFO, asset.version_id)   # as publish, before links
 
     if not force:
         ref_count = db.scalar(
@@ -229,12 +231,9 @@ def delete_asset(
             )
 
     filepath = os.path.join(_asset_dir(asset.version_id), asset.filename)
-    db.delete(asset)
-    db.commit()
-    # Registry is the source of truth: a leftover file is harmless and
-    # can be reaped by ops; a row pointing to a missing file is worse.
-    if os.path.isfile(filepath):
-        try:
-            os.remove(filepath)
-        except OSError:
-            pass
+    # links before the asset row, the order every save takes
+    db.execute(sa_delete(AssetReference).where(AssetReference.asset_id == asset_id))
+    if db.execute(sa_delete(Asset).where(Asset.id == asset_id).returning(Asset.id)).first() is None:
+        db.rollback()                                  # deleted meanwhile: the file may be a new upload's
+        raise HTTPException(status_code=404, detail="Asset not found")
+    commit_delete(db, [filepath])

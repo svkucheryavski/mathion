@@ -188,11 +188,11 @@ def sync_script_reference(
         )
         if still_referenced:
             continue
-        asset = db.get(Asset, aid)
-        if asset is None:
-            continue
-        removed_files.append(os.path.join(_asset_dir(asset.version_id), asset.filename))
-        db.delete(asset)
+        gone = db.execute(
+            sa_delete(Asset).where(Asset.id == aid).returning(Asset.version_id, Asset.filename)
+        ).first()
+        if gone is not None:                           # only a row this call deleted gives up its file
+            removed_files.append(os.path.join(_asset_dir(gone.version_id), gone.filename))
 
     return removed_files
 

@@ -1,4 +1,6 @@
+import os
 import re
+import secrets
 import unicodedata
 
 ALLOWED_EXTENSIONS = {
@@ -78,3 +80,41 @@ def looks_like_pdf(content: bytes) -> bool:
     content but does not guarantee structural validity.
     """
     return content.startswith(PDF_MAGIC)
+
+
+def commit_delete(db, filepaths: list[str]) -> None:
+    """Commit flushed asset-row deletes; their files move aside first and go only after the commit."""
+    db.flush()                                         # a same-name upload now waits for this commit
+    moved: list[tuple[str, str]] = []
+    for path in filepaths:
+        folder, name = os.path.split(path)
+        aside = os.path.join(folder, f".delete-{secrets.token_hex(4)}-{name}"[:255])   # the name kept for recovery
+        try:
+            os.replace(path, aside)
+        except OSError:
+            continue                                   # no file: nothing to restore or remove
+        moved.append((path, aside))
+    try:
+        db.commit()
+    except BaseException:
+        for path, aside in moved:
+            try:
+                os.link(aside, path)                   # never over a newer file
+            except FileExistsError:
+                pass
+            except OSError:
+                try:
+                    os.replace(aside, path)            # no hard links here: move it back
+                except OSError:
+                    pass                               # keep the hidden copy
+                continue
+            try:
+                os.remove(aside)
+            except OSError:
+                pass
+        raise
+    for _path, aside in moved:
+        try:
+            os.remove(aside)
+        except OSError:
+            pass

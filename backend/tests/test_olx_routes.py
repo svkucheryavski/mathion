@@ -345,29 +345,33 @@ def test_render_error_after_partial_inserts_rolls_back(auth_client, db, test_use
     assert db.get(CourseVersion, version.id).label == UNFINISHED
 
 
-def test_script_files_unlinked_only_after_commit(auth_client, db, test_user, monkeypatch):
+def test_script_files_unlinked_only_after_commit(auth_client, db, test_user, monkeypatch, tmp_path):
     _, version = _admin_course(db, test_user)
     _upload_all(auth_client, version.id)
-    events = []
+    folder = tmp_path / "scripts"
+    folder.mkdir()
+    script = folder / "sentinel.js"
+    script.write_text("x")
+    seen = []
     real_commit = db.commit
-    monkeypatch.setattr(olx_import, "apply", lambda plan, vid, s, day: ["/nonexistent/sentinel.js"])
-    monkeypatch.setattr(olx_import.os, "unlink", lambda p: events.append(("unlink", p)))
+    monkeypatch.setattr(olx_import, "apply", lambda plan, vid, s, day: [str(script)])
 
     def commit():
-        events.append(("commit", None))
+        seen.append(script.exists())
         real_commit()
     monkeypatch.setattr(db, "commit", commit)
     assert _build(auth_client, version.id).status_code == 200
-    assert events == [("commit", None), ("unlink", "/nonexistent/sentinel.js")]
+    assert seen == [False] and not script.exists()     # moved aside before, gone after
+    assert list(folder.iterdir()) == []
 
-    events.clear()
+    script.write_text("x")
 
     def failing_commit():
         raise RuntimeError("commit failed")
     monkeypatch.setattr(db, "commit", failing_commit)
     with pytest.raises(RuntimeError):
         _build(auth_client, version.id)
-    assert events == []
+    assert script.read_text() == "x" and [p.name for p in folder.iterdir()] == ["sentinel.js"]
 
 
 def test_apply_refused_maps_to_http(auth_client, db, test_user, monkeypatch):

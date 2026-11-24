@@ -1,4 +1,3 @@
-import os
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from mathion.assets import commit_delete
 from mathion.api.text_utils import bump_content_updated_at, slugify
 from mathion.api.lookups import INT4_MAX, get_or_404
 from mathion.api.authz import require_course_admin
@@ -251,17 +251,8 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), u
         db.rollback()
         raise HTTPException(status_code=422, detail="video_url cannot be null for video items")
 
-    db.commit()
+    commit_delete(db, removed_script_files)           # GC'd script files go only after the commit
     db.refresh(item)
-    # Unlink GC'd interactive_app script files after the DB commit — best-effort,
-    # mirroring delete_asset (a leftover file is harmless; a row without its file
-    # is worse). The rows were deleted inside the committed transaction above.
-    for path in removed_script_files:
-        if os.path.isfile(path):
-            try:
-                os.remove(path)
-            except OSError:
-                pass
     return item
 
 
@@ -283,13 +274,7 @@ def delete_item(item_id: int, db: Session = Depends(get_db), user: User = Depend
     if item.type == "interactive_app":
         removed_script_files = sync_script_reference(db, version.id, item.id, None)
     db.delete(item)
-    db.commit()
-    for path in removed_script_files:
-        if os.path.isfile(path):
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+    commit_delete(db, removed_script_files)
 
 
 @router.post("/api/sequences/{sequence_id}/items/reorder")
