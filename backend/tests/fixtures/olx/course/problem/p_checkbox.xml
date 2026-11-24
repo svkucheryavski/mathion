@@ -1,0 +1,18 @@
+<problem display_name="Checkboxes">
+  <p>Select the prime numbers.</p>
+  <choiceresponse>
+    <checkboxgroup>
+      <choice correct="true">2</choice>
+      <choice correct="true">3</choice>
+      <choice correct="false">4</choice>
+    </checkboxgroup>
+  </choiceresponse>
+  <choiceresponse>
+    <label>Select the vowels.</label>
+    <checkboxgroup>
+      <choice correct="true">a</choice>
+      <choice correct="false">b</choice>
+      <choice correct="true">e</choice>
+    </checkboxgroup>
+  </choiceresponse>
+</problem>

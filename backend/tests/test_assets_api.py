@@ -323,6 +323,19 @@ def test_item_save_rejects_missing_asset(admin_client, asset_tmpdir):
     assert "nonexistent.png" in response.json()["detail"]
 
 
+def test_missing_asset_message_shows_names_as_typed(admin_client, asset_tmpdir):
+    course = admin_client.post("/api/courses", json={"slug": "md2b", "name": "M", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
+    response = admin_client.post(f"/api/sequences/{seq['id']}/items", json={
+        "title": "Page", "type": "static_page",
+        "content_md": "See ![chart](café.png) and [notes](<my notes.pdf>)",
+    })
+    assert response.status_code == 422
+    assert "café.png" in response.json()["detail"] and "my notes.pdf" in response.json()["detail"]
+
+
 def test_item_update_tracks_references(admin_client, db, asset_tmpdir):
     course = admin_client.post("/api/courses", json={"slug": "md3", "name": "M", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()

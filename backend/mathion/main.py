@@ -35,6 +35,7 @@ from mathion.api.submissions import router as submissions_router
 from mathion.api.superuser import router as superuser_router
 from mathion.api.superuser_courses import router as superuser_courses_router
 from mathion.api.superuser_branding import router as superuser_branding_router
+from mathion.api.olx_import import router as olx_import_router
 from mathion.api.superuser_setup import router as superuser_setup_router
 from mathion.api.superuser_settings import router as superuser_settings_router
 from mathion.api.superuser_users import router as superuser_users_router
@@ -183,6 +184,7 @@ app.include_router(superuser_settings_router)
 app.include_router(superuser_branding_router)
 app.include_router(superuser_setup_router)
 app.include_router(branding_router)
+app.include_router(olx_import_router)
 
 
 @app.get("/health")
@@ -259,6 +261,8 @@ if _frontend_dist.is_dir():
         headers = _panel_cache_headers(full_path)
         index = _frontend_dist.resolve() / "index.html"
         if candidate.is_file() and candidate != index:
+            if candidate.is_relative_to(_frontend_dist.resolve() / "_app"):   # hashed names never change
+                headers = {**(headers or {}), "Cache-Control": "public, max-age=31536000, immutable"}
             return FileResponse(candidate, headers=headers)
         if _index is None:
             return FileResponse(index, headers=headers)

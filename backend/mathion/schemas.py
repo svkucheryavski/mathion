@@ -388,6 +388,7 @@ class OptionResponse(BaseModel):
     id: int
     question_id: int
     text: str
+    text_html: str
     is_correct: bool
     order: int
 
@@ -850,6 +851,7 @@ class RunAssetResponse(BaseModel):
     uploaded_by: int | None
     uploaded_by_email: str | None = None
     is_referenced: bool = False
+    referenced_by: list[int] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -983,7 +985,39 @@ class AuthConfigResponse(BaseModel):
     send_pin_enabled: bool
     longest_sign_in_days: int  # superuser Settings D12
     max_file_mb: int           # superuser Settings D11b
+    max_total_mb: int          # OLX import: the browser plans with the server's limits
     branding: BrandingPublic   # superuser Branding D13
+
+
+# --- OLX import (Open edX export) ---
+
+class OlxReportLine(BaseModel):
+    level: str
+    where: str
+    text: str
+
+
+class OlxUpload(BaseModel):
+    source: str
+    target: str
+    kind: str
+    size: int
+
+
+class OlxCheckResponse(BaseModel):
+    summary: dict[str, int]
+    report: list[OlxReportLine]
+    blockers: list[OlxReportLine]
+    uploads: list[OlxUpload]
+    linked: list[str]
+    max_quiz_attempts: int
+    label: str
+    blocking: bool
+
+
+class OlxBuildResponse(BaseModel):
+    report: list[OlxReportLine]
+    label: str
 
 
 # --- The superuser panel: Courses (spec D4-D13) and Users (D14-D21) ---

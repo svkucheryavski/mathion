@@ -3,14 +3,20 @@
 # an Alembic data migration that re-renders it. Before the beta: no backfill.
 import html
 import re
+import types
 import unicodedata
 
 import markdown_it.rules_block.list as _list_rule
 import nh3
 from markdown_it import MarkdownIt
 from markdown_it.rules_core import StateCore
+from markdown_it.rules_block import StateBlock
+from markdown_it.rules_inline import StateInline
 from markdown_it.token import Token
 from mdit_py_plugins.dollarmath import dollarmath_plugin
+from mdit_py_plugins.dollarmath.index import math_block_dollar
+
+from mathion.latex_mathml import LatexError, latex_to_mathml
 
 # D54/D64: a bare http:// or https:// address becomes a link. Our own small rule
 # on markdown-it-py, not linkify-it-py: www., bare domains, ftp:, //host and
@@ -131,7 +137,7 @@ def _glues(kids: list[Token], i: int) -> bool:
     whole, while in *https://x.org/caf*é the letter after them glues.
     """
     i += 1
-    # VR-B: an empty text token (a spent delimiter, dollarmath's) is looked past too.
+    # VR-B: an empty text token (a spent delimiter) is looked past too.
     while i < len(kids) and (kids[i].nesting == -1 or (kids[i].type == "text" and not kids[i].content)):
         i += 1
     tok = kids[i] if i < len(kids) else None
@@ -223,11 +229,192 @@ def _loose_lists(state: StateCore) -> None:
             tok.attrSet("class", "loose")
 
 
+def _escaped(src: str, pos: int) -> bool:
+    """Whether src[pos] follows an odd run of backslashes."""
+    n = 0
+    while pos - n > 0 and src[pos - n - 1] == "\\":
+        n += 1
+    return n % 2 == 1
+
+
+def _next_dollar(src: str, start: int, mark: str) -> int:
+    """The first unescaped `mark` at or after start, or -1."""
+    pos = src.find(mark, start)
+    while pos != -1 and _escaped(src, pos):
+        pos = src.find(mark, pos + 1)
+    return pos
+
+
+def _digit(ch: str) -> bool:
+    return "0" <= ch <= "9"
+
+
+_RUN = re.compile(r"`+")
+
+
+def _in_code(src: str, start: int, end: int) -> bool:
+    """Whether src[end] sits inside a code span opened after start, paired as markdown-it pairs runs."""
+    pos = start
+    while m := _RUN.search(src, pos, end):
+        if _escaped(src, m.start()):
+            pos = m.start() + 1                       # \` is a literal backtick
+            continue
+        n = len(m.group())
+        close = next((r for r in _RUN.finditer(src, m.end()) if len(r.group()) == n), None)
+        if close is None:
+            pos = m.end()                             # an unmatched run stays text
+            continue
+        if close.start() > end:
+            return True
+        pos = close.end()                             # no escapes inside code
+    return False
+
+
+def math_inline_rule(state: StateInline, silent: bool, code_spans: bool = True) -> bool:
+    """Mathion's dollar rule: `$$…$$` first, then a pandoc-like `$…$`."""
+    src, pos = state.src, state.pos
+    if src[pos] != "$":
+        return False
+    if src.startswith("$$", pos):
+        close = _next_dollar(src, pos + 2, "$$")
+        if close == -1 or (code_spans and _in_code(src, pos + 2, close)):
+            return False                              # an unclosed $$ stays text
+        kind, mark = "math_inline_double", "$$"
+    else:
+        if pos and src[pos - 1] == "$" and not _escaped(src, pos - 1):
+            return False                              # never half of a failed $$
+        after = src[pos + 1] if pos + 1 < state.posMax else ""
+        if (pos and _digit(src[pos - 1])) or not after or after.isspace():
+            return False
+        close = _next_dollar(src, pos + 1, "$")
+        if close == -1 or close >= state.posMax or src[close - 1].isspace() or (code_spans and _in_code(src, pos + 1, close)):
+            return False
+        if close + 1 < len(src) and (src[close + 1] == "$" or _digit(src[close + 1])):
+            return False
+        kind, mark = "math_inline", "$"
+    if close + len(mark) > state.posMax:
+        return False
+    if not silent:
+        token = state.push(kind, "math", 0)
+        token.markup = mark
+        token.content = src[pos + len(mark):close]
+    state.pos = close + len(mark)
+    return True
+
+
+_plugin_block = math_block_dollar(allow_labels=False, allow_blank_lines=False)
+
+
+def _has_dollar(text: str) -> bool:
+    return _next_dollar(text, 0, "$") != -1
+
+
+def _block_end(state: StateBlock, startLine: int, endLine: int) -> int:
+    """The line after the end marker, or where the block must stop: an outdent or a blank line."""
+    n = startLine
+    while n < endLine:
+        if n > startLine and (state.sCount[n] < state.blkIndent or state.isEmpty(n)):
+            return n                                  # the next list item, or a lazy line
+        text = state.src[state.bMarks[n] + state.tShift[n]:state.eMarks[n]].strip()
+        n += 1
+        if text.endswith("$$") and (n - 1 > startLine or len(text) > 3):
+            return n
+        if n - 1 > startLine and _has_dollar(text):
+            return n                                  # a `$` inside makes the block invalid anyway
+    return n
+
+
+def _math_block(state: StateBlock, startLine: int, endLine: int, silent: bool) -> bool:
+    """The plugin's `$$` block, with its content rebuilt from the block's own lines."""
+    if not state.src.startswith("$$", state.bMarks[startLine] + state.tShift[startLine]):
+        return False                                  # cheap first: most blocks hold no math
+    count, line = len(state.tokens), state.line
+    if not _plugin_block(state, startLine, _block_end(state, startLine, endLine), silent):
+        return False                                  # bounded, so a long list stays linear
+    text = state.getLines(startLine, state.line, state.blkIndent, False).strip()
+    content = text[2:-2] if len(text) >= 4 else ""
+    valid = not _has_dollar(content) and not _escaped(text, len(text) - 2)
+    if silent or not valid:
+        del state.tokens[count:]                      # the plugin pushes even when silent
+        state.line = line
+        return valid and silent
+    state.tokens[-1].content = content
+    return True
+
+
+def render_math(src: str, display: bool, in_paragraph: bool, mark: str | None = None) -> str:
+    """MathML for one formula, or the escaped source in an error span or div."""
+    try:
+        mathml = latex_to_mathml(src, display)
+    except LatexError as exc:
+        reason = str(exc)
+    except Exception:                                  # never break a page over one formula
+        reason = "formula could not be read"
+    else:
+        if not display:
+            return mathml
+        tag = "span" if in_paragraph else "div"
+        return f'<{tag} class="math-display">{mathml}</{tag}>'
+    mark = mark or ("$$" if display else "$")
+    tag = "div" if display and not in_paragraph else "span"
+    title = html.escape(reason, quote=True)
+    return f'<{tag} class="math-error" title="{title}">{mark}{html.escape(src, quote=True)}{mark}</{tag}>'
+
+
+def _source(content: str) -> str:
+    """The trimmed formula; a final backslash keeps its control space."""
+    text = content.strip()
+    return text + " " if _escaped(text + " ", len(text)) else text
+
+
+def _render_inline(self, tokens, idx, options, env) -> str:
+    return render_math(_source(tokens[idx].content), False, False)
+
+
+def _render_inline_double(self, tokens, idx, options, env) -> str:
+    return render_math(_source(tokens[idx].content), True, True)
+
+
+def _render_block(self, tokens, idx, options, env) -> str:
+    return render_math(_source(tokens[idx].content), True, False) + "\n"
+
+
+def _render_inline_as_text(self, tokens, options, env) -> str:
+    """An image's alt text: formulas keep their source, escapes and entities their text."""
+    out = ""
+    for token in tokens or []:
+        if token.type in ("text", "text_special"):
+            out += token.content
+        elif token.type in ("math_inline", "math_inline_double"):
+            out += _source(token.content)
+        elif token.type == "image":
+            out += self.renderInlineAsText(token.children, options, env)
+        elif token.type in ("softbreak", "hardbreak"):
+            out += "\n"
+    return out
+
+
 _md = MarkdownIt("commonmark", {"html": False})
+_md.renderer.renderInlineAsText = types.MethodType(_render_inline_as_text, _md.renderer)
 _md.core.ruler.push("loose_lists", _loose_lists)
 _md.core.ruler.before("text_join", "bare_url", _bare_urls)
 _md.core.ruler.after("bare_url", "drop_bad_links", _drop_bad_links)
-dollarmath_plugin(_md)
+dollarmath_plugin(_md, allow_labels=False, allow_blank_lines=False, double_inline=True)
+_md.inline.ruler.at("math_inline", math_inline_rule)
+_md.block.ruler.at("math_block", _math_block)
+_md.add_render_rule("math_inline", _render_inline)
+_md.add_render_rule("math_inline_double", _render_inline_double)
+_md.add_render_rule("math_block", _render_block)
+
+# The spec's per-tag MathML map: exactly what the converter emits.
+MATHML_ALLOWED: dict[str, set[str]] = {
+    "math": {"display"}, "semantics": set(), "annotation": {"encoding"}, "mrow": set(),
+    "mi": {"mathvariant"}, "mn": set(), "mtext": set(), "mspace": {"width", "height", "depth"},
+    "mo": {"stretchy", "largeop", "movablelimits", "fence", "form", "lspace", "rspace", "minsize", "maxsize"},
+    "msup": set(), "msub": set(), "msubsup": set(), "mfrac": {"linethickness"}, "msqrt": set(),
+    "mroot": set(), "mover": {"accent"}, "munder": {"accentunder"}, "munderover": set(),
+    "mstyle": {"displaystyle", "scriptlevel"},
+}
 
 _ALLOWED_TAGS = {
     "p", "br", "strong", "em", "b", "i", "u", "s",
@@ -238,13 +425,11 @@ _ALLOWED_TAGS = {
     "table", "thead", "tbody", "tr", "th", "td",
     "hr", "sup", "sub",
     "span", "div",  # for math wrappers
-}
+} | set(MATHML_ALLOWED)
 
 _ALLOWED_ATTRS = {
     "a": {"href", "title"},
     "img": {"src", "alt", "title"},
-    "span": {"class"},
-    "div": {"class"},
     # A list that resumes after a paragraph carries `start`, which markdown-it
     # emits and nh3 would otherwise drop. Harmless while the frontend forced
     # bullets onto every <ol>; once ordered lists render as numbers, a stripped
@@ -252,23 +437,42 @@ _ALLOWED_ATTRS = {
     # not just unstyled markup. Value-restricted by nh3 to the attribute name
     # only; the numeral itself is markdown-it's, never author HTML (html=False).
     "ol": {"start"},
+    **{tag: set(attrs) for tag, attrs in MATHML_ALLOWED.items()},
 }
 
 _URL_SCHEMES = {"http", "https", "mailto"}
-_ALLOWED_CLASSES = {"ul": {"loose"}, "ol": {"loose"}}
+# class lives only here: ammonia panics when it is also an allowed attribute.
+_ALLOWED_CLASSES = {
+    "ul": {"loose"}, "ol": {"loose"},
+    "span": {"math-display", "math-error"}, "div": {"math-display", "math-error"},
+    "mo": {"math-acc", "math-vec"}, "mrow": {"math-overline", "math-underline"},
+}
 
 
 def render_markdown(text: str | None) -> str:
     """Convert Markdown to sanitized HTML.
 
-    LaTeX math ($...$ and $$...$$) is rendered as <span class="math"> and
-    <div class="math"> for client-side KaTeX rendering.
+    LaTeX math ($...$ and $$...$$) becomes MathML on the server.
     Links get rel="noopener noreferrer" automatically via nh3.
     javascript: URIs in href/src are stripped by nh3's url_schemes filter.
     """
     if not text:
         return ""
     return _clean(_md.render(text))
+
+
+_opt = MarkdownIt("zero")
+_opt.inline.ruler.push("math_inline", lambda st, sl: math_inline_rule(st, sl, code_spans=False))   # backticks are text here
+_opt.enable(["escape", "text", "math_inline"])
+_opt.add_render_rule("math_inline", _render_inline)
+_opt.add_render_rule("math_inline_double",           # inline, but a broken one shows its $$
+                     lambda self, t, i, o, e: render_math(_source(t[i].content), False, False, "$$"))
+_opt.add_render_rule("hardbreak", lambda self, t, i, o, e: "\n")   # a backslash before a newline
+
+
+def render_option_text(text: str) -> str:
+    """An answer choice: escaped text with inline math only, no other Markdown."""
+    return _clean(_opt.renderInline(text or ""))
 
 
 def _clean(rendered: str) -> str:
@@ -283,34 +487,41 @@ def _clean(rendered: str) -> str:
     )
 
 
-_TITLE = r'(?:\s+(?:"[^"]*"|\'[^\']*\'|\([^)]*\)))?'
-_IMG_REF = re.compile(r'!\[[^\]]*\]\(\s*([^)\s]+)' + _TITLE + r'\s*\)')
-_LINK_REF = re.compile(r'(?<!!)\[[^\]]*\]\(\s*([^)\s]+)' + _TITLE + r'\s*\)')
 _SKIP_PREFIXES = ("http://", "https://", "mailto:", "#", "//")
-_ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
 # VR-B: a root-relative link is a Mathion page, unless it points at a file.
 _FILE_PATHS = ("/assets/", "/api/")
 
 
 def _is_asset_target(ref: str, is_link: bool) -> bool:
-    if ref.startswith(_SKIP_PREFIXES):
-        return False
+    if ref.lower().startswith(_SKIP_PREFIXES):
+        return False                                  # schemes are case-insensitive (<Https://…>)
     return not (is_link and ref.startswith("/") and not ref.startswith(_FILE_PATHS))
 
 
+def _targets(tokens: list[Token]):
+    """Image sources and link targets, as markdown-it parsed them."""
+    for tok in tokens:
+        if tok.type == "image":
+            yield tok.attrGet("src"), False
+            continue                                  # its children are alt text, not links
+        if tok.type == "link_open":
+            yield tok.attrGet("href"), True
+        if tok.children:
+            yield from _targets(tok.children)
+
+
 def extract_asset_filenames(text: str) -> set[str]:
-    """Extract non-URL filenames from markdown image and link references."""
+    """Extract non-URL filenames from markdown image and link references.
+
+    Read from the parsed tokens, so math, code and escaped brackets never count.
+    """
     if not text:
         return set()
     filenames: set[str] = set()
-    for pattern, is_link in ((_IMG_REF, False), (_LINK_REF, True)):
-        for m in pattern.finditer(text):
-            ref = m.group(1)
-            if len(ref) > 1 and ref[0] == "<" and ref[-1] == ">":
-                ref = ref[1:-1]   # VR-B: markdown's <...> wrapper
-            ref = _ESCAPE.sub(r"\1", ref)   # VR-B: markdown's \ escapes
-            if ref and _is_asset_target(ref, is_link):
-                filenames.add(ref)
+    for ref, is_link in _targets(_md.parse(text)):
+        ref = str(ref or "")                          # as rendered, so resolve_asset_urls finds it
+        if ref and _is_asset_target(ref, is_link):
+            filenames.add(ref)
     return filenames
 
 

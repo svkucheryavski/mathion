@@ -213,7 +213,7 @@ def _serialize_item(item):
                 "type": q.type,
                 "order": q.order,
                 "options": [
-                    {"id": o.id, "text": o.text, "order": o.order}
+                    {"id": o.id, "text": o.text, "text_html": o.text_html, "order": o.order}
                     for o in sorted(q.options, key=lambda o: o.order)
                 ]
                 if q.type in ("single_choice", "multiple_choice")

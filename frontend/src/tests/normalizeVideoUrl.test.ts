@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeVideoUrl } from '../lib/normalizeVideoUrl';
+import videoUrlCases from '../lib/videoUrlCases.json';
 
 describe('normalizeVideoUrl', () => {
   describe('YouTube', () => {
@@ -112,6 +113,13 @@ describe('normalizeVideoUrl', () => {
     it('an unknown scheme-less host is returned as typed', () => {
       expect(normalizeVideoUrl('example.com/v.mp4')).toBe('example.com/v.mp4');
       expect(normalizeVideoUrl('  Example.com/V  ')).toBe('Example.com/V');
+    });
+  });
+
+  // Shared with the Python port (backend/mathion/olx/video.py).
+  describe('shared cases', () => {
+    it.each(videoUrlCases)('$input', ({ input, output }) => {
+      expect(normalizeVideoUrl(input)).toBe(output);
     });
   });
 });

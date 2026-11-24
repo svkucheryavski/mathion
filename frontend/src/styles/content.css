@@ -4,7 +4,7 @@
    its own font-size, line-height and colour on its box; everything here is
    relative to them. Global, and imported after base.css, so it is last in the
    bundle: no component rule out-orders it at equal specificity. Every rule is
-   scoped under `.prose`. */
+   scoped under `.prose`, except the maths rules at the end. */
 
 .prose { overflow-wrap: anywhere; }
 
@@ -30,9 +30,9 @@
    its rules come after the first/last-child pair and use :not(:last-child), so
    the last-child zeroing stays intact; the compact pair is written in full so it
    beats the page pair. */
-.prose :where(p, ul, ol, pre, blockquote, hr, div.math) { margin: 0 0 var(--space-3); }
+.prose :where(p, ul, ol, pre, blockquote, hr, div.math, div.math-display, div.math-error) { margin: 0 0 var(--space-3); }
 .prose :where(h1, h2, h3, h4, h5, h6) { margin: 1em 0 .5em; }
-.prose.compact :where(p, ul, ol, pre, blockquote, hr, div.math) { margin: 0 0 var(--space-2); }
+.prose.compact :where(p, ul, ol, pre, blockquote, hr, div.math, div.math-display, div.math-error) { margin: 0 0 var(--space-2); }
 .prose > :first-child,
 .prose :where(li, blockquote) > :first-child { margin-top: 0; }
 .prose > :last-child,
@@ -40,9 +40,9 @@
 /* A loose list (class "loose" from the renderer, or items wrapped in <p> in older stored HTML)
    groups by item (D85, VR-B): every block in an item but the last is --space-2 above the next
    (a heading keeps its em margins), items are --space-3 apart; compact: --space-1 / --space-2. */
-.prose :where(ul, ol):is(.loose, :has(> li > p)) > li > :where(p, ul, ol, pre, blockquote, hr, div.math):not(:last-child) { margin-bottom: var(--space-2); }
+.prose :where(ul, ol):is(.loose, :has(> li > p)) > li > :where(p, ul, ol, pre, blockquote, hr, div.math, div.math-display, div.math-error):not(:last-child) { margin-bottom: var(--space-2); }
 .prose :where(ul, ol):is(.loose, :has(> li > p)) > li + li { margin-top: var(--space-3); }
-.prose.compact :where(ul, ol):is(.loose, :has(> li > p)) > li > :where(p, ul, ol, pre, blockquote, hr, div.math):not(:last-child) { margin-bottom: var(--space-1); }
+.prose.compact :where(ul, ol):is(.loose, :has(> li > p)) > li > :where(p, ul, ol, pre, blockquote, hr, div.math, div.math-display, div.math-error):not(:last-child) { margin-bottom: var(--space-1); }
 .prose.compact :where(ul, ol):is(.loose, :has(> li > p)) > li + li { margin-top: var(--space-2); }
 
 /* Lists and quotes. reset.css zeroes list padding and markers. */
@@ -60,3 +60,21 @@
 /* Links (D57). App chrome links keep base.css's no-underline style. */
 .prose a { color: var(--primary); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
 .prose a:hover { text-decoration-thickness: 2px; }
+
+/* Maths (typeset by the server as MathML). Top level, not under .prose: choice text sits outside it. */
+math { font-family: "STIX Two Math", math; }
+/* :is() beats compact spacing; the marker's paragraph is left out: WebKit hides a marker beside a scroll box. */
+:is(.prose.compact, .prose) p:has(math):not(li > p:first-child, li > blockquote:first-child > p:first-child) { overflow-x: auto; overflow-y: hidden; padding: 0.35em 4px; margin-inline: -4px; }
+.math-display { text-align: center; overflow-x: auto; overflow-y: hidden; padding-block: 0.5em; }
+span.math-display { display: block; margin: var(--space-2) 0; }
+.math-display > math { width: max-content; margin-inline: auto; }
+/* WebKit loses the marker of an item that opens with a display formula. */
+.prose li > .math-display:first-child,
+.prose li > :is(p, blockquote):first-child > .math-display:first-child { display: inline-block; width: 100%; vertical-align: middle; }
+.math-error { font-family: var(--font-mono); font-size: .93em; background: var(--danger-panel-bg); color: var(--danger-panel-fg); padding: 0 2px; border-radius: var(--radius); }
+mrow.math-overline { border-top: 0.06em solid; padding-top: 0.08em; }
+mrow.math-underline { border-bottom: 0.06em solid; padding-bottom: 0.08em; }
+/* Accents: Chrome sets them on the letter, WebKit 0.33em above; one offset per engine. */
+mo.math-acc { position: relative; top: -0.06em; }
+mo.math-vec { font-size: 0.6em; position: relative; top: -0.12em; }
+@supports (font: -apple-system-body) { mo.math-acc { top: 0.48em; } mo.math-vec { top: -0.05em; } }

@@ -3,6 +3,9 @@ import { mount, unmount, flushSync } from 'svelte';
 import InteractiveAppItem from '../components/items/InteractiveAppItem.svelte';
 import { __test__setSlots, currentCourse } from '../stores/currentCourse.svelte';
 import type { InteractiveAppItem as IAItem } from '../lib/types';
+import { installResizeObserver } from './support/resizeObserver';
+
+const NOTE = 'This app needs a larger screen. Open this page on a laptop or desktop computer.';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -46,7 +49,9 @@ function seedCourse() {
 }
 
 let cleanup: (() => void) | null = null;
+let ro: ReturnType<typeof installResizeObserver>;
 beforeEach(() => {
+  ro = installResizeObserver(928);
   fetchSpy.mockReset();
   fetchSpy.mockImplementation(routed());
   (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
@@ -56,6 +61,7 @@ afterEach(() => {
   cleanup?.(); cleanup = null; document.body.innerHTML = '';
   (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
   __test__setSlots(null);
+  ro.restore();
 });
 
 function mountItem(props: { item: IAItem; isCovered: boolean }) {
@@ -200,4 +206,129 @@ it('puts the fetch-failure copy inside .notice (the class the gate anchors on)',
   // could sit on the "No app uploaded yet" branch alone with this one a bare
   // <p>, and both would still pass.
   expect(notice!.textContent).toContain("couldn't be loaded");
+});
+
+// --- 16:9 frame: the narrow-screen note (spec 2026-11-23) ---
+const assetCalls = () => fetchSpy.mock.calls.filter((c) => String(c[0]).includes('/assets/'));
+function atWidth(w: number | null) { ro.restore(); ro = installResizeObserver(w); }
+
+it('under 800px shows the larger-screen note, fetches nothing and does not cover', async () => {
+  atWidth(799);
+  const el = mountItem({ item: appItem(), isCovered: false });
+  await settle();
+  expect(el.querySelector('.app-card .notice')?.textContent).toBe(NOTE);
+  expect(el.querySelector('iframe')).toBeNull();
+  expect(el.querySelector('.cover-hint')).toBeNull();
+  expect(assetCalls()).toHaveLength(0);
+  expect(trackCalls()).toHaveLength(0);
+});
+
+it('at exactly 800px loads the app', async () => {
+  atWidth(800);
+  const el = mountItem({ item: appItem(), isCovered: false });
+  await settle();
+  expect(el.querySelector('iframe')).not.toBeNull();
+  expect(el.textContent).not.toContain(NOTE);
+  expect(trackCalls()).toHaveLength(1);
+});
+
+it('nothing loads until the width is known', async () => {
+  atWidth(null);
+  const el = mountItem({ item: appItem(), isCovered: false });
+  await settle();
+  expect(assetCalls()).toHaveLength(0);
+  expect(el.querySelector('iframe')).toBeNull();
+  expect(el.textContent).not.toContain(NOTE);
+  expect(trackCalls()).toHaveLength(0);
+});
+
+it('narrowing swaps the app for the note; widening brings it back without a second cover', async () => {
+  const el = mountItem({ item: appItem(), isCovered: false });
+  await settle();
+  expect(el.querySelector('iframe')).not.toBeNull();
+  expect(trackCalls()).toHaveLength(1);
+  ro.resize(700); await settle();
+  expect(el.querySelector('iframe')).toBeNull();
+  expect(el.querySelector('.app-card .notice')?.textContent).toBe(NOTE);
+  ro.resize(900); await settle();
+  expect(el.querySelector('iframe')).not.toBeNull();
+  expect(trackCalls()).toHaveLength(1);
+});
+
+it('"No app uploaded yet." wins over the narrow note', async () => {
+  atWidth(500);
+  const el = mountItem({ item: appItem({ script_url: null }), isCovered: false });
+  await settle();
+  expect(el.textContent).toContain('No app uploaded yet.');
+  expect(el.textContent).not.toContain(NOTE);
+});
+
+it('a fetch still in flight when the page narrows neither renders nor covers', async () => {
+  let resolveSrc: (v: Response) => void = () => {};
+  fetchSpy.mockImplementation((input: RequestInfo | URL) => {
+    const u = String(input);
+    if (u.includes('/assets/')) return new Promise<Response>((r) => { resolveSrc = r; });
+    if (u.includes('/track')) return jres({ item_id: 7, is_covered: true, time_spent: 0 });
+    return jres({});
+  });
+  const el = mountItem({ item: appItem(), isCovered: false });
+  flushSync();
+  expect(assetCalls()).toHaveLength(1);
+  ro.resize(700); flushSync();
+  resolveSrc({ ok: true, status: 200, statusText: 'x', text: () => Promise.resolve('app-root') } as unknown as Response);
+  await settle();
+  expect(el.querySelector('iframe')).toBeNull();
+  expect(el.querySelector('.app-card .notice')?.textContent).toBe(NOTE);
+  expect(trackCalls()).toHaveLength(0);
+});
+
+// --- r1 review fixes ---
+it('a scrollbar-sized dip below 800px keeps the app; a real narrowing still swaps it', async () => {
+  atWidth(805);
+  const el = mountItem({ item: appItem(), isCovered: false });
+  await settle();
+  expect(el.querySelector('iframe')).not.toBeNull();
+  ro.resize(790); await settle();          // a classic scrollbar appeared
+  expect(el.querySelector('iframe')).not.toBeNull();
+  expect(assetCalls()).toHaveLength(1);
+  ro.resize(775); await settle();
+  expect(el.querySelector('iframe')).toBeNull();
+  expect(el.querySelector('.app-card .notice')?.textContent).toBe(NOTE);
+});
+
+it('the first measure still needs the full 800px', async () => {
+  atWidth(790);
+  const el = mountItem({ item: appItem(), isCovered: false });
+  await settle();
+  expect(el.querySelector('iframe')).toBeNull();
+  expect(assetCalls()).toHaveLength(0);
+});
+
+it('a width of 0 (hidden) changes nothing', async () => {
+  atWidth(0);
+  const el = mountItem({ item: appItem(), isCovered: false });
+  await settle();
+  expect(el.textContent).not.toContain(NOTE);
+  expect(assetCalls()).toHaveLength(0);
+  ro.resize(928); await settle();
+  expect(el.querySelector('iframe')).not.toBeNull();
+  ro.resize(0); await settle();
+  expect(el.querySelector('iframe')).not.toBeNull();
+});
+
+it('a cover still in flight when the page narrows still marks the item covered', async () => {
+  let resolveTrack: (v: Response) => void = () => {};
+  fetchSpy.mockImplementation((input: RequestInfo | URL) => {
+    const u = String(input);
+    if (u.includes('/assets/')) return tres('app-root');
+    if (u.includes('/track')) return new Promise<Response>((r) => { resolveTrack = r; });
+    return jres({});
+  });
+  mountItem({ item: appItem(), isCovered: false });
+  await settle();
+  expect(trackCalls()).toHaveLength(1);
+  ro.resize(700); await settle();
+  resolveTrack({ ok: true, status: 200, json: () => Promise.resolve({ item_id: 7, is_covered: true, time_spent: 0 }) } as unknown as Response);
+  await settle();
+  expect(currentCourse.value?.state.items['7'].is_covered).toBe(true);
 });

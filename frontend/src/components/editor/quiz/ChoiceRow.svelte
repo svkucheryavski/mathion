@@ -24,8 +24,8 @@
   const name = $derived(cutName(opt.text));
 </script>
 
-<!-- editing: the tight padding, off while an error line shows under the field. -->
-<li class="ans-row" class:ok={opt.is_correct} class:editing={!!edit && !edit.error} data-a-id={opt.id}>
+<!-- editing: the tight padding; edit-err: today's 4px while an error line shows under the field. -->
+<li class="ans-row" class:ok={opt.is_correct} class:editing={!!edit && !edit.error} class:edit-err={!!edit?.error} data-a-id={opt.id}>
   {#if canText}
     <button
       type="button"
@@ -47,10 +47,10 @@
   {:else if canText}
     <button type="button" class="ans-text ans-edit" title={textReason ?? undefined}
             disabled={textReason !== null} onclick={onEdit}>
-      <span class="sr-only">Edit answer</span> {opt.text}
+      <span class="sr-only">Edit answer</span> {@html opt.text_html}
     </button>
   {:else}
-    <span class="ans-text">{opt.text}</span>
+    <span class="ans-text">{@html opt.text_html}</span>
   {/if}
 
   {#if opt.is_correct && !edit}<span class="ans-ok">correct</span>{/if}
@@ -70,8 +70,10 @@
 
 <style>
   /* Call 9: one height closed and open; min-height = the 30px field + 1px each side. */
-  .ans-row { display: flex; align-items: center; gap: 8px; min-height: calc(var(--control-h) + 2px); padding: 4px 8px; border-radius: var(--radius); font-size: 13.5px; color: var(--text-2); }
+  /* The text's own padding-block gives the height (owner, Task 7: rows keep today's height). */
+  .ans-row { display: flex; align-items: center; gap: 8px; min-height: calc(var(--control-h) + 2px); padding: 0 8px; border-radius: var(--radius); font-size: 13.5px; color: var(--text-2); }
   .ans-row.editing { padding-block: 1px; }
+  .ans-row.edit-err { padding-block: 4px; }
   .ans-row:not(.ok):hover { background: var(--focus-row); }
   .ans-row.ok { background: var(--status-accepted-bg); color: var(--status-accepted-fg); }
   .ans-mark {
@@ -90,8 +92,8 @@
   .ans-mark.multi { border-radius: 3px; }
   .ans-mark.on { border-color: var(--status-accepted-fg); background: var(--status-accepted-fg); }
   .ans-mark:focus-visible, .ans-edit:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-  .ans-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-  .ans-edit { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: text; }
+  .ans-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; overflow-x: auto; overflow-y: hidden; padding-block: 0.35em; }
+  .ans-edit { border: 0; padding-inline: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: text; }
   .ans-edit:disabled { cursor: default; }
   .ans-ok { flex: 0 0 auto; font-size: 11px; font-weight: 500; }
   .row-acts { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; margin-left: auto; opacity: 0; }

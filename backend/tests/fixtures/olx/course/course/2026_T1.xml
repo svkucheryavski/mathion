@@ -1,0 +1,5 @@
+<course display_name="Synthetic Demo Course" max_attempts="3" language="en">
+  <chapter url_name="ch_basics"/>
+  <chapter url_name="ch_practice"/>
+  <wiki slug="MathionX.DEMO101.2026_T1"/>
+</course>

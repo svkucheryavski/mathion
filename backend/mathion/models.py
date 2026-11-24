@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from sqlalchemy.sql import func
 
 from mathion.database import Base
@@ -161,11 +161,19 @@ class AnswerOption(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     question_id: Mapped[int] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"), nullable=False, index=True)
     text: Mapped[str] = mapped_column(String(500), nullable=False)
+    text_html: Mapped[str] = mapped_column(Text, nullable=False)
     is_correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
     order: Mapped[int] = mapped_column(Integer, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     question: Mapped["Question"] = relationship(back_populates="options")
+
+    @validates("text")
+    def _render_text(self, key: str, value: str) -> str:
+        """The one place text_html is set (math plan Task 5)."""
+        from mathion.markdown import render_option_text
+        self.text_html = render_option_text(value)
+        return value
 
 
 class Asset(Base):

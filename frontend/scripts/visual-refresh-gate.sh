@@ -87,7 +87,7 @@ cd "${SELF:h}/.." || { echo "FAIL  cannot cd to frontend/"; exit 1 }
 # checks are added, which is the failure this exists to catch (codex-r1-M2,
 # tightened by codex-r2-M). Bump EXPECTED_CHECKS when you add assertions; that
 # speed bump is intentional.
-EXPECTED_CHECKS=3113
+EXPECTED_CHECKS=3167
 if [[ -z ${VRGATE_IS_CHILD_7f3a:-} ]]; then
   log=$(mktemp "${TMPDIR:-/tmp}/vrgate.XXXXXX") || { echo "FAIL  cannot create temp log"; exit 1 }
   # EXIT cleans up; INT/TERM additionally re-raise so the caller sees a real
@@ -393,12 +393,11 @@ GLOBAL_ALLOW = {
     ('src/components/ui/AskSlot.svelte', '.modal-body'),
     ('src/components/editor/ItemEditorModal.svelte', '*'),
     ('src/pages/editor/VersionEditPage.svelte', '.inline-confirm'),
-    # T5 card framing. Ancestor-scoped under .video-card/.app-card, which wrap
-    # only their own shared frame component -- never a quiz. A BARE top-level
+    # T5 card framing. Ancestor-scoped under .video-card, which wraps only its
+    # own shared frame component -- never a quiz. A BARE top-level
     # :global(.frame) is forbidden by the spec: it would also reach the
-    # deferred editor previews.
+    # deferred editor previews. (.app-card needs none: the frame fills it.)
     ('src/components/items/VideoItem.svelte', '.frame'),
-    ('src/components/items/InteractiveAppItem.svelte', '.frame'),
     # T8a. Ancestor-scoped as `ul li:last-child :global(.row)`, so the hashed part
     # pins it inside BlockGroup own panel list; the only thing a <li> there
     # contains is a SequenceLink or MiniProjectLink whose root IS `.row`. It
@@ -428,6 +427,9 @@ GLOBAL_ALLOW = {
     # components render INSIDE a .q-block, a level below, so it never reaches
     # them. :global so EmptyState's root (the empty-quiz branch) keeps the cap.
     ('src/components/items/QuizItem.svelte', '*'),
+    # Math plan T7/T8: the preview shows a failed formula's reason (only preview HTML, never a quiz).
+    ('src/components/editor/MarkdownEditor.svelte', 'div.math-error'),
+    ('src/components/editor/MarkdownEditor.svelte', 'span.math-error'),
 }
 def global_payloads(style):
     """(payload, …) for every `:global(...)` and `:global{…}`, balanced."""
@@ -544,16 +546,20 @@ else:
 # Beta round T6: `.live-slot:empty`, a status region mounted empty that takes no box. +1 rule (53 -> 54).
 # Beta round T8: `.new-tab-note`, the hidden "(opens in a new tab)", left out of copied text. +1 rule (54 -> 55).
 # Beta round T9: forced colours grey a disabled field (GrayText); the components' own greys are dropped there. +1 rule (55 -> 56).
+# Math plan T7: content.css gains the 12 maths rules (font, display, error, lines, accents); the four spacing lists add div.math-display/div.math-error with unchanged declarations. +12 rules (56 -> 68).
+# Math plan T8: a display formula that opens a list item is an inline-block (WebKit marker). +1 rule (68 -> 69).
 WANT_FULL = [
-    ('', '*,*:before,*:after', '8d5d6c83'), ('', '.live-slot:empty', 'bb6a43fd'), ('', '.mono,code,kbd', '84a226e9'),
+    ('', '*,*:before,*:after', '8d5d6c83'), ('', '.live-slot:empty', 'bb6a43fd'),
+    ('', '.math-display', 'e509f3e9'), ('', '.math-display>math', '6e31cced'), ('', '.math-error', '380f2da4'),
+    ('', '.mono,code,kbd', '84a226e9'),
     ('', '.new-tab-note', 'c24b8404'),
     ('', '.prose', '115422ed'),
     ('', '.prose :is(h1,h2,h3,h4,h5,h6)', '9dabc362'),
     ('', '.prose :where(h1,h2,h3,h4,h5,h6)', '8f770fc2'),
-    ('', '.prose :where(p,ul,ol,pre,blockquote,hr,div.math)', '13af6f60'),
+    ('', '.prose :where(p,ul,ol,pre,blockquote,hr,div.math,div.math-display,div.math-error)', '13af6f60'),
     ('', '.prose :where(ul,ol)', '17bebee9'),
     ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li+li', 'dc00e0ee'),
-    ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)', 'd9f228dd'),
+    ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math,div.math-display,div.math-error):not(:last-child)', 'd9f228dd'),
     ('', '.prose a', '0be0b8c6'),
     ('', '.prose a:hover', '98e62ed4'),
     ('', '.prose blockquote', '5fe22df0'),
@@ -565,19 +571,20 @@ WANT_FULL = [
     ('', '.prose h5', 'a838c678'),
     ('', '.prose h6', 'fdbae480'),
     ('', '.prose hr', 'a216bc6c'),
-    ('', '.prose ol>li', 'd67e9248'),
+    ('', '.prose li>.math-display:first-child,.prose li>:is(p,blockquote):first-child>.math-display:first-child', '9532048b'), ('', '.prose ol>li', 'd67e9248'),
     ('', '.prose pre', 'bd339863'),
     ('', '.prose pre code', 'f4859c1f'),
     ('', '.prose ul>li', '20d7366f'),
-    ('', '.prose.compact :where(p,ul,ol,pre,blockquote,hr,div.math)', 'e291811a'),
+    ('', '.prose.compact :where(p,ul,ol,pre,blockquote,hr,div.math,div.math-display,div.math-error)', 'e291811a'),
     ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li+li', 'ca5345b0'),
-    ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)', '4a789cab'),
+    ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math,div.math-display,div.math-error):not(:last-child)', '4a789cab'),
     ('', '.prose.compact h1', 'a5b38d68'),
     ('', '.prose.compact h2', 'c2943c7b'),
     ('', '.prose>:first-child,.prose :where(li,blockquote)>:first-child', 'd462248a'),
     ('', '.prose>:last-child,.prose :where(li,blockquote)>:last-child', 'ef0b7a11'),
     ('', '.vh', 'b2efbc30'),
     ('', ':focus-visible', 'ebbf7147'),
+    ('', ':is(.prose.compact,.prose) p:has(math):not(li>p:first-child,li>blockquote:first-child>p:first-child)', '06fbf886'),
     ('', ':is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=reset]),textarea,select):focus-visible', '1684b043'),
     ('', ':root', '44b2fe29'),
     ('', '[tabindex="-1"]:focus-visible', 'f9b4dcdb'),
@@ -587,12 +594,16 @@ WANT_FULL = [
     ('', 'h1,h2,h3,h4,h5,h6', '610dd856'), ('', 'h2', 'a8b134e8'),
     ('', 'h3', 'b36ddbd5'), ('', 'h4', 'f98d3d7e'), ('', 'html', '493f971e'),
     ('', 'html,body', '3bd2fa51'),
-    ('', 'img,video', 'aa84fbab'), ('', 'p', '11696618'), ('', 'ul,ol', '99409a76'),
+    ('', 'img,video', 'aa84fbab'), ('', 'math', '310b11ba'), ('', 'mo.math-acc', 'a7fe4fea'),
+    ('', 'mo.math-vec', '31c8ba13'), ('', 'mrow.math-overline', '500c6089'), ('', 'mrow.math-underline', 'bc788dc0'),
+    ('', 'p', '11696618'), ('', 'span.math-display', '772d9310'), ('', 'ul,ol', '99409a76'),
     ('@media (forced-colors:active)', ':focus-visible:not([tabindex="-1"])', '1ff87bb6'),
     ('@media (forced-colors:active)', ':is(input,select,textarea):disabled', '602da9b5'),
     ('@media screen and (min-width:1400px) >> @supports (zoom:1)', ':root', '23694c00'),
+    ('@supports (font:-apple-system-body)', 'mo.math-acc', 'b4408b9e'),
+    ('@supports (font:-apple-system-body)', 'mo.math-vec', '61d29603'),
 ]
-# Document ORDER of the same 58 rules. `a` at #9 (reset.css) and #15 (base.css)
+# Document ORDER of the same 71 rules. `a` at #9 (reset.css) and #15 (base.css)
 # are the live case: only order decides that base's --primary wins, and swapping
 # two @imports in app.css flips it while the sorted multiset stays identical.
 # The four focus rules close it, frozen in order like the rest. None depends on
@@ -613,18 +624,22 @@ WANT_ORDER = [
     ('', '.prose'), ('', '.prose :is(h1,h2,h3,h4,h5,h6)'),
     ('', '.prose h1'), ('', '.prose h2'), ('', '.prose h3'), ('', '.prose h4'),
     ('', '.prose h5'), ('', '.prose h6'), ('', '.prose.compact h1'), ('', '.prose.compact h2'),
-    ('', '.prose :where(p,ul,ol,pre,blockquote,hr,div.math)'),
+    ('', '.prose :where(p,ul,ol,pre,blockquote,hr,div.math,div.math-display,div.math-error)'),
     ('', '.prose :where(h1,h2,h3,h4,h5,h6)'),
-    ('', '.prose.compact :where(p,ul,ol,pre,blockquote,hr,div.math)'),
+    ('', '.prose.compact :where(p,ul,ol,pre,blockquote,hr,div.math,div.math-display,div.math-error)'),
     ('', '.prose>:first-child,.prose :where(li,blockquote)>:first-child'),
     ('', '.prose>:last-child,.prose :where(li,blockquote)>:last-child'),
-    ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)'),
+    ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math,div.math-display,div.math-error):not(:last-child)'),
     ('', '.prose :where(ul,ol):is(.loose,:has(>li>p))>li+li'),
-    ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math):not(:last-child)'),
+    ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li>:where(p,ul,ol,pre,blockquote,hr,div.math,div.math-display,div.math-error):not(:last-child)'),
     ('', '.prose.compact :where(ul,ol):is(.loose,:has(>li>p))>li+li'),
     ('', '.prose :where(ul,ol)'), ('', '.prose ul>li'), ('', '.prose ol>li'),
     ('', '.prose blockquote'), ('', '.prose hr'), ('', '.prose code'),
     ('', '.prose pre'), ('', '.prose pre code'), ('', '.prose a'), ('', '.prose a:hover'),
+    ('', 'math'), ('', ':is(.prose.compact,.prose) p:has(math):not(li>p:first-child,li>blockquote:first-child>p:first-child)'), ('', '.math-display'), ('', 'span.math-display'),
+    ('', '.math-display>math'), ('', '.prose li>.math-display:first-child,.prose li>:is(p,blockquote):first-child>.math-display:first-child'), ('', '.math-error'), ('', 'mrow.math-overline'), ('', 'mrow.math-underline'),
+    ('', 'mo.math-acc'), ('', 'mo.math-vec'),
+    ('@supports (font:-apple-system-body)', 'mo.math-acc'), ('@supports (font:-apple-system-body)', 'mo.math-vec'),
 ]
 def dhash(b):
     return hashlib.sha1(';'.join(sorted(decls(b))).encode()).hexdigest()[:8]
@@ -726,7 +741,8 @@ for _f in ('src/components/course/ItemMark.svelte', 'src/components/course/ItemI
            # 2108). An ancestor redefining either -- the
            # `.block { --border-soft: transparent }` attack this guard was built
            # from -- retunes them with sections (m) and (n) still reading the
-           # pinned `var(...)` and the whole gate green.
+           # pinned `var(...)` and the whole gate green. (Math T7: `.opt` padding
+           # is now the literal `0 9px`, so only --faint is left of that pair.)
            'src/pages/SequencePlayer.svelte',
            'src/components/items/QuizItem.svelte',
            'src/components/items/quiz/SingleChoiceQuestion.svelte',
@@ -1046,7 +1062,7 @@ TARGETS = [
     ('video-card',            r'\.video-card\.svelte-[a-z0-9]+$', 1),
     ('app-card',              r'\.app-card\.svelte-[a-z0-9]+$', 1),
     ('video-card frame reset', r'\.video-card\.svelte-[a-z0-9]+ \.frame$', 1),
-    ('app-card frame reset',  r'\.app-card\.svelte-[a-z0-9]+ \.frame$', 1),
+    ('app-card narrow',       r'\.app-card\.narrow\.svelte-[a-z0-9]+$', 1),
     ('watched row',           r'\.watched\.svelte-[a-z0-9]+$', 1),
     ('cover-hint',            r'\.cover-hint\.svelte-[a-z0-9]+$', 1),
     ('unsupported box',       r'\.unsupported\.svelte-[a-z0-9]+$', 1),
@@ -1129,8 +1145,12 @@ h2n=$(grep -ohE "\.(page-item|video-item|interactive-app)\.svelte-[a-z0-9]+ h2:w
 # would reach the deferred editor previews.
 check "video card zeroes the shared frame margin (ancestor-scoped)" \
       '\.video-card\.svelte-[a-z0-9]+ \.frame\{([^}]*;)?margin-bottom:0[;}]'
-check "app card zeroes the shared frame margin (ancestor-scoped)" \
-      '\.app-card\.svelte-[a-z0-9]+ \.frame\{([^}]*;)?margin-bottom:0[;}]'
+# Student app card: 16:9, sized from the zoomed window height (spec 2026-11-23).
+check "app card is 16:9" \
+      '\.app-card\.svelte-[a-z0-9]+\{([^}]*;)?aspect-ratio:16 / 9[;}]'
+check "app card divides the window height by --app-zoom" \
+      '\.app-card\.svelte-[a-z0-9]+\{([^}]*;)?width:min\(100%,max\(800px,\(calc\(100vh / var\(--app-zoom, 1\)\)'
+none  "no fixed 600px app frame left" '[{;]height:600px'
 for c in video-card app-card; do
   check "$c is a bordered --surface card with overflow:hidden" \
         "\.${c}\.svelte-[a-z0-9]+\{([^}]*;)?overflow:hidden[;}]"
@@ -1461,7 +1481,8 @@ const SPEC = {
   "PageItem.svelte":        { nodes: BASE.concat("HtmlTag"), tags: ["article", "div", "h2"],
                               attachOn: { "div:content.prose": "{@attach externalLinks(item.content_html)}" } },
   "VideoItem.svelte":       { nodes: BASE, tags: ["article", "div", "h2", "p", "polyline", "svg"] },
-  "InteractiveAppItem.svelte": { nodes: BASE, tags: ["article", "div", "h2", "p"] },
+  "InteractiveAppItem.svelte": { nodes: BASE, tags: ["article", "div", "h2", "p"],
+                              attachOn: { "article:interactive-app": "{@attach measure}" } },
   "UnsupportedItem.svelte": { nodes: BASE, tags: ["div", "p"] },
   "CourseCard.svelte":      { nodes: BASE.concat("RenderTag", "SnippetBlock"),
                               tags: ["a", "div", "h3", "span"],
@@ -1648,7 +1669,8 @@ const SIG = {
      "div:opts[class=\"opts\"]", "#each:",
      "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral[class=\"opt\"]",
      "input:[type=\"radio\" name value={opt.id} checked={isChosen} {disabled} onchange]",
-     "span:ctl[class=\"ctl\"]", "#if:", "span:dot[class=\"dot\"]", "#if:",
+     "span:ctl[class=\"ctl\"]", "#if:", "span:dot[class=\"dot\"]",
+     "span:opt-text[class=\"opt-text\"]", "@html:opt.text_html", "#if:",
      "svg:mark[class=\"mark\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:",
      "svg:mark[class=\"mark\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
@@ -1667,7 +1689,9 @@ const SIG = {
   "InteractiveAppItem.svelte":
     ["article:interactive-app[class=\"interactive-app\"]", "h2:", "#if:",
      "div:app-card[class=\"app-card\"]", "InteractiveFrame:[scriptSource title]",
-     "p:cover-hint[class=\"cover-hint\"]", "#else:", "#if:", "p:notice[class=\"notice\"]",
+     "p:cover-hint[class=\"cover-hint\"]", "#else:", "#if:",
+     "div:app-card.narrow[class=\"app-card narrow\"]", "p:notice[class=\"notice\"]",
+     "#else:", "#if:", "p:notice[class=\"notice\"]",
      "#else:", "#if:", "p:notice[class=\"notice\"]"],
   "UnsupportedItem.svelte": ["div:unsupported[class=\"unsupported\"]", "p:"],
   // CourseCard is a Slice-2 component, but the gate pins its `.count` at 11.5px
@@ -1709,7 +1733,8 @@ const SIG = {
      "input:[type=\"checkbox\" value={opt.id} checked={isChosen} {disabled} onchange]",
      "span:ctl[class=\"ctl\"]", "#if:",
      "svg:check[class=\"check\" width=\"11\" height=\"11\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
-     "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#if:",
+     "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]",
+     "span:opt-text[class=\"opt-text\"]", "@html:opt.text_html", "#if:",
      "svg:mark[class=\"mark\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
      "polyline:[points=\"3,8.6 6.4,12 13,4.6\"]", "#else:", "#if:",
      "svg:mark[class=\"mark\" width=\"13\" height=\"13\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden]",
@@ -1782,24 +1807,21 @@ const TEXT = {
      "p:meta:Attempt", "span:mono:{expr}", "p:meta:of", "span:mono:{expr}", "Button::Try again",
      "Button::Show correct answers"],
   // No LITERAL entry on purpose in either -- the entries below are `{expr}`
-  // markers. Every option label is `{opt.text}` from the API, so a LITERAL here
-  // means someone hard-coded question copy into the markup.
+  // markers. Every option label is `{@html opt.text_html}` from the API (pinned
+  // in the markup signature), so a LITERAL here means hard-coded question copy.
   // The `.sr-only` reveal WORDING is built in script; the ExpressionTag that
   // renders it is now marked here in position, so removing or duplicating it
   // reds, but what it says stays out of scope by construction, not by oversight
   // -- see the SCOPE note above.
   "SingleChoiceQuestion.svelte":
-    [
-     "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral:{expr}",
-     "span:sr-only:{expr}"],
+    ["span:sr-only:{expr}"],
   "MultiChoiceQuestion.svelte":
-    [
-     "label:opt.class:selected.class:locked.class:reveal-correct.class:reveal-wrong.class:reveal-missed.class:reveal-neutral:{expr}",
-     "span:sr-only:{expr}"],
+    ["span:sr-only:{expr}"],
   "PageItem.svelte": ["h2::{expr}"],
   "VideoItem.svelte": ["h2::{expr}", "Button::Mark as watched", "p:watched:Marked as watched"],
   "InteractiveAppItem.svelte":
     ["h2::{expr}", "p:cover-hint:Marked covered once opened.",
+     "p:notice:This app needs a larger screen. Open this page on a laptop or desktop computer.",
      "p:notice:This app couldn'\''t be loaded.", "p:notice:No app uploaded yet."],
   "UnsupportedItem.svelte": ["p::This item isn'\''t available in this view yet."],
   "NumericQuestion.svelte": ["p:correct-line:Correct answer:", "strong:mono:{expr}"],
@@ -3013,8 +3035,8 @@ def want(h, ctl_radius, selected_ctl, dot):
     Everything here is shared by both; the three parameters ARE the divergence
     set, asserted as such below. Values a reviewer would otherwise 'tidy':
 
-      `.opt` padding is var(--btn-pad-sm), the shared small-control padding, NOT
-      a literal -- ref 2126. `border-color: var(--border-strong)`, not --border:
+      `.opt` padding is `0 9px`: ref 2126's sides; `.opt-text`'s padding-block
+      gives the row height (owner, math T7). `border-color: var(--border-strong)`, not --border:
       an option is an interactive target, and the faint line reads as disabled.
       `overflow-wrap: anywhere` on both `.opt` and `.text` is the I2 reflow fix
       (long unbroken option/prompt text used to push the page into horizontal
@@ -3051,7 +3073,7 @@ def want(h, ctl_radius, selected_ctl, dot):
         ('.opts' + W, 'display:flex;flex-direction:column;gap:8px;max-width:480px', ()),
         ('.opt' + W,
          'position:relative;display:flex;align-items:center;gap:10px;'
-         'padding:var(--btn-pad-sm);border:1px solid var(--border-strong);'
+         'padding:0 9px;border:1px solid var(--border-strong);'
          'border-radius:var(--radius);background:var(--surface);font-size:14px;'
          'color:var(--text-2);cursor:pointer;overflow-wrap:anywhere', ()),
         ('.opt%s input:where(%s)' % (W, W),
@@ -3095,6 +3117,8 @@ def want(h, ctl_radius, selected_ctl, dot):
         ('.opt.selected' + W, 'outline:2px solid;outline-offset:-2px', FC),
         ('.opt%s:has(input:where(%s):focus-visible)' % (W, W),
          'outline:2px solid Highlight;outline-offset:-2px', FC),
+        # Math plan T7: a formula scrolls inside its own text box; padding keeps tall signs unclipped.
+        ('.opt-text' + W, 'overflow-x:auto;overflow-y:hidden;min-width:0;padding-block:.35em', ()),
     ]
     if dot:
         L.insert(11, ('.ctl%s .dot:where(%s)' % (W, W),
@@ -3493,8 +3517,9 @@ SPECS = [
     spec('InteractiveAppItem', ia, [
         ('.interactive-app@W@', SHELL),
         ('.interactive-app@W@ h2:where(@W@)', H2),
-        ('.app-card@W@', CARD),
-        ('.app-card@W@ .frame', 'margin-bottom:0'),
+        ('.app-card@W@', CARD + ';aspect-ratio:16 / 9;'
+         'width:min(100%,max(800px,(calc(100vh / var(--app-zoom, 1)) - 300px) * 16 / 9));margin-inline:auto'),
+        ('.app-card.narrow@W@', 'aspect-ratio:auto;width:auto;margin-inline:0;padding:var(--space-3)'),
         ('.cover-hint@W@', 'font-size:12.5px;color:var(--muted);margin:0'),
         ('.notice@W@', 'color:var(--muted);margin:0'),
     ]),
@@ -3934,6 +3959,8 @@ if [[ -n $REPLY ]]; then
   none "VersionsPage has no Versions row (.versions-head / .count / .push)" "\.(versions-head|count|push)\.${H}"
   d '\.add-line' '' 'border:0' 'background:transparent' 'color:var\(--primary\)' 'font-size:14px' 'font-weight:600'
   d '\.add-line' ':disabled' 'color:var\(--muted\)'
+  # OLX import: "Import from Open edX" sits beside "+ Add version" on one line.
+  d '\.add-lines' '' 'display:flex' 'align-items:center' 'gap:18px'
   d '\.create' '' 'margin-top:6px' 'border:1px solid var\(--border\)' 'background:var\(--surface\)'
   # 5c follow-up (user, 2026-10-08): the list reads like the block list — separate
   # boxed rows with a 6px gap on the shaded page, not one bordered box.
@@ -4386,7 +4413,7 @@ if [[ -n $REPLY ]]; then
   d '\.preview-head' '' 'display:flex' 'align-items:center' 'gap:10px' 'padding:8px 12px' 'background:var\(--surface-2\)' 'border-bottom:1px solid var\(--border\)'
   d '\.preview-title' '' 'flex:1' 'font-size:12\.5px' 'font-weight:600' 'color:var\(--text\)'
   d '\.preview-meta' '' 'font-size:11\.5px' 'color:var\(--muted\)'
-  d '\.preview-area' '' 'height:296px' 'background:var\(--surface-2\)'
+  d '\.preview-area' '' 'aspect-ratio:16 / 9' 'background:var\(--surface-2\)' 'width:min\(100%,max\(800px,\(min\(calc\(100vh / var\(--app-zoom, 1\)\),872px\) - 378px\) \* 16 / 9\)\)' 'margin-inline:auto'
   d '\.preview-empty' '' 'height:100%' 'display:flex' 'align-items:center' 'justify-content:center' 'font-size:12px' 'color:var\(--muted\)'
   d '\.preview-foot' '' 'display:flex' 'gap:12px' 'padding:8px 12px' 'border-top:1px solid var\(--border-soft\)' 'background:var\(--surface-3\)'
   d '\.preview-status' '' 'font-size:11\.5px' 'color:var\(--muted\)'
@@ -4408,7 +4435,7 @@ if [[ -n $REPLY ]]; then
   d '\.script-name' '' 'font-size:12\.5px' 'color:var\(--text\)' 'text-overflow:ellipsis'
   d '\.app-preview' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'overflow:hidden'
   d '\.preview-head' '' 'display:flex' 'padding:8px 12px' 'background:var\(--surface-2\)' 'border-bottom:1px solid var\(--border\)'
-  d '\.preview-area' '' 'height:360px' 'background:var\(--surface-2\)'
+  d '\.preview-area' '' 'aspect-ratio:16 / 9' 'background:var\(--surface-2\)' 'width:min\(100%,max\(800px,\(min\(calc\(100vh / var\(--app-zoom, 1\)\),872px\) - 356px\) \* 16 / 9\)\)' 'margin-inline:auto'
   d '\.app-hint' '' 'margin:0' 'padding:8px 10px' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)' 'font-size:11\.5px' 'color:var\(--text-3\)'
   d '\.warnings' '' 'padding:8px 10px' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)' 'font-size:11\.5px' 'color:var\(--text-3\)'
   d '\.preview-foot' '' 'border-top:1px solid var\(--border-soft\)' 'background:var\(--surface-3\)'
@@ -4419,15 +4446,16 @@ if [[ -n $REPLY ]]; then
   sweep AppBody $H
 fi
 
-# R3: the shared frames size themselves when given `height`; the student
-# defaults (16:9, 600px) stay. Anchored on each default rule's declarations,
-# since both components author `.frame`.
+# R3: VideoFrame fills the editor's 16:9 preview when given `fill` (student default
+# 16:9); InteractiveFrame always fills its parent. Anchored on each default rule's
+# declarations, since both components author `.frame`.
 VFH=(${(f)"$(grep -oE '\.frame\.svelte-[a-z0-9]+\{position:relative;padding-bottom:56\.25%' $CSS | grep -oE 'svelte-[a-z0-9]+' | sort -u)"})
-IFH=(${(f)"$(grep -oE '\.frame\.svelte-[a-z0-9]+\{width:100%;height:600px' $CSS | grep -oE 'svelte-[a-z0-9]+' | sort -u)"})
+IFH=(${(f)"$(grep -oE '\.frame\.svelte-[a-z0-9]+\{width:100%;height:100%\}' $CSS | grep -oE 'svelte-[a-z0-9]+' | sort -u)"})
 if [[ ${#VFH[@]} -eq 1 && ${#IFH[@]} -eq 1 ]]; then
   echo "PASS  VideoFrame and InteractiveFrame defaults resolve to one hash each"
-  N=VideoFrame; chk "\.frame\.fixed\.${VFH[1]}" 'padding-bottom:0' 'height:var\(--frame-h\)' 'margin-bottom:0'
-  N=InteractiveFrame; chk "\.frame\.fixed\.${IFH[1]}" 'height:var\(--frame-h\)' 'margin-bottom:0'
+  N=VideoFrame; chk "\.frame\.fill\.${VFH[1]}" 'padding-bottom:0' 'height:100%' 'margin-bottom:0'
+  none "InteractiveFrame has no fill switch" "\.frame\.fill\.${IFH[1]}"
+  N=InteractiveFrame; chk "\.frame\.${IFH[1]} iframe:where\(\.${IFH[1]}\)" 'background:#fff'
 else
   echo "FAIL  frame defaults not unique (VideoFrame ${#VFH[@]}, InteractiveFrame ${#IFH[@]})"; fail=1
 fi
@@ -4510,7 +4538,7 @@ LIT = re.compile(r'#[0-9a-fA-F]{3,8}(?![0-9a-zA-Z_-])|(?<![\w-])(?:rgba?|hsla?)\
 ALLOWED = {'Modal.svelte': {s.replace(' ', '') for s in (
     'box-shadow:0 16px 44px rgba(20,24,35,.22)',   # the centre panel (ref 1684)
     'box-shadow:-14px 0 40px rgba(20,24,35,.22)',  # the right drawer (9b)
-)}}
+)}, 'InteractiveFrame.svelte': {'background:#fff'}}   # apps always sit on white, whatever the theme
 
 def strip_comments(s):
     s = re.sub(r'/\*.*?\*/', ' ', s, flags=re.S)
@@ -4685,13 +4713,20 @@ own ans-row ChoiceRow.svelte
 uniq1 ans-row
 if [[ -n $REPLY ]]; then
   N=ChoiceRow; H=$REPLY
-  d '\.ans-row' '' 'display:flex' 'align-items:center' 'gap:8px' 'padding:4px 8px' 'border-radius:var\(--radius\)' 'font-size:13\.5px' 'color:var\(--text-2\)'
+  d '\.ans-row' '' 'display:flex' 'align-items:center' 'gap:8px' 'padding:0 8px' 'border-radius:var\(--radius\)' 'font-size:13\.5px' 'color:var\(--text-2\)'
   d '\.ans-row\.ok' '' 'background:var\(--status-accepted-bg\)' 'color:var\(--status-accepted-fg\)'
   # Call 9: an answer row keeps its height when its field opens (30px field + 1px each side).
   d '\.ans-row' '' 'min-height:calc\(var\(--control-h\) \+ 2px\)'
   d '\.ans-row\.editing' '' 'padding-block:1px'
+  # Math plan T7: the error state has no .ans-text, so it keeps today's 4px itself.
+  d '\.ans-row\.edit-err' '' 'padding-block:4px'
   d '\.ans-mark' '' 'width:15px' 'height:15px' 'border:1\.5px solid var\(--muted\)' 'border-radius:50%'
   d '\.ans-ok' '' 'font-size:11px' 'font-weight:500'
+  # Math plan T7: a formula scrolls inside the answer text; padding keeps tall signs unclipped.
+  d '\.ans-text' '' 'min-width:0' 'overflow-x:auto' 'overflow-y:hidden' 'padding-block:\.35em'
+  # Owner (Task 7): rows keep today's height; the text's padding replaces the row's, so .ans-edit zeroes only the sides.
+  d '\.ans-edit' '' 'padding-inline:0'
+  none "ChoiceRow .ans-edit keeps the text's padding-block (no shorthand or block longhand)" "\.ans-edit\.${H}\{([^}]*;)?padding(-block|-top|-bottom)?:"
   none "ChoiceRow no --success leftovers (the theme has none)" "\.${H}[^{]*\{[^}]*var\(--success"
   none "ChoiceRow no em/rem font sizes" "(^|[{}])[^{}]*\.${H}[^{]*\{[^}]*font-size:[0-9.]+r?em"
   sweep ChoiceRow $H
@@ -6000,6 +6035,11 @@ if [[ -n $REPLY ]]; then
   d '\.preview\.pv-page' '' 'font-size:14px' 'line-height:1\.6' 'color:var\(--text-2\)'
   d '\.preview\.pv-prompt' '' 'font-size:14\.5px' 'line-height:1\.6' 'color:var\(--text-2\)'
   d '\.preview\.pv-explanation' '' 'font-size:13px' 'color:var\(--text-2\)'
+  # Math plan T7: the preview alone shows why a formula failed (students see the marked source).
+  d '\.preview' ' div\.math-error:after' 'display:block' 'content:attr\(title\)'
+  # Owner (math T8): inside a sentence the reason follows on the same line.
+  d '\.preview' ' span\.math-error:after' 'content:" \(" attr\(title\) "\)"' 'font-size:\.85em'
+  none "MarkdownEditor inline error reason never breaks the line" "\.preview\.${H} span\.math-error:after\{[^}]*display:"
   none "MarkdownEditor .preview sets no type metrics of its own (the variant does)" "\.preview\.${H}\{[^}]*(font-size|color):"
 fi
 # Ruling (Task 3 review m2): the scanner's attachOn and the src_count rows pin
@@ -6567,6 +6607,36 @@ if [[ -n $REPLY ]]; then
   d '\.sc-line' '' 'color:var\(--gold-text\)'
   d '\.sc-done' '' 'color:var\(--text\)'
   sweep StepCourse $H
+fi
+
+echo
+echo "--- OLX import — the import modal on the Versions page ---"
+OLX_MODAL=src/components/editor/OlxImportModal.svelte
+emoji_scan "OlxImportModal" $OLX_MODAL
+colour_scan olx-modal $OLX_MODAL
+srcw editor/OlxImportModal.svelte 720
+# Spec Flow: no close on a backdrop click (passed explicitly), and no backdrop of its own.
+if grep -qE '^[[:space:]]*closeOnBackdrop=\{false\}' $OLX_MODAL && ! grep -qE 'class="(modal-)?backdrop"' $OLX_MODAL; then
+  echo "PASS  OlxImportModal passes closeOnBackdrop={false} and draws no backdrop"
+else
+  echo "FAIL  OlxImportModal passes closeOnBackdrop={false} and draws no backdrop"; fail=1
+fi
+own olx-summary OlxImportModal.svelte
+uniq1 olx-summary
+if [[ -n $REPLY ]]; then
+  N=OlxImportModal; H=$REPLY
+  d '\.olx-heading' '' 'font-size:15px' 'font-weight:600' 'color:var\(--text\)'
+  d '\.olx-foot' '' 'display:contents'
+  d '\.olx-foot-note' '' 'flex:1' 'font-size:12\.5px' 'color:var\(--muted\)'
+  d '\.olx-summary' '' 'padding:9px 11px' 'background:var\(--surface-2\)' 'border-radius:var\(--radius\)'
+  # The danger panel's colours, as the other modals' banners (C1).
+  chk "\.olx-error\.${H},\.olx-failed\.${H}" 'background:var\(--danger-panel-bg\)' 'border-left:3px solid var\(--danger\)' 'color:var\(--danger-panel-fg\)'
+  d '\.olx-blockers' '' 'background:var\(--danger-panel-bg\)' 'border-left:3px solid var\(--danger\)' 'color:var\(--danger-panel-fg\)'
+  d '\.olx-group-title' '' 'font-size:12\.5px' 'font-weight:600' 'color:var\(--text-3\)'
+  d '\.olx-lines' '' 'font-size:12\.5px' 'overflow-wrap:anywhere'
+  d '\.olx-drafts' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)'
+  d '\.olx-draft-label' '' 'min-width:0' 'overflow-wrap:anywhere'
+  sweep OlxImportModal $H
 fi
 
 # The summary line is the parent process's (see the re-exec at the top).

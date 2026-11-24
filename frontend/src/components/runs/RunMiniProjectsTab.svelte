@@ -40,7 +40,7 @@
     blocks: BlockResponse[];
     miniProjects: MiniProjectResponse[];
     onRefetchMiniProjects: () => Promise<void>;
-    onRefetchAssets?: () => Promise<void>;
+    onRefetchAssets: () => Promise<void>;
     onNavigateToTab: (tab: 'overview' | 'teachers' | 'groups' | 'roster' | 'assets') => void;
     pendingEditTarget?: MiniProjectResponse | null;
     onPendingEditConsumed?: () => void;
@@ -50,7 +50,7 @@
   async function refetchAll(): Promise<void> {
     await Promise.all([
       onRefetchMiniProjects(),
-      onRefetchAssets?.() ?? Promise.resolve(),
+      onRefetchAssets(),
     ]);
   }
 
@@ -236,6 +236,7 @@
       if (e instanceof ApiError && e.status === 409) {
         let refetched = true;
         try { await onRefetchMiniProjects(); } catch { refetched = false; }
+        try { await onRefetchAssets(); } catch { /* the chips catch up on the next load */ }
         deleteBusy = false;
         if (refetched) {
           const row = miniProjects.find((m) => m.id === mp.id);

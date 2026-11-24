@@ -38,6 +38,10 @@ it('buildAppSrcdoc inlines the escaped source with #app-root and the exact CSP',
   expect(doc.match(/<\/script/gi)?.length).toBe(1);   // no trailing `>` → also counts a `</script `-style variant
 });
 
+it('the app document sets no background of its own, so the app\'s html or body colour wins', () => {
+  expect(buildAppSrcdoc('x')).not.toContain('background');   // the white sits on the host's <iframe>
+});
+
 it('an app source containing </script> yields exactly one raw terminator', () => {
   const doc = buildAppSrcdoc("var s = '</script><script>evil()</script>';");
   expect(doc.match(/<\/script/gi)?.length).toBe(1);   // no trailing `>` → also counts a `</script `-style variant

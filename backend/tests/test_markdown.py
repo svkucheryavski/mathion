@@ -1,8 +1,13 @@
+import random
 import time
+import xml.etree.ElementTree as ET
 
 import pytest
 
-from mathion.markdown import render_markdown
+import mathion.markdown as markdown_mod
+from mathion.latex_mathml import latex_to_mathml
+from mathion.markdown import MATHML_ALLOWED, _clean, extract_asset_filenames, render_markdown
+from tests.test_latex_mathml import ACCEPTANCE
 
 
 def test_render_basic_markdown():
@@ -37,16 +42,21 @@ def test_render_code_block():
 
 
 def test_render_latex_inline():
-    """Inline LaTeX $x_i$ should be wrapped in math span, not corrupted by emphasis."""
+    """Inline LaTeX $x_i$ becomes MathML, not corrupted by emphasis."""
     result = render_markdown("The variable $x_i$ is important")
-    # dollarmath plugin wraps in <span class="math">
-    assert "x_i" in result
+    assert "<math><semantics>" in result and "x_i</annotation>" in result
     assert "<em>" not in result  # underscore must not trigger emphasis
 
 
 def test_render_latex_block():
     result = render_markdown("$$E = mc^2$$")
-    assert "E = mc^2" in result
+    assert result.startswith('<div class="math-display"><math display="block">')
+    assert "E = mc^2</annotation>" in result
+
+
+def test_url_inside_math_is_typeset_not_linked():
+    out = render_markdown("Math $x = https://example.org$ inline.")
+    assert out.count("<math") == 1 and "<a " not in out
 
 
 def test_render_javascript_uri_not_linked():
@@ -150,7 +160,7 @@ def test_render_bare_url_uppercase_scheme_is_linked():
     "Load //cdn.example.org/x here.",
 ])
 def test_render_text_that_is_not_a_full_url_stays_plain(md):
-    assert "<a" not in render_markdown(md)
+    assert "<a " not in render_markdown(md)  # not <annotation
 
 
 @pytest.mark.parametrize("md", [
@@ -285,7 +295,7 @@ def test_render_bare_url_ends_at_a_character_urls_do_not_use(md, href, rest):
     "*https://x.org/caf*$x$",
 ])
 def test_render_address_of_non_url_characters_stays_plain(md):
-    assert "<a" not in render_markdown(md)
+    assert "<a " not in render_markdown(md)  # not <annotation
 
 
 def test_render_address_after_a_plain_one_still_links():
@@ -376,9 +386,9 @@ def test_loose_is_the_only_class_kept_on_lists():
     from mathion.markdown import _clean
 
     out = _clean('<ul class="loose x"><li class="loose">a</li></ul><p class="loose">b</p>'
-                 '<ol class="tight"><li>c</li></ol><span class="math">m</span>')
+                 '<ol class="tight"><li>c</li></ol><span class="math math-error">m</span>')
     assert out == ('<ul class="loose"><li>a</li></ul><p>b</p>'
-                   '<ol class=""><li>c</li></ol><span class="math">m</span>')
+                   '<ol class=""><li>c</li></ol><span class="math-error">m</span>')
 
 
 @pytest.mark.parametrize("md", [
@@ -433,3 +443,299 @@ def test_bare_url_entity_ends_link():
     result = render_markdown("https://x.org/?a=1&amp;b=2")
     assert 'href="https://x.org/?a=1"' in result
     assert result.count("<a ") == 1
+
+
+# Math typesetting (Task 4): Mathion's own dollar rule, render rules and sanitiser.
+@pytest.mark.parametrize("md,has_math,raw_kept", [
+    (r"$n$ is the sample size, here 30", 1, None),
+    (r"$\alpha$=0.05", 1, None),
+    ("With $n$ = 30", 1, None),
+    ("It costs $5 and $10", 0, "$5 and $10"),
+    ("$5-$10", 0, "$5-$10"),
+    ("2$x$", 0, "2$x$"),
+    ("$ x $", 0, "$ x $"),
+    ("$5 and $10 and $x$", 1, "$5 and $10 and "),
+    (r"$x = 5\$$", 1, None),
+    (r"\$$x$", 1, None),
+    (r"a \$ b", 0, "a $ b"),
+    ("see $$ x $$ here", 1, None),
+    ("text\n$$\nx\n$$", 1, None),
+    ("costs $$5", 0, "costs $$5"),
+    ("`$x$`", 0, "$x$"),
+    # review round 1: each test of the rule on its own
+    ("$ x$", 0, "$ x$"),
+    ("$x$$", 0, "$x$$"),
+    ("$x$$y$", 0, "$x$$y$"),
+])
+def test_dollar_rule_cases(md, has_math, raw_kept):
+    out = render_markdown(md)
+    assert out.count("<math") == has_math
+    if raw_kept:
+        assert raw_kept in out
+
+
+def test_display_block_own_paragraph():
+    out = render_markdown("$$\nx^2\n$$")
+    assert out.startswith('<div class="math-display"><math display="block">')
+
+
+def test_display_inside_paragraph_is_span():
+    out = render_markdown("a $$x$$ b")
+    assert '<p>a <span class="math-display"><math display="block">' in out and "</span> b</p>" in out
+
+
+def test_blockquote_display_drops_markers():
+    out = render_markdown("> $$\n> x\n> $$")
+    assert '<blockquote>\n<div class="math-display"><math display="block"><semantics><mrow><mi>x</mi></mrow>' in out
+
+
+def test_list_item_display():
+    assert '<li>\n<div class="math-display"><math display="block">' in render_markdown("- $$\n  x\n  $$")
+
+
+def test_unclosed_display_stops_at_blank_line():
+    out = render_markdown("$$\nx\n\nnext para")
+    assert "<p>next para</p>" in out
+
+
+def test_backslash_parity():
+    assert render_markdown(r"\\$x$").count("<math") == 1      # escaped backslash, live dollar
+    assert render_markdown(r"\$x$").count("<math") == 0
+
+
+def test_display_error_inside_paragraph_is_span():
+    assert '<p>a <span class="math-error"' in render_markdown(r"a $$\foo$$ b")
+
+
+def test_two_displays_on_one_line_fall_through():
+    assert render_markdown("$$a$$ and $$b$$").count('<span class="math-display">') == 2
+
+
+def test_escaped_closing_double_dollar_falls_through():
+    out = render_markdown(r"$$x\$$")
+    assert "<math" not in out and "math-error" not in out and out.startswith("<p>")
+
+
+def test_error_span_escapes_source_and_reason():
+    out = render_markdown(r"$\foo<b>$")
+    assert out.count('class="math-error"') == 1 and "<b>" not in out
+    assert 'title="unknown command `\\foo`"' in out
+
+
+def test_error_block_is_div():
+    assert render_markdown("$$\n\\foo\n$$").startswith('<div class="math-error"')
+
+
+def test_unexpected_converter_exception_becomes_error_span(monkeypatch):
+    monkeypatch.setattr(markdown_mod, "latex_to_mathml", lambda s, d: 1 / 0)
+    assert 'title="formula could not be read"' in render_markdown("$x$")
+
+
+def test_sanitiser_keeps_mathml_and_drops_unknown_classes():
+    out = _clean('<span class="evil math-error" title="r">x</span><math><mi onclick="x">a</mi></math>')
+    assert 'class="math-error"' in out and "evil" not in out and "onclick" not in out and 'title="r"' in out
+    assert "<math><mi>a</mi></math>" in out
+    out = _clean('<math><mo class="math-acc evil">a</mo><mrow class="math-overline math-underline evil">b</mrow><mi class="math-acc">c</mi></math>')
+    assert '<mo class="math-acc">' in out and '<mrow class="math-overline math-underline">' in out
+    assert "evil" not in out and '<mi class' not in out
+    assert '<mo class="math-vec">' in _clean('<math><mo class="math-vec evil">→</mo></math>')
+
+
+SANITISE = ACCEPTANCE + [r"\binom{n}{k}", r"\big(\dfrac{a}{b}\big)", r"\underline{x}",
+    r"\lim_{n\to\infty}", r"a\,b", r"\sqrt[3]{x}", r"\text{a b}", r"\mathrm{d}x", r"\tfrac12",
+    r"\left(-x\right)", r"\hat{\beta}", r"\sum\limits_i", r"\overline{x}", r"\bar{x}",
+    r"\vec{v}", r"\Big(x\Big)", r"x^{\displaystyle y}", r"\dfrac ab"]
+
+
+def _tree(markup):                       # nested tags, attributes, exact text and tails
+    def walk(e):
+        return (e.tag, sorted(e.attrib.items()), e.text or "", [walk(c) for c in e], e.tail or "")
+    return walk(ET.fromstring(markup.replace("&nbsp;", " ")))
+
+
+@pytest.mark.parametrize("src", SANITISE)
+@pytest.mark.parametrize("display", [False, True])
+def test_sanitiser_keeps_every_emitted_tag_and_attribute(src, display):
+    raw = latex_to_mathml(src, display)
+    assert _tree(_clean(raw)) == _tree(raw)
+
+
+SPEC_MAP = {   # copied from the spec's sanitiser map, independent of markdown.py
+    "math": {"display"}, "semantics": set(), "annotation": {"encoding"}, "mrow": set(),
+    "mi": {"mathvariant"}, "mn": set(), "mtext": set(), "mspace": {"width", "height", "depth"},
+    "mo": {"stretchy", "largeop", "movablelimits", "fence", "form", "lspace", "rspace", "minsize", "maxsize"},
+    "msup": set(), "msub": set(), "msubsup": set(), "mfrac": {"linethickness"}, "msqrt": set(),
+    "mroot": set(), "mover": {"accent"}, "munder": {"accentunder"}, "munderover": set(),
+    "mstyle": {"displaystyle", "scriptlevel"},
+}
+
+
+def test_allowlist_matches_spec():
+    assert MATHML_ALLOWED == SPEC_MAP
+
+
+@pytest.mark.parametrize("tag,attrs", SPEC_MAP.items())
+def test_every_allowed_tag_and_attribute_survives_clean(tag, attrs):
+    inner = "<" + tag + "".join(f' {a}="v"' for a in sorted(attrs)) + ">t</" + tag + ">"
+    snippet = inner if tag == "math" else "<math>" + inner + "</math>"
+    assert _tree(_clean(snippet)) == _tree(snippet)
+
+
+def test_render_markdown_never_raises():
+    rng = random.Random(1118)
+    pool = [chr(c) for c in range(32, 0x2FFF, 37)] + list("$\\{}^_\n") + ["$$", r"\frac", r"\left", r"\sqrt"]
+    for n in (1, 50, 400, 1990, 2010):
+        for _ in range(60):
+            render_markdown("".join(rng.choice(pool) for _ in range(n)))
+
+
+def test_asset_extraction_ignores_math_code_and_escapes():
+    assert extract_asset_filenames(r"$E[X](t)$ and ![a](pic.png)") == {"pic.png"}
+    assert extract_asset_filenames("`[x](y)` and \\[a\\](b)") == set()
+
+
+@pytest.mark.parametrize("md,code", [
+    ("The fee is $5. In R use `df$col`.", "<code>df$col</code>"),    # owner: never end inside code
+    ("It costs $5, see `$price`", "<code>$price</code>"),
+    ("Cost $5 and ``a$b`` here", "<code>a$b</code>"),
+    ("see $$a `b$$` c", "<code>b$$</code>"),
+])
+def test_formula_never_ends_inside_a_code_span(md, code):
+    out = render_markdown(md)
+    assert code in out and "<math" not in out and "math-error" not in out
+
+
+def test_formula_before_a_code_span_still_works():
+    out = render_markdown("Use $x$ and `df$col` here")
+    assert out.count("<math") == 1 and "<code>df$col</code>" in out
+
+
+def test_double_dollar_right_after_another_formula():
+    assert render_markdown("$$a$$$$b$$").count('<span class="math-display">') == 2
+
+
+@pytest.mark.parametrize("md,items", [
+    ("- $$a\n- b$$", 2),
+    ("1. $$\n   x\n2. y $$", 2),
+])
+def test_display_block_stops_at_the_list_item_edge(md, items):
+    out = render_markdown(md)
+    assert out.count("<li>") == items and "<math" not in out
+
+
+def test_display_block_inside_a_list_item_still_works():
+    out = render_markdown("- $$\n  x\n  $$\n- b")
+    assert out.count("<li>") == 2 and out.count('<div class="math-display">') == 1
+
+
+@pytest.mark.parametrize("md", [r"$$a\ $$", "$$\na\\ \n$$"])
+def test_trailing_control_space_is_kept(md):
+    out = render_markdown(md)
+    assert "<math" in out and "math-error" not in out
+
+
+def test_backslash_parity_at_the_closer():
+    out = render_markdown(r"$x\\$ y$")            # \\ is a backslash pair, so this $ closes
+    assert out.count('class="math-error"') + out.count("<math") == 1 and " y$" in out
+    assert render_markdown(r"\\$$x$$").count('<span class="math-display">') == 1
+
+
+def test_error_reason_quotes_are_escaped():
+    out = render_markdown(r'$\begin{" x="}$')
+    assert "x=&quot;" in out and ' x="' not in out.split(">", 2)[1]
+
+
+def test_formula_in_a_link_label():
+    out = render_markdown("[$x$](u)")
+    assert out.startswith('<p><a href="u"') and "<math" in out
+    out = render_markdown("[a $x](u) b$")
+    assert "<a " not in out and out.count("<math") == 1
+
+
+
+@pytest.mark.parametrize("md,codes", [
+    ("Price $5. Type `\\` then `df$col`.", ["<code>\\</code>", "<code>df$col</code>"]),   # no escapes inside code
+    ("Use $5 for ``a`b`` and `x$y`.", ["<code>a`b</code>", "<code>x$y</code>"]),        # runs pair by length
+    ("Cost $5 `` and `df$col`.", ["<code>df$col</code>"]),                               # an unmatched run is text
+])
+def test_code_spans_pair_as_markdown_it_does(md, codes):
+    out = render_markdown(md)
+    assert all(c in out for c in codes) and "<math" not in out and "math-error" not in out
+
+
+@pytest.mark.parametrize("md", [r"$x \text{ is ``big''}$", "$a ` b$", r"$x `a\` b$"])
+def test_backticks_that_open_no_code_span_keep_the_formula(md):
+    out = render_markdown(md)
+    assert out.count("<math") + out.count('class="math-error"') == 1
+
+
+def test_display_blocks_in_a_long_list_stay_fast():
+    start = time.perf_counter()
+    render_markdown("- $$x\n" * 8000 + "$$")
+    assert time.perf_counter() - start < 2.0
+
+
+@pytest.mark.parametrize("md", [
+    "# Topic\nSome teaching notes.\n" * 8000,
+    "```\nx = 1\n```\n" * 8000,
+])
+def test_math_free_markdown_stays_fast(md):
+    start = time.perf_counter()
+    render_markdown(md)
+    assert time.perf_counter() - start < 2.0
+
+
+# --- math round 2026-11-24 ---
+
+@pytest.mark.parametrize("md, html", [
+    ('$$\nx\n$$',
+     '<div class="math-display"><math display="block"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></div>\n'),
+    ('$$x$$',
+     '<div class="math-display"><math display="block"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></div>\n'),
+    ('$$\na\n$b$\n$$',
+     '<p><span class="math-display"><math display="block"><semantics><mrow><mi>a</mi><mo lspace="0em" rspace="0em">$</mo><mi>b</mi><mo lspace="0em" rspace="0em">$</mo></mrow><annotation encoding="application/x-tex">a\n$b$</annotation></semantics></math></span></p>\n'),
+    ('$$\na\n\\$\n$$',
+     '<div class="math-display"><math display="block"><semantics><mrow><mi>a</mi><mo lspace="0em" rspace="0em">$</mo></mrow><annotation encoding="application/x-tex">a\n\\$</annotation></semantics></math></div>\n'),
+    ('- $$\n  x\n  $$',
+     '<ul>\n<li>\n<div class="math-display"><math display="block"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></div>\n</li>\n</ul>\n'),
+    ('> $$\n> x\n> $$',
+     '<blockquote>\n<div class="math-display"><math display="block"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></div>\n</blockquote>\n'),
+])
+def test_dollar_block_bound_keeps_results(md, html):
+    assert render_markdown(md) == html
+
+
+@pytest.mark.parametrize("md, alt", [
+    ("![a $x$ b](p.png)", "a x b"),
+    ("![a $$ x $$ b](p.png)", "a x b"),
+    ("![$\\alpha$](p.png)", "\\alpha"),
+    ("![a $\\frac{a}$ b](p.png)", "a \\frac{a} b"),
+    ("![price \\$5](p.png)", "price $5"),
+    ("![a \\* b](p.png)", "a * b"),
+    ("![a &amp; b](p.png)", "a &amp; b"),
+    ('![a "q" $x$](p.png)', "a &quot;q&quot; x"),
+    ("![a ![b $x$](q.png) c](p.png)", "a b x c"),
+    ("![a  \nb](p.png)", "a\nb"),
+    ("![a\\\nb](p.png)", "a\nb"),
+    ("![a ![b \\$](q.png)](p.png)", "a b $"),
+    ("![a *b* c](p.png)", "a b c"),
+])
+def test_image_alt_keeps_text(md, alt):
+    assert f'alt="{alt}"' in render_markdown(md)
+
+
+def test_formula_output_cap_shows_error_box():
+    assert 'title="formula too long"' in render_markdown("$" + "∑" * 1000 + "$")
+
+
+@pytest.mark.parametrize("src, limit", [
+    ("$$x\n# h\n" * 4000, 0.5),
+    ("$$x\n# h\n" * 4000 + "$$\n", 0.5),
+    ("> $$x\n> # h\n" * 2000, 0.5),
+    ("$$x\n\\$ a\n# h\n" * 3000, 0.5),
+    ("$$x\n# h\n" * 16000, 2.0),
+], ids=["block", "block-closed", "quote", "escaped", "block-128k"])
+def test_unclosed_double_dollar_is_linear(src, limit):
+    start = time.perf_counter()
+    render_markdown(src)
+    assert time.perf_counter() - start < limit

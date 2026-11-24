@@ -2,6 +2,7 @@ import { it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import ItemRouter from '../components/items/ItemRouter.svelte';
 import type { InteractiveAppItem, Item, MiniProjectItem, VersionState } from '../lib/types';
+import { installResizeObserver } from './support/resizeObserver';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -14,7 +15,9 @@ function jres(body: unknown, status = 200) {
 }
 
 let cleanup: (() => void) | null = null;
+let ro: ReturnType<typeof installResizeObserver>;
 beforeEach(() => {
+  ro = installResizeObserver(928);
   fetchSpy.mockReset();
   fetchSpy.mockImplementation(() => jres({}));
   (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
@@ -22,6 +25,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup?.(); cleanup = null; document.body.innerHTML = '';
   (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
+  ro.restore();
 });
 
 it('dispatches an interactive_app item to InteractiveAppItem, not UnsupportedItem', () => {
@@ -101,7 +105,7 @@ it('quiz → quiz remounts: B opens unanswered and unlocked, and B posts only it
   const { __test__setSlots, clearCourse } = await import('../stores/currentCourse.svelte');
   const q = (id: number) => ({
     id, order: 1, type: 'single_choice' as const, text_md: '', text_html: `<p>Q${id}</p>`,
-    options: [{ id: id * 10 + 1, text: 'A' }, { id: id * 10 + 2, text: 'B' }],
+    options: [{ id: id * 10 + 1, text: 'A', text_html: 'A' }, { id: id * 10 + 2, text: 'B', text_html: 'B' }],
   });
   const quiz = (id: number): Item => ({
     id, sequence_id: 1, title: `Quiz ${id}`, slug: `q${id}`, order: id, type: 'quiz', questions: [q(id * 100)],

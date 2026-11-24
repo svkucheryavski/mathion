@@ -1,8 +1,14 @@
 import os
+from urllib.parse import unquote
 
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+
+def _names(missing: set[str]) -> str:
+    """Missing names as the author typed them (markdown-it percent-encodes targets)."""
+    return ", ".join(sorted(unquote(n) for n in missing))
 
 
 def render_with_assets(db: Session, version_id: int, content_md: str | None) -> str:
@@ -36,7 +42,7 @@ def render_with_assets(db: Session, version_id: int, content_md: str | None) -> 
     if missing:
         raise HTTPException(
             status_code=422,
-            detail=f"Referenced assets not found in version: {', '.join(sorted(missing))}",
+            detail=f"Referenced assets not found in version: {_names(missing)}",
         )
     return resolve_asset_urls(html, version_id, ref_filenames)
 
@@ -194,7 +200,7 @@ def render_with_run_assets(db: Session, run_id: int, content_md: str | None) -> 
     if missing:
         raise HTTPException(
             status_code=422,
-            detail=f"Referenced run-assets not found: {', '.join(sorted(missing))}",
+            detail=f"Referenced run-assets not found: {_names(missing)}",
         )
 
     # Rewrite bare filenames to run-scoped URLs. Mirror Phase 6's
@@ -204,6 +210,19 @@ def render_with_run_assets(db: Session, run_id: int, content_md: str | None) -> 
         html = html.replace(f'src="{filename}"', f'src="{base_url}/{filename}"')
         html = html.replace(f'href="{filename}"', f'href="{base_url}/{filename}"')
     return html
+
+
+def reference_new_run_asset(db: Session, asset, mp_ids: list[int]) -> None:
+    """Link a just-added run asset to the mini-projects whose text names it; caller holds their locks."""
+    from mathion.markdown import extract_asset_filenames
+    from mathion.models import MiniProject, RunAssetReference
+
+    for mp_id in mp_ids:
+        mp = db.get(MiniProject, mp_id, populate_existing=True)
+        if mp is None or not mp.assignment_md:
+            continue
+        if asset.filename in extract_asset_filenames(mp.assignment_md):
+            db.add(RunAssetReference(run_asset_id=asset.id, mini_project_id=mp_id))
 
 
 def sync_run_asset_references(db: Session, run_id: int, content_md: str | None, mini_project_id: int) -> None:

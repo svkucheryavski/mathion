@@ -119,12 +119,12 @@ type QuestionBase = {
 
 export type SingleChoiceQuestion = QuestionBase & {
   type: 'single_choice';
-  options: { id: number; text: string }[];
+  options: { id: number; text: string; text_html: string }[];
 };
 
 export type MultipleChoiceQuestion = QuestionBase & {
   type: 'multiple_choice';
-  options: { id: number; text: string }[];
+  options: { id: number; text: string; text_html: string }[];
 };
 
 export type NumericQuestion = QuestionBase & {
@@ -444,6 +444,7 @@ export type RunAssetResponse = {
   uploaded_by: number | null;
   uploaded_by_email: string | null;
   is_referenced: boolean;
+  referenced_by: number[];
 };
 
 export type MiniProjectRowStatus = 'draft' | 'published' | 'locked';

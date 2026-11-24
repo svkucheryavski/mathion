@@ -1,15 +1,22 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import type { InteractiveAppItem } from '../../lib/types';
   import { fetchAssetSource } from '../../lib/assets';
   import { createCoverageTracker } from '../../lib/coverage.svelte';
   import { markItemCovered, currentCourse } from '../../stores/currentCourse.svelte';
   import InteractiveFrame from './InteractiveFrame.svelte';
+  import { APP_WIDTH_SLACK, MIN_APP_WIDTH } from '../../lib/interactiveHost';
 
   let { item, isCovered }: { item: InteractiveAppItem; isCovered: boolean } = $props();
 
   let source = $state<string | null>(null);
-  let status = $state<'empty' | 'loading' | 'ready' | 'error'>('empty');
+  let status = $state<'empty' | 'loading' | 'narrow' | 'ready' | 'error'>('empty');
+  // Set by the first non-zero measure of the article's width.
+  let measured = $state(false);
+  let wide = $state(false);
+  // The store write after /track may outlive a narrow swap, not the component.
+  let alive = true;
+  onDestroy(() => { alive = false; });
   // Which item id already had cover STARTED. Guards against a fast script_url
   // change starting a second markCovered() while the isCovered prop still lags
   // at false (a redundant /track POST for the same item).
@@ -25,17 +32,19 @@
   // once so the post-await store write can't target the wrong item. Two guards
   // protect the cover: `coverStartedForId` makes cover fire at most once per
   // item id (no double /track on a fast script_url change while isCovered lags);
-  // and the `stale` check re-tested inside the markCovered() continuation stops
-  // a /track that resolves AFTER teardown from writing coverage into the global
-  // store post-unmount. The isCovered read via untrack keeps the once-only prop
-  // read outside this effect's synchronous dependency tracking (markItemCovered's
-  // store flip cannot re-run this effect).
+  // and `alive`, tested in the markCovered() continuation, stops a /track that
+  // resolves after UNMOUNT from writing coverage into the global store (a narrow
+  // swap still writes it: same item, the server has credited it). The isCovered
+  // read via untrack keeps the once-only prop read outside this effect's
+  // synchronous dependency tracking (markItemCovered's store flip cannot re-run
+  // this effect).
   $effect(() => {
     const id = item.id;
     const filename = item.script_url;
     const versionId = currentCourse.value?.versionId;
 
     if (!filename) { status = 'empty'; source = null; return; }
+    if (!wide) { status = measured ? 'narrow' : 'loading'; source = null; return; }
     if (versionId == null) { status = 'loading'; source = null; return; }
 
     status = 'loading';
@@ -53,7 +62,7 @@
         tracker.start();
         if (!untrack(() => isCovered) && coverStartedForId !== id) {
           coverStartedForId = id;
-          void tracker.markCovered().then(() => { if (!stale) markItemCovered(id); });
+          void tracker.markCovered().then(() => { if (alive) markItemCovered(id); });
         }
       })
       .catch((e: unknown) => {
@@ -68,9 +77,21 @@
       if (tracker) void tracker.stop();
     };
   });
+
+  function measure(el: HTMLElement) {
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0].contentRect.width;
+      if (w === 0) return; // hidden: keep the last state
+      measured = true;
+      // Hysteresis, so a scrollbar appearing with the app cannot swap it straight back.
+      wide = w >= (wide ? MIN_APP_WIDTH - APP_WIDTH_SLACK : MIN_APP_WIDTH);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }
 </script>
 
-<article class="interactive-app">
+<article class="interactive-app" {@attach measure}>
   <h2>{item.title}</h2>
   {#if status === 'ready' && source !== null}
     <div class="app-card">
@@ -84,6 +105,10 @@
          threading an item-specific string up through ItemRouter would be
          cross-component behavioural plumbing in a restyle slice. -->
     <p class="cover-hint">Marked covered once opened.</p>
+  {:else if status === 'narrow'}
+    <div class="app-card narrow">
+      <p class="notice">This app needs a larger screen. Open this page on a laptop or desktop computer.</p>
+    </div>
   {:else if status === 'error'}
     <p class="notice">This app couldn't be loaded.</p>
   {:else if status === 'empty'}
@@ -101,18 +126,18 @@
     padding: 0;
   }
   .interactive-app h2 { font-size: 16px; /* ref 2122 */ font-weight: 600; color: var(--text); }
-  /* Twin of VideoItem's .video-card. InteractiveFrame is shared with the
-     editor preview and is NOT restyled; its root's `margin-bottom:
-     var(--space-3)` (InteractiveFrame.svelte:35) is zeroed through the
-     ANCESTOR-SCOPED form — a bare top-level `:global(.frame)` is forbidden,
-     it would reach the deferred editor previews. Its fixed 600px stays. */
+  /* Twin of VideoItem's .video-card; the frame inside fills it. */
   .app-card {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     overflow: hidden;
+    /* 16:9, as wide as the window height allows (300px = the page's own chrome), at least 800px */
+    aspect-ratio: 16 / 9;
+    width: min(100%, max(800px, (calc(100vh / var(--app-zoom, 1)) - 300px) * 16 / 9));
+    margin-inline: auto;
   }
-  .app-card :global(.frame) { margin-bottom: 0; }
+  .app-card.narrow { aspect-ratio: auto; width: auto; margin-inline: 0; padding: var(--space-3); }
   /* A named class, not a bare <p>, so the size/colour is grep-able by the gate. */
   .cover-hint { font-size: 12.5px; color: var(--muted); margin: 0; }
   /* font-style:italic dropped — the --muted token carries the recede on its

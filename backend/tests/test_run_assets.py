@@ -725,3 +725,134 @@ def test_replace_whose_run_is_deleted_right_after_its_commit_is_404(admin_client
         stop()
     assert (response.status_code, response.json()["detail"]) == (404, "Run not found")
     assert not (asset_tmpdir / "runs" / str(run["id"])).exists()
+
+
+# ---------------------------------------------------------------------------
+# Math round 2026-11-24: referenced_by, upload restores usage
+# ---------------------------------------------------------------------------
+
+
+def _upload(client, run_id, filename):
+    return client.post(
+        f"/api/runs/{run_id}/assets",
+        files={"file": (filename, io.BytesIO(b"%PDF-1.4\n"), "application/pdf")},
+    )
+
+
+def _mp(admin_client, db, run, md, order=1):
+    """A mini-project on the run's block number `order` (made if missing)."""
+    from mathion.models import Block, Run
+    from sqlalchemy import select as _select
+    version_id = db.get(Run, run["id"]).version_id
+    block = db.execute(
+        _select(Block).where(Block.version_id == version_id, Block.order == order)
+    ).scalars().first()
+    if block is None:
+        block = Block(version_id=version_id, title=f"B{order}", slug=f"b{order}", order=order)
+        db.add(block)
+        db.commit()
+    resp = admin_client.post(
+        f"/api/runs/{run['id']}/mini-projects",
+        json={"block_id": block.id, "assignment_md": md,
+              "hard_deadline": "2026-06-01T23:59:00Z",
+              "resubmission_deadline": "2026-06-15T23:59:00Z"},
+    )
+    assert resp.status_code in (200, 201), resp.text
+    return resp.json()
+
+
+def test_list_assets_referenced_by_distinct_ascending(admin_client, db, seed_run_with_groups):
+    from mathion.models import RunAssetReference
+    run, _, _ = seed_run_with_groups()
+    asset = _upload(admin_client, run["id"], "f.pdf").json()
+    low = _mp(admin_client, db, run, "No link yet.", order=1)
+    high = _mp(admin_client, db, run, "See [f](f.pdf).", order=2)
+    patched = admin_client.patch(f"/api/mini-projects/{low['id']}", json={"assignment_md": "See [f](f.pdf)."})
+    assert patched.status_code == 200, patched.text  # the low id's row is now the newer one
+    db.add(RunAssetReference(run_asset_id=asset["id"], mini_project_id=high["id"]))  # a duplicate row
+    db.commit()
+    assert low["id"] < high["id"]
+    [row] = admin_client.get(f"/api/runs/{run['id']}/assets").json()
+    assert row["referenced_by"] == [low["id"], high["id"]]
+    assert row["is_referenced"] is True
+
+
+def test_list_assets_one_reference_query(admin_client, db, seed_run_with_groups):
+    from sqlalchemy import event
+    from mathion.database import engine
+    run, _, _ = seed_run_with_groups()
+    for name in ("a.pdf", "b.pdf", "c.pdf"):
+        _upload(admin_client, run["id"], name)
+    statements = []
+
+    def record(conn, cursor, statement, *args):
+        if "run_asset_references" in statement:
+            statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        assert admin_client.get(f"/api/runs/{run['id']}/assets").status_code == 200
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    assert len(statements) == 1
+
+
+def test_upload_after_force_delete_restores_usage(admin_client, db, seed_run_with_groups):
+    run, _, _ = seed_run_with_groups()
+    asset = _create_referenced_asset(admin_client, db, run, "back.pdf")
+    from mathion.models import MiniProject
+    from sqlalchemy import select as _select
+    mp_id = db.execute(_select(MiniProject.id).where(MiniProject.run_id == run["id"])).scalar_one()
+    assert admin_client.delete(f"/api/runs/{run['id']}/assets/{asset['id']}?force=true").status_code == 204
+    again = _upload(admin_client, run["id"], "back.pdf")
+    assert again.status_code == 201
+    assert again.json()["referenced_by"] == [mp_id]
+    assert again.json()["is_referenced"] is True
+    teacher = _client_for(db, "teach@example.com")
+    assert teacher.delete(f"/api/runs/{run['id']}/assets/{again.json()['id']}").status_code == 409
+
+
+def test_upload_new_name_unreferenced(admin_client, db, seed_run_with_groups):
+    run, _, _ = seed_run_with_groups()
+    _mp(admin_client, db, run, "No files here.")
+    resp = _upload(admin_client, run["id"], "new.pdf")
+    assert resp.status_code == 201
+    assert resp.json()["referenced_by"] == []
+    assert resp.json()["is_referenced"] is False
+
+
+def test_upload_links_only_mini_projects_naming_the_file(admin_client, db, seed_run_with_groups):
+    run, _, _ = seed_run_with_groups()
+    first = _upload(admin_client, run["id"], "pick.pdf").json()
+    low = _mp(admin_client, db, run, "No files here.", order=1)
+    high = _mp(admin_client, db, run, "See [p](pick.pdf).", order=2)
+    assert low["id"] < high["id"]
+    assert admin_client.delete(f"/api/runs/{run['id']}/assets/{first['id']}?force=true").status_code == 204
+    resp = _upload(admin_client, run["id"], "pick.pdf")
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["referenced_by"] == [high["id"]]
+
+
+def test_upload_run_without_mini_projects(admin_client, seed_run_with_groups):
+    run, _, _ = seed_run_with_groups()
+    resp = _upload(admin_client, run["id"], "solo.pdf")
+    assert resp.status_code == 201
+    assert resp.json()["referenced_by"] == []
+
+
+def test_replace_returns_referenced_by(admin_client, db, seed_run_with_groups):
+    from mathion.models import MiniProject, RunAssetReference
+    from sqlalchemy import select as _select
+    run, _, _ = seed_run_with_groups()
+    asset = _create_referenced_asset(admin_client, db, run, "rep.pdf")
+    mp_id = db.execute(_select(MiniProject.id).where(MiniProject.run_id == run["id"])).scalar_one()
+    ref_ids = db.execute(_select(RunAssetReference.id).where(RunAssetReference.run_asset_id == asset["id"])).scalars().all()
+    db.rollback()
+    resp = admin_client.put(
+        f"/api/runs/{run['id']}/assets/{asset['id']}",
+        files={"file": ("rep.pdf", io.BytesIO(b"%PDF-1.5\n"), "application/pdf")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["referenced_by"] == [mp_id]
+    after = db.execute(_select(RunAssetReference.id).where(RunAssetReference.run_asset_id == asset["id"])).scalars().all()
+    assert after == ref_ids and len(after) == 1  # the same rows, not rebuilt ones

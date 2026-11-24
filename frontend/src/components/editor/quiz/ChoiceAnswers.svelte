@@ -250,7 +250,7 @@
       allowed: () => ctx.canText,
       send: async (v) => {
         const echo = await locked(`text:${o.id}`, () => updateOption(o.id, { text: v.trim() }));
-        if (alive()) options = (options ?? []).map((x) => (x.id === o.id ? { ...x, text: echo.text } : x));
+        if (alive()) options = (options ?? []).map((x) => (x.id === o.id ? { ...x, text: echo.text, text_html: echo.text_html } : x));
       },
       close: (refocus) => {
         editId = null;
