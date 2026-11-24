@@ -339,7 +339,10 @@ def test_render_address_last_inside_emphasis_links(md, href):
     "https://a.b:99999999",
     "https://%zz.org",
     "https:///",
-    "https://[::1]/x",
+    "https://[example.com]/x",
+    "https://[1.2.3.4]/x",
+    "https://[fe80::1%25eth0]/x",
+    "https://[::1]:99999/x",
 ])
 def test_bare_urls_nh3_strips_stay_plain_text(url):
     result = render_markdown(f"see {url} here")
@@ -347,15 +350,36 @@ def test_bare_urls_nh3_strips_stay_plain_text(url):
     assert url in result
 
 
+@pytest.mark.parametrize("src, href", [
+    ("see https://[a]@example.com/x here", 'href="https://%5Ba%5D@example.com/x"'),
+    ("[t](https://[y]@evil.example/\u00e9)", 'href="https://%5By%5D@evil.example/%C3%A9"'),
+    ("[t](https://x@[y]@evil.example/%zz)", 'href="https://x@%5By%5D@evil.example/%25zz"'),
+])
+def test_brackets_in_the_user_part_keep_a_normalised_href(src, href):
+    assert href in render_markdown(src)
+
+
+def test_scheme_less_address_still_links():
+    assert '<a href="//example.com/x"' in render_markdown("[t](//example.com/x)")
+
+
+def test_bare_ipv6_url_links():
+    # markdown-it-py 4.3 links a bracketed IPv6 host, and nh3 keeps it.
+    assert '<a href="https://[::1]/x"' in render_markdown("see https://[::1]/x here")
+
+
 @pytest.mark.parametrize("src,text", [
     ("[t](https://%zz.org)", "t"),
     ("<https://%zz.org>", "https://%zz.org"),
+    ("[t](https://[example.com]/x)", "t"),
+    ("[t](//[example.com]/x)", "t"),
+    ("[t](//%zz.org)", "t"),
+    ("<https://[example.com]/x>", "https://[example.com]/x"),
     ('[**bold** t](https://%zz.org "a title")', "<strong>bold</strong> t"),
-    # nh3 does not escape < or > inside an attribute value (probed), so the
-    # check is not a pattern over its output.
+    # nh3 escapes < and > inside an attribute value.
     ('[t](https://%zz.org "a>b")', "<p>t</p>"),
     ('[t](https://%zz.org "<a href=x>")', "<p>t</p>"),
-    ('[![pic](x.png "</a>")](https://%zz.org)', '<img src="x.png" alt="pic" title="</a>">'),
+    ('[![pic](x.png "</a>")](https://%zz.org)', '<img src="x.png" alt="pic" title="&lt;/a&gt;">'),
 ])
 def test_authored_link_with_a_bad_href_stays_plain_text(src, text):
     result = render_markdown(src)

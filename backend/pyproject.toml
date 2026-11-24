@@ -13,8 +13,8 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "markdown-it-py>=3.0",
     "mdit-py-plugins>=0.4",
-    "nh3>=0.2",
-    "python-multipart>=0.0.18",
+    "nh3>=0.3.8",
+    "python-multipart>=0.0.31",
 ]
 
 [project.optional-dependencies]

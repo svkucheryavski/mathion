@@ -182,6 +182,8 @@ def _bare_urls(state: StateCore) -> None:
 
 def _href_survives(href: str) -> bool:
     """Whether nh3 keeps this href, asked of nh3 itself with the same schemes."""
+    if href.startswith("//"):
+        href = "https:" + href  # nh3 passes relative URLs unchecked; judge the host
     probe = nh3.clean(
         f'<a href="{html.escape(href, quote=True)}">x</a>',
         tags={"a"}, attributes={"a": {"href"}}, url_schemes=_URL_SCHEMES, link_rel=None,
@@ -192,9 +194,8 @@ def _href_survives(href: str) -> bool:
 def _drop_bad_links(state: StateCore) -> None:
     """Polish 3 C11: nh3 drops an href it cannot parse (a bad port, a bad escape,
     no host) and would keep an <a> with none, a dead link. Such a link, bare or
-    authored, stays its text. Checked on the tokens, not on nh3's output: nh3
-    leaves < and > unescaped inside attribute values, so no pattern over its
-    HTML is exact. Links do not nest, so the next link_close is the partner.
+    authored, stays its text. Checked on the tokens, not by a pattern over
+    nh3's output. Links do not nest, so the next link_close is the partner.
     """
     for block in state.tokens:
         if block.type != "inline" or not block.children:
@@ -409,6 +410,25 @@ def _render_inline_as_text(self, tokens, options, env) -> str:
 
 
 _md = MarkdownIt("commonmark", {"html": False})
+_AUTHORITY = re.compile(r"(?:[a-z][a-z0-9+.-]*:)?//([^/?#]*)", re.IGNORECASE)
+
+
+def _bracket_host(url: str) -> bool:
+    """Whether the host, after the last @ of the authority, starts with [."""
+    m = _AUTHORITY.match(url)
+    return bool(m) and m.group(1).rpartition("@")[2].startswith("[")
+
+
+def _keep_brackets(normalize: Callable[[str], str]) -> Callable[[str], str]:
+    """markdown-it unwraps a bracketed host that is not IPv6; keep it, so nh3 drops the link."""
+    def run(url: str) -> str:
+        out = normalize(url)
+        return url if _bracket_host(url) and not _bracket_host(out) else out
+    return run
+
+
+_md.normalizeLink = _keep_brackets(_md.normalizeLink)  # type: ignore[method-assign]
+_md.normalizeLinkText = _keep_brackets(_md.normalizeLinkText)  # type: ignore[method-assign]
 _md.renderer.renderInlineAsText = types.MethodType(_render_inline_as_text, _md.renderer)
 _md.core.ruler.push("loose_lists", _loose_lists)
 _md.core.ruler.before("text_join", "bare_url", _bare_urls)
