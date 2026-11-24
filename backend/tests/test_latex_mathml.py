@@ -1,5 +1,6 @@
 import html
 import random
+import time
 import unicodedata
 import xml.etree.ElementTree as ET
 
@@ -406,7 +407,7 @@ STRUCT = [  # each expected string is the whole body inside the top <mrow>
     (r"\bigl( -x", f'<mrow><mspace height="0.85em" depth="0.35em"/><mo stretchy="true" minsize="1.2em" maxsize="1.2em">(</mo></mrow>{UNARY_MINUS}<mi>x</mi>'),
     (r"a\big.b", "<mi>a</mi><mi>b</mi>"),
     (r"a \over b", "<mfrac><mi>a</mi><mi>b</mi></mfrac>"),
-    (r"{n+1 \over 2}", "<mfrac><mrow><mi>n</mi><mo>+</mo><mn>1</mn></mrow><mn>2</mn></mfrac>"),
+    (r"{n+1 \over 2}", f"<mfrac><mrow><mi>n</mi><mo{TIGHT}>+</mo><mn>1</mn></mrow><mn>2</mn></mfrac>"),
     (r"{\over b}", "<mfrac><mrow/><mi>b</mi></mfrac>"),
     (r"{a \over -b}", f"<mfrac><mi>a</mi><mrow>{UNARY_MINUS}<mi>b</mi></mrow></mfrac>"),
     (r"a \displaystyle b \textstyle c", '<mi>a</mi><mstyle displaystyle="true" scriptlevel="0"><mi>b</mi></mstyle><mstyle displaystyle="false" scriptlevel="0"><mi>c</mi></mstyle>'),
@@ -1321,3 +1322,149 @@ def test_grammar_fuzz_gives_mathml_the_sanitiser_keeps():
         ET.fromstring(out)
         assert _events(_clean(out)) == _events(out), src   # the sanitiser strips nothing
     assert typeset > 200                                 # the grammar mostly builds valid formulas
+
+
+# --- TeX styles (math round 2026-11-24; expectations measured in pdflatex) ---
+
+def _mos(src, display):
+    root = ET.fromstring(latex_to_mathml(src, display))
+    return [e for e in root.iter() if e.tag == "mo"]
+
+
+def _op(src, display, op, nth=0):
+    return [e for e in _mos(src, display) if e.text == op][nth]
+
+
+@pytest.mark.parametrize("src, display, op, nth, tight", [
+    (r"\frac{a+b}{c}", False, "+", 0, True),
+    (r"\frac{a+b}{c}", True, "+", 0, False),
+    (r"\tfrac{a+b}{2}", False, "+", 0, True),
+    (r"\dfrac{a+b}{c}", True, "+", 0, False),
+    (r"\binom{a+b}{c}", False, "+", 0, True),
+    (r"x^{\frac{a+b}{2}}", False, "+", 0, True),
+    (r"\frac{a}{\frac{b+c}{d}}", False, "+", 0, True),
+    (r"\frac{x,y\le z}{2}", False, ",", 0, True),
+    (r"\frac{x,y\le z}{2}", False, "≤", 0, True),
+    (r"\frac{\displaystyle a+b}{c}", False, "+", 0, False),
+    (r"\frac{\sin x+\sum_i\left(y\right)}{2}", False, "+", 0, True),
+    (r"\frac{\sin x+\sum_i\left(y\right)}{2}", True, "+", 0, False),
+    (r"a+b\over c", False, "+", 0, True),
+    (r"{\displaystyle a\over b+c}", False, "+", 0, True),
+    (r"{\frac{a+b}{c}\over d}", True, "+", 0, True),
+    (r"{{a+b\over c}\over d}", True, "+", 0, True),
+    (r"\stackrel{a+b}{=}", False, "+", 0, True),
+    (r"e^{x+y}", False, "+", 0, True),
+    (r"\tfrac{a+b}{2}", True, "+", 0, True),
+    (r"\dfrac{a+b}{2}", False, "+", 0, False),
+    (r"x^{\tfrac{a+b}{2}}", False, "+", 0, True),
+    (r"x^{\tfrac{1}{e^{b+c}}}", False, "+", 0, True),
+    (r"x^{\tfrac{1}{e^{b+c}}}", True, "+", 0, True),
+    (r"\frac{\tfrac{a+b}{2}}{3}", False, "+", 0, True),
+    (r"\sqrt[\tfrac{1}{e^{b+c}}]{2}", False, "+", 0, True),
+    (r"{\displaystyle a+b\over c}", False, "+", 0, False),
+    (r"{a+b\choose c}", False, "+", 0, True),
+    # the look-ahead finds only this group's own \over
+    (r"{\sqrt[a\over b]{x}+c}", False, "+", 0, False),
+    (r"{\left]a\right]+b}", False, "+", 0, False),
+    (r"{\left]a\right]+b\over c}", False, "+", 0, True),
+    (r"{\left(a\middle]b\right)+c}", False, "+", 0, False),
+    (r"{\bigr] a+b}", False, "+", 0, False),
+    (r"{\text{a\}} a+b}", False, "+", 0, False),
+    (r"{\overline{a}+b}", False, "+", 0, False),
+    (r"\sqrt[{[n]}]{x}+\frac{a+b}{c}\over d", True, "+", 1, True),
+])
+def test_tex_style_spacing(src, display, op, nth, tight):
+    mo = _op(src, display, op, nth)
+    assert (mo.get("lspace") == "0em" and mo.get("rspace") == "0em") is tight
+
+
+@pytest.mark.parametrize("display, spaces", [(False, 1), (True, 2)])
+def test_thin_spaces_in_script_style(display, spaces):
+    # The thin space after \sin stays in S; the one before \left (Op–Inner) does not.
+    out = latex_to_mathml(r"\frac{\sin x+\sum_i\left(y\right)}{2}", display)
+    assert out.count('<mspace width="0.1667em"/>') == spaces
+
+
+@pytest.mark.parametrize("src", [r"\frac{f\colon X\to Y}{2}", r"x^{f\colon X\to Y}"])
+def test_colon_keeps_after_space_in_scripts(src):
+    mo = _op(src, False, ":")
+    assert mo.get("lspace") == "0em" and mo.get("rspace") not in (None, "0em")
+
+
+def _bracket(src, display):
+    mo = next(e for e in _mos(src, display) if e.get("fence") == "true")   # the \\left bracket
+    if mo.get("stretchy") == "false":
+        return "normal"
+    return "big" if mo.get("minsize") == "1.2em" else "grow"
+
+
+@pytest.mark.parametrize("src, level", [
+    (r"\frac{\left(\lim_n a\right)}{2}", "normal"),
+    (r"{\left(\lim_n c\right)\over b}", "normal"),
+    (r"{\sqrt{\left(\lim_n c\right)}\over b}", "normal"),
+    (r"\left( x^{\lim_n a} \right)", "normal"),   # pdflatex: \big from letter heights, not modelled
+    (r"x^{\left(\lim_n a\right)}", "normal"),
+    (r"\sqrt{\left(\lim_n a\right)}", "grow"),
+    (r"\sqrt[\left(\lim_n a\right)]{x}", "normal"),
+    (r"\left(a+b\over c\right)", "grow"),
+    (r"{\left(\lim_n c\right)\choose b}", "normal"),
+    (r"\sqrt[\text{a]}]{x}\left(\lim_n a\right)\over d", "normal"),
+])
+def test_tex_style_brackets(src, level):
+    assert _bracket(src, True) == level
+
+
+def test_tex_style_brackets_inline():
+    assert _bracket(r"\frac{\left(\lim_n a\right)}{2}", False) == "normal"
+
+
+def test_display_sum_unchanged():
+    assert latex_to_mathml(r"\sum_{i=1}^{n} x_i", True) == (
+        '<math display="block"><semantics><mrow><munderover><mo largeop="true" movablelimits="true" '
+        'lspace="0em" rspace="0em">∑</mo><mrow><mi>i</mi><mo lspace="0em" rspace="0em">=</mo><mn>1</mn>'
+        '</mrow><mi>n</mi></munderover><mspace width="0.1667em"/><msub><mi>x</mi><mi>i</mi></msub></mrow>'
+        '<annotation encoding="application/x-tex">\\sum_{i=1}^{n} x_i</annotation></semantics></math>'
+    )
+
+
+def _nested_over(depth, inside):
+    src = "a"
+    for _ in range(depth):
+        src = r"{\left(" + src + r"\right)\over z}" if inside else r"{\left(a\right)" + src + r"\over z}"
+    return src
+
+
+@pytest.mark.parametrize("inside, floor", [(True, 19), (False, 38)])
+def test_nested_over_left_converts_fast(inside, floor):
+    depth = 40
+    while depth:
+        src = _nested_over(depth, inside)
+        try:
+            latex_to_mathml(src, True)
+            break
+        except LatexError as exc:
+            assert exc.reason == "formula nested too deeply"
+            depth -= 1
+    assert depth >= floor
+    src = src + "+a" * ((2000 - len(src)) // 2)
+    start = time.perf_counter()
+    latex_to_mathml(src, True)
+    assert time.perf_counter() - start < 0.5
+
+
+def test_look_ahead_stops_past_max_depth(monkeypatch):
+    # Counted, not timed: deep unmatched groups must not make the look-ahead quadratic.
+    from mathion import latex_mathml
+    calls = 0
+    real = latex_mathml.Parser.peek
+
+    def counting(self):
+        nonlocal calls
+        calls += 1
+        return real(self)
+
+    monkeypatch.setattr(latex_mathml.Parser, "peek", counting)
+    src = "{" * 1000 + r"\right." * 142
+    with pytest.raises(LatexError, match="nested too deeply"):
+        latex_to_mathml(src, False)
+    assert calls < 10 * len(src)
