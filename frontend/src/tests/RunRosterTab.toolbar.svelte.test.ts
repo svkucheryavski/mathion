@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunRosterTab from '../components/runs/RunRosterTab.svelte';
 import type { GroupResponse, RunStudentResponse } from '../lib/types';
+import { settle } from './support/settle';
 
 // Slice 6c Task 3 (10b): the draft banner, the toolbar, the add row behind +
 // (D25), the empty state and the no-match lines. §Focus › Roster.
@@ -27,11 +28,6 @@ function resp(body: unknown, status = 200): Response {
   } as unknown as Response;
 }
 const jres = (body: unknown, status = 200) => Promise.resolve(resp(body, status));
-
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
-}
 
 const student = (id: number, over: Partial<RunStudentResponse> = {}): RunStudentResponse => ({
   id,

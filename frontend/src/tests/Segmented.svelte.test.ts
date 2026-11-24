@@ -1,6 +1,7 @@
 import { it, expect, afterEach } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import Segmented from '../components/ui/Segmented.svelte';
+import { settle } from './support/settle';
 
 let target: HTMLDivElement;
 let cmp: ReturnType<typeof mount> | null = null;
@@ -82,8 +83,7 @@ it('frozen keeps the radios enabled, marks them aria-disabled and ignores a clic
   expect(target.querySelector('.segmented')!.classList.contains('disabled')).toBe(false);
   radios()[0].click();
   segments()[2].click();
-  await Promise.resolve();
-  flushSync();
+  await settle();
   expect(state.value).toBe(7);
   expect(radios().map((r) => r.checked)).toEqual([false, true, false]);
   expect(seen).toEqual([]);

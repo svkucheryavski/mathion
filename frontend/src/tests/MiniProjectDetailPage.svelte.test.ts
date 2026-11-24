@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mount, unmount, flushSync, tick } from 'svelte';
+import { mount, unmount, flushSync } from 'svelte';
 
 // Mock the student-MP wire layer BEFORE importing the page so the page's
 // import binding resolves to the mock. We re-export the real REASON_LABELS /
@@ -51,6 +51,7 @@ import type {
   StudentGroupSummary,
   StudentMiniProjectListItem,
 } from '../lib/types';
+import { settle } from './support/settle';
 
 let target: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
@@ -99,11 +100,6 @@ afterEach(() => {
     Object.defineProperty(Document.prototype, 'visibilityState', ORIG_VISIBILITY_DESCRIPTOR);
   }
 });
-
-async function settle() {
-  for (let i = 0; i < 8; i++) await tick();
-  flushSync();
-}
 
 // ---- Fixture builders ----
 

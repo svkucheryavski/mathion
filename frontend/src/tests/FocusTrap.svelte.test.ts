@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync, createRawSnippet } from 'svelte';
 import type { Snippet } from 'svelte';
 import FocusTrap from '../components/ui/FocusTrap.svelte';
+import { settle } from './support/settle';
 
 const noopSnippet = (() => '') as unknown as Snippet;
 
@@ -87,7 +88,6 @@ describe('FocusTrap', () => {
 
   // ---- Polish 3 C7 point 5 (F5): the autofocus target must be able to hold focus.
   const html = (markup: string) => createRawSnippet(() => ({ render: () => `<div>${markup}</div>` }));
-  const micro = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
 
   it('autofocus skips a disabled match and falls through to the next, then the first [tabindex=-1]', async () => {
     component = mount(FocusTrap, {
@@ -96,7 +96,7 @@ describe('FocusTrap', () => {
                children: html('<button id="a" disabled>A</button><button id="b" aria-disabled="true">B</button>') },
     });
     flushSync();
-    await micro();
+    await settle();
     expect(document.activeElement?.id).toBe('b');      // aria-disabled holds focus
     unmount(component); component = null;
 
@@ -106,7 +106,7 @@ describe('FocusTrap', () => {
                children: html('<section id="p" tabindex="-1"><button id="a" disabled>A</button></section>') },
     });
     flushSync();
-    await micro();
+    await settle();
     expect(document.activeElement?.id).toBe('p');
     unmount(component); component = null;
 
@@ -117,7 +117,7 @@ describe('FocusTrap', () => {
                children: html('<span><button id="a" disabled>A</button><span inert><button id="i">I</button></span><button id="c">C</button></span>') },
     });
     flushSync();
-    await micro();
+    await settle();
     expect(document.activeElement?.id).toBe('c');
   });
 
@@ -133,7 +133,7 @@ describe('FocusTrap', () => {
   async function openAndClose() {
     component = mount(FocusTrap, { target, props: { children: html('<button id="in">In</button>') } });
     flushSync();
-    await micro();
+    await settle();
     unmount(component); component = null;
   }
 
@@ -247,7 +247,7 @@ describe('FocusTrap', () => {
                children: html('<button id="x">X</button><button id="a" data-autofocus disabled>A</button><button id="b" data-autofocus>B</button>') },
     });
     flushSync();
-    await micro();
+    await settle();
     expect(document.activeElement?.id).toBe('b');
   });
 });

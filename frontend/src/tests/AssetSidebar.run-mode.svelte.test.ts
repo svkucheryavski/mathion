@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mount, unmount, flushSync } from 'svelte';
+import { mount, unmount } from 'svelte';
 import AssetSidebar from '../components/editor/AssetSidebar.svelte';
 import { runAssetContext } from '../lib/assetContext';
 import type { AssetItem } from '../lib/assetContext';
+import { settle } from './support/settle';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -25,11 +26,6 @@ function jres(body: unknown, status = 200) {
     json: () => Promise.resolve(body),
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response);
-}
-
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
 }
 
 let cleanup: (() => void) | null = null;

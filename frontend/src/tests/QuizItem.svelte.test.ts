@@ -22,6 +22,7 @@ import type {
   QuizRevealResponse,
   QuizSubmitResponse,
 } from '../lib/types';
+import { settle } from './support/settle';
 
 const MAX = 3;
 
@@ -125,12 +126,6 @@ function render(item: QuizItemType): HTMLDivElement {
   component = mount(QuizItem, { target: host, props: reactiveProps });
   flushSync();
   return host;
-}
-
-/** Drain microtasks (awaited continuations) and re-flush the reactive graph. */
-async function settle(): Promise<void> {
-  await new Promise((r) => setTimeout(r, 0));
-  flushSync();
 }
 
 /** Pick the first option of every question so `allAnswered` turns true. */

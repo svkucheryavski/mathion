@@ -1,8 +1,9 @@
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest';
-import { mount, unmount, flushSync, tick } from 'svelte';
+import { mount, unmount, flushSync } from 'svelte';
 
 import RunProgressTab from '../components/runs/RunProgressTab.svelte';
 import { rect, stubZoom } from './support/zoomStubs';
+import { settle } from './support/settle';
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
@@ -52,11 +53,6 @@ function progressMock(overrides: Record<string, unknown> = {}) {
     ],
     ...overrides,
   };
-}
-
-async function settle() {
-  await tick(); await tick(); await tick();
-  flushSync();
 }
 
 describe('RunProgressTab', () => {

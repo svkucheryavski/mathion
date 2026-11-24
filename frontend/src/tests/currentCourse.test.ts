@@ -8,13 +8,7 @@ import {
   __test__setSlots,
 } from '../stores/currentCourse.svelte';
 import { ApiError } from '../lib/api';
-
-// 12-tick microtask drainer — mirrors tests/RunDetailPage.svelte.test.ts:83-86.
-// `api.get` internally chains await fetch → await response.json → return body,
-// so the queued Promise.all in loadCourse needs several microtasks to fan out.
-async function settle(): Promise<void> {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-}
+import { settle } from './support/settle';
 
 // Local typed deferred helper for ordered-resolution tests. We do NOT use
 // `Promise.withResolvers()` — it's not in this project's TS lib types and

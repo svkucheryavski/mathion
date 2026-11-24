@@ -11,6 +11,7 @@ vi.mock('../stores/toasts.svelte', async (importOriginal) => {
 });
 
 import { pushToast } from '../stores/toasts.svelte';
+import { settle } from './support/settle';
 
 const fetchSpy = vi.fn();
 
@@ -46,11 +47,6 @@ function held() {
   let release!: (r: Response) => void;
   const p = new Promise<Response>((r) => { release = r; });
   return { p, release };
-}
-
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
 }
 
 type Extra = {

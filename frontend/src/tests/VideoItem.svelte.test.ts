@@ -17,6 +17,7 @@ vi.mock('../lib/coverage.svelte', () => ({
 import VideoItem from '../components/items/VideoItem.svelte';
 import { createCoverageTracker } from '../lib/coverage.svelte';
 import type { VideoItem as VItem } from '../lib/types';
+import { settle } from './support/settle';
 
 const vidItem = (over: Partial<VItem> = {}): VItem => ({
   id: 9, sequence_id: 2, title: 'Determinants', slug: 'det', order: 1,
@@ -91,8 +92,7 @@ it('marks covered exactly once when "Mark as watched" is clicked', async () => {
   const target = render({ isCovered: false });
   const btn = target.querySelector('button')!;
   btn.click();
-  await Promise.resolve(); await Promise.resolve();
-  flushSync();
+  await settle();
   expect(markCovered).toHaveBeenCalledTimes(1);
 });
 

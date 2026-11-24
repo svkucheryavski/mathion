@@ -9,6 +9,7 @@ vi.mock('../stores/toasts.svelte', async (importOriginal) => {
 });
 
 import { pushToast } from '../stores/toasts.svelte';
+import { settle } from './support/settle';
 
 const fetchSpy = vi.fn();
 beforeEach(() => {
@@ -30,11 +31,6 @@ function jres(body: unknown, status = 200) {
     json: () => Promise.resolve(body),
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response);
-}
-
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
 }
 
 // Test helpers — mirror the canonical pattern in AppHeader.svelte.test.ts and

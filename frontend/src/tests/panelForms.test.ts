@@ -7,6 +7,7 @@ import { CourseForm } from '../lib/panelForms/courseForm.svelte';
 import { SignInForm } from '../lib/panelForms/signInForm.svelte';
 import { LimitsForm } from '../lib/panelForms/limitsForm.svelte';
 import type { PanelEmailSettings } from '../lib/superuser';
+import { settle } from './support/settle';
 
 // Set up §6: the six panel forms, shared by the Settings, Branding and Courses
 // dialogs and the Set up steps. Each keeps the dialog's behaviour.
@@ -193,7 +194,6 @@ describe('LogoPick (Branding D4-D6)', () => {
     };
   });
   afterEach(() => { delete (HTMLImageElement.prototype as { decode?: unknown }).decode; });
-  const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 
   it('of two quick choices, the last one wins', async () => {
     const p = new LogoPick('logo');

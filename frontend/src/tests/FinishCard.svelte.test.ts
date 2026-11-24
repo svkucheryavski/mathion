@@ -4,6 +4,7 @@ import FinishCard from '../components/superuser/FinishCard.svelte';
 import { SetupStore } from '../lib/setupStore.svelte';
 import type { PanelSetup } from '../lib/setup';
 import * as router from '../lib/router.svelte';
+import { settle } from './support/settle';
 
 // Set up D12: the Finish setting up card on the Dashboard.
 
@@ -19,7 +20,6 @@ function state(done: boolean[], over: Partial<PanelSetup> = {}): PanelSetup {
 function jsonResponse(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 
 let target: HTMLDivElement;
 let cmp: ReturnType<typeof mount> | null = null;

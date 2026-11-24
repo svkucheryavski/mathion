@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { flushSync } from 'svelte';
 import { InPlaceAsk, PageAsk, focusIsFree, usable, refused, settleTo, moveOn, withdraw, firstUsable, canHoldFocus, repairFocus, DISCARD_ASK, type Answer, type Ask, type AskHost } from '../lib/askInPlace.svelte';
 import { DISCARD, DISCARD_CONTINUE } from '../lib/editorReasons';
+import { settle } from './support/settle';
 
 const Q = (over: Partial<Ask> = {}): Ask =>
   ({ warning: 'Delete it?', confirmLabel: 'Delete', tone: 'danger', confirmDataAction: 'confirm-x', ...over }) as Ask;
-const flush = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
 
 // A hand-made host: what <AskSlot> draws, enough for focus and answer().
 let host: HTMLDivElement;
@@ -241,7 +241,7 @@ describe('PageAsk — the host stack and the guard (R46, R53)', () => {
     r.dismiss();
     r.focusCancel();
     expect(await r.promise).toBe(false);
-    await flush();
+    await settle();
   });
 });
 
@@ -318,7 +318,7 @@ describe('settleTo / moveOn / withdraw (Task 3, R54, R57, R49)', () => {
     withdraw(a, q, () => t);
     expect(a.open).toBe(false);
     host.innerHTML = '';                       // the slot unmounts
-    await flush();
+    await settle();
     expect(document.activeElement).toBe(t);
   });
 });

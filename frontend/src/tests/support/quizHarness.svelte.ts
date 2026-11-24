@@ -11,6 +11,7 @@ import { toasts, clearToasts } from '../../stores/toasts.svelte';
 import type { AdminTreeItem, AdminTreeVersion } from '../../lib/types';
 import type { AuthoringOption, AuthoringQuestion } from '../../lib/quizAuthoring';
 import type { DirtyRegistry } from '../../lib/dirtyRegistry.svelte';
+import { settle } from './settle';
 
 export function resp(body: unknown, status = 200): Response {
   return {
@@ -20,10 +21,8 @@ export function resp(body: unknown, status = 200): Response {
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response;
 }
-// 30 microtask rounds: a failed answer write runs request → track → locked's
-// awaited reload → send → track → commit before the field shows its error.
-// Intermediate states are always tested with hold(), so a deep settle hides nothing.
-export async function settle() { for (let i = 0; i < 30; i++) await Promise.resolve(); flushSync(); }
+// Intermediate states are always tested with hold(), so a full settle hides nothing.
+export { settle };
 
 export function q(over: Partial<AuthoringQuestion> & { id: number }): AuthoringQuestion {
   return {

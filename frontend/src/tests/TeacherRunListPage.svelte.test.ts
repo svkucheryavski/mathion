@@ -12,6 +12,7 @@ import TeachingRouteHarness from './support/TeachingRouteHarness.svelte';
 import * as router from '../lib/router.svelte';
 import { expectRoutesInApp } from './support/routeClickProbe';
 import { runStatus } from '../lib/runStatus';
+import { settle } from './support/settle';
 
 function mockFetch(status: number, body: unknown) {
   return vi.fn(async () => new Response(JSON.stringify(body), {
@@ -47,12 +48,6 @@ function row(extra: Partial<{
     student_count: 0,
     ...extra,
   };
-}
-
-// Drain microtasks so async load() completes, then flush Svelte reactivity.
-async function settle() {
-  for (let i = 0; i < 8; i++) await Promise.resolve();
-  flushSync();
 }
 
 function nodeByText(target: HTMLElement, text: string | RegExp): HTMLElement | null {

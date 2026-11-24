@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync, createRawSnippet, type ComponentProps } from 'svelte';
 import DangerConfirm from '../components/ui/DangerConfirm.svelte';
+import { settle } from './support/settle';
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
@@ -30,8 +31,6 @@ function tick(box: HTMLInputElement) {
   box.click();
   flushSync();
 }
-
-async function settle() { for (let i = 0; i < 6; i++) await Promise.resolve(); flushSync(); }
 
 describe('DangerConfirm (handoff §4 Confirm-then-act)', () => {
   it('focus goes to the "I understand" box on open', () => {
@@ -203,7 +202,7 @@ describe('DangerConfirm — opened busy (fix-pass review r6)', () => {
     expect(document.activeElement).not.toBe(box);
     props.busy = false;
     flushSync();
-    await Promise.resolve(); await Promise.resolve();
+    await settle();
     expect(document.activeElement).toBe(box);
     unmount(cmp);
     target.remove();
@@ -218,7 +217,7 @@ describe('DangerConfirm — opened busy (fix-pass review r6)', () => {
     elsewhere.focus();
     props.busy = false;
     flushSync();
-    await Promise.resolve(); await Promise.resolve();
+    await settle();
     expect(document.activeElement).toBe(elsewhere);
     elsewhere.remove();
     unmount(cmp);

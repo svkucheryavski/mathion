@@ -5,6 +5,7 @@ import type { AssetResponse } from '../lib/assets';
 import type { AssetContext, AssetItem } from '../lib/assetContext';
 import { ApiError } from '../lib/api';
 import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
+import { settle } from './support/settle';
 
 const mkAsset = (overrides: Partial<AssetResponse> = {}): AssetResponse => ({
   id: 1,
@@ -71,7 +72,7 @@ describe('MarkdownEditor — sidebar mount', () => {
 
   it('mounts AssetSidebar in Edit mode and unmounts it in Preview mode', async () => {
     const { target } = mountEditor();
-    await Promise.resolve(); flushSync();
+    await settle();
     expect(target.querySelector('[data-testid="asset-sidebar"]')).toBeTruthy();
     const previewBtn = Array.from(target.querySelectorAll<HTMLElement>('button')).find(
       (b) => b.textContent === 'Preview',
@@ -83,7 +84,7 @@ describe('MarkdownEditor — sidebar mount', () => {
 
   it('does NOT mount AssetSidebar in readOnly mode', async () => {
     const { target } = mountEditor({ readOnly: true });
-    await Promise.resolve(); flushSync();
+    await settle();
     expect(target.querySelector('[data-testid="asset-sidebar"]')).toBeNull();
   });
 });
@@ -97,7 +98,7 @@ describe('MarkdownEditor — click insert at cursor', () => {
 
   it('clicking a sidebar row inserts the markdown reference at end-of-content when textarea not focused', async () => {
     const { target, propsRef } = mountEditor({ value: 'hello' });
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const row = target.querySelector<HTMLElement>('[data-testid="asset-row-1"]')!;
     const clickBtn = row.querySelector<HTMLElement>('.row-click')!;
     clickBtn.click();
@@ -107,7 +108,7 @@ describe('MarkdownEditor — click insert at cursor', () => {
 
   it('clicking a sidebar row inserts at the textarea cursor position when textarea has been focused', async () => {
     const { target, propsRef } = mountEditor({ value: 'hello world' });
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
     ta.focus();
     ta.setSelectionRange(5, 5);
@@ -131,7 +132,7 @@ describe('MarkdownEditor — cursorReady', () => {
 
   it('cursorReady flips to true on textarea first focus and the banner disappears', async () => {
     const { target } = mountEditor();
-    await Promise.resolve(); flushSync();
+    await settle();
     expect(target.querySelector('[data-testid="cursor-banner"]')).toBeTruthy();
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
     ta.focus();
@@ -142,7 +143,7 @@ describe('MarkdownEditor — cursorReady', () => {
 
   it('cursorReady flips to true on first onInsert call even before textarea focus', async () => {
     const { target } = mountEditor({ value: 'hello' });
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     expect(target.querySelector('[data-testid="cursor-banner"]')).toBeTruthy();
     const row = target.querySelector<HTMLElement>('[data-testid="asset-row-1"]')!;
     const clickBtn = row.querySelector<HTMLElement>('.row-click')!;
@@ -159,7 +160,7 @@ describe('MarkdownEditor — value prop bind:value', () => {
 
   it('typing in the textarea updates parent value', async () => {
     const { target, propsRef } = mountEditor({ value: 'start' });
-    await Promise.resolve(); flushSync();
+    await settle();
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
     ta.value = 'changed';
     ta.dispatchEvent(new Event('input', { bubbles: true }));
@@ -186,7 +187,7 @@ describe('MarkdownEditor — textarea drop', () => {
     const uploadSpy = (stubCtx.upload as ReturnType<typeof vi.fn>)
       .mockResolvedValue(mkAsset({ filename: 'dropped.png', mime_type: 'image/png' }));
     const { target, propsRef } = mountEditor({ value: 'abc', refreshKey: 0 });
-    await Promise.resolve(); flushSync();
+    await settle();
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
     ta.focus();
     ta.setSelectionRange(1, 1);
@@ -199,8 +200,7 @@ describe('MarkdownEditor — textarea drop', () => {
     ta.dispatchEvent(ev);
     expect(preventSpy).toHaveBeenCalled();
     expect(stopSpy).toHaveBeenCalled();
-    await Promise.resolve(); flushSync();
-    await Promise.resolve(); flushSync();
+    await settle();
     expect(uploadSpy).toHaveBeenCalledWith(file, expect.any(AbortSignal));
     expect(propsRef.value).toBe('a\n![dropped](dropped.png)\nbc');
     expect(propsRef.refreshKey).toBe(1);
@@ -215,15 +215,15 @@ describe('MarkdownEditor — textarea drop', () => {
     (stubCtx.upload as ReturnType<typeof vi.fn>)
       .mockReturnValue(new Promise<AssetItem>((r) => { resolveUpload = r; }));
     const { target, propsRef } = mountEditor({ value: 'abc', disabled: false });
-    await Promise.resolve(); flushSync();
+    await settle();
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
     const file = new File(['x'], 'late.png', { type: 'image/png' });
     ta.dispatchEvent(makeDropEvent([file], ta));        // drop starts while unlocked → upload pending
-    await Promise.resolve(); flushSync();
+    await settle();
     propsRef.disabled = true;                            // §7.2 lock engages mid-upload
-    await Promise.resolve(); flushSync();
+    await settle();
     resolveUpload(mkAsset({ filename: 'late.png', mime_type: 'image/png' }));  // resolves while frozen
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     expect(propsRef.value).toBe('abc');                 // insert blocked — markdown untouched
   });
 
@@ -232,12 +232,12 @@ describe('MarkdownEditor — textarea drop', () => {
       mkAsset({ filename: 'fb.png', mime_type: 'image/png' }),
     );
     const { target, propsRef } = mountEditor({ value: 'abc' });
-    await Promise.resolve(); flushSync();
+    await settle();
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
     const file = new File(['x'], 'fb.png', { type: 'image/png' });
     const ev = makeDropEvent([file], ta);
     ta.dispatchEvent(ev);
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     expect(propsRef.value).toBe('abc\n![fb](fb.png)\n');
   });
 
@@ -246,7 +246,7 @@ describe('MarkdownEditor — textarea drop', () => {
       mkAsset({ filename: 'bubble.png', mime_type: 'image/png' }),
     );
     const { target } = mountEditor({ value: 'x' });
-    await Promise.resolve(); flushSync();
+    await settle();
     const wrapper = target.querySelector<HTMLElement>('.edit-content')!;
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
     const wrapperDropListener = vi.fn();
@@ -257,7 +257,7 @@ describe('MarkdownEditor — textarea drop', () => {
     Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
     ta.dispatchEvent(ev);
     expect(wrapperDropListener).not.toHaveBeenCalled();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     wrapper.removeEventListener('drop', wrapperDropListener);
   });
 });
@@ -271,7 +271,7 @@ describe('MarkdownEditor — wrapper (.edit-content) drop', () => {
     const uploadSpy = (stubCtx.upload as ReturnType<typeof vi.fn>)
       .mockResolvedValue(mkAsset({ filename: 'wd.png', mime_type: 'image/png' }));
     const { target, propsRef } = mountEditor({ value: 'abc', refreshKey: 0 });
-    await Promise.resolve(); flushSync();
+    await settle();
     const wrapper = target.querySelector<HTMLElement>('.edit-content')!;
     const file = new File(['x'], 'wd.png', { type: 'image/png' });
     const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
@@ -281,7 +281,7 @@ describe('MarkdownEditor — wrapper (.edit-content) drop', () => {
     ev.preventDefault = preventSpy;
     wrapper.dispatchEvent(ev);
     expect(preventSpy).toHaveBeenCalled();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     expect(uploadSpy).toHaveBeenCalledWith(file, expect.any(AbortSignal));
     expect(propsRef.value).toBe('abc');
     expect(propsRef.refreshKey).toBe(1);
@@ -300,7 +300,7 @@ describe('MarkdownEditor — re-entrancy guard', () => {
       .mockReturnValueOnce(firstPromise)
       .mockResolvedValueOnce(mkAsset({ filename: 'second.png' }));
     const { target } = mountEditor({ value: '' });
-    await Promise.resolve(); flushSync();
+    await settle();
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
     const f1 = new File(['x'], 'first.png', { type: 'image/png' });
     const f2 = new File(['y'], 'second.png', { type: 'image/png' });
@@ -321,7 +321,7 @@ describe('MarkdownEditor — re-entrancy guard', () => {
     expect(ev2Stop).toHaveBeenCalled();
     expect(uploadSpy).toHaveBeenCalledTimes(1);
     resolveFirst(mkAsset({ filename: 'first.png' }));
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
   });
 });
 
@@ -337,7 +337,7 @@ describe('MarkdownEditor — multi-file batch with mid-error', () => {
       .mockRejectedValueOnce(new ApiError(400, 'File size 999 exceeds max 100'))
       .mockResolvedValueOnce(mkAsset({ filename: '4.png' }));
     const { target } = mountEditor({ value: '' });
-    await Promise.resolve(); flushSync();
+    await settle();
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
     const files = [1, 2, 3, 4].map(
       (n) => new File(['x'], `${n}.png`, { type: 'image/png' }),
@@ -349,8 +349,7 @@ describe('MarkdownEditor — multi-file batch with mid-error', () => {
     // Drain ~3 await chains: one per uploadOne invocation. Each iteration =
     // uploadOne's await + $bindable propagation + outer-loop continuation.
     for (let i = 0; i < 8; i++) {
-      await Promise.resolve();
-      flushSync();
+      await settle();
     }
     const err = target.querySelector('[data-testid="upload-error"]');
     expect(err?.textContent).toContain('Upload stopped at file 3 of 4');
@@ -365,14 +364,14 @@ describe('MarkdownEditor — 409 duplicate upload rename hint', () => {
       new ApiError(409, "Asset 'foo.png' already exists in this version"),
     );
     const { target } = mountEditor({ value: 'abc' });
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
     const file = new File(['x'], 'foo.png', { type: 'image/png' });
     const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
     Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
     ev.preventDefault = vi.fn(); ev.stopPropagation = vi.fn();
     ta.dispatchEvent(ev);
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const err = target.querySelector('[data-testid="upload-error"]');
     expect(err?.textContent).toContain("Asset 'foo.png' already exists in this version");
     expect(err?.textContent).toContain('Rename the file on disk and re-upload.');
@@ -387,14 +386,14 @@ describe('MarkdownEditor — 409 duplicate upload rename hint', () => {
       detail: 'plain-object detail from non-Error throw',
     });
     const { target } = mountEditor({ value: 'abc' });
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
     const file = new File(['x'], 'x.png', { type: 'image/png' });
     const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
     Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
     ev.preventDefault = vi.fn(); ev.stopPropagation = vi.fn();
     ta.dispatchEvent(ev);
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const err = target.querySelector('[data-testid="upload-error"]');
     expect(err?.textContent).toContain('plain-object detail from non-Error throw');
     expect(err?.textContent).not.toContain('[object Object]');
@@ -409,14 +408,14 @@ describe('MarkdownEditor — 409 duplicate upload rename hint', () => {
       new Error('boom: assetContext exploded'),
     );
     const { target } = mountEditor({ value: 'abc' });
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
     const file = new File(['x'], 'x.png', { type: 'image/png' });
     const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
     Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
     ev.preventDefault = vi.fn(); ev.stopPropagation = vi.fn();
     ta.dispatchEvent(ev);
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const err = target.querySelector('[data-testid="upload-error"]');
     expect(err?.textContent).toContain('boom: assetContext exploded');
     expect(err?.textContent).not.toContain('Upload failed');
@@ -428,7 +427,7 @@ describe('MarkdownEditor — 409 duplicate upload rename hint', () => {
       new ApiError(400, 'Extension not allowed'),
     );
     const { target } = mountEditor({ value: 'abc' });
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
     // An allowed name: the browser now refuses a .exe before the server sees
     // it (review t4-r12), and this is the server's refusal.
@@ -437,7 +436,7 @@ describe('MarkdownEditor — 409 duplicate upload rename hint', () => {
     Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
     ev.preventDefault = vi.fn(); ev.stopPropagation = vi.fn();
     ta.dispatchEvent(ev);
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const err = target.querySelector('[data-testid="upload-error"]');
     expect(err?.textContent).toContain('Extension not allowed');
     expect(err?.textContent).not.toContain('Rename the file on disk and re-upload.');
@@ -447,14 +446,14 @@ describe('MarkdownEditor — 409 duplicate upload rename hint', () => {
     (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (stubCtx.upload as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new ApiError(413, ''));
     const { target } = mountEditor({ value: 'abc' });
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
     const file = new File(['x'], 'big.png', { type: 'image/png' });
     const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
     Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
     ev.preventDefault = vi.fn(); ev.stopPropagation = vi.fn();
     ta.dispatchEvent(ev);
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     expect(target.querySelector('[data-testid="upload-error"]')?.textContent).toContain("This file is over the server's upload limit.");
   });
 });
@@ -476,7 +475,7 @@ describe('MarkdownEditor — the upload limit on a drop', () => {
     on.dispatchEvent(ev);
   }
   async function settleDrop(): Promise<void> {
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
   }
 
   it('a file over the limit dropped on the text area is not uploaded, and says so', async () => {
@@ -564,7 +563,7 @@ describe('MarkdownEditor — sidebar drop suppression', () => {
       mkAsset({ filename: 'dz.png', mime_type: 'image/png' }),
     );
     const { target } = mountEditor({ value: 'x' });
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const aside = target.querySelector<HTMLElement>('[data-testid="asset-sidebar"]')!;
     const dropZone = target.querySelector<HTMLElement>('[data-testid="drop-zone"]')!;
     // Listener on the aside — between drop-zone and wrapper. Only fires if
@@ -578,7 +577,7 @@ describe('MarkdownEditor — sidebar drop suppression', () => {
     Object.defineProperty(ev, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
     dropZone.dispatchEvent(ev);
     expect(asideDropListener).not.toHaveBeenCalled();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     aside.removeEventListener('drop', asideDropListener);
   });
 
@@ -588,7 +587,7 @@ describe('MarkdownEditor — sidebar drop suppression', () => {
       mkAsset({ filename: 'as.png', mime_type: 'image/png' }),
     );
     const { target } = mountEditor({ value: 'x' });
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const wrapper = target.querySelector<HTMLElement>('.edit-content')!;
     const aside = target.querySelector<HTMLElement>('[data-testid="asset-sidebar"]')!;
     const wrapperDropListener = vi.fn();
@@ -598,7 +597,7 @@ describe('MarkdownEditor — sidebar drop suppression', () => {
     Object.defineProperty(ev, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
     aside.dispatchEvent(ev);
     expect(wrapperDropListener).not.toHaveBeenCalled();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     wrapper.removeEventListener('drop', wrapperDropListener);
   });
 });
@@ -612,7 +611,7 @@ describe('MarkdownEditor — shared uploadProgress visible in sidebar', () => {
       .mockReturnValueOnce(firstPending)
       .mockResolvedValueOnce(mkAsset({ filename: 'progress2.png' }));
     const { target } = mountEditor({ value: 'abc' });
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
     const files = [
       new File(['x'], 'progress.png', { type: 'image/png' }),
@@ -624,7 +623,7 @@ describe('MarkdownEditor — shared uploadProgress visible in sidebar', () => {
     ta.dispatchEvent(ev);
     // Drain the synchronous part of runMarkdownEditorUpload, but the await
     // on uploadAsset for the first file is still pending.
-    await Promise.resolve(); flushSync();
+    await settle();
     // Sidebar should now render the in-flight progress row with current=1, total=2.
     const progress = target.querySelector('[data-testid="upload-progress"]');
     expect(progress).toBeTruthy();
@@ -633,7 +632,7 @@ describe('MarkdownEditor — shared uploadProgress visible in sidebar', () => {
     expect(progress?.textContent).toContain('2');  // total
     // Cleanup: resolve first upload and drain.
     resolveFirst(mkAsset({ filename: 'progress.png' }));
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
   });
 });
 
@@ -644,14 +643,14 @@ describe('MarkdownEditor — Edit→Preview mid-upload race', () => {
     const pending = new Promise<AssetResponse>((r) => { resolveUpload = r; });
     (stubCtx.upload as ReturnType<typeof vi.fn>).mockReturnValueOnce(pending);
     const { target, propsRef } = mountEditor({ value: 'abc', refreshKey: 0 });
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const ta = target.querySelector<HTMLTextAreaElement>('textarea')!;
     const file = new File(['x'], 'race.png', { type: 'image/png' });
     const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
     Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
     ev.preventDefault = vi.fn(); ev.stopPropagation = vi.fn();
     ta.dispatchEvent(ev);
-    await Promise.resolve(); flushSync();
+    await settle();
     // Switch to Preview while the upload is pending. This unmounts the
     // textarea (and the sidebar) — textareaEl becomes null. The next
     // resolve must not crash on insertAtCursor.
@@ -664,7 +663,7 @@ describe('MarkdownEditor — Edit→Preview mid-upload race', () => {
     // with textareaEl null — the guard returns silently, refreshKey++ still
     // executes on the line after onEachSuccess.
     resolveUpload(mkAsset({ filename: 'race.png' }));
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     // Should not have crashed (we got here), and refreshKey was bumped.
     expect(propsRef.refreshKey).toBe(1);
   });
@@ -677,7 +676,7 @@ describe('MarkdownEditor — window-level file-drop navigation guard', () => {
 
   it('window-level file drop has preventDefault called while editor is mounted', async () => {
     mountEditor();
-    await Promise.resolve(); flushSync();
+    await settle();
     const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
     Object.defineProperty(ev, 'dataTransfer', { value: { types: ['Files'], files: [] } });
     const preventSpy = vi.fn();
@@ -688,7 +687,7 @@ describe('MarkdownEditor — window-level file-drop navigation guard', () => {
 
   it('window-level dragover with files has preventDefault called while editor is mounted', async () => {
     mountEditor();
-    await Promise.resolve(); flushSync();
+    await settle();
     const ev = new Event('dragover', { bubbles: true, cancelable: true }) as unknown as DragEvent;
     Object.defineProperty(ev, 'dataTransfer', { value: { types: ['Files'], files: [] } });
     const preventSpy = vi.fn();
@@ -699,7 +698,7 @@ describe('MarkdownEditor — window-level file-drop navigation guard', () => {
 
   it('non-file drags pass through (no preventDefault) — guard does not block URL or text drags', async () => {
     mountEditor();
-    await Promise.resolve(); flushSync();
+    await settle();
     const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
     Object.defineProperty(ev, 'dataTransfer', { value: { types: ['text/uri-list'], files: [] } });
     const preventSpy = vi.fn();
@@ -710,7 +709,7 @@ describe('MarkdownEditor — window-level file-drop navigation guard', () => {
 
   it('guard is removed when editor unmounts (no leak across pages)', async () => {
     const { cmp } = mountEditor();
-    await Promise.resolve(); flushSync();
+    await settle();
     unmount(cmp);
     cleanup = null; // prevent afterEach from unmounting again
     const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
@@ -725,7 +724,7 @@ describe('MarkdownEditor — window-level file-drop navigation guard', () => {
 describe('MarkdownEditor — plain (Slice-5b D6)', () => {
   it('shows the source as text with no tabs, no sidebar and no /render call', async () => {
     const { target } = mountEditor({ value: '# Title\n$x^2$', plain: true });
-    await Promise.resolve(); flushSync();
+    await settle();
     expect(target.querySelector('[data-testid="markdown-plain"]')!.textContent).toBe('# Title\n$x^2$');
     expect(target.querySelector('.tabs')).toBeNull();
     expect(target.querySelector('[data-testid="asset-sidebar"]')).toBeNull();
@@ -735,7 +734,7 @@ describe('MarkdownEditor — plain (Slice-5b D6)', () => {
 
   it('wins over readOnly: still no /render call', async () => {
     mountEditor({ value: 'x', plain: true, readOnly: true });
-    await Promise.resolve(); flushSync();
+    await settle();
     expect(stubCtx.renderPreview).not.toHaveBeenCalled();
   });
 });
@@ -768,14 +767,14 @@ describe('MarkdownEditor — frozen (Slice-5b D10)', () => {
     const ev = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
     Object.defineProperty(ev, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
     target.querySelector('textarea')!.dispatchEvent(ev);
-    await Promise.resolve(); flushSync();
+    await settle();
     expect(stubCtx.upload).not.toHaveBeenCalled();
   });
 
   it('disables sidebar inserts and the drop zone', async () => {
     (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1 })]);
     const { target } = mountEditor({ value: '', frozen: true });
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     expect(target.querySelector<HTMLButtonElement>('.row-click')!.disabled).toBe(true);
     expect(target.querySelector('[data-testid="drop-zone"]')!.classList.contains('disabled')).toBe(true);
   });
@@ -786,7 +785,7 @@ describe('MarkdownEditor — frozen (Slice-5b D10)', () => {
     const preview = target.querySelector<HTMLButtonElement>('button[data-action="preview"]')!;
     expect(preview.disabled).toBe(false);
     preview.click();
-    await Promise.resolve(); flushSync();
+    await settle();
     expect(stubCtx.renderPreview).toHaveBeenCalledWith('abc');
   });
 });
@@ -794,14 +793,14 @@ describe('MarkdownEditor — frozen (Slice-5b D10)', () => {
 describe('MarkdownEditor — noAssets (5d D11)', () => {
   it('noAssets: no sidebar, no upload on drop, and a window file drop never navigates', async () => {
     const { target } = mountEditor({ value: 'x', noAssets: true });
-    await Promise.resolve(); flushSync();
+    await settle();
     expect(target.querySelector('[data-testid="asset-sidebar"]')).toBeNull();
     expect(target.querySelector('textarea')).not.toBeNull();
     const file = new File(['a'], 'a.png', { type: 'image/png' });
     const drop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
     Object.defineProperty(drop, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
     target.querySelector('textarea')!.dispatchEvent(drop);
-    await Promise.resolve();
+    await settle();
     expect(stubCtx.upload).not.toHaveBeenCalled();
     const winDrop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
     Object.defineProperty(winDrop, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
@@ -847,7 +846,7 @@ describe('MarkdownEditor — a named card when there is no field to name', () =>
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ html: '<p>x</p>' }), { status: 200, headers: { 'content-type': 'application/json' } })));
     try {
       const { target } = mountEditor({ readOnly: true, value: 'x', ariaLabel: 'Content' });
-      await Promise.resolve(); flushSync();
+      await settle();
       const card = target.querySelector('.md-card')!;
       expect(card.getAttribute('role')).toBe('group');
       expect(card.getAttribute('aria-label')).toBe('Content');
@@ -856,7 +855,7 @@ describe('MarkdownEditor — a named card when there is no field to name', () =>
 
   it('editing: the textarea carries the name, the card has no role', async () => {
     const { target } = mountEditor({ value: 'x', ariaLabel: 'Content' });
-    await Promise.resolve(); flushSync();
+    await settle();
     const card = target.querySelector('.md-card')!;
     expect(card.hasAttribute('role')).toBe(false);
     expect(card.hasAttribute('aria-label')).toBe(false);

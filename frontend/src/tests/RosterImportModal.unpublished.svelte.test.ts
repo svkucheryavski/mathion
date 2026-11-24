@@ -3,6 +3,7 @@ import { mount, unmount, flushSync } from 'svelte';
 import RosterImportModal from '../components/runs/RosterImportModal.svelte';
 import { RUN_UNPUBLISHED_ERROR_CODE } from '../lib/runRoster';
 import type { RunStudentResponse, GroupResponse } from '../lib/types';
+import { settle } from './support/settle';
 
 const student = (over: Partial<RunStudentResponse>): RunStudentResponse => ({
   id: 1, run_id: 10, user_id: 1, user_email: 'a@x.com', user_full_name: null,
@@ -19,12 +20,6 @@ beforeEach(() => {
   (globalThis as { fetch: typeof fetch }).fetch = fetchSpy as unknown as typeof fetch;
   document.body.innerHTML = '';
 });
-
-// 12-tick settle mirrors the pattern in RosterImportModal.submit.svelte.test.ts
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
-}
 
 it('submit-step 409 surfaces via submitError slot with role=alert', async () => {
   // Refetch succeeds; batch call rejects with 409 run_unpublished.

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import PublishConflictsModal from '../components/runs/PublishConflictsModal.svelte';
 import type { PublishConflict } from '../lib/types';
+import { settle } from './support/settle';
 
 // Per the codebase memory rule: component tests use mount/unmount/flushSync
 // from `svelte`, NOT @testing-library/svelte.
@@ -19,12 +20,6 @@ afterEach(() => {
   component = undefined;
   document.body.removeChild(target);
 });
-
-// FocusTrap autofocuses in a microtask; Modal registers its listeners on mount.
-async function settle() {
-  for (let i = 0; i < 4; i++) await Promise.resolve();
-  flushSync();
-}
 
 const BASE_CONFLICT: PublishConflict = {
   user_id: 1,

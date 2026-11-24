@@ -4,6 +4,7 @@ import RunRosterTab from '../components/runs/RunRosterTab.svelte';
 import { toasts } from '../stores/toasts.svelte';
 import { OFFLINE_MESSAGE, REQUEST_ERROR_MESSAGE, SERVER_ERROR_MESSAGE } from '../lib/api';
 import type { GroupResponse, RunStudentResponse } from '../lib/types';
+import { settle } from './support/settle';
 
 // Slice 6c Task 4 (10b): the bulk strip and its confirm, the result banner,
 // the table, marked rows and the row confirm. R38, R44, §Focus › Roster,
@@ -42,10 +43,6 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
-}
 async function settleAll() {
   for (let i = 0; i < 4; i++) await settle();
 }

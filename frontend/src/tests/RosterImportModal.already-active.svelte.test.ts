@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RosterImportModal from '../components/runs/RosterImportModal.svelte';
 import type { RunStudentResponse, GroupResponse } from '../lib/types';
+import { settle } from './support/settle';
 
 const student = (over: Partial<RunStudentResponse>): RunStudentResponse => ({
   id: 1, run_id: 10, user_id: 1, user_email: 'a@x.com', user_full_name: null,
@@ -33,13 +34,6 @@ function jres(body: unknown, status = 200) {
     json: () => Promise.resolve(body),
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response);
-}
-
-// 12-tick settle mirrors the sibling submit suite — submit chains refetch →
-// batch → state update, so a 2-tick settle would race.
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
 }
 
 function mountModal(extra: Record<string, unknown> = {}) {

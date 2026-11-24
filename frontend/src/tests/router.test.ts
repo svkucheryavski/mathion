@@ -8,6 +8,7 @@ import {
 } from '../lib/router.svelte';
 import { routeClick } from '../lib/routeClick';
 import { routes as appRoutes } from '../routes';
+import { settle } from './support/settle';
 
 describe('lib/router', () => {
   describe('matchRoute', () => {
@@ -117,7 +118,7 @@ describe('navigation guards', () => {
     let answer!: (ok: boolean) => void;
     const slow = registerNavigationGuard(() => new Promise<boolean>((r) => { answer = r; }));
     const first = navigate('/teaching');
-    await Promise.resolve();
+    await settle();
     slow();
     const second = navigate('/courses/x');
     answer(true);

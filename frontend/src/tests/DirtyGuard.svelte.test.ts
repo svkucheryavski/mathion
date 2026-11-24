@@ -3,6 +3,7 @@ import { mount, unmount, flushSync } from 'svelte';
 import DirtyGuard from '../components/editor/DirtyGuard.svelte';
 import { navigate, __resetGuardsForTests } from '../lib/router.svelte';
 import type { GuardAsk } from '../lib/askInPlace.svelte';
+import { settle } from './support/settle';
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
@@ -26,7 +27,6 @@ function render(isDirty: () => boolean, onDiscard: () => void, ask: () => GuardA
   component = mount(DirtyGuard, { target: host, props: { isDirty, onDiscard, ask } });
   flushSync();
 }
-const flush = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); flushSync(); };
 
 afterEach(async () => {
   if (component) { unmount(component); component = null; }
@@ -42,7 +42,7 @@ describe('DirtyGuard — the owner asks in place (Polish 1 D37)', () => {
     const onDiscard = vi.fn();
     render(() => true, onDiscard, ask);
     const nav = navigate('/somewhere');
-    await flush();
+    await settle();
     expect(o.asked).toBe(1);
     o.answer(true);
     await nav;
@@ -55,7 +55,7 @@ describe('DirtyGuard — the owner asks in place (Polish 1 D37)', () => {
     const onDiscard = vi.fn();
     render(() => true, onDiscard, ask);
     const nav = navigate('/elsewhere');
-    await flush();
+    await settle();
     o.answer(false);
     await nav;
     expect(onDiscard).not.toHaveBeenCalled();
@@ -77,9 +77,9 @@ describe('DirtyGuard — the owner asks in place (Polish 1 D37)', () => {
     const onDiscard = vi.fn();
     render(() => true, onDiscard, ask);
     const a = navigate('/first');
-    await flush();
+    await settle();
     const b = navigate('/second');
-    await flush();
+    await settle();
     expect(o.asked).toBe(1);
     expect(o.focused).toBe(1);
     o.answer(true);
@@ -94,15 +94,15 @@ describe('DirtyGuard — the owner asks in place (Polish 1 D37)', () => {
     const onDiscard = vi.fn();
     render(() => true, onDiscard, ask);
     const nav = navigate('/asked');
-    await flush();
+    await settle();
     await navigate('/forced', { force: true });
-    await flush();
+    await settle();
     expect(o.dismissed).toBe(1);
     await nav;
     expect(onDiscard).not.toHaveBeenCalled();
     expect(location.pathname).toBe('/forced');
     const again = navigate('/later');
-    await flush();
+    await settle();
     expect(o.asked).toBe(2);
     o.answer(false);
     await again;
@@ -112,10 +112,10 @@ describe('DirtyGuard — the owner asks in place (Polish 1 D37)', () => {
     const { o, ask } = fakeOwner();
     render(() => true, vi.fn(), ask);
     const nav = navigate('/asked-too');
-    await flush();
+    await settle();
     expect(o.dismissed).toBe(0);
     await navigate(`${location.pathname}${location.search}#frag`);
-    await flush();
+    await settle();
     expect(o.dismissed).toBe(0);
     o.answer(false);
     await nav;
@@ -126,7 +126,7 @@ describe('DirtyGuard — the owner asks in place (Polish 1 D37)', () => {
     const onDiscard = vi.fn();
     render(() => true, onDiscard, ask);
     const nav = navigate('/gone');
-    await flush();
+    await settle();
     unmount(component!);
     component = null;
     expect(o.dismissed).toBe(1);

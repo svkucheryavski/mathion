@@ -3,6 +3,7 @@ import { mount, unmount, flushSync } from 'svelte';
 import RosterImportModal from '../components/runs/RosterImportModal.svelte';
 import type { RunStudentResponse, GroupResponse } from '../lib/types';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
+import { settle } from './support/settle';
 
 const student = (over: Partial<RunStudentResponse>): RunStudentResponse => ({
   id: 1, run_id: 10, user_id: 1, user_email: 'a@x.com', user_full_name: null,
@@ -32,13 +33,6 @@ function jres(body: unknown, status = 200) {
     json: () => Promise.resolve(body),
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response);
-}
-
-// 12-tick settle — the submit flow chains refetch → batch → state update, so
-// the 2-tick pattern races on switching from fake to real timers.
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
 }
 
 function mountModal(extra: Record<string, unknown> = {}) {

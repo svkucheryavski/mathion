@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RunRosterTab from '../components/runs/RunRosterTab.svelte';
+import { settle } from './support/settle';
 
 const fetchSpy = vi.fn();
 beforeEach(() => {
@@ -16,11 +17,6 @@ function jres(body: unknown, status = 200) {
     json: () => Promise.resolve(body),
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response);
-}
-
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
 }
 
 const studentN = (n: number) =>

@@ -2,6 +2,7 @@ import { it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import Login from '../pages/Login.svelte';
 import * as router from '../lib/router.svelte';
+import { settle } from './support/settle';
 
 const FAKE_USER = {
   id: 1, email: 'a@b.com', full_name: 'A', is_superuser: false,
@@ -10,10 +11,6 @@ const FAKE_USER = {
 
 function jsonResponse(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-}
-async function settle() {
-  for (let i = 0; i < 8; i++) await Promise.resolve();
-  flushSync();
 }
 function setValue(el: HTMLInputElement, v: string) {
   el.value = v;

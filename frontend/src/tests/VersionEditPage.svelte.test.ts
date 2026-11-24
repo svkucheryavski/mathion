@@ -7,6 +7,7 @@ import { routes } from '../routes';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
 import type { AdminTree, AdminTreeBlock, AdminTreeItem, AdminTreeSequence, AdminTreeVersion } from '../lib/types';
 import type { DirtyRegistry } from '../lib/dirtyRegistry.svelte';
+import { settle } from './support/settle';
 
 // Capture the page's real registry so a test can register a dirty tracker
 // without depending on which body a block renders.
@@ -26,7 +27,6 @@ function jres(body: unknown, status = 200) {
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response);
 }
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 // jsdom has no scrollIntoView; the page's focus $effect calls it on route expansion.
 Element.prototype.scrollIntoView = () => {};
 // …nor scrollTo; the page row's Cancel calls it (D38).

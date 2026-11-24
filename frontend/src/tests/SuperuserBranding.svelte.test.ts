@@ -6,11 +6,11 @@ import { branding, setBranding, DEFAULT_BRANDING } from '../lib/branding.svelte'
 import { crc32 } from '../lib/pngCheck';
 import { themeFileText } from '../lib/themeFile';
 import { THEME_VARS } from './support/themeVars';
+import { settle, until } from './support/settle';
 
 // Branding D1, D2, D3-D6, D14: the page's four cards, the name dialog and the
 // image dialogs.
 
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 /** FileReader answers in a task, not a microtask. */
 async function tick() { await new Promise((r) => setTimeout(r, 0)); await settle(); }
 function jsonResponse(status: number, body: unknown) {
@@ -107,12 +107,16 @@ async function open(title: string) { pencil(card(title))!.click(); await settle(
 const posts = (path: string) => calls.filter((c) => c.key === `POST ${path}` || c.key === `PUT ${path}`);
 const previews = () => [...panel()!.querySelectorAll<HTMLImageElement>('img')].map((i) => i.getAttribute('src') ?? '');
 
-/** Choose a file in the open image dialog, as the browser's picker would. */
+const alertText = () => panel()?.querySelector('[role="alert"]')?.textContent ?? null;
+/** Choose a file in the open image dialog, as the browser's picker would, and
+ *  wait until it is read: its decode starts, or its refusal shows. */
 async function choose(bytes: Uint8Array, name = 'school.png') {
+  const before = decodes.length;
+  const was = alertText();
   const input = panel()!.querySelector<HTMLInputElement>('input[type="file"]')!;
   Object.defineProperty(input, 'files', { value: [new File([new Uint8Array(bytes)], name, { type: 'image/png' })], configurable: true });
   input.dispatchEvent(new Event('change', { bubbles: true }));
-  for (let i = 0; i < 3; i++) await tick();
+  await until(() => decodes.length > before || (alertText() !== null && alertText() !== was));
 }
 function partBytes(part: Blob): Promise<number[]> {
   return new Promise((resolve) => {
@@ -527,7 +531,8 @@ describe('the Colours card (D2, D9, D10)', () => {
     const css = ':root { --primary: #7a1f2b; }';
     Object.defineProperty(input, 'files', { value: [new File([css], 'school.css', { type: 'text/css' })], configurable: true });
     input.dispatchEvent(new Event('change', { bubbles: true }));
-    for (let i = 0; i < 3; i++) await tick();
+    await until(() => posts('/branding/theme/check').length > 0);
+    await settle();
     expect(posts('/branding/theme/check')).toHaveLength(1);
     save().click(); await settle();
     const part = (posts('/branding/theme')[0].body as FormData).get('file') as File;

@@ -3,11 +3,11 @@ import { mount, unmount, flushSync } from 'svelte';
 import Harness from './support/ModalHarness.svelte';
 import NestedHarness from './support/NestedModalHarness.svelte';
 import { isTopModal } from '../components/ui/Modal.svelte';
+import { settle } from './support/settle';
 
 let target: HTMLDivElement | null = null;
 let cmp: ReturnType<typeof mount> | null = null;
 
-async function settle() { for (let i = 0; i < 6; i++) await Promise.resolve(); flushSync(); }
 function render(over: Record<string, unknown> = {}) {
   target = document.createElement('div');
   document.body.appendChild(target);
@@ -234,10 +234,10 @@ describe('Modal — nested level-3 inside level-2 (5d)', () => {
     const props = $state({ inner: false, onOuterClose, onInnerClose });
     const cmp = mount(NestedHarness, { target: host, props });
     flushSync();
-    await Promise.resolve();
+    await settle();
     props.inner = true;
     flushSync();
-    await Promise.resolve();
+    await settle();
     const innerPanel = document.querySelector<HTMLElement>('section[aria-labelledby="inner-t"]')!;
     const innerClose = innerPanel.querySelector<HTMLButtonElement>('header.modal-head button[aria-label="Close"]')!;
     const innerB = document.getElementById('inner-b') as HTMLButtonElement;

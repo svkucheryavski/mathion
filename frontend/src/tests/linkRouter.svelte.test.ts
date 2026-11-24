@@ -20,6 +20,7 @@ import {
   registerNavigationGuard,
   __resetGuardsForTests,
 } from '../lib/router.svelte';
+import { settle } from './support/settle';
 
 let teardown: () => void;
 let left: boolean[];
@@ -50,11 +51,6 @@ function click(el: Element, init: MouseEventInit = {}): MouseEvent {
   const e = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ...init });
   el.dispatchEvent(e);
   return e;
-}
-
-/** Let the handler's awaited navigate() and the scroll after it run. */
-async function settle(): Promise<void> {
-  await new Promise((r) => setTimeout(r, 0));
 }
 
 beforeEach(() => {

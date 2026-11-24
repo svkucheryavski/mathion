@@ -5,6 +5,7 @@ import { createDirtyRegistry, DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../
 import { toasts, clearToasts } from '../stores/toasts.svelte';
 import type { AdminTreeVersion } from '../lib/types';
 import { PageAsk, PAGE_ASK_KEY } from '../lib/askInPlace.svelte';
+import { settle } from './support/settle';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -12,7 +13,6 @@ function jres(body: unknown, status = 200) {
   return Promise.resolve({ ok: status < 400, status, statusText: 'x', json: () => Promise.resolve(body),
     text: () => Promise.resolve(''), headers: new Headers({ 'content-type': 'application/json' }) } as unknown as Response);
 }
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 function mkVersion(over: Partial<AdminTreeVersion> = {}): AdminTreeVersion {
   return { id: 1, course_id: 1, state: 'created', is_disabled: false, info_md: 'Hello', info_html: '<p>Hello</p>',
     max_quiz_attempts: 3, label: 'Draft', created_at: '', published_at: null, archived_at: null, content_updated_at: '', ...over };

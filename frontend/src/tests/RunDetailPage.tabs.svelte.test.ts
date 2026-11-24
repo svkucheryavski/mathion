@@ -3,6 +3,7 @@ import { mount, unmount, flushSync } from 'svelte';
 import RunDetailPage from '../pages/runs/RunDetailPage.svelte';
 import { session } from '../stores/session.svelte';
 import { currentRoute, registerNavigationGuard, __resetGuardsForTests } from '../lib/router.svelte';
+import { settle } from './support/settle';
 
 // R1/R10: the open tab lives in ?tab=, every switch goes through setTab and the
 // registered unsaved-changes guards. Review Focus 1 is the cancelled-guard case.
@@ -14,7 +15,6 @@ function jres(body: unknown, status = 200) {
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response);
 }
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 
 const course = { id: 1, slug: 'algebra', name: 'Algebra', description: '', is_admin: true };
 const runFx = (id = 10) => ({

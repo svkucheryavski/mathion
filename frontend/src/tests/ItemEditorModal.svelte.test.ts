@@ -12,6 +12,7 @@ import type { PageAsk } from '../lib/askInPlace.svelte';
 import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
 import { navigate } from '../lib/router.svelte';
 import { structureReason } from '../lib/editorReasons';
+import { settle, until } from './support/settle';
 
 // Real store, real bodies; only fetch is stubbed.
 const fetchSpy = vi.fn();
@@ -25,7 +26,6 @@ function resp(body: unknown, status = 200) {
   } as unknown as Response;
 }
 const jres = (body: unknown, status = 200) => Promise.resolve(resp(body, status));
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 
 function mkVersion(over: Partial<AdminTreeVersion> = {}): AdminTreeVersion {
   return {
@@ -836,16 +836,6 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     uploaded_at: '', uploaded_by: 1, is_referenced: false,
   };
   const jsFile = (text: string, name = 'new.js') => new File([text], name, { type: 'application/javascript' });
-  // jsdom fires FileReader.onload on a macrotask: drain macrotasks until `cond` holds.
-  async function waitUntil(cond: () => boolean, tries = 60): Promise<void> {
-    for (let i = 0; i < tries; i++) {
-      flushSync();
-      if (cond()) return;
-      await new Promise((r) => setTimeout(r));
-      await Promise.resolve();
-    }
-    flushSync();
-  }
   function chooseFile(file: File) {
     const input = panel().querySelector<HTMLInputElement>('input[type="file"]')!;
     Object.defineProperty(input, 'files', { value: [file], configurable: true });
@@ -869,7 +859,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     serveUpload();
     await render({ item: { type: 'interactive_app', script_url: null } });
     chooseFile(jsFile("getElementById('app-root')"));
-    await waitUntil(() => calls(/\/admin-tree$/).length > 0);
+    await until(() => calls(/\/admin-tree$/).length > 0);
     await settle();
     expect(uploadPosts().length).toBe(1);
     expect(patchBodies()).toEqual([{ script_url: 'new.js' }]);
@@ -881,7 +871,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     await render({ item: { type: 'interactive_app', script_url: null } });
     type(titleInput(), 'App 2');
     chooseFile(jsFile("getElementById('app-root')"));
-    await waitUntil(() => uploadPosts().length > 0);
+    await until(() => uploadPosts().length > 0);
     // Polish 3 C7: Save is blocked (aria-disabled), no longer natively disabled.
     expect(footBtn('Save').getAttribute('aria-disabled')).toBe('true');
     expect(scriptBtn('Upload').disabled).toBe(true);
@@ -891,7 +881,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     serveUpload();
     await render({ item: { type: 'interactive_app', script_url: null } });
     chooseFile(jsFile("import x from 'y'; fetch('/z')", 'm.js'));
-    await waitUntil(() => calls(/\/admin-tree$/).length > 0);
+    await until(() => calls(/\/admin-tree$/).length > 0);
     expect(panel().querySelector('.warnings')!.textContent).toContain('ES module');
     expect(panel().querySelector('.warnings')!.textContent).toContain('Network');
     expect(uploadPosts().length).toBe(1);
@@ -907,13 +897,13 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
       Object.defineProperty(big, 'size', { value: 1024 * 1024 + 1 });
       const read = vi.spyOn(FileReader.prototype, 'readAsText');
       chooseFile(big);
-      await waitUntil(() => !!panel().querySelector('.field-err'));
+      await until(() => !!panel().querySelector('.field-err'));
       expect(panel().querySelector('.field-err')!.textContent).toContain('This file is over the 1 MB limit.');
       expect(uploadPosts().length).toBe(0);
       expect(read).not.toHaveBeenCalled();
       // The refusal leaves the upload usable: a file within the limit goes up.
       chooseFile(jsFile("getElementById('app-root')", 'small.js'));
-      await waitUntil(() => uploadPosts().length > 0);
+      await until(() => uploadPosts().length > 0);
       expect(uploadPosts().length).toBe(1);
     } finally {
       resetUploadLimit();
@@ -924,7 +914,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     serveUpload();
     await render({ item: { type: 'interactive_app', script_url: null } });
     chooseFile(jsFile('', 'empty.js'));
-    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await until(() => !!panel().querySelector('.field-err'));
     expect(panel().querySelector('.field-err')!.textContent).toContain('empty');
     expect(uploadPosts().length).toBe(0);
   });
@@ -933,7 +923,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     serveUpload((u, init) => (/\/api\/versions\/1\/assets$/.test(u) && init?.method === 'POST' ? jres({ detail: 'dupe' }, 409) : undefined));
     await render({ item: { type: 'interactive_app', script_url: null } });
     chooseFile(jsFile("getElementById('app-root')", 'dupe.js'));
-    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await until(() => !!panel().querySelector('.field-err'));
     expect(panel().querySelector('.field-err')!.textContent).toContain('already exists');
   });
 
@@ -943,7 +933,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
       : undefined));
     await render({ item: { type: 'interactive_app', script_url: null } });
     chooseFile(jsFile("getElementById('app-root')", 'big.js'));
-    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await until(() => !!panel().querySelector('.field-err'));
     expect(panel().querySelector('.field-err')!.textContent).toContain("This file is over the server's upload limit.");
   });
 
@@ -951,7 +941,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     serveUpload((u, init) => (/\/api\/items\/7$/.test(u) && init?.method === 'PATCH' ? jres({ detail: 'boom' }, 500) : undefined));
     await render({ item: { type: 'interactive_app', script_url: null } });
     chooseFile(jsFile("getElementById('app-root')"));
-    await waitUntil(() => calls(/\/api\/assets\/5$/, 'DELETE').length > 0);
+    await until(() => calls(/\/api\/assets\/5$/, 'DELETE').length > 0);
     await settle();
     expect(calls(/\/admin-tree$/).length).toBe(0);
     expect(panel().querySelector('.field-err')).not.toBeNull();
@@ -962,7 +952,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     const load = vi.spyOn(editorStore, 'loadAdminTree').mockRejectedValue(new Error('refresh down'));
     await render({ item: { type: 'interactive_app', script_url: null } });
     chooseFile(jsFile("getElementById('app-root')", 'ok.js'));
-    await waitUntil(() => load.mock.calls.length > 0);
+    await until(() => load.mock.calls.length > 0);
     await settle();
     expect(patchBodies()).toEqual([{ script_url: 'new.js' }]);
     expect(calls(/\/api\/assets\/5$/, 'DELETE').length).toBe(0);
@@ -1140,10 +1130,10 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
       ? new Promise<Response>((r) => { release = () => r(resp(APP_ASSET)); }) : undefined));
     await render({ item: { type: 'interactive_app', script_url: null } });
     chooseFile(jsFile("getElementById('app-root')"));
-    await waitUntil(() => uploadPosts().length > 0);
+    await until(() => uploadPosts().length > 0);
     unmount(cmp!); cmp = null;
     release();
-    await waitUntil(() => patchBodies().length > 0);
+    await until(() => patchBodies().length > 0);
     await settle();
     expect(patchBodies()).toEqual([{ script_url: 'new.js' }]);
     expect(calls(/\/api\/assets\/5$/, 'DELETE').length).toBe(0);
@@ -1192,7 +1182,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
       ? jres({ detail: 'Only a created version can change its items' }, 409) : undefined));
     await render({ item: { type: 'interactive_app', script_url: null } });
     chooseFile(jsFile("getElementById('app-root')"));
-    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await until(() => !!panel().querySelector('.field-err'));
     await settle();
     expect(panel().querySelector('.field-err')!.textContent).toBe('Only a created version can change its items');
     expect(calls(/\/admin-tree$/).length).toBe(1);
@@ -1203,7 +1193,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
       ? jres({ detail: 'You can no longer edit this course' }, 403) : undefined));
     await render({ item: { type: 'interactive_app', script_url: null } });
     chooseFile(jsFile("getElementById('app-root')"));
-    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await until(() => !!panel().querySelector('.field-err'));
     await settle();
     expect(calls(/\/admin-tree$/).length).toBe(1);
     const ro = mkVersion({ state: 'archived' });
@@ -1219,7 +1209,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
       ? jres({ detail: 'No' }, 409) : undefined));
     await render({ item: { type: 'interactive_app', script_url: null }, modal: { stillOnVid: () => false } });
     chooseFile(jsFile("getElementById('app-root')"));
-    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await until(() => !!panel().querySelector('.field-err'));
     await settle();
     expect(calls(/\/admin-tree$/).length).toBe(0);
   });
@@ -1229,7 +1219,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
       ? jres({ detail: 'Forbidden' }, 403) : undefined));
     await render({ item: { type: 'interactive_app', script_url: null } });
     chooseFile(jsFile("getElementById('app-root')"));
-    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await until(() => !!panel().querySelector('.field-err'));
     await settle();
     expect(panel().querySelector('.field-err')!.textContent).toBe('Forbidden');
     expect(calls(/\/admin-tree$/).length).toBe(1);
@@ -1278,7 +1268,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     serveUpload();
     await render({ item: { type: 'interactive_app', script_url: null } });
     chooseFile(jsFile('', 'empty.js'));
-    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await until(() => !!panel().querySelector('.field-err'));
     const ro = mkVersion({ state: 'archived' });
     props.modal.version = ro;
     props.modal.perms = versionPermissions(ro);
@@ -1294,12 +1284,12 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     await render({ item: { type: 'interactive_app', script_url: null } });
     uploadBtn()!.focus();
     chooseFile(jsFile("getElementById('app-root')"));
-    await waitUntil(() => uploadPosts().length > 0);
+    await until(() => uploadPosts().length > 0);
     // A browser drops focus to <body> under the disabled button (jsdom keeps it there).
     const tmp = document.createElement('input'); panel().appendChild(tmp); tmp.focus(); tmp.remove();
     props.modal.item = { ...props.modal.item, script_url: 'new.js' };
     release();
-    await waitUntil(() => toastTexts().includes('App uploaded'));
+    await until(() => toastTexts().includes('App uploaded'));
     for (let i = 0; i < 3; i++) await settle();
     expect(document.activeElement).toBe(uploadBtn());
     expect(uploadBtn()!.textContent!.trim()).toBe('Replace');
@@ -1312,7 +1302,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     scriptBtn('Remove').click();
     await settle();
     scriptAsk()!.querySelector<HTMLButtonElement>('button.confirm')!.click();
-    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await until(() => !!panel().querySelector('.field-err'));
     await new Promise((t) => setTimeout(t, 20));
     for (let i = 0; i < 4; i++) await settle();
     expect(panel().querySelector('[data-action="app-upload"]')).toBeNull();
@@ -1325,7 +1315,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     await render({ item: { type: 'interactive_app', script_url: null } });
     uploadBtn()!.focus();
     chooseFile(jsFile("getElementById('app-root')"));
-    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await until(() => !!panel().querySelector('.field-err'));
     await new Promise((t) => setTimeout(t, 20));
     for (let i = 0; i < 4; i++) await settle();
     expect(panel().querySelector('[data-action="app-upload"]')).toBeNull();
@@ -1349,7 +1339,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
       ? jres({ detail: 'exists' }, 409) : undefined));
     await render({ item: { type: 'interactive_app', script_url: null } });
     chooseFile(jsFile("getElementById('app-root')"));
-    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await until(() => !!panel().querySelector('.field-err'));
     await settle();
     expect(panel().querySelector('.field-err')!.textContent).toBe('A file with that name already exists. Rename it or remove the old one first.');
     expect(calls(/\/admin-tree$/).length).toBe(0);
@@ -1359,7 +1349,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     serveUpload((u) => (u.endsWith('/admin-tree') ? jres({ detail: 'down' }, 500) : undefined));
     await render({ item: { type: 'interactive_app', script_url: null } });
     chooseFile(jsFile("getElementById('app-root')"));
-    await waitUntil(() => calls(/\/admin-tree$/).length > 0);
+    await until(() => calls(/\/admin-tree$/).length > 0);
     await settle();
     expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Uploaded (refresh failed — reload to see latest)', 'info']]);
   });
@@ -1380,7 +1370,7 @@ describe('ItemEditorModal — app body (T4; ported from InteractiveAppEditor)', 
     serveUpload();
     await render({ item: { type: 'interactive_app', script_url: null } });
     chooseFile(jsFile('', 'empty.js'));
-    await waitUntil(() => !!panel().querySelector('.field-err'));
+    await until(() => !!panel().querySelector('.field-err'));
     const err = panel().querySelector('.field-err')!;
     const field = err.parentElement!;
     expect(field.classList.contains('field')).toBe(true);
@@ -1487,7 +1477,7 @@ describe('ItemEditorModal — header actions and trash (VR-B)', () => {
     await render({ modal: {
       onDeleteItem: async () => {
         props.modal.deleting = true;
-        await Promise.resolve();
+        await settle();
         const pub = mkVersion({ state: 'published' });
         props.modal.version = pub;
         props.modal.perms = versionPermissions(pub);

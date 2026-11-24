@@ -1,9 +1,11 @@
 import { it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import InteractiveAppItem from '../components/items/InteractiveAppItem.svelte';
+// Keep this import: it preloads lib/api, which the tracker's dynamic import needs within one settle().
 import { __test__setSlots, currentCourse } from '../stores/currentCourse.svelte';
 import type { InteractiveAppItem as IAItem } from '../lib/types';
 import { installResizeObserver } from './support/resizeObserver';
+import { settle } from './support/settle';
 
 const NOTE = 'This app needs a larger screen. Open this page on a laptop or desktop computer.';
 
@@ -25,12 +27,6 @@ function routed(sourceOrStatus: string | number = "getElementById('app-root')") 
     return jres({});
   };
 }
-// 12 microtask drains suffice ONLY because lib/api is module-warm: this file
-// statically imports __test__setSlots from currentCourse.svelte, which imports
-// lib/api, so the tracker's `await import('./api')` resolves without a macrotask.
-// The added fetchAssetSource fetch→text() hops still settle within 12. Do NOT
-// drop the currentCourse import to "clean up".
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 
 const appItem = (over: Partial<IAItem> = {}): IAItem => ({
   id: 7, sequence_id: 3, title: 'Sandbox', slug: 'sandbox', order: 1,

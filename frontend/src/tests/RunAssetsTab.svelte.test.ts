@@ -17,6 +17,7 @@ import { ApiError, REQUEST_ERROR_MESSAGE } from '../lib/api';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
 import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
 import type { BlockResponse, Course, MiniProjectResponse, RunAssetResponse } from '../lib/types';
+import { settle } from './support/settle';
 
 // jsdom doesn't ship DataTransfer/DragEvent constructors with a writable
 // `files` property, so build a minimal shape via Object.defineProperty —
@@ -25,11 +26,6 @@ function makeDropEvent(files: File[]): DragEvent {
   const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
   Object.defineProperty(ev, 'dataTransfer', { value: { files } });
   return ev;
-}
-
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
 }
 
 function pickReplaceFile(file: File): void {
@@ -848,8 +844,7 @@ describe('RunAssetsTab — upload via file picker', () => {
     const file = new File(['x'], 'p.pdf', { type: 'application/pdf' });
     Object.defineProperty(hiddenInput, 'files', { value: [file], configurable: true });
     hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
-    await Promise.resolve();
-    flushSync();
+    await settle();
 
     const live = target.querySelector('[aria-live="polite"]');
     expect(live).not.toBeNull();
@@ -984,8 +979,7 @@ describe('RunAssetsTab — upload lifecycle hardening', () => {
     const file = new File(['x'], 'p.pdf', { type: 'application/pdf' });
     Object.defineProperty(hiddenInput, 'files', { value: [file], configurable: true });
     hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
-    await Promise.resolve();
-    flushSync();
+    await settle();
     expect(capturedSignal?.aborted).toBe(false);
 
     unmount(component);
@@ -1228,8 +1222,7 @@ describe('RunAssetsTab — replace flow', () => {
     pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
     findButton(target, /^(Delete|Replace)$/)!.click();
-    await Promise.resolve();
-    flushSync();
+    await settle();
     expect(capturedSignal?.aborted).toBe(false);
 
     unmount(component);
@@ -1257,8 +1250,7 @@ describe('RunAssetsTab — replace flow', () => {
     pickReplaceFile(new File(['NEW'], 'doc.pdf', { type: 'application/pdf' }));
     await settle();
     findButton(target, /^(Delete|Replace)$/)!.click();
-    await Promise.resolve();
-    flushSync();
+    await settle();
     expect(capturedSignal?.aborted).toBe(false);
 
     box.runId = 999;
@@ -1581,8 +1573,7 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
       flushSync();
       findButton(target, /Force delete/i)!.click();
       // Let microtasks settle (rejection propagates + note404 schedules timer).
-      for (let i = 0; i < 12; i++) await Promise.resolve();
-      flushSync();
+      await settle();
 
       // Window not yet elapsed; no banner.
       expect(target.textContent).not.toMatch(/deleted by another user/i);
@@ -1677,8 +1668,7 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
     const confirm = findButton(target, /^(Delete|Replace)$/)!;
     confirm.click();
     confirm.click();
-    await Promise.resolve();
-    flushSync();
+    await settle();
 
     expect(deleteRunAsset).toHaveBeenCalledTimes(1);
   });
@@ -1724,8 +1714,7 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
     findDeleteBtn('orphan.pdf').click();
     flushSync();
     findButton(target, /^(Delete|Replace)$/)!.click();
-    await Promise.resolve();
-    flushSync();
+    await settle();
 
     // Delete is in-flight. Trigger an upload validation banner now.
     const uploadInput = target.querySelector('input[type="file"]:not([data-role])') as HTMLInputElement;
@@ -1995,8 +1984,7 @@ describe('RunAssetsTab — bulk delete execution', () => {
       flushSync();
       findButton(target, /^(Delete|Replace)$/)!.click();
       // Drain microtasks without real-time advance.
-      for (let i = 0; i < 12; i++) await Promise.resolve();
-      flushSync();
+      await settle();
 
       expect(target.textContent).toMatch(/Delete failed: backend on fire/);
 
@@ -2173,8 +2161,7 @@ describe('RunAssetsTab — 404 storm coalescing', () => {
       flushSync();
       findButton(target, /^(Delete|Replace)$/)!.click();
       // Microtask drain so both rejections + note404 schedule the timer.
-      for (let i = 0; i < 20; i++) await Promise.resolve();
-      flushSync();
+      await settle();
 
       // Window not elapsed; no banner.
       expect(target.textContent).not.toMatch(/by another user/i);
@@ -2212,8 +2199,7 @@ describe('RunAssetsTab — 404 storm coalescing', () => {
       deleteBtn.click();
       flushSync();
       findButton(target, /^(Delete|Replace)$/)!.click();
-      for (let i = 0; i < 12; i++) await Promise.resolve();
-      flushSync();
+      await settle();
 
       const callsBeforeUnmount = onRefetchAssets.mock.calls.length;
 
@@ -2254,8 +2240,7 @@ describe('RunAssetsTab — 404 storm coalescing', () => {
       deleteBtn.click();
       flushSync();
       findButton(target, /^(Delete|Replace)$/)!.click();
-      for (let i = 0; i < 12; i++) await Promise.resolve();
-      flushSync();
+      await settle();
 
       // Within the 500ms window: bulk-delete the other two → 2 more 404s,
       // each note404()'d, sharing the same timer.
@@ -2270,8 +2255,7 @@ describe('RunAssetsTab — 404 storm coalescing', () => {
       findButton(target, /Delete 2 selected/i)!.click();
       flushSync();
       findButton(target, /^(Delete|Replace)$/)!.click();
-      for (let i = 0; i < 30; i++) await Promise.resolve();
-      flushSync();
+      await settle();
 
       // Still pre-window: no banner, no refetch.
       expect(target.textContent).not.toMatch(/by another user/i);

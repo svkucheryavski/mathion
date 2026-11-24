@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync, createRawSnippet, type ComponentProps } from 'svelte';
 import InlineConfirm from '../components/ui/InlineConfirm.svelte';
+import { settle } from './support/settle';
 
 let target: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
@@ -60,8 +61,7 @@ describe('InlineConfirm', () => {
     confirm.click();
     expect(onConfirm).toHaveBeenCalledTimes(1);
     release();
-    await Promise.resolve();
-    await Promise.resolve();
+    await settle();
     confirm.click();
     expect(onConfirm).toHaveBeenCalledTimes(2);
   });

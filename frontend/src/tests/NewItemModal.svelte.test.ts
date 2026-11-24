@@ -4,11 +4,11 @@ import NewItemModal from '../components/editor/NewItemModal.svelte';
 import { createDirtyRegistry, DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../lib/dirtyRegistry.svelte';
 import { ApiError } from '../lib/api';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
+import { settle } from './support/settle';
 
 let target: HTMLDivElement;
 let cmp: ReturnType<typeof mount> | null = null;
 let registry: DirtyRegistry;
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 afterEach(() => { if (cmp) unmount(cmp); cmp = null; target?.remove(); document.documentElement.style.overflow = ''; vi.restoreAllMocks(); });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
