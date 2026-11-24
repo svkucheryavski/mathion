@@ -548,6 +548,7 @@ else:
 # Beta round T9: forced colours grey a disabled field (GrayText); the components' own greys are dropped there. +1 rule (55 -> 56).
 # Math plan T7: content.css gains the 12 maths rules (font, display, error, lines, accents); the four spacing lists add div.math-display/div.math-error with unchanged declarations. +12 rules (56 -> 68).
 # Math plan T8: a display formula that opens a list item is an inline-block (WebKit marker). +1 rule (68 -> 69).
+# Zoom x main merge (2026-11-24): 56 + 2 zoom + 13 maths = 71 rules.
 WANT_FULL = [
     ('', '*,*:before,*:after', '8d5d6c83'), ('', '.live-slot:empty', 'bb6a43fd'),
     ('', '.math-display', 'e509f3e9'), ('', '.math-display>math', '6e31cced'), ('', '.math-error', '380f2da4'),
@@ -4413,7 +4414,8 @@ if [[ -n $REPLY ]]; then
   d '\.preview-head' '' 'display:flex' 'align-items:center' 'gap:10px' 'padding:8px 12px' 'background:var\(--surface-2\)' 'border-bottom:1px solid var\(--border\)'
   d '\.preview-title' '' 'flex:1' 'font-size:12\.5px' 'font-weight:600' 'color:var\(--text\)'
   d '\.preview-meta' '' 'font-size:11\.5px' 'color:var\(--muted\)'
-  d '\.preview-area' '' 'aspect-ratio:16 / 9' 'background:var\(--surface-2\)' 'width:min\(100%,max\(800px,\(min\(calc\(100vh / var\(--app-zoom, 1\)\),872px\) - 378px\) \* 16 / 9\)\)' 'margin-inline:auto'
+  # Zoom merge (owner 2026-11-24): the preview floor is 800 screen px, 800px / zoom.
+  d '\.preview-area' '' 'aspect-ratio:16 / 9' 'background:var\(--surface-2\)' 'width:min\(100%,max\(calc\(800px / var\(--app-zoom, 1\)\),\(min\(calc\(100vh / var\(--app-zoom, 1\)\),872px\) - 378px\) \* 16 / 9\)\)' 'margin-inline:auto'
   d '\.preview-empty' '' 'height:100%' 'display:flex' 'align-items:center' 'justify-content:center' 'font-size:12px' 'color:var\(--muted\)'
   d '\.preview-foot' '' 'display:flex' 'gap:12px' 'padding:8px 12px' 'border-top:1px solid var\(--border-soft\)' 'background:var\(--surface-3\)'
   d '\.preview-status' '' 'font-size:11\.5px' 'color:var\(--muted\)'
@@ -4435,7 +4437,7 @@ if [[ -n $REPLY ]]; then
   d '\.script-name' '' 'font-size:12\.5px' 'color:var\(--text\)' 'text-overflow:ellipsis'
   d '\.app-preview' '' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'overflow:hidden'
   d '\.preview-head' '' 'display:flex' 'padding:8px 12px' 'background:var\(--surface-2\)' 'border-bottom:1px solid var\(--border\)'
-  d '\.preview-area' '' 'aspect-ratio:16 / 9' 'background:var\(--surface-2\)' 'width:min\(100%,max\(800px,\(min\(calc\(100vh / var\(--app-zoom, 1\)\),872px\) - 356px\) \* 16 / 9\)\)' 'margin-inline:auto'
+  d '\.preview-area' '' 'aspect-ratio:16 / 9' 'background:var\(--surface-2\)' 'width:min\(100%,max\(calc\(800px / var\(--app-zoom, 1\)\),\(min\(calc\(100vh / var\(--app-zoom, 1\)\),872px\) - 356px\) \* 16 / 9\)\)' 'margin-inline:auto'
   d '\.app-hint' '' 'margin:0' 'padding:8px 10px' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)' 'font-size:11\.5px' 'color:var\(--text-3\)'
   d '\.warnings' '' 'padding:8px 10px' 'background:var\(--surface-2\)' 'border-left:3px solid var\(--primary\)' 'font-size:11\.5px' 'color:var\(--text-3\)'
   d '\.preview-foot' '' 'border-top:1px solid var\(--border-soft\)' 'background:var\(--surface-3\)'

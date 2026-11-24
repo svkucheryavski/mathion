@@ -1,4 +1,4 @@
-# Large-screen zoom — design (rev 6)
+# Large-screen zoom — design (rev 7)
 
 Rev 1 was a single `@media screen and (min-width: 1280px) { html { zoom: 1.15 } }`
 rule. Fable and Codex both reviewed it (round 1); this revision answers their
@@ -6,6 +6,8 @@ findings. Rev 3 answers round 2 (both: tooltip helper contract, browser-zoom
 example, browser acceptance). Rev 4 applies the round-3 minors (both reviewers:
 sound to plan from). The owner has seen side-by-side screenshots at 115%
 and likes the look, and chose the 1400px threshold knowing the Cmd+ trade-off (§5).
+Rev 7 (merge of main, 2026-11-24) lists main's three zoom-aware viewport uses and
+the owner's call on the editor previews' 800px floor (§3).
 
 ## Intent
 The Mathion web app looks small on laptops and larger screens: the theme's base
@@ -59,6 +61,13 @@ larger on wide windows; everything else unchanged.
      drawer collapsed to its content.)
    - `RunProgressTab.svelte:618` and `SuperuserUsers.svelte:412` tooltip
      `max-width: min(320px, calc(100vw - 16px))` → divide `100vw` likewise.
+   Main (merged 2026-11-24) adds three, already zoom-aware: the item-window
+   previews (`AppBody.svelte`, `VideoBody.svelte`) and the student app card
+   (`InteractiveAppItem.svelte`) use `calc(100vh / var(--app-zoom, 1))`. Owner
+   2026-11-24: the previews' 800px floor becomes `calc(800px / var(--app-zoom, 1))`
+   (800 screen px): the item window fits a 14" MacBook (scroll 61px -> 2px); a 13"
+   Air still scrolls ~70px (was ~130px), accepted. The student app card keeps 800
+   layout px (the authors' promise) and may scroll ~60px on a 13" Air under zoom.
    These are all the `vh`/`dvh`/`vw` uses in `frontend/src` today. The
    visual-refresh gate (`frontend/scripts/visual-refresh-gate.sh`) pins some of
    these exact strings and changes in the same task.

@@ -1,6 +1,8 @@
 # Larger item window and apps on white — short design
 
 Owner request from the OLX import spot-check (2026-11-23), approved in the conversation.
+Since the large-screen zoom merge (2026-11-24) the previews' floor is `calc(800px / var(--app-zoom, 1))`,
+800 screen px under zoom (large-screen-zoom spec rev 7 §3).
 
 ## Intent
 
