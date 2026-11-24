@@ -31,7 +31,7 @@ const mp = {
 };
 const asset = {
   id: 1, run_id: 10, filename: 'fig.png', file_size: 10, mime_type: 'image/png',
-  uploaded_at: '2026-01-01T00:00:00Z', uploaded_by: 1, uploaded_by_email: 'a@x', is_referenced: true,
+  uploaded_at: '2026-01-01T00:00:00Z', uploaded_by: 1, uploaded_by_email: 'a@x', is_referenced: true, referenced_by: [5],
 };
 const teacher = { id: 1, run_id: 10, user_id: 1, user_email: 't@x', user_full_name: 'T', created_at: '2026-01-01' };
 const unassigned = { id: 1, run_id: 10, user_id: 7, user_email: 's@x', user_full_name: 'S', group_id: null, created_at: '2026-01-01' };

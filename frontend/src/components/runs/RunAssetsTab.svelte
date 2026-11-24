@@ -8,7 +8,6 @@
   } from '../../lib/types';
   import { formatFileSize } from '../../lib/format';
   import { formatLocalWithTz } from '../../lib/datetime';
-  import { extractAssetRefs } from '../../lib/extractAssetRefs';
   import {
     uploadRunAsset,
     replaceRunAsset,
@@ -517,22 +516,11 @@
     await rescueFocus(replaceEls[assetId]);
   }
 
-  // Map { mpId -> Set<filename refs> }. Empty when miniProjects is null.
-  const refsByMp = $derived.by(() => {
-    const m = new Map<number, Set<string>>();
-    if (miniProjects == null) return m;
-    for (const mp of miniProjects) {
-      m.set(mp.id, extractAssetRefs(mp.assignment_md ?? ''));
-    }
-    return m;
-  });
-
+  // The server's usage, kept to the mini-projects this tab lists, in their order.
   function referencingMpIds(asset: RunAssetResponse): number[] {
-    const ids: number[] = [];
-    for (const [mpId, refs] of refsByMp.entries()) {
-      if (refs.has(asset.filename)) ids.push(mpId);
-    }
-    return ids;
+    if (miniProjects == null) return [];
+    const used = new Set(asset.referenced_by);
+    return miniProjects.filter((mp) => used.has(mp.id)).map((mp) => mp.id);
   }
 
   // D87: a reload can drop a chip to 0 uses, and a 0-uses chip is a label. Its
@@ -771,7 +759,7 @@
         </thead>
         <tbody>
           {#each sortedAssets as a (a.id)}
-            {@const refIds = miniProjects == null ? [] : referencingMpIds(a)}
+            {@const refIds = referencingMpIds(a)}
             {@const subOpen = openSubPanelAssetId === a.id && miniProjects != null}
             {@const rc = confirmFor(a.id)}
             <tr data-asset-id={a.id}>
@@ -852,7 +840,7 @@
             {/if}
             {#if rc?.kind === 'delete' && rc.isReferenced}
               {#snippet rowMessage()}
-                {#if miniProjects == null}
+                {#if miniProjects == null || refIds.length === 0}
                   This asset is referenced by other mini-projects.
                 {:else}
                   This asset is referenced by {refIds.length} mini-project{refIds.length === 1 ? '' : 's'}.

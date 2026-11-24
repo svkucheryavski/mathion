@@ -444,6 +444,7 @@ export type RunAssetResponse = {
   uploaded_by: number | null;
   uploaded_by_email: string | null;
   is_referenced: boolean;
+  referenced_by: number[];
 };
 
 export type MiniProjectRowStatus = 'draft' | 'published' | 'locked';
