@@ -1468,3 +1468,19 @@ def test_look_ahead_stops_past_max_depth(monkeypatch):
     with pytest.raises(LatexError, match="nested too deeply"):
         latex_to_mathml(src, False)
     assert calls < 10 * len(src)
+
+
+def test_formula_output_cap():
+    with pytest.raises(LatexError, match="formula too long"):
+        latex_to_mathml("∑" * 1000, False)
+    latex_to_mathml("x" * 2000, False)
+
+
+def test_formula_output_cap_counts_the_whole_math_element(monkeypatch):
+    from mathion import latex_mathml
+    size = len(latex_to_mathml("x+y", False))
+    monkeypatch.setattr(latex_mathml, "MAX_OUTPUT", size)
+    latex_to_mathml("x+y", False)
+    monkeypatch.setattr(latex_mathml, "MAX_OUTPUT", size - 1)
+    with pytest.raises(LatexError, match="formula too long"):
+        latex_to_mathml("x+y", False)

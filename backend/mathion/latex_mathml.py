@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 MAX_LENGTH = 2000
 MAX_DEPTH = 40
+MAX_OUTPUT = 60_000                         # characters of one formula's MathML
 
 # Attribute order in the output; matches the spec's sanitiser map.
 _ATTR_ORDER = (
@@ -1492,8 +1493,11 @@ def latex_to_mathml(src: str, display: bool) -> str:
     nodes = Parser(text, display).parse_seq(0)
     body = "".join(n.xml() for n in nodes) if nodes else "<mrow/>"
     head = '<math display="block">' if display else "<math>"
-    return (
+    out = (
         f"{head}<semantics><mrow>{body}</mrow>"
         f'<annotation encoding="application/x-tex">{html.escape(src, quote=True)}</annotation>'
         "</semantics></math>"
     )
+    if len(out) > MAX_OUTPUT:
+        raise LatexError("formula too long")
+    return out
