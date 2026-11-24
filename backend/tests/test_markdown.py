@@ -739,3 +739,69 @@ def test_unclosed_double_dollar_is_linear(src, limit):
     start = time.perf_counter()
     render_markdown(src)
     assert time.perf_counter() - start < limit
+
+
+# Today's backtick scan, frozen, to pin the faster one against.
+def _old_in_code(src, start, end, *_):
+    pos = start
+    while m := markdown_mod._RUN.search(src, pos, end):
+        if markdown_mod._escaped(src, m.start()):
+            pos = m.start() + 1
+            continue
+        n = len(m.group())
+        close = next((r for r in markdown_mod._RUN.finditer(src, m.end()) if len(r.group()) == n), None)
+        if close is None:
+            pos = m.end()
+            continue
+        if close.start() > end:
+            return True
+        pos = close.end()
+    return False
+
+
+def _backtick_corpus():
+    rng = random.Random(20261124)
+    return ["".join(rng.choice("`$\\a ") for _ in range(rng.randint(1, 40))) for _ in range(2000)]
+
+
+def test_in_code_matches_old_scan():
+    for src in _backtick_corpus():
+        dollars = [i for i, c in enumerate(src) if c == "$"]
+        for a, i in enumerate(dollars):
+            for j in dollars[a + 1:]:
+                assert markdown_mod._in_code(src, i + 1, j) == _old_in_code(src, i + 1, j), (src, i, j)
+
+
+def test_render_matches_old_scan(monkeypatch):
+    corpus = _backtick_corpus() + ["[x](a`b) $c ` d$ `"]
+    new = [render_markdown(s) for s in corpus]
+    monkeypatch.setattr(markdown_mod, "_in_code", _old_in_code)
+    assert [render_markdown(s) for s in corpus] == new
+
+
+def _backtick_text(k, n):
+    return "$x " + " ".join("`" * i for i in range(2, k)) + " a`" * n + " y$"
+
+
+def _best_of_3(text):
+    best = None
+    for _ in range(3):
+        start = time.perf_counter()
+        render_markdown(text)
+        took = time.perf_counter() - start
+        best = took if best is None else min(best, took)
+    return best
+
+
+def test_backtick_scan_scales_linearly():
+    small, large = _best_of_3(_backtick_text(350, 20000)), _best_of_3(_backtick_text(495, 40000))
+    print(f"backtick scan: S {small:.3f} s, 2S {large:.3f} s")
+    assert large < 0.5
+
+
+def test_backtick_scan_nested_images_stay_linear():
+    # each alt text is its own source; the paragraph's run index must not be rebuilt per image
+    inner = "".join(f"![$`{i}` x$](x{i}.png) " for i in range(9))
+    took = _best_of_3(f"![{inner}](y.png) $`a` b$ " * 1000)
+    print(f"nested backtick scan: {took:.3f} s")
+    assert took < 0.5

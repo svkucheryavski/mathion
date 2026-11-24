@@ -1,4 +1,8 @@
-from mathion.markdown import extract_asset_filenames, resolve_asset_urls, render_markdown
+from mathion.markdown import extract_asset_filenames, render_markdown
+
+
+def _url(name):
+    return f"/assets/42/{name}"
 
 
 def test_extract_image_references():
@@ -37,34 +41,20 @@ def test_extract_no_refs():
 
 
 def test_resolve_image_urls():
-    html = '<p><img src="chart.png" alt="diagram"></p>'
-    result = resolve_asset_urls(html, 42, {"chart.png"})
-    assert 'src="/assets/42/chart.png"' in result
+    assert 'src="/assets/42/chart.png"' in render_markdown("![diagram](chart.png)", asset_url=_url)
 
 
 def test_resolve_link_urls():
-    html = '<p><a href="slides.pdf">download</a></p>'
-    result = resolve_asset_urls(html, 42, {"slides.pdf"})
-    assert 'href="/assets/42/slides.pdf"' in result
+    assert 'href="/assets/42/slides.pdf"' in render_markdown("[download](slides.pdf)", asset_url=_url)
 
 
 def test_resolve_leaves_external_urls():
-    html = '<p><a href="https://example.com">link</a></p>'
-    result = resolve_asset_urls(html, 42, set())
-    assert 'href="https://example.com"' in result
-
-
-def test_resolve_only_known_filenames():
-    html = '<p><img src="unknown.png" alt="x"></p>'
-    result = resolve_asset_urls(html, 42, {"known.png"})
-    assert 'src="unknown.png"' in result
+    assert 'href="https://example.com"' in render_markdown("[link](https://example.com)", asset_url=_url)
 
 
 def test_full_render_with_asset_resolution():
-    md = "See ![chart](data.png) for details"
-    html = render_markdown(md)
-    resolved = resolve_asset_urls(html, 99, {"data.png"})
-    assert 'src="/assets/99/data.png"' in resolved
+    html = render_markdown("See ![chart](data.png) for details", asset_url=lambda n: f"/assets/99/{n}")
+    assert 'src="/assets/99/data.png"' in html
 
 
 def test_extract_link_with_title():
@@ -78,12 +68,25 @@ def test_extract_image_with_title():
 
 
 def test_resolve_does_not_overwrite_inside_text():
-    """A bare filename appearing in plain text must not be rewritten;
-    only attribute values inside src/href are rewritten.
-    """
-    html = '<p>The file is <code>data.png</code></p>'
-    result = resolve_asset_urls(html, 42, {"data.png"})
-    assert result == html
+    """A bare filename in plain text is never rewritten; only image and link targets."""
+    md = "The file is `data.png`"
+    assert render_markdown(md, asset_url=_url) == render_markdown(md)
+
+
+def test_asset_rewrite_skips_code_and_math():
+    md = '![p](pic.png) and `src="pic.png"` and $\\text{src="pic.png"}$ and $\\bad{src="pic.png"}$'
+    assert render_markdown(md, asset_url=_url).count("/assets/42/pic.png") == 1
+
+
+def test_asset_rewrite_image_and_link_same_name():
+    html = render_markdown("[![p](pic.png)](pic.png)", asset_url=_url)
+    assert 'src="/assets/42/pic.png"' in html and 'href="/assets/42/pic.png"' in html
+    assert html.count("/assets/42/pic.png") == 2
+
+
+def test_empty_targets_not_rewritten():
+    md = "[a]() ![b]()"
+    assert render_markdown(md, asset_url=_url) == render_markdown(md)
 
 
 def test_root_relative_link_is_not_an_asset():
@@ -107,7 +110,7 @@ def test_angle_bracket_target_is_unwrapped():
     # VR-B: <...> is markdown's wrapper, not part of the target.
     md = "[x](<foo.pdf>) [a](</courses>) ![p](<https://x.org/p.png>)"
     assert extract_asset_filenames(md) == {"foo.pdf"}
-    html = resolve_asset_urls(render_markdown("[x](<foo.pdf>)"), 7, {"foo.pdf"})
+    html = render_markdown("[x](<foo.pdf>)", asset_url=lambda n: f"/assets/7/{n}")
     assert 'href="/assets/7/foo.pdf"' in html
 
 
@@ -126,7 +129,7 @@ def test_extraction_reads_reference_links_and_images_in_links():
 
 
 def test_extracted_names_are_the_rendered_targets():
-    # validation and resolve_asset_urls must agree, so no decoding
+    # validation and the rewrite must agree, so no decoding
     assert extract_asset_filenames("![chart](p%69c.png)") == {"p%69c.png"}
     for md in ("![chart](p%69c.png)", "[a](<my file.pdf>)", "![x](a.png) [y](b.pdf)"):
         out = render_markdown(md)

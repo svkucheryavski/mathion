@@ -101,3 +101,20 @@ def test_run_render_no_reference_rows_created(admin_client, seed_run_with_groups
     assert r.status_code == status.HTTP_200_OK, r.text
     after = db.query(RunAssetReference).filter_by(run_asset_id=asset["id"]).count()
     assert before == after
+
+
+def test_run_render_rewrite_skips_code_and_math(admin_client, seed_run_with_groups):
+    run, _, _ = seed_run_with_groups()
+    _upload_asset(admin_client, run["id"], "pic.png")
+    r = admin_client.post(f"/api/runs/{run['id']}/render",
+                          json={"content_md": '![p](pic.png) and `src="pic.png"` and $\\text{src="pic.png"}$'})
+    assert r.status_code == status.HTTP_200_OK, r.text
+    assert r.json()["html"].count(f'/api/runs/{run["id"]}/assets/pic.png') == 1
+
+
+def test_run_render_refuses_data_image(admin_client, seed_run_with_groups):
+    run, _, _ = seed_run_with_groups()
+    r = admin_client.post(f"/api/runs/{run['id']}/render", json={"content_md": "![a](data:image/png;base64,AAAA)"})
+    assert r.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert r.json()["detail"] == ("Images pasted as data: URLs are not supported. "
+                                  "Upload the file under Assets and link it by name.")

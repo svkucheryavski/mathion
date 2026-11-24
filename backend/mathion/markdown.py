@@ -3,6 +3,8 @@
 # an Alembic data migration that re-renders it. Before the beta: no backfill.
 import html
 import re
+from bisect import bisect_left
+from collections.abc import Callable
 import types
 import unicodedata
 
@@ -252,7 +254,7 @@ def _digit(ch: str) -> bool:
 _RUN = re.compile(r"`+")
 
 
-def _in_code(src: str, start: int, end: int) -> bool:
+def _in_code(src: str, start: int, end: int, env: dict | None = None) -> bool:
     """Whether src[end] sits inside a code span opened after start, paired as markdown-it pairs runs."""
     pos = start
     while m := _RUN.search(src, pos, end):
@@ -260,14 +262,26 @@ def _in_code(src: str, start: int, end: int) -> bool:
             pos = m.start() + 1                       # \` is a literal backtick
             continue
         n = len(m.group())
-        close = next((r for r in _RUN.finditer(src, m.end()) if len(r.group()) == n), None)
-        if close is None:
+        starts = _run_starts(src, env).get(n, ())
+        k = bisect_left(starts, m.end())
+        if k == len(starts):
             pos = m.end()                             # an unmatched run stays text
             continue
-        if close.start() > end:
+        if starts[k] > end:
             return True
-        pos = close.end()                             # no escapes inside code
+        pos = starts[k] + n                           # no escapes inside code
     return False
+
+
+def _run_starts(src: str, env: dict | None) -> dict[int, list[int]]:
+    """Start of every backtick run in src, by run length; kept in the render's env, one pass per source."""
+    index = {} if env is None else env.setdefault("backtick_runs", {})
+    if src not in index:
+        starts: dict[int, list[int]] = {}
+        for r in _RUN.finditer(src):
+            starts.setdefault(len(r.group()), []).append(r.start())
+        index[src] = starts
+    return index[src]
 
 
 def math_inline_rule(state: StateInline, silent: bool, code_spans: bool = True) -> bool:
@@ -277,7 +291,7 @@ def math_inline_rule(state: StateInline, silent: bool, code_spans: bool = True) 
         return False
     if src.startswith("$$", pos):
         close = _next_dollar(src, pos + 2, "$$")
-        if close == -1 or (code_spans and _in_code(src, pos + 2, close)):
+        if close == -1 or (code_spans and _in_code(src, pos + 2, close, state.env)):
             return False                              # an unclosed $$ stays text
         kind, mark = "math_inline_double", "$$"
     else:
@@ -287,7 +301,7 @@ def math_inline_rule(state: StateInline, silent: bool, code_spans: bool = True) 
         if (pos and _digit(src[pos - 1])) or not after or after.isspace():
             return False
         close = _next_dollar(src, pos + 1, "$")
-        if close == -1 or close >= state.posMax or src[close - 1].isspace() or (code_spans and _in_code(src, pos + 1, close)):
+        if close == -1 or close >= state.posMax or src[close - 1].isspace() or (code_spans and _in_code(src, pos + 1, close, state.env)):
             return False
         if close + 1 < len(src) and (src[close + 1] == "$" or _digit(src[close + 1])):
             return False
@@ -449,16 +463,24 @@ _ALLOWED_CLASSES = {
 }
 
 
-def render_markdown(text: str | None) -> str:
+def render_markdown(text: str | None, asset_url: Callable[[str], str] | None = None) -> str:
     """Convert Markdown to sanitized HTML.
 
     LaTeX math ($...$ and $$...$$) becomes MathML on the server.
     Links get rel="noopener noreferrer" automatically via nh3.
     javascript: URIs in href/src are stripped by nh3's url_schemes filter.
+    With asset_url, asset image and link targets become asset_url(name).
     """
     if not text:
         return ""
-    return _clean(_md.render(text))
+    env: dict = {}
+    tokens = _md.parse(text, env)
+    if asset_url:
+        for tok, attr, is_link in _targets(tokens):
+            ref = _asset_ref(tok.attrGet(attr), is_link)
+            if ref:
+                tok.attrSet(attr, asset_url(ref))
+    return _clean(_md.renderer.render(tokens, _md.options, env))
 
 
 _opt = MarkdownIt("zero")
@@ -498,14 +520,24 @@ def _is_asset_target(ref: str, is_link: bool) -> bool:
     return not (is_link and ref.startswith("/") and not ref.startswith(_FILE_PATHS))
 
 
+def _asset_ref(ref: str | None, is_link: bool) -> str | None:
+    """The target as an asset name, or None (as rendered, so validation and the rewrite agree)."""
+    ref = str(ref or "")
+    return ref if ref and _is_asset_target(ref, is_link) else None
+
+
+def is_data_url(ref: str) -> bool:
+    return ref.lower().startswith("data:")
+
+
 def _targets(tokens: list[Token]):
-    """Image sources and link targets, as markdown-it parsed them."""
+    """Image and link tokens with the attribute holding their target, as markdown-it parsed them."""
     for tok in tokens:
         if tok.type == "image":
-            yield tok.attrGet("src"), False
+            yield tok, "src", False
             continue                                  # its children are alt text, not links
         if tok.type == "link_open":
-            yield tok.attrGet("href"), True
+            yield tok, "href", True
         if tok.children:
             yield from _targets(tok.children)
 
@@ -517,21 +549,5 @@ def extract_asset_filenames(text: str) -> set[str]:
     """
     if not text:
         return set()
-    filenames: set[str] = set()
-    for ref, is_link in _targets(_md.parse(text)):
-        ref = str(ref or "")                          # as rendered, so resolve_asset_urls finds it
-        if ref and _is_asset_target(ref, is_link):
-            filenames.add(ref)
-    return filenames
-
-
-def resolve_asset_urls(rendered: str, version_id: int, asset_filenames: set[str]) -> str:
-    """Replace bare asset filenames with /assets/{version_id}/{filename} paths.
-
-    Only replaces filenames in asset_filenames. Must be called AFTER
-    render_markdown() / nh3 sanitization.
-    """
-    for filename in asset_filenames:
-        rendered = rendered.replace(f'src="{filename}"', f'src="/assets/{version_id}/{filename}"')
-        rendered = rendered.replace(f'href="{filename}"', f'href="/assets/{version_id}/{filename}"')
-    return rendered
+    refs = (_asset_ref(tok.attrGet(attr), is_link) for tok, attr, is_link in _targets(_md.parse(text)))
+    return {ref for ref in refs if ref}

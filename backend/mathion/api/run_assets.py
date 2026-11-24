@@ -362,8 +362,8 @@ def render_run_markdown(
     """Render markdown with bare-filename asset refs resolved against this run's asset pool.
 
     Convention is `![alt](filename.png)` (markdown.py:52-68 extracts non-URL refs);
-    `render_with_run_assets` validates each against the run's RunAsset pool and rewrites
-    `src="{filename}"` / `href="{filename}"` to `/api/runs/{run_id}/assets/{filename}`.
+    `render_with_run_assets` validates each against the run's RunAsset pool and points
+    those image and link targets at `/api/runs/{run_id}/assets/{filename}`.
     Side-effect-free: SELECTs only; no RunAssetReference rows are written here
     (sync_run_asset_references runs only on PATCH/POST of mini-projects).
     422 raised internally by render_with_run_assets when any referenced asset

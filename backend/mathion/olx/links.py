@@ -122,6 +122,8 @@ def classify_link(url: str, targets: LinkTargets, *, image: bool) -> Link:
         return Link("web", "mailto" + u[6:])
     form = None if scheme and not low.startswith("asset-v1:") else _static_name(re.split(r"[?#]", u, maxsplit=1)[0])
     if form is None:
+        if image and low.startswith("data:"):
+            return Link("text", None, note="An image pasted into the page as a data: URL was removed; its text was kept")
         return Link("text", None, note=f"{what} to “{u}” was removed (only web addresses and course files can be linked); its text was kept")
     found = _lookup(form, targets)
     if found is None:

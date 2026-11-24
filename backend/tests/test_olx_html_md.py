@@ -136,6 +136,20 @@ def test_mailto_image_and_data_image_lose_their_link():
         assert classify_link(url, TARGETS, image=True).kind == "text"
 
 
+DATA_NOTE = "An image pasted into the page as a data: URL was removed; its text was kept"
+
+
+@pytest.mark.parametrize("url", ["data:image/png;base64,AAAA", "DATA:image/png;base64,AAAA"])
+def test_olx_data_image_note_is_short(url):
+    assert classify_link(url, TARGETS, image=True) == Link("text", None, note=DATA_NOTE)
+
+
+def test_olx_data_link_and_ftp_image_keep_their_note():
+    for url, image in (("data:text/plain,x", False), ("ftp://e.com/p.png", True)):
+        note = classify_link(url, TARGETS, image=image).note
+        assert note and note != DATA_NOTE and url in note
+
+
 def test_link_scheme_lowercased_and_protocol_relative():
     assert md('<p><a href="HTTPS://E.com/x">a</a> <a href="//e.com/y">b</a></p>') == "[a](<https://E.com/x>) [b](<https://e.com/y>)"
 

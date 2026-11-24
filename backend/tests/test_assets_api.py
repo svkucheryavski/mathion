@@ -336,6 +336,66 @@ def test_missing_asset_message_shows_names_as_typed(admin_client, asset_tmpdir):
     assert "café.png" in response.json()["detail"] and "my notes.pdf" in response.json()["detail"]
 
 
+def _seq(admin_client, slug, upload=None):
+    course = admin_client.post("/api/courses", json={"slug": slug, "name": "M", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
+    if upload:
+        admin_client.post(f"/api/versions/{version['id']}/assets",
+                          files={"file": (upload, io.BytesIO(b"png"), "image/png")})
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
+    return version, seq
+
+
+def _page(admin_client, seq, md):
+    return admin_client.post(f"/api/sequences/{seq['id']}/items",
+                             json={"title": "Page", "type": "static_page", "content_md": md})
+
+
+def test_item_asset_rewrite_skips_code_and_math(admin_client, asset_tmpdir):
+    version, seq = _seq(admin_client, "md-rw", upload="pic.png")
+    r = _page(admin_client, seq, '![p](pic.png) and `src="pic.png"` and $\\text{src="pic.png"}$')
+    assert r.status_code in (200, 201), r.text
+    assert r.json()["content_html"].count(f'/assets/{version["id"]}/pic.png') == 1
+
+
+@pytest.mark.parametrize("target", ["data:image/png;base64,AAAA", "DATA:image/png;base64,AAAA"])
+def test_data_image_refused_with_short_message(admin_client, asset_tmpdir, target):
+    from mathion.api import asset_render
+    _, seq = _seq(admin_client, "md-data")
+    r = _page(admin_client, seq, f"![a]({target})")
+    assert r.status_code == 422
+    assert r.json()["detail"] == ("Images pasted as data: URLs are not supported. "
+                                  "Upload the file under Assets and link it by name.")
+    assert r.json()["detail"] == asset_render.DATA_URL_REFUSAL
+
+
+def test_data_link_text_is_not_refused(admin_client, asset_tmpdir):
+    _, seq = _seq(admin_client, "md-datalink")
+    assert _page(admin_client, seq, "[x](data:text/html,hi)").status_code in (200, 201)
+
+
+def test_missing_names_keep_typed_spelling(admin_client, asset_tmpdir):
+    _, seq = _seq(admin_client, "md-typed")
+    r = _page(admin_client, seq, "![a](p%69c.png) ![b](pic.png) ![c](pic.png)")
+    assert r.status_code == 422
+    assert r.json()["detail"].endswith(": p%69c.png, pic.png")
+
+
+def test_missing_names_keep_escaped_percent(admin_client, asset_tmpdir):
+    _, seq = _seq(admin_client, "md-typed2")
+    r = _page(admin_client, seq, "![a](a%2541.png) ![b](a%41.png)")
+    assert r.status_code == 422
+    assert r.json()["detail"].endswith(": a%2541.png, a%41.png")
+
+
+def test_missing_names_show_a_plain_percent(admin_client, asset_tmpdir):
+    _, seq = _seq(admin_client, "md-typed3")
+    r = _page(admin_client, seq, "![a](100%.png)")
+    assert r.status_code == 422
+    assert r.json()["detail"].endswith(": 100%.png")
+
+
 def test_item_update_tracks_references(admin_client, db, asset_tmpdir):
     course = admin_client.post("/api/courses", json={"slug": "md3", "name": "M", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
