@@ -851,6 +851,7 @@ class RunAssetResponse(BaseModel):
     uploaded_by: int | None
     uploaded_by_email: str | None = None
     is_referenced: bool = False
+    referenced_by: list[int] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

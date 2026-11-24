@@ -3,6 +3,7 @@
 # an Alembic data migration that re-renders it. Before the beta: no backfill.
 import html
 import re
+import types
 import unicodedata
 
 import markdown_it.rules_block.list as _list_rule
@@ -318,6 +319,8 @@ def _block_end(state: StateBlock, startLine: int, endLine: int) -> int:
         n += 1
         if text.endswith("$$") and (n - 1 > startLine or len(text) > 3):
             return n
+        if n - 1 > startLine and _has_dollar(text):
+            return n                                  # a `$` inside makes the block invalid anyway
     return n
 
 
@@ -376,7 +379,23 @@ def _render_block(self, tokens, idx, options, env) -> str:
     return render_math(_source(tokens[idx].content), True, False) + "\n"
 
 
+def _render_inline_as_text(self, tokens, options, env) -> str:
+    """An image's alt text: formulas keep their source, escapes and entities their text."""
+    out = ""
+    for token in tokens or []:
+        if token.type in ("text", "text_special"):
+            out += token.content
+        elif token.type in ("math_inline", "math_inline_double"):
+            out += _source(token.content)
+        elif token.type == "image":
+            out += self.renderInlineAsText(token.children, options, env)
+        elif token.type in ("softbreak", "hardbreak"):
+            out += "\n"
+    return out
+
+
 _md = MarkdownIt("commonmark", {"html": False})
+_md.renderer.renderInlineAsText = types.MethodType(_render_inline_as_text, _md.renderer)
 _md.core.ruler.push("loose_lists", _loose_lists)
 _md.core.ruler.before("text_join", "bare_url", _bare_urls)
 _md.core.ruler.after("bare_url", "drop_bad_links", _drop_bad_links)

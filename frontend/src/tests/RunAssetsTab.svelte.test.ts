@@ -69,11 +69,11 @@ function baseProps(overrides: Partial<{
   };
 }
 
-function mkAsset(id: number, filename: string): RunAssetResponse {
+function mkAsset(id: number, filename: string, referenced_by: number[] = []): RunAssetResponse {
   return {
     id, run_id: 1, filename, file_size: 100, mime_type: 'application/pdf',
     uploaded_at: '2026-05-20T12:00:00Z', uploaded_by: 7,
-    uploaded_by_email: 'a@b.com', is_referenced: false,
+    uploaded_by_email: 'a@b.com', is_referenced: referenced_by.length > 0, referenced_by,
   };
 }
 
@@ -137,13 +137,13 @@ describe('RunAssetsTab — table rendering', () => {
         id: 1, run_id: 1, filename: 'doc.pdf', file_size: 1234,
         mime_type: 'application/pdf',
         uploaded_at: '2026-05-20T12:00:00Z', uploaded_by: 7,
-        uploaded_by_email: 'admin@example.com', is_referenced: false,
+        uploaded_by_email: 'admin@example.com', is_referenced: false, referenced_by: [],
       },
       {
         id: 2, run_id: 1, filename: 'fig.png', file_size: 180_000,
         mime_type: 'image/png',
         uploaded_at: '2026-05-21T13:00:00Z', uploaded_by: null,
-        uploaded_by_email: null, is_referenced: true,
+        uploaded_by_email: null, is_referenced: true, referenced_by: [5],
       },
     ];
     component = mount(RunAssetsTab, { target, props: baseProps({ assets }) });
@@ -175,7 +175,7 @@ describe('RunAssetsTab — table rendering', () => {
         id: 1, run_id: 1, filename: 'has space.pdf', file_size: 100,
         mime_type: 'application/pdf',
         uploaded_at: '2026-05-20T12:00:00Z', uploaded_by: 7,
-        uploaded_by_email: 'a@b.com', is_referenced: false,
+        uploaded_by_email: 'a@b.com', is_referenced: false, referenced_by: [],
       },
     ];
     component = mount(RunAssetsTab, { target, props: baseProps({ assets }) });
@@ -195,11 +195,11 @@ describe('RunAssetsTab — filter pills', () => {
   const fixtureAssets = [
     mkAsset(1, 'orphan-a.pdf'),
     mkAsset(2, 'orphan-b.pdf'),
-    mkAsset(3, 'referenced.pdf'),
+    mkAsset(3, 'referenced.pdf', [10]),
   ];
   const fixtureMps = [mkMp(10, 'MP1', 'See ![ref](referenced.pdf).')];
 
-  it('counts orphan vs referenced from extractAssetRefs scan', () => {
+  it('counts orphan vs referenced from referenced_by', () => {
     component = mount(RunAssetsTab, {
       target,
       props: baseProps({ assets: fixtureAssets, miniProjects: fixtureMps }),
@@ -309,7 +309,7 @@ describe('RunAssetsTab — sort', () => {
     component = mount(RunAssetsTab, {
       target,
       props: baseProps({
-        assets: sortAssets,
+        assets: [mkAsset(1, 'banana.pdf'), mkAsset(2, 'apple.pdf', [10]), mkAsset(3, 'cherry.pdf')],
         miniProjects: [mkMp(10, 'MP1', '![](apple.pdf)')],
       }),
     });
@@ -419,7 +419,7 @@ describe('RunAssetsTab — sort', () => {
 
 describe('RunAssetsTab — filtered-empty state', () => {
   it('shows "No orphan assets" when all are referenced and Orphan filter is active', () => {
-    const allRefd = [mkAsset(1, 'ref.pdf')];
+    const allRefd = [mkAsset(1, 'ref.pdf', [10])];
     component = mount(RunAssetsTab, {
       target,
       props: baseProps({
@@ -452,7 +452,7 @@ describe('RunAssetsTab — Esc collapses sub-panel', () => {
     component = mount(RunAssetsTab, {
       target,
       props: baseProps({
-        assets: [mkAsset(1, 'foo.pdf')],
+        assets: [mkAsset(1, 'foo.pdf', [10])],
         miniProjects: [mkMp(10, 'MP A', '![](foo.pdf)')],
       }),
     });
@@ -475,7 +475,7 @@ describe('RunAssetsTab — Esc collapses sub-panel', () => {
 
 describe('RunAssetsTab — miniProjects prop-update recomputes', () => {
   it('updating miniProjects on a STAYED-mounted instance re-derives filter counts', () => {
-    const assetsFix = [mkAsset(1, 'doc.pdf')];
+    const assetsFix = [mkAsset(1, 'doc.pdf', [10])];  // counts once MP 10 is listed
 
     // Reactive props box: mutating its fields propagates into the component's
     // $props() reads. This proves in-mount re-derivation, not a fresh render.
@@ -503,7 +503,7 @@ describe('RunAssetsTab — miniProjects prop-update recomputes', () => {
 });
 
 describe('RunAssetsTab — uses badge + sub-panel', () => {
-  const subPanelAssets = [mkAsset(1, 'foo.pdf')];
+  const subPanelAssets = [mkAsset(1, 'foo.pdf', [10, 11])];
   const subPanelMps = [
     mkMp(10, 'MP A', '![](foo.pdf)'),
     mkMp(11, 'MP B', '[](foo.pdf)'),
@@ -568,7 +568,7 @@ describe('RunAssetsTab — uses badge + sub-panel', () => {
     component = mount(RunAssetsTab, {
       target,
       props: baseProps({
-        assets: [mkAsset(1, 'a.pdf'), mkAsset(2, 'b.pdf')],
+        assets: [mkAsset(1, 'a.pdf', [10]), mkAsset(2, 'b.pdf', [11])],
         miniProjects: [
           mkMp(10, 'M1', '![](a.pdf)'),
           mkMp(11, 'M2', '![](b.pdf)'),
@@ -588,6 +588,41 @@ describe('RunAssetsTab — uses badge + sub-panel', () => {
     flushSync();
     expect(badges[0]!.getAttribute('aria-expanded')).toBe('false');
     expect(badges[1]!.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('chips follow the mini-project list order, not referenced_by order', () => {
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({
+        assets: [mkAsset(1, 'foo.pdf', [3, 9])],
+        miniProjects: [mkMp(9, 'MP Nine', ''), mkMp(3, 'MP Three', '')],
+      }),
+    });
+    flushSync();
+    findButton(target, /2 uses/)!.click();
+    flushSync();
+    const text = target.querySelector('.sub-panel')!.textContent!;
+    expect(text.indexOf('MP Nine')).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf('MP Nine')).toBeLessThan(text.indexOf('MP Three'));
+  });
+
+  it('ignores mini-project ids the tab does not know', () => {
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: [mkAsset(1, 'foo.pdf', [3, 99])], miniProjects: [mkMp(3, 'MP Three', '')] }),
+    });
+    flushSync();
+    expect(findButton(target, /^1 use$/)).toBeTruthy();
+  });
+
+  it('an asset whose text link is not in referenced_by counts as orphan', () => {
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: [mkAsset(1, 'a.png', [])], miniProjects: [mkMp(10, 'M', '![](a.png)')] }),
+    });
+    flushSync();
+    expect(findButton(target, /Orphan \(1\)/)).toBeTruthy();
+    expect(findButton(target, /Referenced \(0\)/)).toBeTruthy();
   });
 
   it('miniProjects === null → uses cell renders em-dash, no badge', () => {
@@ -1381,7 +1416,7 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
     (deleteRunAsset as any).mockReset();
   });
 
-  const refAssets = [{ ...mkAsset(1, 'ref.pdf'), is_referenced: true }];
+  const refAssets = [mkAsset(1, 'ref.pdf', [10])];
   const refMps = [mkMp(10, 'M', '![](ref.pdf)')];
 
   function findDeleteBtn(filename: string): HTMLButtonElement {
@@ -1661,6 +1696,19 @@ describe('RunAssetsTab — delete (referenced, force-confirm)', () => {
     expect(target.textContent).not.toMatch(/referenced by 0 mini-projects/i);
   });
 
+  it('referenced but no known mini-project: generic delete sentence', async () => {
+    component = mount(RunAssetsTab, {
+      target,
+      props: baseProps({ assets: [mkAsset(1, 'ref.pdf', [99])], miniProjects: [mkMp(10, 'M', '')] }),
+    });
+    flushSync();
+
+    findDeleteBtn('ref.pdf').click();
+    flushSync();
+    expect(target.textContent).toMatch(/This asset is referenced by other mini-projects\./);
+    expect(target.textContent).not.toMatch(/referenced by 0 mini-projects/i);
+  });
+
   it('slow successful delete does not clobber a newer banner set mid-flight', async () => {
     let resolveDelete!: () => void;
     (deleteRunAsset as any).mockImplementation(
@@ -1725,7 +1773,7 @@ describe('RunAssetsTab — bulk selection + action strip', () => {
   const mixedAssets = [
     { ...mkAsset(1, 'a.pdf'), is_referenced: false },
     { ...mkAsset(2, 'b.pdf'), is_referenced: false },
-    { ...mkAsset(3, 'c.pdf'), is_referenced: true },
+    mkAsset(3, 'c.pdf', [10]),
   ];
   const mixedMps = [mkMp(10, 'M', '![](c.pdf)')];
 
@@ -1821,7 +1869,7 @@ describe('RunAssetsTab — bulk delete execution', () => {
   const mixedAssets = [
     { ...mkAsset(1, 'a.pdf'), is_referenced: false },
     { ...mkAsset(2, 'b.pdf'), is_referenced: false },
-    { ...mkAsset(3, 'c.pdf'), is_referenced: true },
+    mkAsset(3, 'c.pdf', [10]),
   ];
   const mixedMps = [mkMp(10, 'M', '![](c.pdf)')];
 
@@ -1994,10 +2042,10 @@ describe('RunAssetsTab — bulk delete execution', () => {
     expect(target.textContent).not.toMatch(/Deleted 2 of 2/);
   });
 
-  it('force flag is derived from backend is_referenced (not client scan)', async () => {
-    // Backend flags it referenced, but no MPs reference the file in their assignment_md
+  it('force follows is_referenced when no listed mini-project matches', async () => {
+    // The server says referenced, by a mini-project this tab does not list
     (deleteRunAsset as any).mockResolvedValue(undefined);
-    const staleAssets = [{ ...mkAsset(1, 'stale.pdf'), is_referenced: true }];
+    const staleAssets = [mkAsset(1, 'stale.pdf', [99])];
     component = mount(RunAssetsTab, {
       target,
       props: baseProps({ assets: staleAssets, miniProjects: [] }),
@@ -2311,7 +2359,7 @@ describe('RunAssetsTab — referenced-asset force-delete role gating (T11 regres
     return target.querySelector(`button[aria-label="Delete ${filename}"]`) as HTMLButtonElement;
   }
 
-  const refAssets = [{ ...mkAsset(1, 'ref.pdf'), is_referenced: true }];
+  const refAssets = [mkAsset(1, 'ref.pdf', [10])];
   const refMps = [mkMp(10, 'M', '![](ref.pdf)')];
 
   it('teacher: Force delete button visible but disabled with tooltip (even after acknowledge)', async () => {
@@ -2439,7 +2487,7 @@ describe('RunAssetsTab — 6a restyle', () => {
     { id: 4, version_id: 7, title: 'Vectors', slug: 'v', order: 2, info: '', info_html: '' },
     { id: 1, version_id: 7, title: 'Intro', slug: 'i', order: 5, info: '', info_html: '' },
   ];
-  const refAsset = { ...mkAsset(1, 'ref.pdf'), is_referenced: true };
+  const refAsset = mkAsset(1, 'ref.pdf', [10]);
   const refMp = mkMp(10, 'MP A', '![](ref.pdf)');
 
   it('header row: h2 "Assets" with the mono count and a primary + Upload; the filter pills under it', () => {
@@ -2471,7 +2519,7 @@ describe('RunAssetsTab — 6a restyle', () => {
   it('Uses chip colour follows the count; size, date and email are mono', () => {
     component = mount(RunAssetsTab, {
       target,
-      props: baseProps({ assets: [mkAsset(1, 'a.pdf'), mkAsset(2, 'b.pdf')], miniProjects: [mkMp(10, 'M', '![](a.pdf)')] }),
+      props: baseProps({ assets: [mkAsset(1, 'a.pdf', [10]), mkAsset(2, 'b.pdf')], miniProjects: [mkMp(10, 'M', '![](a.pdf)')] }),
     });
     flushSync();
     const chips = Array.from(target.querySelectorAll('.uses-chip'));
@@ -2491,7 +2539,7 @@ describe('RunAssetsTab — 6a restyle', () => {
   });
 
   it('the "used by" sub-panel sits under its row and names "Block {n} — title" by position (R13, R14)', () => {
-    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'foo.pdf')], miniProjects: [mkMp(10, 'MP A', '![](foo.pdf)')], blocks }) });
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'foo.pdf', [10])], miniProjects: [mkMp(10, 'MP A', '![](foo.pdf)')], blocks }) });
     flushSync();
     findButton(target, /1 use$/)!.click();
     flushSync();
@@ -2502,7 +2550,7 @@ describe('RunAssetsTab — 6a restyle', () => {
   });
 
   it('a block missing from blocks drops the "Block {n} — " prefix', () => {
-    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'foo.pdf')], miniProjects: [mkMp(10, 'MP A', '![](foo.pdf)')] }) });
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'foo.pdf', [10])], miniProjects: [mkMp(10, 'MP A', '![](foo.pdf)')] }) });
     flushSync();
     findButton(target, /1 use$/)!.click();
     flushSync();
@@ -2561,8 +2609,8 @@ describe('RunAssetsTab — 6a restyle', () => {
   });
 
   it('the plain delete row and the "used by" panel never show together, either way round (R14)', () => {
-    // A chip with uses (D87: 0 uses has no panel); is_referenced stays false, so Delete asks the plain row.
-    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [mkAsset(1, 'a.pdf')], miniProjects: [mkMp(10, 'M', '![](a.pdf)')] }) });
+    // A chip with uses (D87: 0 uses has no panel); is_referenced forced false, so Delete asks the plain row.
+    component = mount(RunAssetsTab, { target, props: baseProps({ assets: [{ ...mkAsset(1, 'a.pdf', [10]), is_referenced: false }], miniProjects: [mkMp(10, 'M', '![](a.pdf)')] }) });
     flushSync();
     const chip = findButton(target, /1 use$/)!;
     chip.click();
@@ -2872,7 +2920,7 @@ describe('RunAssetsTab — 6a focus never drops to <body> (T11 review)', () => {
   });
 
   it('opening the replace confirm closes that row\'s "used by" panel: one panel under a row (R14)', async () => {
-    const refAsset = { ...mkAsset(1, 'ref.pdf'), is_referenced: true };
+    const refAsset = mkAsset(1, 'ref.pdf', [10]);
     component = mount(RunAssetsTab, {
       target,
       props: baseProps({ assets: [refAsset], miniProjects: [mkMp(10, 'MP A', '![](ref.pdf)')] }),
@@ -2890,7 +2938,7 @@ describe('RunAssetsTab — 6a focus never drops to <body> (T11 review)', () => {
   });
 
   it('opening "used by" closes that row\'s replace confirm: R14 the other way round', async () => {
-    const refAsset = { ...mkAsset(1, 'ref.pdf'), is_referenced: true };
+    const refAsset = mkAsset(1, 'ref.pdf', [10]);
     component = mount(RunAssetsTab, {
       target,
       props: baseProps({ assets: [refAsset], miniProjects: [mkMp(10, 'MP A', '![](ref.pdf)')] }),
@@ -2954,7 +3002,7 @@ describe('RunAssetsTab (Polish 3 — 0 uses)', () => {
   });
 
   it('a focused chip that drops to 0 on reload repairs focus to the row\'s next control, else the heading', async () => {
-    const box: any = $state(baseProps({ assets: [mkAsset(1, 'a.pdf')], miniProjects: [mkMp(10, 'M', '![](a.pdf)')] }));
+    const box: any = $state(baseProps({ assets: [mkAsset(1, 'a.pdf', [10])], miniProjects: [mkMp(10, 'M', '![](a.pdf)')] }));
     component = mount(RunAssetsTab, { target, props: box });
     flushSync();
     const chip = target.querySelector('button.uses-chip') as HTMLButtonElement;
@@ -2963,19 +3011,19 @@ describe('RunAssetsTab (Polish 3 — 0 uses)', () => {
     chip.focus();
     expect(target.querySelector('#uses-1')).not.toBeNull();
     // A reload: no mini-project uses a.pdf any more.
-    box.miniProjects = [mkMp(10, 'M', 'no files')];
+    box.assets = [mkAsset(1, 'a.pdf')];
     await settle();
     expect(target.querySelector('button.uses-chip')).toBeNull();
     expect(target.querySelector('#uses-1')).toBeNull();
     expect(document.activeElement).toBe(replaceBtn());
     // The uses come back: the panel stays closed (the open id was dropped).
-    box.miniProjects = [mkMp(10, 'M', '![](a.pdf)')];
+    box.assets = [mkAsset(1, 'a.pdf', [10])];
     await settle();
     expect(target.querySelector('#uses-1')).toBeNull();
     unmount(component); component = null;
 
     // A closed version disables Replace and Delete: focus goes to the heading.
-    const off: any = $state(baseProps({ assets: [mkAsset(1, 'a.pdf')], miniProjects: [mkMp(10, 'M', '![](a.pdf)')], versionIsDisabled: true }));
+    const off: any = $state(baseProps({ assets: [mkAsset(1, 'a.pdf', [10])], miniProjects: [mkMp(10, 'M', '![](a.pdf)')], versionIsDisabled: true }));
     component = mount(RunAssetsTab, { target, props: off });
     flushSync();
     (target.querySelector('button.uses-chip') as HTMLButtonElement).focus();
@@ -2986,12 +3034,13 @@ describe('RunAssetsTab (Polish 3 — 0 uses)', () => {
   });
 
   it('a chip that keeps its uses on reload keeps the focus', async () => {
-    const box: any = $state(baseProps({ assets: [mkAsset(1, 'a.pdf')], miniProjects: [mkMp(10, 'M', '![](a.pdf)')] }));
+    const box: any = $state(baseProps({ assets: [mkAsset(1, 'a.pdf', [10])], miniProjects: [mkMp(10, 'M', '![](a.pdf)')] }));
     component = mount(RunAssetsTab, { target, props: box });
     flushSync();
     const chip = target.querySelector('button.uses-chip') as HTMLButtonElement;
     chip.focus();
     box.miniProjects = [mkMp(10, 'M', '![](a.pdf)'), mkMp(11, 'N', '![](a.pdf)')];
+    box.assets = [mkAsset(1, 'a.pdf', [10, 11])];
     await settle();
     expect(document.activeElement).toBe(chip);
     expect(chip.textContent).toBe('2 uses');
@@ -2999,7 +3048,7 @@ describe('RunAssetsTab (Polish 3 — 0 uses)', () => {
 
   it('the used-by panel keeps focus when only its entry goes', async () => {
     const both = () => [mkMp(10, 'M', '![](a.pdf)'), mkMp(11, 'N', '![](a.pdf)'), mkMp(12, 'O', '![](a.pdf)')];
-    const box: any = $state(baseProps({ assets: [mkAsset(1, 'a.pdf')], miniProjects: both() }));
+    const box: any = $state(baseProps({ assets: [mkAsset(1, 'a.pdf', [10, 11, 12])], miniProjects: both() }));
     component = mount(RunAssetsTab, { target, props: box });
     flushSync();
     (target.querySelector('button.uses-chip') as HTMLButtonElement).click();
@@ -3007,19 +3056,30 @@ describe('RunAssetsTab (Polish 3 — 0 uses)', () => {
     const edits = () => Array.from(target.querySelectorAll('#uses-1 button')) as HTMLButtonElement[];
     // The middle entry goes: the next Edit takes focus.
     edits()[1].focus();
-    box.miniProjects = [mkMp(10, 'M', '![](a.pdf)'), mkMp(11, 'N', 'no files'), mkMp(12, 'O', '![](a.pdf)')];
+    box.assets = [mkAsset(1, 'a.pdf', [10, 12])];
     await settle();
     expect(edits()).toHaveLength(2);
     expect(document.activeElement).toBe(edits()[1]);
     // The last entry goes: the chip takes focus.
-    box.miniProjects = [mkMp(10, 'M', '![](a.pdf)'), mkMp(11, 'N', 'no files'), mkMp(12, 'O', 'no files')];
+    box.assets = [mkAsset(1, 'a.pdf', [10])];
     await settle();
     expect(edits()).toHaveLength(1);
     expect(document.activeElement).toBe(target.querySelector('button.uses-chip'));
   });
 
+  it('a focused chip repairs focus when its mini-project leaves the list before the assets reload', async () => {
+    const box: any = $state(baseProps({ assets: [mkAsset(1, 'a.pdf', [10])], miniProjects: [mkMp(10, 'M', '')] }));
+    component = mount(RunAssetsTab, { target, props: box });
+    flushSync();
+    (target.querySelector('button.uses-chip') as HTMLButtonElement).focus();
+    box.miniProjects = [];  // a delete refetches mini-projects first; referenced_by still lists 10
+    await settle();
+    expect(target.querySelector('button.uses-chip')).toBeNull();
+    expect(document.activeElement).toBe(replaceBtn());
+  });
+
   it('focus inside the open "used by" panel also repairs when the uses drop to 0', async () => {
-    const box: any = $state(baseProps({ assets: [mkAsset(1, 'a.pdf')], miniProjects: [mkMp(10, 'M', '![](a.pdf)')] }));
+    const box: any = $state(baseProps({ assets: [mkAsset(1, 'a.pdf', [10])], miniProjects: [mkMp(10, 'M', '![](a.pdf)')] }));
     component = mount(RunAssetsTab, { target, props: box });
     flushSync();
     (target.querySelector('button.uses-chip') as HTMLButtonElement).click();
@@ -3027,7 +3087,7 @@ describe('RunAssetsTab (Polish 3 — 0 uses)', () => {
     const edit = target.querySelector('#uses-1 button') as HTMLButtonElement;
     edit.focus();
     expect(document.activeElement).toBe(edit);
-    box.miniProjects = [mkMp(10, 'M', 'no files')];
+    box.assets = [mkAsset(1, 'a.pdf')];
     await settle();
     expect(target.querySelector('#uses-1')).toBeNull();
     expect(document.activeElement).toBe(replaceBtn());

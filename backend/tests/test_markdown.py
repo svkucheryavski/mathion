@@ -683,3 +683,59 @@ def test_math_free_markdown_stays_fast(md):
     start = time.perf_counter()
     render_markdown(md)
     assert time.perf_counter() - start < 2.0
+
+
+# --- math round 2026-11-24 ---
+
+@pytest.mark.parametrize("md, html", [
+    ('$$\nx\n$$',
+     '<div class="math-display"><math display="block"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></div>\n'),
+    ('$$x$$',
+     '<div class="math-display"><math display="block"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></div>\n'),
+    ('$$\na\n$b$\n$$',
+     '<p><span class="math-display"><math display="block"><semantics><mrow><mi>a</mi><mo lspace="0em" rspace="0em">$</mo><mi>b</mi><mo lspace="0em" rspace="0em">$</mo></mrow><annotation encoding="application/x-tex">a\n$b$</annotation></semantics></math></span></p>\n'),
+    ('$$\na\n\\$\n$$',
+     '<div class="math-display"><math display="block"><semantics><mrow><mi>a</mi><mo lspace="0em" rspace="0em">$</mo></mrow><annotation encoding="application/x-tex">a\n\\$</annotation></semantics></math></div>\n'),
+    ('- $$\n  x\n  $$',
+     '<ul>\n<li>\n<div class="math-display"><math display="block"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></div>\n</li>\n</ul>\n'),
+    ('> $$\n> x\n> $$',
+     '<blockquote>\n<div class="math-display"><math display="block"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></div>\n</blockquote>\n'),
+])
+def test_dollar_block_bound_keeps_results(md, html):
+    assert render_markdown(md) == html
+
+
+@pytest.mark.parametrize("md, alt", [
+    ("![a $x$ b](p.png)", "a x b"),
+    ("![a $$ x $$ b](p.png)", "a x b"),
+    ("![$\\alpha$](p.png)", "\\alpha"),
+    ("![a $\\frac{a}$ b](p.png)", "a \\frac{a} b"),
+    ("![price \\$5](p.png)", "price $5"),
+    ("![a \\* b](p.png)", "a * b"),
+    ("![a &amp; b](p.png)", "a &amp; b"),
+    ('![a "q" $x$](p.png)', "a &quot;q&quot; x"),
+    ("![a ![b $x$](q.png) c](p.png)", "a b x c"),
+    ("![a  \nb](p.png)", "a\nb"),
+    ("![a\\\nb](p.png)", "a\nb"),
+    ("![a ![b \\$](q.png)](p.png)", "a b $"),
+    ("![a *b* c](p.png)", "a b c"),
+])
+def test_image_alt_keeps_text(md, alt):
+    assert f'alt="{alt}"' in render_markdown(md)
+
+
+def test_formula_output_cap_shows_error_box():
+    assert 'title="formula too long"' in render_markdown("$" + "∑" * 1000 + "$")
+
+
+@pytest.mark.parametrize("src, limit", [
+    ("$$x\n# h\n" * 4000, 0.5),
+    ("$$x\n# h\n" * 4000 + "$$\n", 0.5),
+    ("> $$x\n> # h\n" * 2000, 0.5),
+    ("$$x\n\\$ a\n# h\n" * 3000, 0.5),
+    ("$$x\n# h\n" * 16000, 2.0),
+], ids=["block", "block-closed", "quote", "escaped", "block-128k"])
+def test_unclosed_double_dollar_is_linear(src, limit):
+    start = time.perf_counter()
+    render_markdown(src)
+    assert time.perf_counter() - start < limit

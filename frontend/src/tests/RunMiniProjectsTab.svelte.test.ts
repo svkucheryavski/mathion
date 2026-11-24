@@ -79,6 +79,7 @@ function mountMpTab(extra: Record<string, unknown> = {}) {
     blocks,
     miniProjects: [] as MiniProjectResponse[],
     onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined),
+    onRefetchAssets: vi.fn().mockResolvedValue(undefined),
     onNavigateToTab: vi.fn(),
   };
   const cmp = mount(RunMiniProjectsTab, {
@@ -244,6 +245,7 @@ describe('RunMiniProjectsTab', () => {
       runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
       blocks: localBlocks,
       miniProjects: [mp],
+      onRefetchAssets: vi.fn().mockResolvedValue(undefined),
       onRefetchMiniProjects: vi.fn().mockImplementation(async () => {
         propsRef.miniProjects = [lockedMp];
       }),
@@ -400,6 +402,7 @@ describe('RunMiniProjectsTab', () => {
       blocks: localBlocks,
       miniProjects: [mp],
       onRefetchMiniProjects: vi.fn().mockImplementation(async () => { propsRef.miniProjects = []; }),
+      onRefetchAssets: vi.fn().mockResolvedValue(undefined),
       onNavigateToTab: vi.fn(),
       course: baseCourse,
     });
@@ -414,6 +417,7 @@ describe('RunMiniProjectsTab', () => {
     await settle();
     expect(document.activeElement).toBe(target.querySelector('button[data-action="new-mp"]'));
     expect(toasts.list).toHaveLength(0);
+    expect(propsRef.onRefetchAssets).toHaveBeenCalledTimes(1);  // its assets may be free now
     unmount(cmp);
   });
 
@@ -471,6 +475,7 @@ describe('RunMiniProjectsTab', () => {
       runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
       blocks: localBlocks,
       miniProjects: [mp],
+      onRefetchAssets: vi.fn().mockResolvedValue(undefined),
       onRefetchMiniProjects: vi.fn().mockRejectedValue(new Error('network down')),
       onNavigateToTab: vi.fn(),
       course: baseCourse,
@@ -785,6 +790,7 @@ describe('RunMiniProjectsTab — T12 teacher-gating (spec §6.2)', () => {
       runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
       blocks: localBlocks,
       miniProjects: [unlocked],
+      onRefetchAssets: vi.fn().mockResolvedValue(undefined),
       onRefetchMiniProjects: vi.fn().mockImplementation(async () => {
         propsRef.miniProjects = [lockedAfterRace];
       }),
@@ -838,6 +844,7 @@ describe('RunMiniProjectsTab — T12 teacher-gating (spec §6.2)', () => {
       runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
       blocks: localBlocks,
       miniProjects: [unlocked],
+      onRefetchAssets: vi.fn().mockResolvedValue(undefined),
       onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined),
       onNavigateToTab: vi.fn(),
       course: { ...baseCourse, is_admin: false },
@@ -1005,6 +1012,7 @@ describe('RunMiniProjectsTab — 6a restyle', () => {
       runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
       blocks,
       miniProjects: [mkMp()],
+      onRefetchAssets: vi.fn().mockResolvedValue(undefined),
       onRefetchMiniProjects: async () => { propsRef.miniProjects = []; },
       onNavigateToTab: vi.fn(),
       course: baseCourse,
@@ -1020,6 +1028,7 @@ describe('RunMiniProjectsTab — 6a restyle', () => {
     await settle();
     expect(target.textContent).toContain('No mini-projects yet');
     expect(document.activeElement).toBe(byAction(target, 'new-mp'));
+    expect(toasts.list).toHaveLength(0);  // the normal path, not "refresh failed"
     unmount(cmp);
   });
 
@@ -1031,6 +1040,7 @@ describe('RunMiniProjectsTab — 6a restyle', () => {
       runEndDate: '2026-06-30', versionIsDisabled: false, pinnedAvailable: true,
       blocks,
       miniProjects: [mkMp()],
+      onRefetchAssets: vi.fn().mockResolvedValue(undefined),
       onRefetchMiniProjects: async () => { propsRef.miniProjects = []; },
       onNavigateToTab: vi.fn(),
       course: baseCourse,
@@ -1046,6 +1056,7 @@ describe('RunMiniProjectsTab — 6a restyle', () => {
     await settle();
     await settle();
     expect(document.activeElement).toBe(target.querySelector('h2'));
+    expect(toasts.list).toHaveLength(0);
     unmount(cmp);
   });
 
@@ -1135,6 +1146,7 @@ describe('RunMiniProjectsTab — 6b editor hand-off', () => {
       versionIsDisabled: false, pinnedAvailable: true, blocks,
       miniProjects: [mkMp({ id: 1, block_id: 1 })] as MiniProjectResponse[],
       onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined),
+      onRefetchAssets: vi.fn().mockResolvedValue(undefined),
       onNavigateToTab: vi.fn(),
       course: baseCourse,
     });
@@ -1157,6 +1169,7 @@ describe('RunMiniProjectsTab — 6b editor hand-off', () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(byAction(target, 'new-mp')!.disabled).toBe(true);
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Edit mini-project for Block 2');
+    expect(props.onRefetchAssets).toHaveBeenCalledTimes(1);  // a saved text can change which assets are used
     unmount(cmp);
   });
 });
@@ -1399,7 +1412,8 @@ describe('RunMiniProjectsTab — plain and force lock each other (fix-pass revie
     const props = $state({
       runId: 10, runIsPublished: true, runGroupsEnabled: true, runEndDate: '2026-06-30', versionIsDisabled: false,
       pinnedAvailable: true, blocks, miniProjects: [mkMp({ id: 1, block_id: 1 })] as MiniProjectResponse[],
-      onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined), onNavigateToTab: vi.fn(), course: baseCourse,
+      onRefetchMiniProjects: vi.fn().mockResolvedValue(undefined), onRefetchAssets: vi.fn().mockResolvedValue(undefined),
+      onNavigateToTab: vi.fn(), course: baseCourse,
     });
     const cmp = mount(RunMiniProjectsTab, { target, props });
     mountedTabs.push(cmp);

@@ -159,6 +159,7 @@ def delete_run(
     ).scalars().all()
     for locked_mp_id in mp_ids_to_lock:
         advisory.advisory_xact_lock(db, advisory.LOCK_NS_MINIPROJECT, locked_mp_id)
+    advisory.interleave_hook("run_delete_locked")
 
     # D28 (Slice 6c): a published run is never deleted, forced or not, so a stale
     # page cannot wipe a live run. publish_run takes a different lock, so this is
@@ -180,14 +181,17 @@ def delete_run(
 
     # ?force=true on an unpublished run (course admins): override the student and submission blocks
     # Cascade order: evaluations -> submissions -> run_asset_refs -> mini_projects -> groups -> teachers/students -> run_assets -> run
-    sub_ids = db.execute(
-        select(Submission.id).join(MiniProject, MiniProject.id == Submission.mini_project_id)
-        .where(MiniProject.run_id == run_id)
+    mp_ids = db.execute(
+        select(MiniProject.id).where(MiniProject.run_id == run_id).order_by(MiniProject.id)
     ).scalars().all()
+    for new_mp_id in sorted(set(mp_ids) - set(mp_ids_to_lock)):  # made since the first pass; before any row write
+        advisory.advisory_xact_lock(db, advisory.LOCK_NS_MINIPROJECT, new_mp_id)
+    sub_ids = db.execute(
+        select(Submission.id).where(Submission.mini_project_id.in_(mp_ids))
+    ).scalars().all() if mp_ids else []
     if sub_ids:
         db.execute(Evaluation.__table__.delete().where(Evaluation.submission_id.in_(sub_ids)))
         db.execute(Submission.__table__.delete().where(Submission.id.in_(sub_ids)))
-    mp_ids = db.execute(select(MiniProject.id).where(MiniProject.run_id == run_id)).scalars().all()
     if mp_ids:
         db.execute(RunAssetReference.__table__.delete().where(RunAssetReference.mini_project_id.in_(mp_ids)))
         db.execute(MiniProject.__table__.delete().where(MiniProject.id.in_(mp_ids)))

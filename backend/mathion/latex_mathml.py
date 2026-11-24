@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 MAX_LENGTH = 2000
 MAX_DEPTH = 40
+MAX_OUTPUT = 60_000                         # characters of one formula's MathML
 
 # Attribute order in the output; matches the spec's sanitiser map.
 _ATTR_ORDER = (
@@ -45,6 +46,7 @@ class Node:
     attrs: dict[str, str] = field(default_factory=dict)
     kind: str = "ord"
     group: bool = False                     # a braced group: \\bm keeps it whole
+    colon: bool = False                     # \\colon: its after-space stays in scripts
 
     def xml(self) -> str:
         assert set(self.attrs) <= _ATTR_SET, self.attrs
@@ -78,7 +80,7 @@ def tighten(node: Node) -> Node:
     if node.tag == "mstyle" and "scriptlevel" in node.attrs:
         return node                                   # full size again, so spaced as in TeX
     if node.tag == "mo" and node.kind in _SCRIPT_TIGHT:
-        node.attrs.update(_ZERO)
+        node.attrs.update({"lspace": "0em"} if node.colon else _ZERO)
     node.children[:] = [c for c in node.children if c.kind != "relspace"]
     for child in node.children:
         tighten(child)
@@ -463,12 +465,21 @@ def _make_ordinary(node: Node | None) -> None:
         core.kind = node.kind = "unary"
 
 
+def _smaller(node: Node, i: int) -> bool:
+    """Whether child i is a fraction part or a script, so in a smaller style than its parent."""
+    if node.tag == "mfrac":
+        return True
+    if node.tag in _SCRIPT_TAGS or (node.tag in _STACK_TAGS and node.attrs.get("accent") != "true"):
+        return i > 0
+    return False
+
+
 def _measure(node: Node, display: bool) -> tuple[int, int]:
     """How far a \\left bracket grows for this node (0 not, 1 to the \\big size, 2 to the
     content), and how many script levels it stacks (1 for x^2, 2 for x^{x^2})."""
     if node.tag == "mstyle" and "displaystyle" in node.attrs:
         display = node.attrs["displaystyle"] == "true"   # an explicit style moves the limits
-    parts = [_measure(c, display) for c in node.children]
+    parts = [_measure(c, display and not _smaller(node, i)) for i, c in enumerate(node.children)]
     height = max((h for h, _ in parts), default=0)
     tower = max((t for _, t in parts), default=0)
     if node.tag in _SCRIPT_TAGS:
@@ -533,16 +544,31 @@ COMMANDS: dict[str, Handler] = {}
 
 # --- parser -------------------------------------------------------------------
 
+_D, _T, _S, _SS = 0, 1, 2, 3              # TeX's display, text, script and scriptscript styles
+
+
+def _frac_style(style: int) -> int:
+    return min(style + 1, _SS)
+
+
+def _script_style(style: int) -> int:
+    return _S if style <= _T else _SS
+
+
 class Parser:
     def __init__(self, src: str, display: bool = False):
         self.src = src
-        self.display = display              # whether movable limits sit under their operator
+        self.style = _D if display else _T
         self.pos = 0
         self.font: str | None = None
         self.bold = False                   # inside \\bm or \\boldsymbol: bold math
         self.opname = False                 # inside \\operatorname: - and * are text
         self.plain = False                  # \\bm inside an alphabet: its letters stay unbold
         self.prev: str | None = None        # the kind before the atom being parsed
+
+    @property
+    def display(self) -> bool:
+        return self.style == _D
 
     # tokens
 
@@ -582,15 +608,59 @@ class Parser:
 
     def parse_seq(self, depth: int, until: str | None = None, closes: bool = True) -> list[Node]:
         """Nodes up to the group's end: the source end, `}`, `]` or `\\right` (`until`)."""
-        saved = self.display
+        saved = self.style
         try:
             return self._seq(depth, until, closes)
         finally:
-            self.display = saved                      # a style ends with its group
+            self.style = saved                        # a style ends with its group
+
+    def parse_styled(self, style: int, parse: Callable[[], Node]) -> Node:
+        """A part in the given style; it loses TeX's script spacing when it first gets small."""
+        saved = self.style
+        self.style = style
+        try:
+            node = parse()
+        finally:
+            self.style = saved
+        return tighten(node) if saved <= _T < style else node
+
+    def _group_splits(self, until: str | None) -> bool:
+        """Whether this group has its own `\\over` or `\\choose` ahead."""
+        start = self.pos
+        closers: list[str] = []
+        try:
+            while (tok := self.peek()) is not None:
+                if not closers and (tok in ("}", "\\right") or (tok == "]" and until == "]")):
+                    return False
+                if not closers and tok in ("\\over", "\\choose"):
+                    return True
+                self.take()
+                if len(closers) > MAX_DEPTH:
+                    return False                      # too deep: the parser rejects it anyway
+                if tok == "{":
+                    closers.append("}")
+                elif tok == "\\left":
+                    closers.append("\\right")
+                elif tok == "\\sqrt" and self.peek() == "[":
+                    self.take()
+                    closers.append("]")
+                elif closers and tok == closers[-1]:
+                    closers.pop()
+                elif tok in ("}", "\\right") and tok in closers:
+                    return False                      # unbalanced: the parser reports it
+                if tok in ("\\left", "\\right", "\\middle") or tok[1:].rstrip("lrm") in _BIG:
+                    if self.peek() is not None:
+                        self.take()                   # the bracket after it is no group end
+            return False
+        finally:
+            self.pos = start
 
     def _seq(self, depth: int, until: str | None, closes: bool) -> list[Node]:
         nodes: list[Node] = []
         styles: list[tuple[int, str]] = []          # (start index, displaystyle value)
+        start = self.style
+        if self._group_splits(until):
+            self.style = _frac_style(start)           # a fraction's parts are one style down
         split: tuple[list[Node], str] | None = None  # numerator and `\\over` or `\\choose`
         prev: str | None = "left" if until == "\\right" else None
         spaced = False                               # a function waits for its thin space
@@ -624,13 +694,13 @@ class Parser:
                 _make_ordinary(last)
                 if self.opname:
                     _end_punct(nodes)                 # the numerator is a list of its own
-                self.display = False                  # so is the denominator, in text style
+                self.style = _frac_style(start)       # so is the denominator
                 split = (_fold_styles(nodes, styles), tok)
                 nodes, styles, prev, spaced, last, rel_after, op_after = [], [], None, False, None, False, False
                 continue
             if tok in ("\\displaystyle", "\\textstyle"):
                 self.take()
-                self.display = tok == "\\displaystyle"
+                self.style = _D if tok == "\\displaystyle" else _T
                 styles.append((len(nodes), "true" if tok == "\\displaystyle" else "false"))
                 continue
             self.prev = prev
@@ -674,6 +744,8 @@ class Parser:
         if split is None:
             return nodes
         num, cmd = split
+        if start <= _T < _frac_style(start):
+            num, nodes = [tighten(row(num))], [tighten(row(nodes))]
         if cmd == "\\over":
             return [Node("mfrac", children=[row(num), row(nodes)])]
         return [binom_node(row(num), row(nodes))]
@@ -803,12 +875,12 @@ class Parser:
                 if sup is not None:
                     raise LatexError("double superscript")
                 self.take()
-                sup = tighten(self.parse_arg(depth, "^"))
+                sup = self.parse_styled(_script_style(self.style), lambda: self.parse_arg(depth, "^"))
             elif tok == "_":
                 if sub is not None:
                     raise LatexError("double subscript")
                 self.take()
-                sub = tighten(self.parse_arg(depth, "_"))
+                sub = self.parse_styled(_script_style(self.style), lambda: self.parse_arg(depth, "_"))
             else:
                 break
         if primes:
@@ -966,8 +1038,13 @@ for _name in ("limits", "nolimits"):
 
 
 def _frac(parser: Parser, name: str, depth: int) -> Node:
-    top = parser.parse_arg(depth, f"\\{name}", 2)
-    bottom = parser.parse_arg(depth, f"\\{name}", 2)
+    outer = parser.style
+    parser.style = _D if name == "dfrac" else _T if name == "tfrac" else outer   # the fraction's own style
+    try:
+        top = parser.parse_styled(_frac_style(parser.style), lambda: parser.parse_arg(depth, f"\\{name}", 2))
+        bottom = parser.parse_styled(_frac_style(parser.style), lambda: parser.parse_arg(depth, f"\\{name}", 2))
+    finally:
+        parser.style = outer
     if name == "binom":
         return binom_node(top, bottom)
     frac = Node("mfrac", children=[top, bottom])
@@ -981,7 +1058,7 @@ def _sqrt(parser: Parser, name: str, depth: int) -> Node:
         return Node("msqrt", children=_inner(parser.parse_arg(depth, "\\sqrt")))
     inner = parser.enter(depth + 1)
     parser.take()
-    index = tighten(row(parser.parse_seq(inner, "]")))   # a script-size index
+    index = parser.parse_styled(_SS, lambda: row(parser.parse_seq(inner, "]")))
     parser.take()
     return Node("mroot", children=[parser.parse_arg(depth, "\\sqrt"), index])
 
@@ -1008,7 +1085,7 @@ def _line(parser: Parser, name: str, depth: int) -> Node:
 
 def _stack(parser: Parser, name: str, depth: int) -> Node:
     prev = parser.prev
-    top = tighten(parser.parse_arg(depth, f"\\{name}", 2))
+    top = parser.parse_styled(_script_style(parser.style), lambda: parser.parse_arg(depth, f"\\{name}", 2))
     base = parser.parse_arg(depth, f"\\{name}", 2, ordinary=False)   # `{=}` stays a relation
     rel = name == "stackrel"
     base = _unsize(base)
@@ -1246,7 +1323,7 @@ def _not(parser: Parser, name: str, depth: int) -> Node:
 
 
 COMMANDS["not"] = _not
-COMMANDS["colon"] = lambda parser, name, depth: mo(":", "punct", lspace="0em", rspace="0.2778em")
+COMMANDS["colon"] = lambda parser, name, depth: Node("mo", ":", attrs={"lspace": "0em", "rspace": "0.2778em"}, kind="punct", colon=True)
 for _name, _char in _BIGOPS.items():
     COMMANDS[_name] = lambda parser, name, depth: bigop_node(_BIGOPS[name], True)
 for _name, _char in _INTEGRALS.items():
@@ -1416,8 +1493,11 @@ def latex_to_mathml(src: str, display: bool) -> str:
     nodes = Parser(text, display).parse_seq(0)
     body = "".join(n.xml() for n in nodes) if nodes else "<mrow/>"
     head = '<math display="block">' if display else "<math>"
-    return (
+    out = (
         f"{head}<semantics><mrow>{body}</mrow>"
         f'<annotation encoding="application/x-tex">{html.escape(src, quote=True)}</annotation>'
         "</semantics></math>"
     )
+    if len(out) > MAX_OUTPUT:
+        raise LatexError("formula too long")
+    return out

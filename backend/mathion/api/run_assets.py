@@ -12,14 +12,17 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from pydantic import BaseModel
 
+from mathion.api import advisory
 from mathion.api.lookups import get_or_404
 from mathion.api.authz import require_course_admin_for_run, require_run_admin_or_teacher
-from mathion.api.asset_render import render_with_run_assets
+from mathion.api.asset_render import reference_new_run_asset, render_with_run_assets
 from mathion.api.submission_files import run_asset_storage_dir
 from mathion.assets import get_mime_type, sanitize_filename, validate_extension
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.models import CourseAdmin, CourseVersion, Run, RunAsset, RunAssetReference, RunStudent, RunTeacher
+from mathion.models import (
+    CourseAdmin, CourseVersion, MiniProject, Run, RunAsset, RunAssetReference, RunStudent, RunTeacher,
+)
 from mathion.models_auth import User
 from mathion.schemas import RunAssetResponse
 from mathion.site_settings import file_over_limit, load as load_site, total_over_limit
@@ -33,6 +36,31 @@ def _row_gone(db: Session, run_id: int) -> HTTPException:
         shutil.rmtree(os.path.dirname(run_asset_storage_dir(run_id)), ignore_errors=True)
         return HTTPException(status_code=404, detail="Run not found")
     return HTTPException(status_code=404, detail="Asset not found")
+
+
+def _responses(db: Session, assets: list[RunAsset]) -> list[RunAssetResponse]:
+    """Response rows with usage and uploader email, one query for each."""
+    ids = [a.id for a in assets]
+    refs: dict[int, list[int]] = {}
+    if ids:
+        rows = db.execute(
+            select(RunAssetReference.run_asset_id, RunAssetReference.mini_project_id)
+            .where(RunAssetReference.run_asset_id.in_(ids))
+            .distinct()
+            .order_by(RunAssetReference.mini_project_id)
+        )
+        for asset_id, mp_id in rows:
+            refs.setdefault(asset_id, []).append(mp_id)
+    user_ids = {a.uploaded_by for a in assets if a.uploaded_by is not None}
+    emails = dict(db.execute(select(User.id, User.email).where(User.id.in_(user_ids))).all()) if user_ids else {}
+    out = []
+    for a in assets:
+        resp = RunAssetResponse.model_validate(a)
+        resp.referenced_by = refs.get(a.id, [])
+        resp.is_referenced = bool(resp.referenced_by)
+        resp.uploaded_by_email = emails.get(a.uploaded_by)
+        out.append(resp)
+    return out
 
 
 @router.post("/api/runs/{run_id}/assets", status_code=201, response_model=RunAssetResponse)
@@ -63,6 +91,13 @@ def upload_run_asset(
         raise HTTPException(status_code=413, detail=total_over_limit(site, "run"))
 
     filename = sanitize_filename(file.filename)
+    # Lock before the insert, as delete_run and saves do, so usage reads settled text.
+    mp_ids = list(db.scalars(
+        select(MiniProject.id).where(MiniProject.run_id == run_id).order_by(MiniProject.id)
+    ))
+    for mp_id in mp_ids:
+        advisory.advisory_xact_lock(db, advisory.LOCK_NS_MINIPROJECT, mp_id)
+    advisory.interleave_hook("asset_upload_locked")
     asset = RunAsset(
         run_id=run_id,
         filename=filename,
@@ -78,6 +113,8 @@ def upload_run_asset(
         get_or_404(db, Run, run_id)
         raise HTTPException(status_code=409, detail=f"Asset '{filename}' already exists in this run")
     new_id = asset.id
+    reference_new_run_asset(db, asset, mp_ids)
+    db.flush()  # rows before the file, so a failure leaves nothing on disk
 
     # Write file via temp+rename for atomicity
     dirpath = run_asset_storage_dir(run_id)
@@ -103,14 +140,7 @@ def upload_run_asset(
     asset = db.get(RunAsset, new_id)
     if asset is None:
         raise _row_gone(db, run_id)
-    resp = RunAssetResponse.model_validate(asset)
-    resp.is_referenced = False
-    resp.uploaded_by_email = (
-        db.scalar(select(User.email).where(User.id == asset.uploaded_by))
-        if asset.uploaded_by is not None
-        else None
-    )
-    return resp
+    return _responses(db, [asset])[0]
 
 
 @router.put("/api/runs/{run_id}/assets/{asset_id}", response_model=RunAssetResponse)
@@ -199,18 +229,7 @@ def replace_run_asset(
     asset = db.get(RunAsset, asset_id)
     if asset is None:
         raise _row_gone(db, run_id)
-
-    ref_count = db.scalar(
-        select(func.count()).where(RunAssetReference.run_asset_id == asset.id)
-    )
-    resp = RunAssetResponse.model_validate(asset)
-    resp.is_referenced = (ref_count or 0) > 0
-    resp.uploaded_by_email = (
-        db.scalar(select(User.email).where(User.id == asset.uploaded_by))
-        if asset.uploaded_by is not None
-        else None
-    )
-    return resp
+    return _responses(db, [asset])[0]
 
 
 @router.get("/api/runs/{run_id}/assets", response_model=list[RunAssetResponse])
@@ -225,20 +244,7 @@ def list_run_assets(
     assets = db.execute(
         select(RunAsset).where(RunAsset.run_id == run_id).order_by(RunAsset.filename)
     ).scalars().all()
-    result = []
-    for a in assets:
-        ref_count = db.scalar(
-            select(func.count()).where(RunAssetReference.run_asset_id == a.id)
-        )
-        resp = RunAssetResponse.model_validate(a)
-        resp.is_referenced = ref_count > 0
-        resp.uploaded_by_email = (
-            db.scalar(select(User.email).where(User.id == a.uploaded_by))
-            if a.uploaded_by is not None
-            else None
-        )
-        result.append(resp)
-    return result
+    return _responses(db, list(assets))
 
 
 @router.get("/api/runs/{run_id}/assets/{filename}")
