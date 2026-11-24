@@ -1171,3 +1171,28 @@ def test_merge_keeps_names_with_an_inner_open_quote_apart():
 def test_merge_ignores_a_closing_quote_before_the_first_opening_one():
     line = _rl("skipped", "The file “extra.pdf” was not uploaded, so it is not in the draft")
     assert olx_import._merged([line], [_rl("skipped", "5” wide: “extra.pdf” was refused")], set()) == []
+
+
+def test_build_and_discard_take_the_version_lock_first(auth_client, db, test_user, monkeypatch):
+    from mathion.api import advisory
+    from tests.conftest import record_lock_calls
+    _, version = _admin_course(db, test_user)
+    _upload_all(auth_client, version.id)
+    from tests.test_concurrency_draft_lock import _statements
+    events = record_lock_calls(monkeypatch)
+    with _statements() as seen:
+        assert _build(auth_client, version.id).status_code == 200
+    assert events[0] == ("lock", advisory.LOCK_NS_VERSION_INFO, (version.id,))
+    assert _advisory_before_row_locks(seen)
+    _, draft = _admin_course(db, test_user, slug="olx-discard")
+    events.clear()
+    with _statements() as seen:
+        assert auth_client.post(f"/api/versions/{draft.id}/olx-import/discard").status_code == 204
+    assert events[0] == ("lock", advisory.LOCK_NS_VERSION_INFO, (draft.id,))
+    assert _advisory_before_row_locks(seen)
+
+
+def _advisory_before_row_locks(seen) -> bool:
+    lock = next(i for i, st in enumerate(seen) if "pg_advisory_xact_lock" in st)
+    row = next(i for i, st in enumerate(seen) if "FROM course_versions" in st and "FOR UPDATE" in st)
+    return lock < row

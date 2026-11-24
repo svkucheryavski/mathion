@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
+from mathion.api.draft_lock import lock_draft
 from mathion.api import advisory
 from mathion.api.text_utils import bump_content_updated_at
 from mathion.api.lookups import INT4_MAX, get_or_404
@@ -84,6 +85,8 @@ def _clear_other_correct(db: Session, question_id: int, keep_id: int) -> None:
 @router.post("/api/items/{item_id}/questions", status_code=201, response_model=QuestionResponse)
 def create_question(item_id: int, data: QuestionCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     item, version = _get_version_for_item(db, item_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
+    item, version = _get_version_for_item(db, item_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
         raise HTTPException(status_code=403, detail="Version is disabled")
@@ -135,6 +138,8 @@ def list_questions(item_id: int, db: Session = Depends(get_db), user: User = Dep
 @router.patch("/api/questions/{question_id}", response_model=QuestionResponse)
 def update_question(question_id: int, data: QuestionUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     question, version = _get_version_for_question(db, question_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
+    question, version = _get_version_for_question(db, question_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
         raise HTTPException(status_code=403, detail="Version is disabled")
@@ -172,6 +177,8 @@ def update_question(question_id: int, data: QuestionUpdate, db: Session = Depend
 @router.delete("/api/questions/{question_id}", status_code=204)
 def delete_question(question_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     question, version = _get_version_for_question(db, question_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
+    question, version = _get_version_for_question(db, question_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
         raise HTTPException(status_code=403, detail="Version is disabled")
@@ -186,6 +193,8 @@ def delete_question(question_id: int, db: Session = Depends(get_db), user: User 
 
 @router.post("/api/items/{item_id}/questions/reorder")
 def reorder_questions(item_id: int, data: ReorderRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    item, version = _get_version_for_item(db, item_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
     item, version = _get_version_for_item(db, item_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
@@ -211,6 +220,8 @@ def reorder_questions(item_id: int, data: ReorderRequest, db: Session = Depends(
 
 @router.post("/api/questions/{question_id}/options", status_code=201, response_model=OptionResponse)
 def create_option(question_id: int, data: OptionCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    question, version = _get_version_for_question(db, question_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
     question, version = _get_version_for_question(db, question_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
@@ -254,6 +265,8 @@ def list_options(question_id: int, db: Session = Depends(get_db), user: User = D
 
 @router.patch("/api/options/{option_id}", response_model=OptionResponse)
 def update_option(option_id: int, data: OptionUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    option, version = _get_version_for_option(db, option_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
     option, version = _get_version_for_option(db, option_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
@@ -305,6 +318,8 @@ def update_option(option_id: int, data: OptionUpdate, db: Session = Depends(get_
 @router.delete("/api/options/{option_id}", status_code=204)
 def delete_option(option_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     option, version = _get_version_for_option(db, option_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
+    option, version = _get_version_for_option(db, option_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
         raise HTTPException(status_code=403, detail="Version is disabled")
@@ -322,6 +337,8 @@ def delete_option(option_id: int, db: Session = Depends(get_db), user: User = De
 
 @router.post("/api/questions/{question_id}/options/reorder")
 def reorder_options(question_id: int, data: ReorderRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    question, version = _get_version_for_question(db, question_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
     question, version = _get_version_for_question(db, question_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:

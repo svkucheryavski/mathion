@@ -11,6 +11,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from mathion.api import advisory
 from mathion.api.assets import _asset_dir
 from mathion.api.lookups import get_or_create_user
 from mathion.api.superuser import require_superuser_panel, require_superuser_panel_write
@@ -31,6 +32,8 @@ router = APIRouter(tags=["superuser"])
 _GONE = "This course was deleted"
 _SLUG_TAKEN = "This address is already used by another course"
 _HAS_RUNS = "This course has runs and can't be deleted"
+_CHANGED = "This course changed while it was being deleted. Try again."
+_DELETE_ATTEMPTS = 3
 _ACCOUNT_GONE = "This account was deleted"
 
 
@@ -234,10 +237,20 @@ def delete_course(course_id: int, _user: User = Depends(require_superuser_panel_
     # D12c: the course lock blocks new versions and admin rows; the version
     # locks block new runs, enrollments and assets; so the runs check holds
     # and the folder list is complete when the cascade runs.
-    course = _locked_course(db, course_id)
-    version_ids = list(db.scalars(
-        select(CourseVersion.id).where(CourseVersion.course_id == course.id).with_for_update()
-    ).all())
+    # Draft locks first, as authoring writes and duplicate take them before any row.
+    for _attempt in range(_DELETE_ATTEMPTS):
+        held = sorted(db.scalars(select(CourseVersion.id).where(CourseVersion.course_id == course_id)))
+        for vid in held:
+            advisory.advisory_xact_lock(db, advisory.LOCK_NS_VERSION_INFO, vid)
+        course = _locked_course(db, course_id)
+        version_ids = list(db.scalars(
+            select(CourseVersion.id).where(CourseVersion.course_id == course.id).with_for_update()
+        ).all())
+        if set(version_ids) <= set(held):
+            break
+        db.rollback()                                  # a draft made meanwhile: start again
+    else:
+        raise HTTPException(status_code=409, detail=_CHANGED)
     if version_ids and db.scalar(select(func.count()).select_from(Run).where(Run.version_id.in_(version_ids))):
         raise HTTPException(status_code=409, detail=_HAS_RUNS)
     try:

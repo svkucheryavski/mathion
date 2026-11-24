@@ -10,6 +10,7 @@ from sqlalchemy import exists, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from mathion.api.draft_lock import lock_draft
 from mathion.assets import commit_delete
 from mathion.api.authz import require_course_admin
 from mathion.api.lookups import get_or_404
@@ -201,6 +202,7 @@ def status(version_id: int, user: User = Depends(get_current_user), db: Session 
 
 @router.post("/api/versions/{version_id}/olx-import/discard", status_code=204)
 def discard(version_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Response:
+    lock_draft(db, version_id)                         # as authoring writes, before any row
     _course_admin_version(db, user, version_id)
     version = db.execute(
         select(CourseVersion).where(CourseVersion.id == version_id)

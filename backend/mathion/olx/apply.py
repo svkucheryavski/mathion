@@ -4,6 +4,7 @@ from datetime import date
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
+from mathion.api import advisory
 from mathion.api.asset_render import render_with_assets, sync_asset_references, sync_script_reference
 from mathion.api.text_utils import bump_content_updated_at
 from mathion.models import AnswerOption, Asset, Block, CourseVersion, Item, Question, Sequence
@@ -82,6 +83,7 @@ def _item(db: Session, version_id: int, sequence_id: int, order: int, p: PlanIte
 def apply(plan: Plan, version_id: int, db: Session, day: date) -> list[str]:
     """Create the plan's content; returns script files to unlink after the caller commits."""
     _before_lock()
+    advisory.advisory_xact_lock(db, advisory.LOCK_NS_VERSION_INFO, version_id)   # as authoring writes, before the row
     version = _lock(db, version_id)
     _files(plan, version_id, db)
     removed: list[str] = []

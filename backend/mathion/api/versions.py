@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
+from mathion.api.draft_lock import lock_draft
 from mathion.api import advisory
 from mathion.api.text_utils import bump_content_updated_at
 from mathion.api.lookups import get_or_404
@@ -75,6 +76,7 @@ def duplicate_version(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    lock_draft(db, version_id)                         # a settled source: edits wait for the copy
     source = get_or_404(db, CourseVersion, version_id)
     require_course_admin(db, user, source.course_id)
     if source.is_disabled:
@@ -421,6 +423,7 @@ def revert_version(version_id: int, db: Session = Depends(get_db), user: User = 
 
 @router.delete("/api/versions/{version_id}", status_code=204)
 def delete_version(version_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    lock_draft(db, version_id)                         # as authoring writes, before any row
     version = get_or_404(db, CourseVersion, version_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:

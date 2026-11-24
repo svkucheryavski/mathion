@@ -1,10 +1,13 @@
 """The superuser panel's Courses API (spec D4-D13, D25)."""
+from contextlib import contextmanager
 from datetime import date, datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 
 from mathion.config import settings
+from mathion.database import engine
 from mathion.course_links import course_sign_in_url
 from mathion.main import app
 from mathion.models import (
@@ -538,3 +541,69 @@ def test_create_with_account_deleted_meanwhile_409(panel, db, monkeypatch, email
     r = client.post(f"{base}/courses", json={"name": "S", "slug": "s", "admin_email": "ghost@x"})
     assert (r.status_code, _msg(r)) == (409, "This account was deleted")
     assert db.query(Course).filter_by(slug="s").first() is None
+
+
+
+@contextmanager
+def _lock_trace(monkeypatch):
+    """Statements and advisory-lock calls in one ordered list."""
+    from mathion.api import advisory
+    seen: list = []
+    real = advisory.advisory_xact_lock
+
+    def spy(session, namespace, *ids):
+        real(session, namespace, *ids)
+        seen.append(("lock", namespace, ids))
+
+    def grab(conn, cursor, statement, params, context, executemany):
+        seen.append(statement)
+
+    monkeypatch.setattr(advisory, "advisory_xact_lock", spy)
+    event.listen(engine, "before_cursor_execute", grab)
+    try:
+        yield seen
+    finally:
+        event.remove(engine, "before_cursor_execute", grab)
+
+
+def _locks_before_course_row(seen) -> list:
+    """Lock calls of the last attempt: between the previous courses FOR UPDATE and the last one."""
+    rows = [i for i, st in enumerate(seen) if isinstance(st, str) and "FROM courses" in st and "FOR UPDATE" in st]
+    start = rows[-2] if len(rows) > 1 else 0
+    return [st for st in seen[start:rows[-1]] if isinstance(st, tuple)]
+
+
+def test_delete_course_takes_each_version_lock_first(panel, db, monkeypatch):
+    from mathion.api import advisory
+    client, base = panel
+    course, vs = _course(db, slug="locks", versions=3)
+    ids = sorted(v.id for v in vs)
+    with _lock_trace(monkeypatch) as seen:
+        assert client.delete(f"{base}/courses/{course.id}").status_code == 204
+    assert _locks_before_course_row(seen) == [("lock", advisory.LOCK_NS_VERSION_INFO, (i,)) for i in ids]
+
+
+def test_delete_course_starts_again_when_a_draft_appears(panel, db, monkeypatch, concurrency):
+    from mathion.api import advisory
+    client, base = panel
+    course, vs = _course(db, slug="late", versions=1)
+    course_id, first = course.id, vs[0].id
+    [other] = concurrency.make_sessions(1)
+    made: list[int] = []
+    real = advisory.advisory_xact_lock
+
+    def make_draft(session, namespace, *ids):
+        real(session, namespace, *ids)
+        if not made:
+            v = CourseVersion(course_id=course_id)
+            other.add(v)
+            other.commit()
+            made.append(v.id)
+
+    monkeypatch.setattr(advisory, "advisory_xact_lock", make_draft)
+    with _lock_trace(monkeypatch) as seen:
+        assert client.delete(f"{base}/courses/{course_id}").status_code == 204
+    assert _locks_before_course_row(seen) == [
+        ("lock", advisory.LOCK_NS_VERSION_INFO, (i,)) for i in sorted([first, *made])]
+    db.expire_all()
+    assert db.get(Course, course_id) is None

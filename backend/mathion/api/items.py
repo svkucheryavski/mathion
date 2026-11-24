@@ -5,6 +5,8 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from mathion.api.draft_lock import lock_draft
+from mathion.api import advisory
 from mathion.assets import commit_delete
 from mathion.api.text_utils import bump_content_updated_at, slugify
 from mathion.api.lookups import INT4_MAX, get_or_404
@@ -44,6 +46,8 @@ def _process_content_md(db: Session, version: CourseVersion, item_id: int, conte
 @router.post("/api/sequences/{sequence_id}/items", status_code=201, response_model=ItemResponse)
 def create_item(sequence_id: int, data: ItemCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     version = _get_version_for_sequence(db, sequence_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
+    version = _get_version_for_sequence(db, sequence_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
         raise HTTPException(status_code=403, detail="Version is disabled")
@@ -70,8 +74,7 @@ def create_item(sequence_id: int, data: ItemCreate, db: Session = Depends(get_db
             }],
         )
 
-    # NOTE: order assignment is not safe under concurrent writes.
-    # For PostgreSQL, consider SELECT ... FOR UPDATE or a serializable transaction.
+    # Safe: the draft lock serializes creates in this version.
     current_max_order = db.scalar(select(func.max(Item.order)).where(Item.sequence_id == sequence_id)) or 0
     if current_max_order >= INT4_MAX:
         raise HTTPException(
@@ -112,6 +115,9 @@ def list_items(sequence_id: int, limit: int = 100, offset: int = 0, db: Session 
 
 @router.patch("/api/items/{item_id}", response_model=ItemResponse)
 def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    item = get_or_404(db, Item, item_id)
+    version = _get_version_for_item(db, item)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
     item = get_or_404(db, Item, item_id)
     version = _get_version_for_item(db, item)
     require_course_admin(db, user, version.course_id)
@@ -251,6 +257,7 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), u
         db.rollback()
         raise HTTPException(status_code=422, detail="video_url cannot be null for video items")
 
+    advisory.interleave_hook("item_saved")
     commit_delete(db, removed_script_files)           # GC'd script files go only after the commit
     db.refresh(item)
     return item
@@ -258,6 +265,9 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), u
 
 @router.delete("/api/items/{item_id}", status_code=204)
 def delete_item(item_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    item = get_or_404(db, Item, item_id)
+    version = _get_version_for_item(db, item)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
     item = get_or_404(db, Item, item_id)
     version = _get_version_for_item(db, item)
     require_course_admin(db, user, version.course_id)
@@ -279,6 +289,8 @@ def delete_item(item_id: int, db: Session = Depends(get_db), user: User = Depend
 
 @router.post("/api/sequences/{sequence_id}/items/reorder")
 def reorder_items(sequence_id: int, data: ReorderRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    version = _get_version_for_sequence(db, sequence_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
     version = _get_version_for_sequence(db, sequence_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
