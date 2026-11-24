@@ -52,7 +52,7 @@ def sanitize_filename(name: str) -> str:
     keep = 255 - len(ext_part)
     if keep <= 0:  # pathological: the extension alone exceeds the column width
         return ext_part[:255]
-    return base[:keep] + ext_part
+    return (base[:keep].rstrip("-") or "file") + ext_part
 
 
 def validate_extension(filename: str) -> str | None:

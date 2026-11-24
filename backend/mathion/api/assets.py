@@ -76,14 +76,12 @@ def upload_asset(
     try:
         db.flush()
         asset_id = asset.id
-        db.commit()
     except IntegrityError:
         db.rollback()
         get_or_404(db, CourseVersion, version_id)
         raise HTTPException(status_code=409, detail=f"Asset '{filename}' already exists in this version")
 
-    # Registry committed; now write file via temp+rename for atomicity.
-    # On any disk failure, roll back the registry row to avoid orphans.
+    # Row flushed, not committed: the file goes on disk first (temp + rename), then the commit.
     dirpath = _asset_dir(version_id)
     filepath = os.path.join(dirpath, filename)
     tmp_path: str | None = None
@@ -100,11 +98,11 @@ def upload_asset(
                 os.remove(tmp_path)
             except OSError:
                 pass
-        db.delete(asset)
-        db.commit()
+        db.rollback()
         raise HTTPException(status_code=500, detail="Failed to write asset to disk")
+    db.commit()
 
-    # A version deleted while the file was written leaves no folder behind.
+    # A version deleted right after the commit leaves no folder behind.
     db.expire_all()
     if db.get(CourseVersion, version_id) is None:
         shutil.rmtree(dirpath, ignore_errors=True)

@@ -763,26 +763,38 @@ def test_asset_file_response_has_nosniff(admin_client, asset_tmpdir):
         assert response.headers["x-content-type-options"] == "nosniff"
 
 
-def test_upload_into_a_version_deleted_meanwhile_leaves_no_folder(admin_client, asset_tmpdir, monkeypatch):
-    from sqlalchemy import text
-    from mathion.api import assets as assets_api
+def _after_upload_commit(sql, version_id, written):
+    """Run sql in a second session right after the commit that follows the file write."""
+    from sqlalchemy import event, text
+    from sqlalchemy.orm import Session
     from mathion.database import SessionLocal
-    _course, version = _create_published_version(admin_client)
-    real_replace = assets_api.os.replace
+    fired = []
 
-    def replace_after_delete(src, dst):
+    def run(session):
+        if fired or not written.exists():
+            return
+        fired.append(True)
         with SessionLocal() as s:
-            s.execute(text("DELETE FROM course_versions WHERE id = :id"), {"id": version["id"]})
+            s.execute(text(sql), {"id": version_id})
             s.commit()
-        real_replace(src, dst)
 
-    monkeypatch.setattr(assets_api.os, "replace", replace_after_delete)
-    response = admin_client.post(
-        f"/api/versions/{version['id']}/assets",
-        files={"file": ("a.png", io.BytesIO(b"x"), "image/png")},
-    )
-    assert response.status_code == 404
-    assert not (asset_tmpdir / "courses" / str(version["id"])).exists()
+    event.listen(Session, "after_commit", run)
+    return lambda: event.remove(Session, "after_commit", run)
+
+
+def test_upload_into_a_version_deleted_meanwhile_leaves_no_folder(admin_client, asset_tmpdir):
+    _course, version = _create_published_version(admin_client)
+    folder = asset_tmpdir / "courses" / str(version["id"])
+    stop = _after_upload_commit("DELETE FROM course_versions WHERE id = :id", version["id"], folder / "a.png")
+    try:
+        response = admin_client.post(
+            f"/api/versions/{version['id']}/assets",
+            files={"file": ("a.png", io.BytesIO(b"x"), "image/png")},
+        )
+    finally:
+        stop()
+    assert (response.status_code, response.json()["detail"]) == (404, "CourseVersion not found")
+    assert not folder.exists()
 
 
 def test_upload_into_a_version_deleted_before_the_insert_is_404(admin_client, monkeypatch):
@@ -804,20 +816,97 @@ def test_upload_into_a_version_deleted_before_the_insert_is_404(admin_client, mo
     assert (response.status_code, response.json()["detail"]) == (404, "CourseVersion not found")
 
 
-def test_upload_whose_asset_row_is_deleted_meanwhile_is_404(admin_client, asset_tmpdir, monkeypatch):
+def test_upload_whose_asset_row_is_deleted_meanwhile_is_404(admin_client, asset_tmpdir):
+    _course, version = _create_published_version(admin_client)
+    written = asset_tmpdir / "courses" / str(version["id"]) / "a.png"
+    stop = _after_upload_commit("DELETE FROM assets WHERE version_id = :id", version["id"], written)
+    try:
+        response = admin_client.post(f"/api/versions/{version['id']}/assets",
+                                     files={"file": ("a.png", io.BytesIO(b"x"), "image/png")})
+    finally:
+        stop()
+    assert (response.status_code, response.json()["detail"]) == (404, "Asset not found")
+
+
+def test_version_delete_waits_for_the_upload(admin_client, asset_tmpdir, monkeypatch):
+    import os
     from sqlalchemy import text
-    from mathion.api import assets as assets_api
+    from sqlalchemy.exc import OperationalError
     from mathion.database import SessionLocal
     _course, version = _create_published_version(admin_client)
-    real_replace = assets_api.os.replace
+    outcome = []
+    real_replace = os.replace
 
-    def replace_after_delete(src, dst):
+    def replace(src, dst):
         with SessionLocal() as s:
-            s.execute(text("DELETE FROM assets WHERE version_id = :id"), {"id": version["id"]})
-            s.commit()
+            s.execute(text("SET LOCAL lock_timeout = '200ms'"))
+            try:
+                s.execute(text("DELETE FROM course_versions WHERE id = :id"), {"id": version["id"]})
+                outcome.append("deleted")
+            except OperationalError:
+                outcome.append("waited")
+            s.rollback()
         real_replace(src, dst)
 
-    monkeypatch.setattr(assets_api.os, "replace", replace_after_delete)
-    response = admin_client.post(f"/api/versions/{version['id']}/assets",
-                                 files={"file": ("a.png", io.BytesIO(b"x"), "image/png")})
-    assert (response.status_code, response.json()["detail"]) == (404, "Asset not found")
+    monkeypatch.setattr(os, "replace", replace)
+    r = admin_client.post(f"/api/versions/{version['id']}/assets",
+                          files={"file": ("a.png", io.BytesIO(b"x"), "image/png")})
+    assert outcome == ["waited"] and r.status_code == 201
+
+
+# ----- beta gate Task 2: the file is on disk before its row is committed -----
+
+
+def _draft(admin_client, slug):
+    course = admin_client.post("/api/courses", json={"slug": slug, "name": "M", "description": ""}).json()
+    return admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
+
+
+def _upload(admin_client, version, name="pic.png"):
+    return admin_client.post(f"/api/versions/{version['id']}/assets",
+                             files={"file": (name, io.BytesIO(b"png"), "image/png")})
+
+
+def test_upload_row_invisible_until_file_written(admin_client, asset_tmpdir, monkeypatch):
+    import os
+    from sqlalchemy import func, select
+    from mathion.database import SessionLocal
+    from mathion.models import Asset
+    version = _draft(admin_client, "up-order")
+    seen = []
+    real_replace = os.replace
+
+    def replace(src, dst):
+        with SessionLocal() as s:
+            seen.append(s.scalar(select(func.count(Asset.id)).where(Asset.version_id == version["id"])))
+        real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", replace)
+    assert _upload(admin_client, version).status_code == 201
+    assert seen == [0]
+
+
+def test_upload_disk_failure_leaves_no_row_and_no_file(admin_client, asset_tmpdir, db, monkeypatch):
+    import os
+    from sqlalchemy import select
+    from mathion.models import Asset
+    version = _draft(admin_client, "up-fail")
+
+    def replace(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", replace)
+    r = _upload(admin_client, version)
+    assert r.status_code == 500 and r.json()["detail"] == "Failed to write asset to disk"
+    db.expire_all()
+    assert db.scalars(select(Asset).where(Asset.version_id == version["id"])).all() == []
+    folder = asset_tmpdir / "courses" / str(version["id"])
+    left = [p.name for p in folder.iterdir()] if folder.exists() else []
+    assert left == []
+
+
+def test_upload_duplicate_name_still_409(admin_client, asset_tmpdir):
+    version = _draft(admin_client, "up-dup")
+    assert _upload(admin_client, version).status_code == 201
+    r = _upload(admin_client, version)
+    assert r.status_code == 409 and "already exists" in r.json()["detail"]
