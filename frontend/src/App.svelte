@@ -97,8 +97,9 @@
   .shell {
     display: flex;
     flex-direction: column;
-    min-height: 100vh;
-    min-height: 100dvh;
+    /* vh is the real window; divide out the app zoom. */
+    min-height: calc(100vh / var(--app-zoom));
+    min-height: calc(100dvh / var(--app-zoom));
   }
   .app-page { flex: 1; }
   .loading { display: flex; justify-content: center; padding: var(--space-6); }

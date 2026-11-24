@@ -11,6 +11,7 @@
   import SortMark from '../ui/SortMark.svelte';
   import DashboardSidePanel from './DashboardSidePanel.svelte';
   import { loadFailureText as loadText } from '../../lib/api';
+  import { tipSpace } from '../../lib/tipSpace';
 
   let {
     runId,
@@ -216,8 +217,8 @@
   // Placed on the header's VISIBLE part (right of the pinned Student + Group
   // columns, inside the scroll box): it starts at that part's left edge, or ends
   // at its right edge when the part's centre is on the window's right half, and
-  // keeps 8px from the window edge. Within 48px of the window top (the tip is
-  // one or two 17px lines plus padding) it flips below the header.
+  // keeps 8px from the window edge. It sits 6px above the header's label; within
+  // 48px of the window top (one or two 17px lines plus padding) it flips below it.
   // A scroll or resize hides a hover tip. A focus tip follows its header
   // instead: focusing an out-of-view header scrolls it in, and that scroll event
   // comes AFTER the focus (round 2, both lanes). While no part of the header
@@ -243,15 +244,22 @@
     if (tipSrc?.el === e.currentTarget) hideTip();
   }
   function placeTip(el: HTMLElement, text: string) {
-    const r = el.getBoundingClientRect();
-    const box = el.closest('.table-scroll')?.getBoundingClientRect();
-    const pin = el.closest('table')?.querySelector('thead .sticky-group')?.getBoundingClientRect();
+    // Layout px: the fixed tip is placed in the zoomed space.
+    const s = tipSpace();
+    const r = s.box(el.getBoundingClientRect());
+    const boxEl = el.closest('.table-scroll');
+    const box = boxEl ? s.box(boxEl.getBoundingClientRect()) : undefined;
+    const pinEl = el.closest('table')?.querySelector('thead .sticky-group');
+    const pin = pinEl ? s.box(pinEl.getBoundingClientRect()) : undefined;
     const visL = Math.max(r.left, pin?.right ?? -Infinity, box?.left ?? -Infinity);
     const visR = Math.min(r.right, box?.right ?? Infinity);
-    if (visR < visL || r.bottom < 0 || r.top > window.innerHeight) { tip = null; return; }
-    const below = r.top < 48;
-    const top = below ? r.bottom + 6 : r.top - 6;
-    const w = window.innerWidth;
+    if (visR < visL || r.bottom < 0 || r.top > s.height) { tip = null; return; }
+    // The 6px gap is measured from the label text, not the padded cell.
+    const labelEl = el.querySelector(':scope > .seq-n, :scope > .blk-n');
+    const lab = labelEl ? s.box(labelEl.getBoundingClientRect()) : r;
+    const below = lab.top < 48;
+    const top = below ? Math.max(6, lab.bottom + 6) : lab.top - 6;
+    const w = s.width;
     tip = (visL + visR) / 2 > w / 2
       ? { text, top, below, right: Math.max(8, w - visR) }
       : { text, top, below, left: Math.max(8, visL) };
@@ -442,7 +450,7 @@
                 <th class="block-header" scope="colgroup" colspan={bg.sequences.length}>{bg.block_title}</th>
               {:else}
                 <th class="block-header" scope="colgroup" colspan={bg.sequences.length}
-                    onmouseenter={(e) => showTip(e, blockLabel(bg.block_id, bg.block_title))} onmouseleave={restoreTip}>B{bn}<span class="sr-only">{` · ${bg.block_title}`}</span></th>
+                    onmouseenter={(e) => showTip(e, blockLabel(bg.block_id, bg.block_title))} onmouseleave={restoreTip}><span class="blk-n">B{bn}</span><span class="sr-only">{` · ${bg.block_title}`}</span></th>
               {/if}
             {/each}
           </tr>
@@ -557,7 +565,8 @@
 
   /* D73: keyboard focus scrolls a cell into view beside the pinned Student + Group
      columns (14rem + 6rem), not under them. */
-  .table-scroll { overflow-x: auto; scroll-padding-left: 20rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  /* Positioned, so the headers' .sr-only spans stay inside its clip. */
+  .table-scroll { position: relative; overflow-x: auto; scroll-padding-left: 20rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
   .progress-grid { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
   .progress-grid th, .progress-grid td { padding: 0; border-bottom: 1px solid var(--border-soft); text-align: left; }
   .progress-grid thead th { background: var(--surface-2); color: var(--text-3); font-size: 12px; font-weight: 600; }
@@ -610,12 +619,12 @@
     border: 0;
   }
   /* D79: the header tooltip, above its header (translateY -100%), on top of the
-     sticky header cells. Its place comes from the header's on-screen box. */
+     sticky header cells. Its place comes from the header's and its label's on-screen boxes. */
   .pg-tip {
     position: fixed;
     z-index: 10;
     transform: translateY(-100%);
-    max-width: min(320px, calc(100vw - 16px));
+    max-width: min(320px, calc(100vw / var(--app-zoom) - 16px));
     overflow-wrap: anywhere;
     padding: 4px 8px;
     border-radius: var(--radius);

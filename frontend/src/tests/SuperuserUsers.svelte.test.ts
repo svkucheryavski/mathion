@@ -1,6 +1,7 @@
 import { it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import SuperuserUsers from '../pages/superuser/SuperuserUsers.svelte';
+import { rect, stubZoom } from './support/zoomStubs';
 import type { PanelUser, PanelUserList } from '../lib/superuser';
 
 async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
@@ -52,7 +53,7 @@ beforeEach(() => {
 afterEach(() => {
   if (cmp) unmount(cmp); cmp = null; target?.remove();
   document.documentElement.style.overflow = '';
-  vi.useRealTimers(); vi.restoreAllMocks();
+  vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
 async function render() {
@@ -570,6 +571,45 @@ it('a chip with a list is a tab stop with no title; its tooltip shows on hover a
   expect(tip()).not.toBeNull();
   admin.blur(); flushSync();
   expect(tip()).toBeNull();
+});
+
+// Large-screen zoom: (a) rects scaled by the zoom (1.15), (b) layout rects (1.16).
+async function hoverChip(r: DOMRect): Promise<HTMLElement> {
+  routes['GET /users'] = () => [200, page([SU, ANNA])];
+  await render();
+  const chip = row('aho@uni.dk').querySelectorAll<HTMLElement>('.chip')[1];
+  chip.getBoundingClientRect = () => r;
+  chip.dispatchEvent(new MouseEvent('mouseenter')); flushSync();
+  return document.querySelector<HTMLElement>('.u-tip')!;
+}
+
+it('(a) a chip tip in the zoomed space: clamped left, above the chip', async () => {
+  stubZoom('1.15', 115);
+  const t = await hoverChip(rect(1380, 1414.5, 460, 483));
+  expect(parseFloat(t.style.left)).toBeCloseTo(1512 / 1.15 - 328);
+  expect(parseFloat(t.style.top)).toBeCloseTo(396);
+  expect(t.classList.contains('below')).toBe(false);
+});
+
+it('(a) a chip in the top half gets its tip below', async () => {
+  stubZoom('1.15', 115);
+  const t = await hoverChip(rect(600, 630, 400, 423));
+  expect(t.classList.contains('below')).toBe(true);
+  expect(parseFloat(t.style.top)).toBeCloseTo(423 / 1.15 + 4);
+  expect(parseFloat(t.style.left)).toBeCloseTo(600 / 1.15);
+});
+
+it('(b) a chip tip with layout-px rects', async () => {
+  stubZoom('1.16', 100);
+  const t = await hoverChip(rect(1200, 1230, 400, 420));
+  expect(parseFloat(t.style.left)).toBeCloseTo(1512 / 1.16 - 328);
+  expect(t.style.top).toBe('396px');
+  expect(t.classList.contains('below')).toBe(false);
+});
+
+it('(b) a chip at the left edge keeps 8px', async () => {
+  stubZoom('1.16', 100);
+  expect((await hoverChip(rect(2, 30, 400, 420))).style.left).toBe('8px');
 });
 
 it('a hovered chip that a search filters out takes its tip with it', async () => {

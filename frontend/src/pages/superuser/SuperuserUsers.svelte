@@ -21,6 +21,7 @@
   import FilterPills from '../../components/ui/FilterPills.svelte';
   import Skeleton from '../../components/ui/Skeleton.svelte';
   import ErrorState from '../../components/ui/ErrorState.svelte';
+  import { tipSpace } from '../../lib/tipSpace';
 
   let { token, onAuth }: { token: string; onAuth: PanelOnAuth } = $props();
 
@@ -182,10 +183,12 @@
   let focusEl: HTMLElement | null = null;
   function placeTip(el: HTMLElement): void {
     const text = el.dataset.tip ?? '';
-    const r = el.getBoundingClientRect();
-    const below = r.top < window.innerHeight / 2;
+    // Layout px: the fixed tip is placed in the zoomed space.
+    const s = tipSpace();
+    const r = s.box(el.getBoundingClientRect());
+    const below = r.top < s.height / 2;
     tipEl = el;
-    tip = { text, below, top: below ? r.bottom + 4 : r.top - 4, left: Math.max(8, Math.min(r.left, window.innerWidth - 328)) };
+    tip = { text, below, top: below ? r.bottom + 4 : r.top - 4, left: Math.max(8, Math.min(r.left, s.width - 328)) };
   }
   function showTip(e: Event): void { placeTip(e.currentTarget as HTMLElement); }
   // Only keyboard focus keeps a tip after a mouse-out.
@@ -360,7 +363,8 @@
     font-size: 12.5px;
   }
   /* The Courses page's table (the teaching list's look). */
-  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  /* Positioned, so the hidden .vh spans stay inside its clip. */
+  .table-scroll { position: relative; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
   .u-table { width: 100%; border-collapse: separate; border-spacing: 0; }
   .u-table th {
     text-align: left;
@@ -409,7 +413,7 @@
     position: fixed;
     z-index: 10;
     transform: translateY(-100%);
-    max-width: min(320px, calc(100vw - 16px));
+    max-width: min(320px, calc(100vw / var(--app-zoom) - 16px));
     overflow-wrap: anywhere;
     white-space: pre-line;
     padding: 4px 8px;

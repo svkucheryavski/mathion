@@ -114,6 +114,9 @@
      (the teacher drawings' content, 1180 artboard minus 20px gutters) --- */
   --page-max: 1140px;
 
+  /* --- whole-app zoom: 1, or 1.15 in windows 1400px and wider (below) --- */
+  --app-zoom: 1;
+
   /* --- progress heatmap: single-hue ramp, replaces the hsl() sweep --- */
   --surface-muted: #F5F6F9;   /* no data */
   --heat-1: #E1E8EE;          /* >0–25%  */
@@ -141,4 +144,11 @@
      contrast step below its neighbours while every element stays above 5.5:1.
      Opacity would composite the whole row — including live action glyphs —
      against the page and push the text to 2.7:1. */
+}
+
+/* 115% in windows 1400px and wider; print and browsers without CSS zoom keep 100%. */
+@media screen and (min-width: 1400px) {
+  @supports (zoom: 1) {
+    :root { --app-zoom: 1.15; }
+  }
 }

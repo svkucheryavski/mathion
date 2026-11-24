@@ -1,3 +1,6 @@
+/* The whole app scales with --app-zoom (theme-default.css). */
+html { zoom: var(--app-zoom); }
+
 body {
   font-family: var(--font-sans);
   background: var(--bg);

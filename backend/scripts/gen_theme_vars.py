@@ -51,7 +51,7 @@ def read() -> tuple[list[tuple[str, str, str]], list[str]]:
             ref = _VAR.fullmatch(value)
             if _LITERAL.fullmatch(value) or (ref and ref.group(1) in colours):
                 colours[name] = (value, section)
-            else:
+            elif name not in others:  # a redeclared name is listed once
                 others.append(name)
     return [(n, v, s) for n, (v, s) in colours.items()], others
 

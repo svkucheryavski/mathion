@@ -223,7 +223,8 @@
 
 <style>
   /* The teaching list's table (TeacherRunListPage). */
-  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  /* Positioned, so the hidden .vh spans stay inside its clip. */
+  .table-scroll { position: relative; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
   .c-table { width: 100%; border-collapse: separate; border-spacing: 0; }
   .c-table th {
     text-align: left;
