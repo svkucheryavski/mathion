@@ -1,399 +1,111 @@
 # Mathion
 
-A learning-management backend (FastAPI + SQLAlchemy 2.0 + Alembic) on
-**PostgreSQL 17**, with a Svelte 5 frontend.
+**Run your own teaching platform.**
 
-## Prerequisites
+Mathion is an open-source learning platform for schools, universities and
+training teams. It hosts your courses, assignments and student work on a server
+you control. It is a simpler, lighter alternative to Open edX: one server, one
+command-line tool to install and update it, and screens that stay out of the way.
 
-- Docker (for the local Postgres) and Docker Compose
-- Python 3.13 (as CI) with the backend virtualenv at `backend/.venv`, installed with CI's pins:
-  `backend/.venv/bin/pip install -c backend/constraints.txt -e './backend[dev]'`
-- Node 26 for the frontend (CI and the image build use Node 26)
+Project site: https://svkucheryavski.github.io/mathion/
 
-## Dev bootstrap
+## What it does
 
-From the repository root:
+**For students**
 
-```bash
-# 1. Start the local Postgres (compose service `db`, matches the config default URL).
-#    Run from the repo root, where docker-compose.yml lives.
-docker compose up -d --wait db
+- Courses split into blocks (chapters), sequences (lessons) and items: text
+  pages, videos, quizzes and interactive apps.
+- A progress bar for every block and the whole course, and one clear deadline
+  for each assignment.
+- Formulas written in LaTeX show as real math in the browser.
+- Sign in with a one-time PIN sent by email; there are no passwords to forget.
+- Course pages work on a phone (interactive apps need a laptop or a larger
+  screen).
 
-# 2-4. The remaining commands run from the backend/ directory.
-cd backend
+**For teachers**
 
-# 2. Create the schema.
-.venv/bin/alembic upgrade head
+- Each course is taught as a run with its own dates; teachers add students and
+  groups to it.
+- A progress table shows where every student is.
+- Mini-projects: student groups hand in a file, and teachers accept it, ask
+  for a revision or reject it, with a score, written feedback and a feedback
+  file. Groups can hand in again.
 
-# 3. (optional) Seed demo data.
-.venv/bin/python -m scripts.seed_demo
+**For course authors**
 
-# 4. Run the app.
-.venv/bin/uvicorn mathion.main:app --reload
-```
+- An editor for blocks, sequences, items and quizzes (single choice, multiple
+  choice, numeric and text answers).
+- Course versions: a published version stays fixed for its students while you
+  prepare the next one.
+- Import an existing Open edX course.
+- Interactive apps: upload one JavaScript file and Mathion runs it in a sandbox
+  that cannot reach the network ([rules for apps](docs/interactive-apps.md)).
 
-Or use the dev runner scripts:
+**For the site administrator**
 
-- `./run-debug.sh` — start Postgres, then the backend in developer mode (login PINs
-  printed to stdout; assumes the schema already exists — run step 2 once first).
-- `./run-dashboards-smoke.sh` — start Postgres, migrate, seed the teacher-dashboards
-  smoke fixture, then serve. Assumes a clean database; to reset, drop the compose
-  volume first: `docker compose down -v && docker compose up -d --wait db`.
+- An admin panel (the superuser panel) for users, courses, email, sign-in rules
+  and branding (site name, logo and colours).
+- A Set up page that walks you through the first steps.
+- The `mathion` command installs, backs up, restores and updates the whole site.
+- Every release of the `mathion` command is signed; the installer and
+  `mathion self-update` check the signature before installing it.
 
-## Configuration
+## Install
 
-Settings come from environment variables with the `MATHION_` prefix (e.g.
-`MATHION_DATABASE_URL`, `MATHION_DEBUG`). The app does **not** read a `.env`
-file — any `.env` is only for `docker compose` and for values you `export`
-yourself. `database_url` defaults to the local docker Postgres
-(`postgresql+psycopg://mathion:mathion@localhost:5432/mathion`) for zero-config
-dev.
+You need:
 
-**In production, `MATHION_DATABASE_URL` is required.** If it is unset, the app
-silently falls back to the localhost dev default (and fails loud with a
-connection error). On startup the app logs its password-redacted database
-target so a misconfigured deploy is visible in the logs.
+- a 64-bit Linux server (Intel/AMD or ARM) with Docker, Docker Compose v2,
+  `curl` and `gpg` installed;
+- a domain name that points at the server, with ports 80 and 443 open;
+- an email account (SMTP) that Mathion can send sign-in PINs from.
 
-## Tests
-
-The suite runs against a dedicated `mathion_test` database on the same local
-Postgres:
-
-```bash
-cd backend && .venv/bin/pytest -q
-```
-
-## Self-hosting Mathion (production)
-
-Requires: a Linux host with Docker + Compose v2; a domain (A/AAAA) pointing at it;
-inbound TCP **80 and 443** open (for ACME/Let's Encrypt); a reverse proxy for TLS
-(reproxy primary, Caddy alternative — see below). These steps require a
-**published** image — valid only after the maintainer has pushed a release and
-made the GHCR package public.
-
-### Self-hosting with the `mathion` CLI
-
-The recommended path. The `mathion` CLI installs and manages the whole stack for
-you — no editing `.env` or running `docker compose` by hand. There are two
-distinct steps: first install the CLI **binary**, then use it to stand up the
-**deployment**.
-
-**Install the CLI.** The one-liner downloads the latest `cli-v*` release, verifies
-its checksum against the release `checksums.txt`, and installs `mathion` to
-`/usr/local/bin`:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/svkucheryavski/mathion/main/deploy/install.sh | sudo sh
-```
-
-Prefer to read before you run? Download, inspect, then execute:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/svkucheryavski/mathion/main/deploy/install.sh -o install.sh
-less install.sh          # review what it does
-sudo sh install.sh
-```
-
-*Check the release key (out of band).* The installer carries Mathion's release
-key. To see which key it accepts, run this on the script you downloaded:
-
-```bash
-sed -n '/BEGIN PGP PUBLIC KEY BLOCK/,/END PGP PUBLIC KEY BLOCK/p' install.sh | gpg --show-keys
-```
-
-The first fingerprint it prints must be
-`F00602DFE1BF8CD2B321FC72AD21D4AD294C31A0`, the one published on the project
-site (https://svkucheryavski.github.io/mathion/) as
-`F006 02DF E1BF 8CD2 B321  FC72 AD21 D4AD 294C 31A0`. This shows the key
-the installer trusts, not that the rest of the script is honest: read it
-before you run it. The copy in `deploy/keys/README.md` lives in this
-repository, so it is not an independent check.
-
-The installer verifies the release **signature** (authenticity) before the
-**checksum** (integrity). It fetches `checksums.txt.asc` — a detached GPG
-signature over `checksums.txt` made by Mathion's release subkey (`S_rel`) — and
-rejects the download unless that signature validates against the installer's
-embedded release key, pinned to the expected signing and primary fingerprints.
-Only then does it verify the selected artifact's SHA-256 against the
-now-authenticated `checksums.txt`. The signing key and its fingerprints are documented in
-[`deploy/keys/README.md`](deploy/keys/README.md). You can still inspect the
-script and pin a known release tag (`sudo sh install.sh cli-v0.1.0`) for a
-reproducible install.
-
-**Stand up the deployment.** The `mathion` commands manage Docker containers, so
-run them as root — prefix each with `sudo`. Pass the deployment **domain** and
-**admin email** as flags (both are required):
-
-```bash
-sudo mathion install --domain school.edu --admin-email you@school.edu
-```
-
-`--domain` is a bare host or `host:port` — **no scheme**. This writes the config,
-pulls the image, starts the stack on `127.0.0.1:8000`, migrates the database, and
-creates the first superuser. For scripted or CI installs, add `--yes`; it requires
-both `--domain` and `--admin-email` to be set. (Interactive prompting for omitted
-values is planned but not yet available — supply both flags for now.)
-
-Then finish setup:
-
-1. Put a TLS reverse proxy in front of `127.0.0.1:8000` — see
-   [TLS / reverse proxy (external)](#tls--reverse-proxy-external) below. Confirm
-   `https://<domain>` loads with a valid cert before continuing (ACME + DNS can
-   take minutes).
-2. Issue the first-login PIN (it prints how long the PIN lasts; the superuser
-   panel's Settings page sets that):
+1. Install the `mathion` command:
 
    ```bash
-   sudo mathion pin you@school.edu
+   curl -fsSL https://raw.githubusercontent.com/svkucheryavski/mathion/main/deploy/install.sh | sudo sh
    ```
 
-3. Browse to **`https://<domain>`** and log in with your email + PIN. Log in over
-   HTTPS, **not** `http://127.0.0.1:8000` — the Secure session cookie won't persist
-   over plain HTTP, so a login there silently fails to stick.
+2. Install Mathion and turn on HTTPS:
 
-**Survive a reboot.** The stack's containers use `restart: unless-stopped`, but
-that policy only takes effect if the Docker daemon itself starts at boot. Enable
-it once:
+   ```bash
+   sudo mathion install --domain learn.example.edu --admin-email you@example.edu
+   sudo mathion tls enable --domain learn.example.edu --email you@example.edu
+   ```
 
-```bash
-sudo systemctl enable docker
-```
+   Wait until `https://learn.example.edu` opens with a valid certificate; this
+   can take a few minutes.
 
-**Command reference** (run each with `sudo` — the commands manage the Docker stack
-or read root-owned config):
+3. Get your first sign-in PIN for the `--admin-email` address, then open
+   `https://learn.example.edu` and sign in with that email and PIN:
 
-| Command | What it does |
-| --- | --- |
-| `mathion install --domain <host[:port]> --admin-email <email> [--version <tag>] [--yes]` | Install and start a deployment (`--domain` has no scheme; `--yes` is non-interactive and requires `--domain` + `--admin-email`). |
-| `mathion start` | Start the stack (`docker compose up -d --wait`). |
-| `mathion stop` | Stop the stack (containers stopped; data + config retained). |
-| `mathion status` | Show stack status + `/health`. |
-| `mathion logs [app\|db]` | Show stack logs (optionally for a single service). |
-| `mathion version` | Print CLI + pinned image version. |
-| `mathion licenses` | Print the licenses of Mathion and the code built into it. |
-| `mathion superuser <email>` | Create or promote a superuser account (idempotent). |
-| `mathion pin <email>` | Issue a sign-in PIN (the panel's Settings page sets how long a PIN lasts). |
-| `mathion branding reset [--all] [--yes]` | Remove the colour changes from the panel's Branding page (`--all` also resets the site name, logo and tab icon). |
-| `mathion uninstall` | Stop and remove containers (keeps data + config). |
-| `mathion uninstall --purge` | Also remove volumes and config — **destructive**; requires typing the project name to confirm. |
+   ```bash
+   sudo mathion pin you@example.edu
+   ```
 
-### Manual setup (docker compose)
+4. Get a link to the superuser panel and open it in the same browser. Its Set
+   up page walks you through email, the site name, the first course and
+   sign-in rules. Set up email first: until then, nobody else can sign in. The
+   link stops working after 30 minutes without use; run the command again for
+   a new one.
 
-Work from a directory containing `docker-compose.prod.yml`.
+   ```bash
+   sudo docker compose -p mathion_prod -f /etc/mathion/docker-compose.yml \
+     --env-file /etc/mathion/.env exec -T app python -m mathion.superuser activate
+   ```
 
-```bash
-# 1. Configure
-cp deploy/.env.prod.example .env
-#    Edit .env: set MATHION_BASE_URL; generate MATHION_SECRET_KEY (`openssl rand -base64 48`)
-#    and POSTGRES_PASSWORD (`openssl rand -hex 24`, pasting the SAME value into
-#    MATHION_DATABASE_URL); set MATHION_VERSION to the current release tag (see the
-#    repo's Releases/Packages page, e.g. v0.1.0).
+To keep Mathion running after a reboot, run `sudo systemctl enable docker` once.
 
-# 2. Pull + start
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d --wait
+## Self-hosting
 
-# 3. Migrate the database
-docker compose -f docker-compose.prod.yml exec app alembic upgrade head
+The full guide covers checking the installer's signature, the manual Docker
+Compose setup, [using your own HTTPS proxy](docs/self-hosting.md#tls--reverse-proxy-external),
+backups, upgrades and the `mathion` commands:
+[docs/self-hosting.md](docs/self-hosting.md).
 
-# 4. Create the first superuser
-docker compose -f docker-compose.prod.yml exec app python -m mathion.superuser create-superuser you@school.edu
+## Contributing
 
-# 5. Start your reverse proxy → 127.0.0.1:8000 (below) and confirm https://<domain>
-#    loads with a valid cert FIRST (ACME + DNS can take minutes).
+Developer setup, configuration and tests are in [DEVELOPER.md](DEVELOPER.md).
 
-# 6. Issue the first-login PIN LAST (it prints how long the PIN lasts)
-docker compose -f docker-compose.prod.yml exec app python -m mathion.superuser pin you@school.edu
-#    Then browse to https://<domain> (test via HTTPS, not http://127.0.0.1:8000 —
-#    the Secure session cookie won't persist over plain HTTP) and log in with
-#    email + PIN.
+## License
 
-# 7. Open the superuser panel; its Set up page walks you through email, the site
-#    name, the first course and sign-in rules:
-docker compose -f docker-compose.prod.yml exec app python -m mathion.superuser activate
-```
-
-### Bundled HTTPS (`mathion tls`) — the easy path
-
-If your server has a public domain and ports 80 + 443 open, Mathion can run its
-own TLS-terminating reverse proxy and obtain a Let's Encrypt certificate for you —
-no cert files to manage:
-
-    sudo mathion tls enable --domain learn.example.edu --email you@example.org
-
-This stands up a bundled, network-segmented reproxy (it shares no network with the
-database), obtains and auto-renews the certificate, and serves the app over HTTPS.
-Check state any time with `mathion tls status`; stop it with `mathion tls disable`.
-
-**Requirements:** DNS for the domain must point at this host, and the firewall must
-allow inbound TCP 80 (ACME HTTP-01 challenge + redirect) and 443 (HTTPS).
-
-**Production is HTTPS-only.** `mathion tls disable` stops the bundled proxy but does
-**not** downgrade to plain HTTP — the app keeps `Secure` cookies and its
-`https://…` base URL, so put your own TLS proxy in front (or re-enable) to reach it.
-
-**Upload limit:** the superuser panel's Settings page sets the largest file, up to
-50 MB. The bundled proxy allows request bodies up to 60 MiB, enough for that
-ceiling. The compose file an older `mathion` CLI wrote allows only 25 MiB: upgrade
-the CLI (`mathion self-update`) and run `mathion update`.
-
-**Downgrade caveat:** running an **older** `mathion` CLI's `tls enable` against a
-**newer** install rewrites the on-disk compose with the older embedded copy. That
-newer→older path is unsupported — upgrade the CLI first (`mathion self-update`).
-
-Prefer your own external proxy? That path is unchanged — see below.
-
-### TLS / reverse proxy (external)
-
-Primary — **reproxy** (host-run; pin a specific release and verify the flags):
-
-```bash
-reproxy --listen=:443 --ssl.type=auto --ssl.fqdn=<domain> --ssl.http-port=80 \
-        --max=60M --timeout.resp-header=30s --timeout.write=15m \
-        --static.enabled --static.rule='*,/,http://127.0.0.1:8000'
-```
-
-Host mode defaults to `127.0.0.1:443`, so `--listen=:443` is required; ACME http-01
-needs port 80; `--static.enabled` is required alongside `--static.rule`; and
-reproxy's default `--max` is **64K** — raise it above the largest file set in the
-panel's Settings (up to 50 MB) or uploads are rejected at the proxy. Its default
-5 s wait for an answer is shorter than the panel's 20 s email test, and its 30 s
-limit per request is too short for a big upload or download on a slow link: raise
-both, as above. Binding 80/443 needs root or `CAP_NET_BIND_SERVICE`.
-
-Alternative — **Caddy** (no low default body limit; auto-manages 80/443 + ACME):
-
-```
-<domain> {
-    reverse_proxy 127.0.0.1:8000
-}
-```
-
-A **containerized** proxy cannot reach the loopback-only `127.0.0.1:8000` publish —
-join the compose network and target `http://app:8000`, or use host networking.
-
-### Operations
-
-- **Rate limits:** PIN requests and wrong PIN tries are limited per email per hour;
-  the superuser panel's Settings page sets both. If someone is locked out,
-  `sudo mathion pin <email>` makes a new PIN: it skips the request limit and clears
-  that email's wrong tries. On the manual docker-compose path, which has no
-  `mathion` command, run
-  `docker compose -f docker-compose.prod.yml exec app python -m mathion.superuser pin <email>`.
-- **Data safety:** `mathion_pgdata` + `mathion_assets` hold all state (project-prefixed as
-  `mathion_prod_mathion_pgdata` / `mathion_prod_mathion_assets` in `docker volume ls`).
-  **`docker compose -f docker-compose.prod.yml down -v` permanently deletes them** — use
-  `docker compose -f docker-compose.prod.yml down` (no `-v`) to stop. Always pass
-  `-f docker-compose.prod.yml` so the command targets the prod stack, not the dev `db`.
-  Backup on the manual docker-compose path (with the `mathion` CLI, `sudo mathion backup` takes the
-  same pair, online):
-  `docker compose -f docker-compose.prod.yml exec db pg_dump -U mathion mathion > backup.sql`
-  plus a snapshot of the assets volume. For a point-in-time-consistent pair, stop `app` first
-  (`docker compose -f docker-compose.prod.yml stop app`) so a concurrent asset change can't leave
-  the dump referencing a since-deleted file — at the cost of a longer stop.
-- **DB password is first-init-only:** don't change `POSTGRES_PASSWORD` after the
-  first `up` against an existing `mathion_pgdata`.
-- **Upgrade on the manual docker-compose path** (brief downtime; with the `mathion` CLI,
-  `sudo mathion update` pulls, backs up, migrates and restarts, rolling back on failure): back up →
-  stop the proxy → `docker compose -f docker-compose.prod.yml stop app` → bump
-  `MATHION_VERSION` → `pull` → migrate on the new image
-  (`docker compose -f docker-compose.prod.yml run --rm app alembic upgrade head`) →
-  `up -d --wait` → restart the proxy. (`/health` does no DB check, so migrating
-  before serving avoids running new code on the old schema.)
-
-## Updating the CLI (`mathion self-update`)
-
-`mathion self-update` upgrades the **`mathion` CLI binary itself** — and nothing
-else. It does **not** touch your deployment, its containers, or the database;
-updating the running Mathion **stack** is a separate command, `mathion update`.
-
-It updates the binary that `install.sh` put at `/usr/local/bin/mathion`: it
-resolves the newest verifiable `cli-v*` release, downloads its `checksums.txt`,
-verifies the detached signature against the binary's compiled-in release key
-(`S_rel`), checks the downloaded binary's SHA-256 against the now-authenticated
-checksums, and swaps it into place.
-
-If a system package owns the binary (for example an old .deb), self-update
-refuses and names the package; nothing is changed.
-
-**Flags.**
-
-- `--check` reports whether a newer installable release exists and exits
-  **without changing anything**. It needs **no root** and performs no swap — safe
-  to run as any user or from a scheduled check.
-- `--yes` skips the confirmation prompt for scripted upgrades. The swap writes to
-  `/usr/local/bin`, so the update itself still requires root
-  (`sudo mathion self-update`).
-
-**Guarantees.** self-update is **forward-only**: it moves to a release *greater*
-than the one you are running and never downgrades or pins an arbitrary version.
-It installs a release **only** after that release's `checksums.txt` signature
-verifies against the compiled-in `S_rel` release key **and** the downloaded
-binary's checksum matches; any verification, download, or staging failure aborts
-**before the running binary is touched** (fail-closed). The one exception is a
-rare post-swap durability-uncertain case: the replacement is already in place but
-a directory `fsync` did not confirm — self-update reports that explicitly rather
-than claiming a clean success or implying nothing changed. The signing key and its
-fingerprints are documented in
-[`deploy/keys/README.md`](deploy/keys/README.md).
-
-**A key rotation may take two runs.** The verifying key is compiled into the
-binary, so crossing a maintainer key rotation uses a *transition release* rather
-than a re-fetched keyring: your current binary first updates to the transition
-release (still signed by the key it already trusts, but carrying the new key),
-and a **second** `mathion self-update` then reaches the release signed by the new
-key. Run `mathion self-update` again **after a run that installs the transition
-release** to pick up the new-key release. If a run instead reports **"already up
-to date"** during a rotation window, the new-key successor is likely not published
-yet — retry **later** rather than immediately.
-
-**Debian staff-group hosts (`/usr/local` remediation).** Before swapping,
-self-update requires `/usr/local/bin` and every ancestor up to `/` to be
-root-owned and neither group- nor world-writable. Debian hosts that carry
-`/etc/staff-group-for-usr-local` (an upgrade-path default) have `base-files` set
-**both** `/usr/local` and `/usr/local/bin` to `root:staff 2775` — group-writable
-— so self-update fail-closed-refuses and names the offending component. The
-ancestry walk rejects **any** group-writable component from `/`, so fixing only
-the leaf (`/usr/local/bin`) leaves `/usr/local` still refused; repair **both**:
-
-```bash
-sudo chgrp root /usr/local /usr/local/bin && sudo chmod 0755 /usr/local /usr/local/bin
-```
-
-Removing `/etc/staff-group-for-usr-local` alone does **not** re-permission an
-already-created directory — it only stops *future* directories from being
-staff-owned — so the `chgrp`/`chmod` above is what actually clears the refusal.
-
-### Applying a stack-definition change after a CLI upgrade
-
-`mathion self-update` updates the CLI binary, not the running deployment: it does not
-apply the bundled stack definition to the containers you already have running.
-
-`mathion update` (the in-place deployment upgrade) now **also** applies this
-release's embedded stack definition, not just the app image, so a single
-`update` brings the deployment fully up to the CLI release. A few related points:
-
-- `--no-reconcile` applies only the image upgrade and defers the stack change; a
-  drift notice reminds you, and you apply it later with `sudo mathion reconcile`.
-- **Behavior change:** a same-tag `update --yes` on a host whose compose has
-  drifted now applies that drift — a call that used to be a no-op can briefly
-  recreate the bundled TLS proxy, a short HTTPS blip.
-- **Exit code 2** means the image/database update committed but post-commit work
-  or verification is still pending — follow the recovery instructions in the
-  message. Usually that is `sudo mathion reconcile`; if the message instead says
-  the recovery breadcrumb could not be removed, remove it by hand as the message
-  directs (`reconcile` refuses while the breadcrumb remains). The database is never
-  rolled back; in the rare case the restore also failed the runtime may be
-  degraded, so check `mathion status`. A same-tag apply that fails is exit 1
-  (nothing committed).
-
-To apply a stack-definition change on its own — after a CLI-only upgrade, or when
-you deferred it with `--no-reconcile` — use:
-
-```
-sudo mathion reconcile
-```
-
-`mathion reconcile` re-materializes the bundled Docker Compose and recreates only
-the services whose configuration changed (a brief interruption of those services).
-`mathion status` tells you when a reconcile is needed.
+Apache License 2.0. See [LICENSE](LICENSE).

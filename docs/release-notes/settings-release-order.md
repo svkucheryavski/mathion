@@ -82,13 +82,13 @@ nothing to do.
   keys removed, the old image refuses to start.
 - On the manual docker-compose path there is no `mathion self-update` or
   `mathion update`: set `MATHION_VERSION` to the new tag, pull the image and
-  run the migration yourself, as the README's "Upgrade on the manual
-  docker-compose path" under Operations says. The migration prints the same
+  run the migration yourself, as "Upgrade on the manual docker-compose path"
+  under Operations in `docs/self-hosting.md` says. The migration prints the same
   `site-settings:` lines there too.
 - With your own proxy in front of Mathion (not `mathion tls`), raise its body
   limit first (reproxy `--max`, nginx `client_max_body_size`) to a little more
   than the largest file you'll allow, then raise the limit in the panel. Raise
   its timeouts too (reproxy `--timeout.resp-header=30s --timeout.write=15m`,
-  as in the README), or a slow email test and a large upload are cut off.
+  as in `docs/self-hosting.md`), or a slow email test and a large upload are cut off.
 
 The release itself is the maintainer's step; nothing here is automated.
