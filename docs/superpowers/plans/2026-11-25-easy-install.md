@@ -17,7 +17,7 @@
 - Docker's source is `https://download.docker.com/linux/<ubuntu|debian>`. Packages: `docker-ce docker-ce-cli containerd.io docker-compose-plugin`. Key fingerprint `9DC858229FC7DD38854AE2D88D81803C0EBFCD88`, confirmed in Task 2 from two independent sources before it is committed.
 - Nothing changes on the server without a yes, except under `--yes`. `--yes` never asks a question.
 - One-line code comments (owner rule). Code and tests only under `cli/` and `deploy/`; docs under `README.md`, `docs/`.
-- The certificate wait is 2 minutes; every other wait stays under 30 s.
+- The certificate wait is 2 minutes; every other wait stays under 30 s, except waits for another program holding the apt lock (up to 2 minutes for `apt-get update` and 120 s for the install; Task 2 ruling, owner OK 2026-11-25).
 - Never open the Mac to the network. Real-server checks are owner steps on the rented beta server.
 - Tests run with `cd cli && go vet ./... && go test ./...`; shell tests with `sh deploy/<name>_test.sh`. Never run two test processes at once.
 
@@ -61,23 +61,24 @@
 **Interfaces:**
 - Produces:
   - `type OS struct { ID, VersionID, Codename string }`; `func ParseOSRelease(r io.Reader) (OS, error)` (reads `ID`, `VERSION_ID`, `VERSION_CODENAME`, strips quotes).
-  - `func Supported(o OS) bool`: ubuntu ≥ 22.04, debian ≥ 12, compared numerically on major[.minor].
+  - `func Supported(o OS) bool`: ubuntu ≥ 22.04, debian ≥ 12, compared numerically on major[.minor]; the codename must match `^[a-z]+$` (as built, Task 2 ruling).
   - `const DockerKeyFingerprint = "9DC858229FC7DD38854AE2D88D81803C0EBFCD88"`
-  - `func CheckKey(armored []byte, wantFPR string) error`: parses with `openpgp.ReadArmoredKeyRing`, requires exactly one entity whose primary key fingerprint (upper hex) equals `wantFPR`.
-  - `type Cmd interface { Run(ctx context.Context, name string, args ...string) error; Output(ctx context.Context, name string, args ...string) (string, error) }` and `ExecCmd` (real, streams stdout and stderr to the terminal for `Run`).
-  - `type Steps struct { Cmd Cmd; Fetch func(ctx context.Context, url string) ([]byte, error); WriteFile func(path string, data []byte, perm os.FileMode) error; Arch string }`
-  - `func (s Steps) Install(ctx context.Context, o OS) error`: in order:
+  - `func CheckKey(armored []byte, wantFPR string) ([]byte, error)`: exactly one armored block, exactly one entity whose primary key fingerprint (upper hex) equals `wantFPR`; returns that entity armored again, which is what gets written (as built, Task 2 ruling).
+  - `type Cmd interface { Run(ctx context.Context, name string, args ...string) error; Output(ctx context.Context, name string, args ...string) (string, error) }` and `ExecCmd` (real; no stdin; env `DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l LC_ALL=C`; `Run` streams to the terminal and wraps `ErrLocked` on apt lock messages; `Output` shows stderr).
+  - `type Steps struct { Cmd; Fetch; ReadFile; WriteFile; Remove; Sleep func(time.Duration); Out io.Writer; Arch string }` and `func NewSteps(arch string, out io.Writer) Steps` (real seams).
+  - `func (s Steps) Install(ctx context.Context, o OS) error`: refuses `!Supported(o)` and `Arch` other than `amd64`/`arm64`, then in order:
     1. fetch `https://download.docker.com/linux/<id>/gpg`, then `CheckKey`;
-    2. write `/etc/apt/keyrings/docker.asc` (0644, whole file);
-    3. write `/etc/apt/sources.list.d/docker.list` (whole file) with `deb [arch=<arch> signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/<id> <codename> stable`;
-    4. run `apt-get update`;
-    5. run `apt-get install -s <4 packages>`, refusing with `ErrWouldRemove` if any output line starts with `Remv `;
-    6. run `apt-get install -y <4 packages>`;
-    7. run `systemctl enable --now docker`.
+    2. fetch `.../dists/<codename>/InRelease`; a 404 → `ErrNoDockerRelease` before anything is written;
+    3. write `/etc/apt/keyrings/docker.asc` (0644, whole file, the checked key);
+    4. write `/etc/apt/sources.list.d/docker.list` (whole file) with `deb [arch=<arch> signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/<id> <codename> stable`;
+    5. run `apt-get update`, retrying every 10 s for up to 2 minutes while `ErrLocked`; on failure put the old `docker.list` back, or remove it;
+    6. run `apt-get -o DPkg::Lock::Timeout=120 install -s <4 packages>`, refusing with `ErrWouldRemove` on `Remv `/`Purg ` lines;
+    7. run `apt-get -o DPkg::Lock::Timeout=120 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y --no-remove <4 packages>`;
+    8. run `systemctl enable --now docker`.
 
     Each failure is wrapped as `fmt.Errorf("installing Docker: <step name>: %w", err)`.
-  - `func EnableAtBoot(ctx context.Context, c Cmd) (changed bool, err error)`: `systemctl is-enabled docker`; when not `enabled`, run `systemctl enable docker` and return true.
-  - `var ErrWouldRemove = errors.New(...)`; `func Instructions(o OS) string` (the manual text with the Docker guide link; names Compose v2).
+  - `func EnableAtBoot(ctx context.Context, c Cmd) (changed bool, err error)`: `systemctl is-enabled docker`; only when it says `disabled`, run `systemctl enable docker` and return true (snap Docker, no systemd and masked are left alone).
+  - `var ErrWouldRemove, ErrNoDockerRelease, ErrLocked, ErrNotFound`; `func Instructions(reason string) string` (the reason, then the manual text with the Docker guide link; names Compose v2 and removing `docker.io` first).
 
 - [ ] **Step 1: Confirm the fingerprint from two independent sources**, then save the key as `testdata/docker.asc`:
   1. `curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --show-keys`;
@@ -105,13 +106,13 @@
 - Test: `cli/cmd/install_test.go`, new `cli/cmd/install_docker_test.go`
 
 **Interfaces:**
-- Consumes: Task 1 `Prompter`, Task 2 `Supported`, `Steps.Install`, `EnableAtBoot`, `Instructions`, `ErrWouldRemove`.
+- Consumes: Task 1 `Prompter`, Task 2 `Supported`, `NewSteps`, `Steps.Install`, `EnableAtBoot`, `Instructions`, `ErrWouldRemove`, `ErrNoDockerRelease`. `Arch` comes from `dpkg --print-architecture` (an armhf userland on an arm64 kernel gets the instructions).
 - Produces:
   - `installOpts` gains `NoTLS bool` (flag `--no-tls`, help "do not set up the bundled HTTPS proxy").
   - `func (a *App) ensureDocker(ctx context.Context, yes bool) error`:
     - when `docker version` and `docker compose version` both succeed (existing `dockerx.Preflight`), call `EnableAtBoot` and print `Docker will now start at boot.` if it changed something;
-    - when Docker works but Compose is missing, return an error carrying `Instructions(os)`;
-    - otherwise read the OS: unsupported → error with `Instructions`; supported → `Confirm("Docker is not installed. Install it from Docker's official packages?", true)` (skipped under `yes`); no → error `"Docker is needed; install it and run sudo mathion install again"` plus `Instructions`; yes → `Steps.Install`, then `Preflight` again.
+    - when Docker works but Compose is missing, return an error carrying `Instructions("Docker works, but Docker Compose v2 is missing.")`;
+    - otherwise read the OS: unsupported, or `Install` returns `ErrNoDockerRelease` → error with `Instructions(<reason>)`; supported → `Confirm("Docker is not installed. Install it from Docker's official packages?", true)` (skipped under `yes`); no → error `"Docker is needed; install it and run sudo mathion install again"` plus `Instructions`; yes → `Steps.Install`, then `Preflight` again.
   - `func (a *App) askMissing(o *installOpts) error`: asks `Site address (e.g. learn.school.edu)` with check `config.BuildBaseURL`, and `Your email (you become the site administrator)` with check `config.ValidateEmail`, only for empty fields and only on the fresh path.
 - `RunE` order: `requireRoot()` → `ensureDocker` → `lockAndGuard` → `runInstall`. `ensureDocker` must run before `lockAndGuard`, whose `SweepWorkers` calls Docker.
 - Interactive = `!o.Yes && prompt.StdinIsTerminal(os.Stdin)`. Non-interactive with a missing value keeps today's error text, with "(interactive prompting is planned but not yet available)" replaced by "(or run it in a terminal to be asked)".
