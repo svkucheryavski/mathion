@@ -633,3 +633,18 @@ def test_api_update_sequence_equivalent_after_slugify(admin_client):
     assert resp.status_code == 200
     assert resp.json()["title"] == "Foo Bar!"
     assert resp.json()["slug"] == "foo-bar"
+
+
+def test_block_info_refuses_a_data_image(admin_client):
+    from mathion.api.asset_render import BLOCK_DATA_URL_REFUSAL as DATA_URL_REFUSAL
+    version = _setup_version(admin_client)
+    bad = "![a](data:image/png;base64,AAAA)"
+    created = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B1", "info": bad})
+    assert created.status_code == 422
+    assert created.json()["detail"] == DATA_URL_REFUSAL
+    assert "Assets" not in DATA_URL_REFUSAL                # block info cannot link uploaded files
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B2", "info": "ok"}).json()
+    patched = admin_client.patch(f"/api/blocks/{block['id']}", json={"info": bad})
+    assert patched.status_code == 422
+    assert patched.json()["detail"] == DATA_URL_REFUSAL
+    assert admin_client.get(f"/api/versions/{version['id']}/blocks").json()[0]["info"] == "ok"

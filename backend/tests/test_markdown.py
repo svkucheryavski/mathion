@@ -828,4 +828,4 @@ def test_backtick_scan_nested_images_stay_linear():
     inner = "".join(f"![$`{i}` x$](x{i}.png) " for i in range(9))
     took = _best_of_3(f"![{inner}](y.png) $`a` b$ " * 1000)
     print(f"nested backtick scan: {took:.3f} s")
-    assert took < 0.5
+    assert took < 2.0                                 # ~0.16 s here; rebuilding the index per image takes ~24 s

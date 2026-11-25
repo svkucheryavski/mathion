@@ -27,6 +27,8 @@ router = APIRouter(tags=["versions"])
 
 @router.post("/api/courses/{course_id}/versions", status_code=201, response_model=VersionResponse)
 def create_version(course_id: int, data: VersionCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if data.copy_assets_from is not None:
+        lock_draft(db, data.copy_assets_from)          # a settled source: asset deletes wait for the copy
     get_or_404(db, Course, course_id)
     require_course_admin(db, user, course_id)
 
@@ -53,18 +55,18 @@ def create_version(course_id: int, data: VersionCreate, db: Session = Depends(ge
     db.add(version)
     db.flush()
 
-    if data.copy_assets_from is not None:
-        try:
-            copy_version_assets(db, data.copy_assets_from, version.id, user.id)
-        except HTTPException:
-            db.rollback()
-            raise
-
-    # Render info_md after assets are in place so asset references resolve
-    version.info_html = render_with_assets(db, version.id, data.info_md)
-    sync_asset_references(db, version.id, [data.info_md], {"info_version_id": version.id})
-
-    db.commit()
+    new_id = version.id
+    try:
+        if data.copy_assets_from is not None:
+            copy_version_assets(db, data.copy_assets_from, new_id, user.id)
+        # Render info_md after assets are in place so asset references resolve
+        version.info_html = render_with_assets(db, new_id, data.info_md)
+        sync_asset_references(db, new_id, [data.info_md], {"info_version_id": new_id})
+        db.commit()
+    except Exception:
+        db.rollback()
+        shutil.rmtree(os.path.join(settings.asset_path, "courses", str(new_id)), ignore_errors=True)
+        raise
     db.refresh(version)
     return version
 

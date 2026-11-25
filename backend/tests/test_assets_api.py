@@ -471,6 +471,40 @@ def test_version_copy_assets(admin_client, db, asset_tmpdir):
     assert (v2_dir / "b.pdf").read_bytes() == b"bbb"
 
 
+def test_version_copy_assets_failure_leaves_nothing(admin_client, db, asset_tmpdir, monkeypatch):
+    import shutil
+    from mathion.models import CourseVersion
+    course = admin_client.post("/api/courses", json={"slug": "copy-fail", "name": "C", "description": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
+    for name in ("a.png", "b.png"):
+        admin_client.post(f"/api/versions/{v1['id']}/assets", files={"file": (name, io.BytesIO(b"x"), "image/png")})
+    real, calls = shutil.copy2, []
+
+    def flaky(src, dst):
+        calls.append(dst)
+        if len(calls) == 2:
+            raise FileNotFoundError(src)                  # the source vanished mid-copy
+        return real(src, dst)
+
+    monkeypatch.setattr(shutil, "copy2", flaky)
+    with pytest.raises(FileNotFoundError):
+        admin_client.post(f"/api/courses/{course['id']}/versions",
+                          json={"label": "L2", "info_md": "", "copy_assets_from": v1["id"]})
+    assert sorted(p.name for p in (asset_tmpdir / "courses").iterdir()) == [str(v1["id"])]
+    db.expire_all()
+    assert [v.id for v in db.query(CourseVersion).filter_by(course_id=course["id"])] == [v1["id"]]
+
+
+def test_version_copy_assets_refused_info_leaves_nothing(admin_client, asset_tmpdir):
+    course = admin_client.post("/api/courses", json={"slug": "copy-422", "name": "C", "description": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
+    admin_client.post(f"/api/versions/{v1['id']}/assets", files={"file": ("a.png", io.BytesIO(b"x"), "image/png")})
+    r = admin_client.post(f"/api/courses/{course['id']}/versions",
+                          json={"label": "L2", "info_md": "![n](nope.png)", "copy_assets_from": v1["id"]})
+    assert r.status_code == 422
+    assert sorted(p.name for p in (asset_tmpdir / "courses").iterdir()) == [str(v1["id"])]
+
+
 def test_version_copy_assets_wrong_course_rejected(admin_client, asset_tmpdir):
     c1 = admin_client.post("/api/courses", json={"slug": "c1", "name": "C1", "description": ""}).json()
     c2 = admin_client.post("/api/courses", json={"slug": "c2", "name": "C2", "description": ""}).json()

@@ -3,13 +3,13 @@ from sqlalchemy import exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from mathion.api.asset_render import render_without_assets
 from mathion.api.draft_lock import lock_draft
 from mathion.api.text_utils import slugify
 from mathion.api.lookups import INT4_MAX, get_or_404
 from mathion.api.authz import has_run_pinned_to_version, require_course_admin
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.markdown import render_markdown
 from mathion.models import Block, CourseAdmin, CourseVersion, Sequence
 from mathion.models_auth import User
 from mathion.schemas import (
@@ -87,7 +87,7 @@ def create_block(version_id: int, data: BlockCreate, db: Session = Depends(get_d
         slug=slug,
         order=next_order,
         info=data.info,
-        info_html=render_markdown(data.info or ""),
+        info_html=render_without_assets(data.info),
     )
     db.add(block)
     try:
@@ -180,10 +180,10 @@ def update_block(block_id: int, data: BlockUpdate, db: Session = Depends(get_db)
                 )
             updates["slug"] = new_slug
 
+    if "info" in updates:
+        updates["info_html"] = render_without_assets(updates["info"])  # refuse before any change
     for field, value in updates.items():
         setattr(block, field, value)
-        if field == "info":
-            block.info_html = render_markdown(value or "")
     try:
         db.commit()
     except IntegrityError:

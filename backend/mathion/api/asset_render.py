@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 DATA_URL_REFUSAL = ("Images pasted as data: URLs are not supported. "
                     "Upload the file under Assets and link it by name.")
+BLOCK_DATA_URL_REFUSAL = ("Images pasted as data: URLs are not supported in block info. "
+                          "Link an image by its full web address.")
 
 
 _ESCAPE = re.compile(r"%([0-9A-Fa-f]{2})")
@@ -36,6 +38,15 @@ def _checked_refs(content_md: str) -> set[str]:
     if any(is_data_url(r) for r in refs):
         raise HTTPException(status_code=422, detail=DATA_URL_REFUSAL)
     return refs
+
+
+def render_without_assets(content_md: str | None) -> str:
+    """Render text that cannot hold assets (block info); a pasted data: image is still refused."""
+    from mathion.markdown import extract_asset_filenames, is_data_url, render_markdown
+
+    if any(is_data_url(r) for r in extract_asset_filenames(content_md or "")):
+        raise HTTPException(status_code=422, detail=BLOCK_DATA_URL_REFUSAL)
+    return render_markdown(content_md or "")
 
 
 def render_with_assets(db: Session, version_id: int, content_md: str | None) -> str:

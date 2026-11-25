@@ -101,15 +101,19 @@ def _draft(admin_client, slug):
     return admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()["id"]
 
 
-@pytest.mark.parametrize("kind", ["delete", "duplicate"])
+@pytest.mark.parametrize("kind", ["delete", "duplicate", "copy"])
 def test_whole_draft_writes_take_the_version_lock_first(admin_client, monkeypatch, kind):
     v = _draft(admin_client, f"wd-{kind}")
     events = record_lock_calls(monkeypatch)
     with _statements() as seen:
         if kind == "delete":
             r = admin_client.delete(f"/api/versions/{v}")
-        else:
+        elif kind == "duplicate":
             r = admin_client.post(f"/api/versions/{v}/duplicate", json={"label": "Copy"})
+        else:
+            course = next(c["id"] for c in admin_client.get("/api/courses").json() if c["slug"] == "wd-copy")
+            r = admin_client.post(f"/api/courses/{course}/versions",
+                                  json={"label": "Copy", "info_md": "", "copy_assets_from": v})
     assert r.status_code in (201, 204), r.text
     assert events[0] == ("lock", advisory.LOCK_NS_VERSION_INFO, (v,))
     assert "pg_advisory_xact_lock" in next(st for st in seen if "course_versions" in st or "pg_advisory" in st)
