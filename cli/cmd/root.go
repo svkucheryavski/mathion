@@ -157,7 +157,7 @@ func newRootCmd(app *App) *cobra.Command {
 		newLogsCmd(app), newPinCmd(app), newSuperuserCmd(app), newVersionCmd(app),
 		newUninstallCmd(app), newBackupCmd(app), newRestoreCmd(app), newUpdateCmd(app),
 		newSelfUpdateCmd(app), newTLSCmd(app), newReconcileCmd(app), newBrandingCmd(app),
-		newLicensesCmd(app),
+		newLicensesCmd(app), newPanelCmd(app),
 	)
 	return root
 }

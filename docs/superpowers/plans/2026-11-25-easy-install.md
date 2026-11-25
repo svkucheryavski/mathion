@@ -214,7 +214,7 @@
 - Test: `cli/cmd/panel_test.go`
 
 **Interfaces:**
-- Produces: `func newPanelCmd(app *App) *cobra.Command`. `Use: "panel"`, Short `Print a link to the superuser panel`, `Args: cobra.NoArgs`. It runs `requireRoot()`, then `app.compose(ctx, "exec", "-T", "app", "python", "-m", "mathion.superuser", "activate")` (stdout passes through, as `pin` does), then prints `Open it in the browser where you are signed in as <admin email>. It stops working after 30 minutes without use; running this command again replaces it.` The admin email comes from `config.ReadState`; if the state can't be read, use "a superuser". On a compose error: `fmt.Errorf("no panel link was made (%w)", err)`.
+- Produces: `func newPanelCmd(app *App) *cobra.Command`. `Use: "panel"`, Short `Print a link to the admin panel`, `Args: cobra.NoArgs`. It runs `requireRoot()`, then `app.requireInstalledDeployment()`, then `app.compose(ctx, "exec", "-T", "app", "python", "-m", "mathion.superuser", "activate")` (stdout passes through, as `pin` does), then prints `Sign in as <admin email> first, then open this link in the same browser. It stops working after 30 minutes without use; running this command again replaces it.` The admin email comes from `config.ReadState`; if the state can't be read, use "a superuser". On a compose error: `fmt.Errorf("no panel link was made (%w). Is Mathion running? Start it with: sudo mathion start", err)`.
 
 - [ ] **Step 1: Write the failing tests:**
   - `TestPanelRunsActivate`: the exact compose argv.
