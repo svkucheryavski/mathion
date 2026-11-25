@@ -142,6 +142,48 @@ $(printf '%s' "$body" | grep -oE '"tag_name": *"cli-v[^"]*"' | sed -E 's/.*"(cli
   tar -xzf "${TMP}/${ASSET}" -C "$TMP" mathion
   install -m 0755 "${TMP}/mathion" "$DEST"
   echo "==> Installed: $(${DEST} version 2>/dev/null | head -1 || echo mathion)"
+  offer_setup
+}
+
+# offer_setup offers to run `mathion install` now, asking on the terminal (curl | sh has no stdin).
+offer_setup() {
+  cfg="${MATHION_CONFIG_DIR:-/etc/mathion}"
+  tty="${MATHION_TTY:-/dev/tty}"
+  next='Next: sudo mathion install   (it asks for the site address and your email)'
+  if [ -e "$cfg/.env" ] || [ -L "$cfg/.env" ]; then
+    echo "Mathion is already set up here. Update with: sudo mathion self-update && sudo mathion update"
+    return 0
+  fi
+  # An older mathion (a pinned version) has no questions to ask.
+  if ! "$DEST" install --help 2>/dev/null | grep -q -- '--no-tls'; then
+    echo 'Next: sudo mathion install --domain <your-domain> --admin-email <you@example.edu>'
+    return 0
+  fi
+  if ! (: <"$tty") 2>/dev/null; then
+    echo "$next"
+    return 0
+  fi
+  exec 3<"$tty"
+  while :; do
+    printf 'Set up Mathion on this server now? [Y/n] ' >&2
+    if ! read -r ans <&3; then
+      ans=n
+      echo >&2
+    fi
+    case "$ans" in
+      ""|y|Y|yes|Yes|YES)
+        exec 3<&-
+        # exec skips main's EXIT trap, so remove the downloads first.
+        [ -z "${TMP:-}" ] || rm -rf "$TMP"
+        trap - EXIT
+        exec "$DEST" install <"$tty"
+        ;;
+      n|N|no|No|NO) break ;;
+      *) echo "  Please answer y or n." >&2 ;;
+    esac
+  done
+  exec 3<&-
+  echo "$next"
 }
 
 # Sourcing guard: tests set MATHION_INSTALL_LIB=1 to load functions without running.
