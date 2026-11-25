@@ -259,6 +259,7 @@ func (a *App) runInstallFresh(ctx context.Context, o installOpts) error {
 		return err
 	}
 	email := config.NormalizeEmail(o.AdminEmail)
+	o.Domain = config.NormalizeSiteAddress(o.Domain)
 	baseURL, err := config.BuildBaseURL(o.Domain)
 	if err != nil {
 		return err

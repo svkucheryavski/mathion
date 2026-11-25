@@ -153,3 +153,14 @@ func TestInstallSiteAddressTrailingSlashLikeFlag(t *testing.T) {
 		t.Fatalf("the flag accepts a trailing slash, the question must too: %v", err)
 	}
 }
+
+func TestInstallSavesANormalisedAddress(t *testing.T) {
+	app, _ := freshApp(t, "", false)
+	if err := app.runInstall(context.Background(), installOpts{Domain: "Learn.Example.EDU.", AdminEmail: "you@example.edu"}); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := config.ReadEnvFile(app.CfgDir)
+	if m["MATHION_BASE_URL"] != "https://learn.example.edu" {
+		t.Fatalf("base URL %q", m["MATHION_BASE_URL"])
+	}
+}

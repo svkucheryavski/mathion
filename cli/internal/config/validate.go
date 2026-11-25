@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
@@ -15,6 +16,16 @@ func hasCtrlOrSpace(s string) bool {
 		}
 	}
 	return false
+}
+
+// NormalizeSiteAddress lowercases a site address and drops one trailing slash and the host's trailing dot.
+func NormalizeSiteAddress(s string) string {
+	s = strings.TrimSuffix(strings.ToLower(s), "/")
+	host, port, err := net.SplitHostPort(s)
+	if err != nil {
+		return strings.TrimSuffix(s, ".")
+	}
+	return net.JoinHostPort(strings.TrimSuffix(host, "."), port)
 }
 
 // BuildBaseURL takes an authority (host[:port], no scheme), constructs

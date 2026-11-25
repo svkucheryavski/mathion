@@ -122,3 +122,18 @@ func TestValidateTLSEmail(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeSiteAddress(t *testing.T) {
+	for in, want := range map[string]string{
+		"Learn.Example.EDU.":      "learn.example.edu",
+		"learn.example.edu/":      "learn.example.edu",
+		"Learn.Example.edu.:8443": "learn.example.edu:8443",
+		"learn.example.edu:8443/": "learn.example.edu:8443",
+		"[2001:DB8::1]:8443":      "[2001:db8::1]:8443",
+		"203.0.113.9":             "203.0.113.9",
+	} {
+		if got := NormalizeSiteAddress(in); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
+	}
+}

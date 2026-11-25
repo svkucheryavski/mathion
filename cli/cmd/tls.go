@@ -190,12 +190,8 @@ func (a *App) tlsEnable(ctx context.Context, o tlsEnableOpts) error {
 	if err := a.requireInstallComplete(); err != nil {
 		return err
 	}
-	// 4. Re-materialize the on-disk compose to the embedded (Slice-5) revision so
-	// `up … proxy` finds the service after a CLI upgrade.
-	if err := config.EnsureConfigDir(a.CfgDir); err != nil {
-		return err
-	}
-	if err := config.AtomicWrite(a.CfgDir+"/docker-compose.yml", composeBytes(), 0o644); err != nil {
+	// 4. Re-materialize the on-disk compose before the proxy check below.
+	if err := a.writeCompose(); err != nil {
 		return err
 	}
 	// 5. Port preflight — only when the proxy is not already running.
@@ -210,15 +206,8 @@ func (a *App) tlsEnable(ctx context.Context, o tlsEnableOpts) error {
 	if _, err := dnsLookup(o.Domain); err != nil {
 		fmt.Fprintf(a.Err, "warning: DNS lookup for %s failed (%v); Let's Encrypt issuance waits until DNS points at this host.\n", o.Domain, err)
 	}
-	// 7. SetTLS: atomic, validate-before-write, reread + assert; then reflect the new
-	// state so composeArgs adds --profile tls to the `up` below.
-	if err := config.SetTLS(a.CfgDir, o.Domain, email); err != nil {
-		return err
-	}
-	a.tlsEnabled = true
-	// 8. Full-project up (profile now active; pull ALLOWED so reproxy + busybox are
-	// fetched on first enable — this omits --pull never, unlike start/update/restore).
-	if err := a.compose(ctx, "up", "-d", "--wait"); err != nil {
+	// 7-8. Save the TLS settings and bring the proxy up.
+	if err := a.turnOnTLS(ctx, o.Domain, email); err != nil {
 		return err
 	}
 	// Readiness (non-fatal): the container has no healthcheck.
@@ -229,6 +218,27 @@ func (a *App) tlsEnable(ctx context.Context, o tlsEnableOpts) error {
 		"Ensure the firewall opens ports 80 and 443 and DNS points at this host.\n"+
 		"If HTTPS is not up yet, check `mathion tls status` / `mathion logs`.\n", o.Domain)
 	return nil
+}
+
+// writeCompose re-materializes the on-disk compose to the embedded revision.
+func (a *App) writeCompose() error {
+	if err := config.EnsureConfigDir(a.CfgDir); err != nil {
+		return err
+	}
+	return config.AtomicWrite(a.CfgDir+"/docker-compose.yml", composeBytes(), 0o644)
+}
+
+// turnOnTLS writes the compose file, saves the TLS settings and brings the whole project up with the proxy.
+func (a *App) turnOnTLS(ctx context.Context, domain, email string) error {
+	if err := a.writeCompose(); err != nil {
+		return err
+	}
+	if err := config.SetTLS(a.CfgDir, domain, email); err != nil {
+		return err
+	}
+	a.tlsEnabled = true
+	// Pull is allowed so the proxy images are fetched on first enable.
+	return a.compose(ctx, "up", "-d", "--wait")
 }
 
 // requirePrivateEnv verifies .env exists, is a regular file, and is owner-only

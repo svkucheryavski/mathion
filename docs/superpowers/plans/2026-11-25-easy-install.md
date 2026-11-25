@@ -143,12 +143,12 @@
 **Interfaces:**
 - Consumes: Task 1 `Prompter`; existing `portBindable`, `dnsLookup`, `config.ValidateDomain`, `config.ValidateTLSEmail`.
 - Produces:
-  - `type httpsResult struct { On bool; Pending bool; Reason string; NextCmd string }`: `On` means the proxy is up; `Pending` means the certificate is not verified within the wait; when `!On`, `Reason` is one plain sentence and `NextCmd` is the exact `sudo mathion tls enable --domain <d> --email <e>` line, or empty for `host:port`, which points to the guide.
+  - `type httpsResult struct { On bool; Pending bool; Reason string; NextCmd string }`: `On` means the proxy is up; `Pending` means the certificate is not verified within the wait; when `!On`, `Reason` is one plain lowercase phrase (Task 5 embeds it) and `NextCmd` is the exact `sudo mathion tls enable --domain <d> --email <e>` line, or empty for `host:port`, which points to the guide.
   - `func (a *App) httpsStep(ctx context.Context, domain, email string, o installOpts) (httpsResult, error)` decides, in order:
     1. `host:port` (`ValidateDomain` fails) → off, guide;
     2. `o.NoTLS` → off;
-    3. `Confirm("Turn on HTTPS with a free Let's Encrypt certificate?", true)` unless `o.Yes`; no → off;
-    4. port 80 or 443 not bindable → off, with the reason `port <n> is in use by another program, often Apache or nginx`;
+    3. `Confirm("Turn on HTTPS with a free Let's Encrypt certificate?", true)` unless `o.Yes`; no → off; no terminal (without `--yes`) → off, the reason naming `--yes`; an ended input → the `unanswered` error;
+    4. port 80 or 443 not bindable (checked only when the proxy is not already running, as in `tls enable`) → off, with the reason `port <n> is in use by another program, often Apache or nginx`;
     5. `ValidateTLSEmail(email)` fails → interactive: `Ask("Email for Let's Encrypt", ValidateTLSEmail)`; `--yes`: off;
     6. DNS check;
     7. `turnOnTLS`;
@@ -156,7 +156,7 @@
   - Package seams: `var localAddrs = func() ([]net.IP, error)` (from `net.InterfaceAddrs`), `var probeDomainHTTPS = func(ctx context.Context, domain string) bool` (GET `https://<domain>/health` with normal certificate checks, 5 s timeout), `var certWait = 2 * time.Minute`, `var certPoll = 5 * time.Second`.
   - **DNS check:**
     - match when any address from `dnsLookup(domain)` equals any non-loopback, non-link-local address from `localAddrs`;
-    - when every local address is private (RFC 1918, ULA), print `This server has only private addresses, so the domain cannot be compared; going on.` and continue;
+    - when every local address is private (RFC 1918, ULA, 100.64/10), print `This server has only private addresses, so the domain cannot be compared; going on.` and continue; when the server has no public address in any family the DNS answer uses, print `This server has no public <IPv4|IPv6> address of its own, so the domain cannot be compared; going on.` and continue; a lookup that gives only loopback (`/etc/hosts`) goes on with a line saying so; the site address is normalised first (`config.NormalizeSiteAddress`, also used by install before `BuildBaseURL`);
     - on a mismatch or failed lookup, print the addresses on both sides and `If your provider has a firewall, it must allow ports 80 and 443.`, then `Confirm("Turn on HTTPS anyway?", false)`. With `--yes`, continue with a warning.
   - The certificate wait prints a dot per poll, then `Getting the certificate … ok` or `The certificate is still on its way. Check with sudo mathion tls status in a few minutes.` (`Pending: true`).
 
@@ -170,7 +170,7 @@
   - `TestHTTPSDNSMismatchYes` (Review Focus 1): `--yes` → on, `Pending` true after a short `certWait`, no read from the prompter.
   - `TestHTTPSStricterEmailAsks`, `TestHTTPSStricterEmailYesOff`.
   - `TestHTTPSCertReady`.
-  - `TestTLSEnableUnchanged`: the existing `tls_test.go` passes as is.
+  - `TestHTTPSNoTerminalOff`, `TestHTTPSInputEnds`, `TestHTTPSOwnProxySkipsPortCheck`, `TestHTTPSLookupFailsAsks`, `TestHTTPSCertReadyAfterRetries`; the existing `tls_test.go` passes unchanged.
 - [ ] **Step 2: Run** `cd cli && go test ./cmd/ -run 'HTTPS|TLS'`. Expected: FAIL (new symbols missing).
 - [ ] **Step 3: Implement** `install_https.go` and the `turnOnTLS` extraction.
 - [ ] **Step 4: Run** `cd cli && go vet ./... && go test ./...`. Expected: PASS.
