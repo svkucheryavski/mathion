@@ -54,46 +54,42 @@ Project site: https://svkucheryavski.github.io/mathion/
 
 You need:
 
-- a 64-bit Linux server (Intel/AMD or ARM) with Docker, Docker Compose v2,
-  `curl` and `gpg` installed;
+- a 64-bit Ubuntu (22.04 or later) or Debian (12 or later) server, Intel/AMD
+  or ARM. Another Linux works too if Docker and Docker Compose v2 are already
+  installed;
+- `curl` and `gpg` (`sudo apt install curl gpg` if they are missing);
 - a domain name that points at the server, with ports 80 and 443 open;
 - an email account (SMTP) that Mathion can send sign-in PINs from.
 
-1. Install the `mathion` command:
+1. Log in to the server (over SSH), run the installer there and answer `Y`
+   when it asks `Set up Mathion on this server now?`:
 
    ```bash
    curl -fsSL https://raw.githubusercontent.com/svkucheryavski/mathion/main/deploy/install.sh | sudo sh
    ```
 
-2. Install Mathion and turn on HTTPS:
+2. Answer the questions: your site address (for example `learn.school.edu`)
+   and your email, which becomes the administrator's. It also asks two yes/no
+   questions, whether to install Docker (when it is missing) and whether to
+   turn on HTTPS with a free Let's Encrypt certificate; press Enter to take the
+   suggested answer.
+   Then it starts the site. If something stops HTTPS, the last lines say why
+   and which command turns it on later.
+
+3. The last lines show your sign-in email and a first PIN. Open your site,
+   for example `https://learn.school.edu`, and sign in with them. A PIN
+   works for a limited time; `sudo mathion pin you@school.edu` gives a new one.
+
+4. Get a link to the admin panel:
 
    ```bash
-   sudo mathion install --domain learn.example.edu --admin-email you@example.edu
-   sudo mathion tls enable --domain learn.example.edu --email you@example.edu
+   sudo mathion panel
    ```
 
-   Wait until `https://learn.example.edu` opens with a valid certificate; this
-   can take a few minutes.
-
-3. Get your first sign-in PIN for the `--admin-email` address, then open
-   `https://learn.example.edu` and sign in with that email and PIN:
-
-   ```bash
-   sudo mathion pin you@example.edu
-   ```
-
-4. Get a link to the superuser panel and open it in the same browser. Its Set
-   up page walks you through email, the site name, the first course and
-   sign-in rules. Set up email first: until then, nobody else can sign in. The
-   link stops working after 30 minutes without use; run the command again for
-   a new one.
-
-   ```bash
-   sudo docker compose -p mathion_prod -f /etc/mathion/docker-compose.yml \
-     --env-file /etc/mathion/.env exec -T app python -m mathion.superuser activate
-   ```
-
-To keep Mathion running after a reboot, run `sudo systemctl enable docker` once.
+   Open it in the browser where you just signed in. Its Set up page walks you
+   through email, the site name, the first course and sign-in rules. Set up
+   email first: until then, nobody else can sign in. The link stops working
+   after 30 minutes without use; run the command again for a new one.
 
 ## Self-hosting
 

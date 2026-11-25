@@ -290,4 +290,4 @@
 
 ## Owner steps after the plan
 
-- Tag `cli-v0.9.0` (maintainer release step), then run the server checklist on the rented server.
+- Push `main` and tag the next `cli-v*` release in the same sitting (the README's one-liner installs the latest release, so the new Install steps hold only once it exists), then run the server checklist on the rented server.

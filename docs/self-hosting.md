@@ -1,6 +1,7 @@
 # Self-hosting Mathion
 
-Requires: a Linux host with Docker + Compose v2; a domain (A/AAAA) pointing at it;
+Requires: a Linux host with Docker + Compose v2 (the `mathion` CLI below installs
+them on Ubuntu and Debian, and bundles the HTTPS proxy); a domain (A/AAAA) pointing at it;
 inbound TCP **80 and 443** open (for ACME/Let's Encrypt); a reverse proxy for TLS
 (reproxy primary, Caddy alternative — see below). These steps require a
 **published** image — valid only after the maintainer has pushed a release and
@@ -14,8 +15,13 @@ distinct steps: first install the CLI **binary**, then use it to stand up the
 **deployment**.
 
 **Install the CLI.** The one-liner downloads the latest `cli-v*` release, verifies
-its checksum against the release `checksums.txt`, and installs `mathion` to
-`/usr/local/bin`:
+its signature and checksum (below), installs `mathion` to `/usr/local/bin`, and
+then asks `Set up Mathion on this server now? [Y/n]`. Enter or `y` goes straight
+on to `mathion install`; `n` prints the command to run later. It does not ask
+when Mathion is already set up on the server (it prints the update command
+instead), when there is no terminal to ask on, or when the release you pinned
+(below) is older than this question (it prints the full `mathion install`
+command instead):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/svkucheryavski/mathion/main/deploy/install.sh | sudo sh
@@ -56,39 +62,80 @@ script and pin a known release tag (`sudo sh install.sh cli-v0.1.0`) for a
 reproducible install.
 
 **Stand up the deployment.** The `mathion` commands manage Docker containers, so
-run them as root — prefix each with `sudo`. Pass the deployment **domain** and
-**admin email** as flags (both are required):
+run them as root — prefix each with `sudo`. The installer runs this for you
+when you answer yes; you can also run it yourself:
 
 ```bash
-sudo mathion install --domain school.edu --admin-email you@school.edu
+sudo mathion install
 ```
 
-`--domain` is a bare host or `host:port` — **no scheme**. This writes the config,
-pulls the image, starts the stack on `127.0.0.1:8000`, migrates the database, and
-creates the first superuser. For scripted or CI installs, add `--yes`; it requires
-both `--domain` and `--admin-email` to be set. (Interactive prompting for omitted
-values is planned but not yet available — supply both flags for now.)
+It asks only for what it needs:
 
-Then finish setup:
+1. **Docker.** When Docker is missing on Ubuntu 22.04 or later or Debian 12 or
+   later (64-bit Intel/AMD or ARM), it asks
+   `Docker is not installed. Install it from Docker's official packages?` and
+   installs Docker Engine and Compose v2 from Docker's signed apt repository.
+   On any other system it says how to install Docker yourself and stops; run
+   `sudo mathion install` again afterwards. A Docker that already works is left
+   as it is. Once Docker works, it is set to start at boot.
+2. **Site address** (`learn.school.edu`): a bare host name, or `host:port`, with
+   no `https://`. Skipped when you pass `--domain`.
+3. **Your email**, which becomes the first superuser's. Skipped when you pass
+   `--admin-email`.
+4. **HTTPS.** `Turn on HTTPS with a free Let's Encrypt certificate?` (default
+   yes). Before turning it on, it checks that ports 80 and 443 are free and that
+   the domain points at this server; when the domain points elsewhere, it asks
+   `Turn on HTTPS anyway?` (default no). A `host:port` address never gets
+   HTTPS, because a certificate needs a plain domain name.
 
-1. Put a TLS reverse proxy in front of `127.0.0.1:8000` — see
-   [TLS / reverse proxy (external)](#tls--reverse-proxy-external) below. Confirm
-   `https://<domain>` loads with a valid cert before continuing (ACME + DNS can
-   take minutes).
-2. Issue the first-login PIN (it prints how long the PIN lasts; the superuser
-   panel's Settings page sets that):
+Then it writes the config, pulls the image, starts the stack on
+`127.0.0.1:8000`, migrates the database, creates the first superuser and, with
+HTTPS on, starts the [bundled HTTPS proxy](#bundled-https-mathion-tls--the-easy-path)
+and waits up to two minutes for the certificate.
 
-   ```bash
-   sudo mathion pin you@school.edu
-   ```
+It ends in one of two ways:
 
-3. Browse to **`https://<domain>`** and log in with your email + PIN. Log in over
-   HTTPS, **not** `http://127.0.0.1:8000` — the Secure session cookie won't persist
-   over plain HTTP, so a login there silently fails to stick.
+- **HTTPS is on.** It prints `✓ Mathion is running at https://<domain>`, your
+  sign-in email and a first PIN. Browse to `https://<domain>` and sign in. If the
+  certificate has not arrived within the wait, it says the site will work once
+  it does; check with `sudo mathion tls status`.
+- **HTTPS is off** (you answered no, a port was busy, the domain did not point
+  here yet, or `--no-tls`). It says why, prints the `sudo mathion tls enable …`
+  line that turns it on later (for a `host:port` address, only the guide), and
+  links the [guide for your own HTTPS proxy](#tls--reverse-proxy-external). Then run
+  `sudo mathion pin <email>` for a PIN. Sign in over HTTPS, **not**
+  `http://127.0.0.1:8000`: the Secure session cookie does not stick over plain
+  HTTP.
 
-**Survive a reboot.** The stack's containers use `restart: unless-stopped`, but
-that policy only takes effect if the Docker daemon itself starts at boot. Enable
-it once:
+Either way, `sudo mathion panel` then prints a link to the admin panel. Open it
+in the browser where you are signed in. Its Set up page walks you through
+email, the site name, the first course and sign-in rules. The link stops
+working after 30 minutes without use; running the command again replaces it.
+
+Running `sudo mathion install` again on a set-up server finishes an
+interrupted install, or asks about HTTPS when it is still off; it never makes
+a second deployment.
+
+**Scripted installs.** `--yes` never asks: it needs `--domain` and
+`--admin-email`, installs Docker when it is missing, and turns HTTPS on unless
+you add `--no-tls`, a port is busy or Let's Encrypt refuses the email (the
+ending says why). A domain that does not point here yet still gets HTTPS, with
+a warning; it starts once DNS points here. `--no-tls` skips HTTPS, for a server
+behind your own proxy. For example:
+
+```bash
+sudo mathion install --yes --domain school.edu --admin-email you@school.edu
+sudo mathion install --no-tls --domain school.edu --admin-email you@school.edu
+```
+
+Without `--yes` and without a terminal, nothing is asked: a missing `--domain`
+or `--admin-email` stops the install, so does a missing Docker, and HTTPS stays
+off. Each case prints what to do instead.
+
+**Survive a reboot.** The stack's containers use `restart: unless-stopped`,
+which takes effect only when the Docker daemon starts at boot. `mathion install`
+turns that on for you. On a system where it could not, it prints a note; run
+this once:
 
 ```bash
 sudo systemctl enable docker
@@ -99,7 +146,7 @@ or read root-owned config):
 
 | Command | What it does |
 | --- | --- |
-| `mathion install --domain <host[:port]> --admin-email <email> [--version <tag>] [--yes]` | Install and start a deployment (`--domain` has no scheme; `--yes` is non-interactive and requires `--domain` + `--admin-email`). |
+| `mathion install [--domain <host[:port]>] [--admin-email <email>] [--version <tag>] [--yes] [--no-tls]` | Install and start a deployment, asking for what is missing (`--domain` has no scheme; `--yes` never asks and requires `--domain` + `--admin-email`; `--no-tls` skips the bundled HTTPS). |
 | `mathion start` | Start the stack (`docker compose up -d --wait`). |
 | `mathion stop` | Stop the stack (containers stopped; data + config retained). |
 | `mathion status` | Show stack status + `/health`. |
@@ -114,6 +161,7 @@ or read root-owned config):
 | `mathion licenses` | Print the licenses of Mathion and the code built into it. |
 | `mathion superuser <email>` | Create or promote a superuser account (idempotent). |
 | `mathion pin <email>` | Issue a sign-in PIN (the panel's Settings page sets how long a PIN lasts). |
+| `mathion panel` | Print a link to the admin panel. Sign in first and open it in the same browser; it stops working after 30 minutes without use, and running the command again replaces it. |
 | `mathion branding reset [--all] [--yes]` | Remove the colour changes from the panel's Branding page (`--all` also resets the site name, logo and tab icon). |
 | `mathion uninstall` | Stop and remove containers (keeps data + config). |
 | `mathion uninstall --purge` | Also remove volumes and config — **destructive**; requires typing the project name to confirm. |
@@ -156,9 +204,11 @@ docker compose -f docker-compose.prod.yml exec app python -m mathion.superuser a
 
 ## Bundled HTTPS (`mathion tls`) — the easy path
 
-If your server has a public domain and ports 80 + 443 open, Mathion can run its
-own TLS-terminating reverse proxy and obtain a Let's Encrypt certificate for you —
-no cert files to manage:
+`mathion install` turns this on when you answer yes. Run the command below by
+hand only when the install left HTTPS off (its last lines print this exact
+command). If your server has a public domain and ports 80 + 443 open, Mathion can
+run its own TLS-terminating reverse proxy and obtain a Let's Encrypt certificate
+for you — no cert files to manage:
 
     sudo mathion tls enable --domain learn.example.edu --email you@example.org
 
