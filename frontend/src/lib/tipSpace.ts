@@ -29,13 +29,25 @@ export function rectScale(zoom: number): number {
   return s;
 }
 
-/** The window size and a converter for element rects, both in layout px. */
+/** The rect of a hidden fixed box filling the window, which leaves out classic scrollbars. */
+function viewRect(): DOMRect {
+  const probe = document.createElement('div');
+  probe.setAttribute('data-view-probe', '');
+  probe.style.cssText = 'position:fixed;inset:0;visibility:hidden;pointer-events:none';
+  document.body.appendChild(probe);
+  const r = probe.getBoundingClientRect();
+  probe.remove();
+  return r;
+}
+
+/** The window size (less classic scrollbars) and a converter for element rects, both in layout px. */
 export function tipSpace(): TipSpace {
   const zoom = appZoom();
   const s = rectScale(zoom);
+  const v = viewRect();
   return {
-    width: window.innerWidth / zoom,
-    height: window.innerHeight / zoom,
+    width: good(v.width) ? v.width / s : window.innerWidth / zoom,     // innerWidth when it cannot be measured (jsdom)
+    height: good(v.height) ? v.height / s : window.innerHeight / zoom,
     box: (r) => ({ left: r.left / s, right: r.right / s, top: r.top / s, bottom: r.bottom / s }),
   };
 }

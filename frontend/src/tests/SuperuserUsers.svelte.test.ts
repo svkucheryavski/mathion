@@ -591,6 +591,12 @@ it('(a) a chip tip in the zoomed space: clamped left, above the chip', async () 
   expect(t.classList.contains('below')).toBe(false);
 });
 
+it('(a) a chip tip near the right edge stays clear of a classic scrollbar', async () => {
+  stubZoom('1.15', 115, 1512, 860, [1495, 860]);
+  const t = await hoverChip(rect(1380, 1414.5, 460, 483));
+  expect(parseFloat(t.style.left)).toBeCloseTo(1495 / 1.15 - 328);
+});
+
 it('(a) a chip in the top half gets its tip below', async () => {
   stubZoom('1.15', 115);
   const t = await hoverChip(rect(600, 630, 400, 423));

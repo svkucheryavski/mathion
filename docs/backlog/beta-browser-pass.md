@@ -15,6 +15,7 @@ Only the checks a person must make: Safari, Windows High Contrast, a real HTTP/1
 - **Esc with a native `datetime-local` or `date` picker open** (mini-project deadlines, run dates): note whether Esc closes only the picker or also the edit or dialog.
 - **A failed Save in the mini-project editor at about 1000px** brings the error banner into view at the top of the body, not under the padding.
 - **New run and the Publish conflicts at 1000px:** they fit without a sideways scroll. They were checked only in Chrome.
+- **Hover tips beside a classic scrollbar.** Set System Settings → Appearance → Show scroll bars: Always, then use a window of 1400px or wider (115% zoom). Hover a role chip near the right edge on Users, and a sequence header near the right edge on Progress. Each tip should end at least 8px left of the scrollbar, not under it. Chrome was checked with forced scrollbars on 2026-11-25.
 - **Copying a paragraph with an authored link** leaves out the hidden "(opens in a new tab)". Chromium does. Also note whether find-in-page counts it (record only).
 
 ## Windows High Contrast

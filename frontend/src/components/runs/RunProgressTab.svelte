@@ -624,7 +624,7 @@
     position: fixed;
     z-index: 10;
     transform: translateY(-100%);
-    max-width: min(320px, calc(100vw / var(--app-zoom) - 16px));
+    max-width: min(320px, calc(100% - 16px));  /* % of the window less classic scrollbars */
     overflow-wrap: anywhere;
     padding: 4px 8px;
     border-radius: var(--radius);
