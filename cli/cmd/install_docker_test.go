@@ -396,7 +396,14 @@ func TestEnsureDockerComposePathWording(t *testing.T) {
 	w := newDockerWorld(t, "y\n", true)
 	w.installed = true
 	w.sys.outputs[dpkgStatus] = "install ok installed"
-	if err := w.app.ensureDocker(context.Background(), false); err != nil || !strings.Contains(w.out.String(), "Docker Compose is installed.") {
+	if err := w.app.ensureDocker(context.Background(), false); err != nil || !strings.Contains(w.out.String(), "✓ Docker Compose installed") {
+		t.Fatalf("err=%v out=%q", err, w.out.String())
+	}
+}
+
+func TestEnsureDockerInstalledLineMatchesSketch(t *testing.T) {
+	w := newDockerWorld(t, "y\n", true)
+	if err := w.app.ensureDocker(context.Background(), false); err != nil || !strings.Contains(w.out.String(), "✓ Docker installed, starts at boot") {
 		t.Fatalf("err=%v out=%q", err, w.out.String())
 	}
 }

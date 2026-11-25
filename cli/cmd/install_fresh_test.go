@@ -119,9 +119,7 @@ func TestFreshInstallNamesThePanelsSetUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	want := "  4. Open the superuser panel; its Set up page walks you through email, the site\n" +
-		"     name, the first course and sign-in rules:\n" +
-		"         docker compose ... exec -T app python -m mathion.superuser activate\n"
+	want := "open the admin panel to set up email and your first course:\n      sudo mathion panel\n"
 	if !strings.Contains(got, want) {
 		t.Fatalf("next steps lack the Set up line:\n%s", got)
 	}

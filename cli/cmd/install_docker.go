@@ -112,9 +112,9 @@ func (a *App) ensureDocker(ctx context.Context, yes bool) error {
 		return fmt.Errorf("%s was installed but Docker does not answer yet: %w", name, err)
 	}
 	if name == "Docker" {
-		fmt.Fprintln(a.Out, "Docker is installed and will start at boot.")
+		fmt.Fprintln(a.Out, "✓ Docker installed, starts at boot")
 	} else {
-		fmt.Fprintln(a.Out, "Docker Compose is installed.")
+		fmt.Fprintln(a.Out, "✓ Docker Compose installed")
 	}
 	return nil
 }

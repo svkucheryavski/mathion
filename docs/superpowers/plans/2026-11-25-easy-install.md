@@ -180,7 +180,7 @@
 
 **Files:**
 - Create: `cli/cmd/install_end.go`
-- Modify: `cli/cmd/install.go` (call `httpsStep` and the ending from `runInstallFresh` and `resume`; delete the `nextSteps` constant and its `Fprintf`)
+- Modify: `cli/cmd/install.go` (fresh path: `httpsDecide` right after the inputs are checked and before anything is written, `Starting Mathion …` / `… ok` around pull–superuser, then `httpsApply` and the ending; re-run: `rerunHTTPS` after `resume`; delete the `nextSteps` constant and its `Fprintf`); `cli/cmd/install_https.go` (split `httpsStep` into `httpsDecide` + `httpsApply`, `PortBusy` on the result)
 - Test: `cli/cmd/install_end_test.go`; adjust the existing tests that assert `nextSteps` text in `install_fresh_test.go` and `install_resume_test.go`, keeping every compose-order assertion
 
 **Interfaces:**
@@ -188,8 +188,8 @@
 - Produces:
   - `func (a *App) printEnding(ctx context.Context, domain, email string, h httpsResult)`:
     - **On (Pending or not):** run `a.Runner.Output` on the compose `exec -T app python -m mathion.superuser pin -- <email>`, parse `PIN: (\d+)` and `It expires in (\d+) minutes`, and print the sketch block: `✓ Mathion is running at https://<domain>`, `Sign in with:`, `First PIN:     <pin>   (works for <n> minutes)`, then the panel lines with `sudo mathion panel`. If the pin step errors, print `Run sudo mathion pin <email> to get a sign-in PIN.` instead of the PIN lines. If the output does not parse, print it raw under `First PIN:` (Review Focus 5).
-    - **Off:** no pin call; print `Mathion is installed but cannot be reached until HTTPS is set up.`, then `NextCmd` (or the guide link `docs/self-hosting.md#tls--reverse-proxy-external` on GitHub for `host:port` / own proxy), then `Then run: sudo mathion pin <email>` and `sudo mathion panel`.
-  - Re-run: `resume` gains the HTTPS step when `!a.tlsEnabled` and the saved domain passes `ValidateDomain`. With HTTPS already on, it prints the On ending without calling pin and adds `Run sudo mathion pin <email> for a new sign-in PIN.` The saved domain comes from `MATHION_BASE_URL` in `.env` (strip `https://`).
+    - **Off:** no pin call; print `Mathion is installed but cannot be reached until HTTPS is set up.`, `HTTPS is not on: <reason>.`, then `NextCmd` followed by the own-proxy guide link `docs/self-hosting.md#tls--reverse-proxy-external` on GitHub (the guide link alone for `host:port`), then `Then run:  sudo mathion pin <email>` and `sudo mathion panel`. A `Pending` On ending adds a firewall hint.
+  - Re-run: after `resume` succeeds, `runInstall` calls `rerunHTTPS`: the HTTPS step when `!a.tlsEnabled` (a `host:port` address ends at the guide). With HTTPS already on, it runs the certificate wait, prints the On ending without calling pin and adds `Run sudo mathion pin <email> for a new sign-in PIN.` The saved domain comes from `MATHION_BASE_URL` in `.env` (strip `https://`).
   - The removed `nextSteps` text takes the README "Self-hosting" pointer with it.
 
 - [ ] **Step 1: Write the failing tests:**

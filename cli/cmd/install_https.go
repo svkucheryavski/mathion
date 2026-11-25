@@ -15,11 +15,15 @@ import (
 
 // httpsResult says how the HTTPS step ended.
 type httpsResult struct {
-	On      bool   // the proxy is up
-	Pending bool   // the certificate was not verified within the wait
-	Reason  string // when off: why, as a lowercase phrase
-	NextCmd string // when off: the tls enable line to run later; empty for a host:port address
+	On       bool   // the proxy is up
+	Pending  bool   // the certificate was not verified within the wait
+	Reason   string // when off: why, as a lowercase phrase
+	NextCmd  string // when off: the tls enable line to run later; empty for a host:port address
+	PortBusy bool   // when off: port 80 or 443 is taken, so NextCmd waits for it
 }
+
+// httpsPlan is the decision to turn HTTPS on for domain with email.
+type httpsPlan struct{ domain, email string }
 
 // Package seams for the HTTPS step's checks.
 var (
@@ -65,18 +69,35 @@ func tlsEnableLine(domain, email string) string {
 	return fmt.Sprintf("sudo mathion tls enable --domain %s --email %s", domain, email)
 }
 
-// httpsStep turns on the bundled HTTPS proxy unless something stands in the way.
+// httpsStep decides and, on a go, turns on the bundled HTTPS proxy.
 func (a *App) httpsStep(ctx context.Context, domain, email string, o installOpts) (httpsResult, error) {
+	p, h, err := a.httpsDecide(ctx, domain, email, o)
+	if err != nil || p == nil {
+		return h, err
+	}
+	return a.httpsApply(ctx, p)
+}
+
+// httpsApply turns on the proxy and waits for the certificate.
+func (a *App) httpsApply(ctx context.Context, p *httpsPlan) (httpsResult, error) {
+	if err := a.turnOnTLS(ctx, p.domain, p.email); err != nil {
+		return httpsResult{}, err
+	}
+	return httpsResult{On: true, Pending: !a.waitForCertificate(ctx, p.domain)}, nil
+}
+
+// httpsDecide asks the HTTPS questions and runs the checks; a nil plan means HTTPS stays off as h says.
+func (a *App) httpsDecide(ctx context.Context, domain, email string, o installOpts) (*httpsPlan, httpsResult, error) {
 	domain = config.NormalizeSiteAddress(domain)
 	if config.ValidateDomain(domain) != nil {
-		return httpsResult{Reason: "this site address is not a plain domain name, which a free certificate needs"}, nil
+		return nil, httpsResult{Reason: "this site address is not a plain domain name, which a free certificate needs"}, nil
 	}
 	later := email
 	if config.ValidateTLSEmail(email) != nil {
 		later = "<your-email>"
 	}
-	off := func(reason string) (httpsResult, error) {
-		return httpsResult{Reason: reason, NextCmd: tlsEnableLine(domain, later)}, nil
+	off := func(reason string) (*httpsPlan, httpsResult, error) {
+		return nil, httpsResult{Reason: reason, NextCmd: tlsEnableLine(domain, later)}, nil
 	}
 	const noTerminal = "there was no terminal to ask on (add --yes to turn it on without asking)"
 	if o.NoTLS {
@@ -87,29 +108,31 @@ func (a *App) httpsStep(ctx context.Context, domain, email string, o installOpts
 	case errors.Is(err, prompt.ErrNotInteractive):
 		return off(noTerminal)
 	case err != nil:
-		return httpsResult{}, unanswered(err, "add --no-tls to skip HTTPS")
+		return nil, httpsResult{}, unanswered(err, "add --no-tls to skip HTTPS")
 	case !ok:
 		return off("you answered no")
 	}
 	if !a.proxyRunning(ctx) {
 		for _, p := range []string{"80", "443"} {
 			if portBindable(":"+p) != nil {
-				return off("port " + p + " is in use by another program, often Apache or nginx")
+				_, h, _ := off("port " + p + " is in use by another program, often Apache or nginx")
+				h.PortBusy = true
+				return nil, h, nil
 			}
 		}
 	}
 	if config.ValidateTLSEmail(email) != nil {
 		bad := "Let's Encrypt cannot use the email " + email
 		if o.Yes {
-			return httpsResult{Reason: bad, NextCmd: tlsEnableLine(domain, later)}, nil
+			return nil, httpsResult{Reason: bad, NextCmd: tlsEnableLine(domain, later)}, nil
 		}
 		fmt.Fprintf(a.Err, "  %s. Type another one for its notices.\n", bad)
 		email, err = a.prompter().Ask("Email for Let's Encrypt", checkTLSEmail)
 		switch {
 		case errors.Is(err, prompt.ErrNotInteractive):
-			return httpsResult{Reason: bad, NextCmd: tlsEnableLine(domain, later)}, nil
+			return nil, httpsResult{Reason: bad, NextCmd: tlsEnableLine(domain, later)}, nil
 		case err != nil:
-			return httpsResult{}, unanswered(err, "add --no-tls to skip HTTPS")
+			return nil, httpsResult{}, unanswered(err, "add --no-tls to skip HTTPS")
 		}
 	}
 	email = config.NormalizeEmail(email)
@@ -120,7 +143,7 @@ func (a *App) httpsStep(ctx context.Context, domain, email string, o installOpts
 		case errors.Is(err, prompt.ErrNotInteractive):
 			return off(noTerminal)
 		case err != nil:
-			return httpsResult{}, unanswered(err, "add --no-tls to skip HTTPS")
+			return nil, httpsResult{}, unanswered(err, "add --no-tls to skip HTTPS")
 		case !ok:
 			return off(domain + " does not point at this server yet")
 		}
@@ -128,10 +151,7 @@ func (a *App) httpsStep(ctx context.Context, domain, email string, o installOpts
 			fmt.Fprintf(a.Err, "warning: turning HTTPS on anyway; it starts by itself once %s points at this server.\n", domain)
 		}
 	}
-	if err := a.turnOnTLS(ctx, domain, email); err != nil {
-		return httpsResult{}, err
-	}
-	return httpsResult{On: true, Pending: !a.waitForCertificate(ctx, domain)}, nil
+	return &httpsPlan{domain: domain, email: email}, httpsResult{}, nil
 }
 
 // checkTLSEmail words the Let's Encrypt email check for the admin.

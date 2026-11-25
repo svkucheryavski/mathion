@@ -49,7 +49,7 @@ func TestInstallAsksForMissingValues(t *testing.T) {
 	if err := flag.runInstall(context.Background(), installOpts{Domain: "Learn.Example.EDU.", AdminEmail: "you@example.edu"}); err != nil {
 		t.Fatal(err)
 	}
-	asked, out := freshApp(t, "http://x\nLearn.Example.EDU.\nnot-an-email\nyou@example.edu\n", true)
+	asked, out := freshApp(t, "http://x\nLearn.Example.EDU.\nnot-an-email\nyou@example.edu\nn\n", true)
 	if err := asked.runInstall(context.Background(), installOpts{}); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestInstallAsksForMissingValues(t *testing.T) {
 func TestInstallFlagsSkipQuestions(t *testing.T) {
 	app, out := freshApp(t, "", true)
 	app.Prompt = prompt.New(failReader{t}, out, true)
-	if err := app.runInstall(context.Background(), installOpts{Domain: "learn.example.edu", AdminEmail: "you@example.edu"}); err != nil {
+	if err := app.runInstall(context.Background(), installOpts{Domain: "learn.example.edu", AdminEmail: "you@example.edu", NoTLS: true}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(out.String(), "Site address") {
@@ -84,7 +84,7 @@ func TestInstallFlagsSkipQuestions(t *testing.T) {
 }
 
 func TestInstallAsksOnlyForTheMissingValue(t *testing.T) {
-	app, out := freshApp(t, "you@example.edu\n", true)
+	app, out := freshApp(t, "you@example.edu\nn\n", true)
 	if err := app.runInstall(context.Background(), installOpts{Domain: "learn.example.edu"}); err != nil {
 		t.Fatal(err)
 	}

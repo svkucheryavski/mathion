@@ -151,7 +151,11 @@ func TestHTTPSPortBusy(t *testing.T) {
 			w.noReads(t)
 		}
 		w.busy = ":80"
-		wantOff(t, w, w.step(t, httpsDomain, httpsEmail, installOpts{Yes: yes}), "port 80 is in use by another program, often Apache or nginx", httpsNext)
+		h := w.step(t, httpsDomain, httpsEmail, installOpts{Yes: yes})
+		wantOff(t, w, h, "port 80 is in use by another program, often Apache or nginx", httpsNext)
+		if !h.PortBusy {
+			t.Fatal("PortBusy not set")
+		}
 	}
 }
 

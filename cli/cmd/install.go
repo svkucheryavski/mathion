@@ -95,7 +95,10 @@ func (a *App) runInstall(ctx context.Context, o installOpts) error {
 			return fmt.Errorf(".env is incomplete or inconsistent (%w); repair it or run `mathion uninstall --purge`", err)
 		}
 		warnDivergentFlags(a, o, st) // domain/email/version are ignored on resume
-		return a.resume(ctx, st)
+		if err := a.resume(ctx, st); err != nil {
+			return err
+		}
+		return a.rerunHTTPS(ctx, st.AdminEmail, o)
 	}
 
 	// FRESH branch: volume guard BEFORE any secret is generated.
@@ -264,6 +267,11 @@ func (a *App) runInstallFresh(ctx context.Context, o installOpts) error {
 	if err != nil {
 		return err
 	}
+	// The HTTPS questions and checks come before anything is written or started.
+	plan, h, err := a.httpsDecide(ctx, o.Domain, email, o)
+	if err != nil {
+		return err
+	}
 
 	// 4. Write config: compose + state BEFORE .env; .env LAST.
 	if err := config.EnsureConfigDir(a.CfgDir); err != nil {
@@ -289,6 +297,7 @@ func (a *App) runInstallFresh(ctx context.Context, o installOpts) error {
 	}
 
 	// 5-7. Pull, up, migrate, create superuser.
+	fmt.Fprintln(a.Out, "\n  Starting Mathion …")
 	if err := a.compose(ctx, "pull"); err != nil {
 		return err
 	}
@@ -305,23 +314,16 @@ func (a *App) runInstallFresh(ctx context.Context, o installOpts) error {
 		return err
 	}
 
-	// 8. Next steps (no secrets printed).
-	fmt.Fprintf(a.Out, nextSteps, o.Domain, o.Domain, email)
+	fmt.Fprintln(a.Out, "  Starting Mathion … ok")
+
+	// 8. HTTPS, then the first PIN or the next step.
+	if plan != nil {
+		if h, err = a.httpsApply(ctx, plan); err != nil {
+			return err
+		}
+	}
+	a.printEnding(ctx, o.Domain, email, h)
 	return nil
 }
 
 func composeBytes() []byte { return compose.ComposeYAML }
-
-const nextSteps = `
-Deployment up. Next:
-  1. Front it with HTTPS. Easiest — bundled auto-TLS (opens 80+443, obtains a
-     Let's Encrypt cert):
-         sudo mathion tls enable --domain %s --email you@example.org
-     Or run your own TLS proxy (see README "Self-hosting").
-  2. Log in at https://%s — NOT http://127.0.0.1:8000 (the Secure session cookie
-     won't persist over plain HTTP).
-  3. Issue your first-login PIN:  sudo mathion pin %s
-  4. Open the superuser panel; its Set up page walks you through email, the site
-     name, the first course and sign-in rules:
-         docker compose ... exec -T app python -m mathion.superuser activate
-`
