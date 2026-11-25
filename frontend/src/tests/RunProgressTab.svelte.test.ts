@@ -1177,6 +1177,12 @@ describe('RunProgressTab', () => {
         expect(t.classList.contains('below')).toBe(false);
       });
 
+      it('(a) right half: measured from the window less a classic scrollbar', async () => {
+        stubZoom('1.15', 115, 1512, 860, [1495, 860]);
+        const t = await hover(A_BOX, A_PIN, rect(805, 1495, 345, 379.5));
+        expect(parseFloat(t.style.right)).toBeCloseTo(1495 / 1.15 - 1000);
+      });
+
       it('(a) the label anchor is converted from zoomed px too', async () => {
         stubZoom('1.15', 115);
         const t = await hover(A_BOX, A_PIN, rect(287.5, 437, 345, 379.5), rect(299, 322, 356.5, 374));

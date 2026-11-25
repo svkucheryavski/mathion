@@ -5027,7 +5027,7 @@ if [[ -n $REPLY ]]; then
   # D79 (user, compact table): short headers, a 4rem floor per sequence column,
   # and one fixed tooltip above the header, outside the scroll box.
   chk "\.progress-grid\.${H} \.seq-header:where\(\.${H}\)" 'min-width:4rem'
-  d '\.pg-tip' '' 'position:fixed' 'z-index:10' 'transform:translateY\(-100%\)' 'max-width:min\(320px,calc\(100vw ?/ ?var\(--app-zoom\) - 16px\)\)' 'overflow-wrap:anywhere' 'background:var\(--text\)' 'color:var\(--surface\)' 'pointer-events:none'
+  d '\.pg-tip' '' 'position:fixed' 'z-index:10' 'transform:translateY\(-100%\)' 'max-width:min\(320px,calc\(100% - 16px\)\)' 'overflow-wrap:anywhere' 'background:var\(--text\)' 'color:var\(--surface\)' 'pointer-events:none'
   # Review round 1: the tip flips below a header near the window top, keeps an
   # edge in High Contrast, and the full names stay hidden only while .sr-only does.
   d '\.pg-tip\.below' '' 'transform:none'
@@ -6254,7 +6254,7 @@ uniq1 u-table
 if [[ -n $REPLY ]]; then
   N=SuperuserUsers; H=$REPLY
   # Beta round T6: the chips' list tooltip, fixed so the scroll box can't clip it, one line per item.
-  d '\.u-tip' '' 'position:fixed' 'white-space:pre-line' 'pointer-events:none' 'max-width:min\(320px,calc\(100vw ?/ ?var\(--app-zoom\) - 16px\)\)'
+  d '\.u-tip' '' 'position:fixed' 'white-space:pre-line' 'pointer-events:none' 'max-width:min\(320px,calc\(100% - 16px\)\)'
   d '\.u-tools' '' 'display:flex' 'justify-content:space-between' 'flex-wrap:wrap' 'margin:0 0 12px'
   d '\.u-search' '' 'height:var\(--control-h-sm\)' 'border:1px solid var\(--border-strong\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)'
   d '\.table-scroll' '' 'overflow-x:auto' 'border:1px solid var\(--border\)' 'border-radius:var\(--radius\)' 'background:var\(--surface\)' 'position:relative'

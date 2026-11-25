@@ -77,6 +77,26 @@ describe('tipSpace', () => {
     expect(s.box(rect(115, 230, 57.5, 115))).toEqual({ left: 115, right: 230, top: 57.5, bottom: 115 });
   });
 
+  it('model (a): a classic scrollbar is left out of the window', () => {
+    stubZoom('1.19', 119, 1512, 860, [1495, 843]);
+    const s = tipSpace();
+    expect(s.width).toBeCloseTo(1495 / 1.19);
+    expect(s.height).toBeCloseTo(843 / 1.19);
+    expect(document.querySelectorAll('[data-view-probe]').length).toBe(0);
+  });
+
+  it('model (b): the window probe is read in layout px', () => {
+    stubZoom('1.21', 100, 1512, 860, [1235.5, 710.7]);
+    const s = tipSpace();
+    expect(s.width).toBeCloseTo(1235.5);
+    expect(s.height).toBeCloseTo(710.7);
+  });
+
+  it('at zoom 1 a classic scrollbar is left out too', () => {
+    stubZoom('1', 115, 1512, 860, [1497, 860]);
+    expect(tipSpace().width).toBe(1497);
+  });
+
   it('at zoom 1 it is the raw window and rects', () => {
     const z = stubZoom('1', 115);
     const s = tipSpace();
