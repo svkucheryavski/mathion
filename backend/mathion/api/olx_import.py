@@ -10,6 +10,8 @@ from sqlalchemy import exists, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from mathion.api.draft_lock import lock_draft
+from mathion.assets import commit_delete
 from mathion.api.authz import require_course_admin
 from mathion.api.lookups import get_or_404
 from mathion.config import settings
@@ -157,18 +159,13 @@ def build(admin_body: tuple[int, bytes] = Depends(version_body), db: Session = D
                                                       "blockers": blockers})
     try:
         removed = apply(plan, version_id, db, body.date)
-        db.commit()
+        commit_delete(db, removed)                       # files go only after the commit
     except ApplyRefused as exc:
         db.rollback()
         raise HTTPException(status_code=exc.status, detail=exc.detail) from None
     except BaseException:
         db.rollback()
         raise
-    for path in removed:                                 # files only after the commit
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
     browser = [_clean_line(ReportLine(ln.level, ln.where, ln.text)) for ln in body.report]
     kept = set(_merged(plan.report.lines(), browser, plan.not_uploaded)) | set(browser)
     report = [ln for ln in plan.report.lines(browser) if ln in kept]
@@ -205,6 +202,7 @@ def status(version_id: int, user: User = Depends(get_current_user), db: Session 
 
 @router.post("/api/versions/{version_id}/olx-import/discard", status_code=204)
 def discard(version_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Response:
+    lock_draft(db, version_id)                         # as authoring writes, before any row
     _course_admin_version(db, user, version_id)
     version = db.execute(
         select(CourseVersion).where(CourseVersion.id == version_id)

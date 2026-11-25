@@ -7,6 +7,7 @@ import { navigate, currentRoute, matchRoute, __resetGuardsForTests } from '../li
 import { routes } from '../routes';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
 import type { AdminTree, AdminTreeBlock, AdminTreeSequence, AdminTreeVersion } from '../lib/types';
+import { settle } from './support/settle';
 
 // Real router + store; fetch stubbed. Route-derived props are getters over
 // currentRoute, as App.svelte supplies them, so `expanded` follows navigate().
@@ -19,7 +20,6 @@ function jres(body: unknown, status = 200) {
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response);
 }
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 
 function mkVersion(over: Partial<AdminTreeVersion> = {}): AdminTreeVersion {
   return {

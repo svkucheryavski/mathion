@@ -1,0 +1,109 @@
+{
+  "summary": {
+    "blocks": 2,
+    "sequences": 3,
+    "items": 12,
+    "videos": 3,
+    "pages": 3,
+    "apps": 1,
+    "quizzes": 5,
+    "files": 3,
+    "bytes": 1062
+  },
+  "report": [
+    {
+      "level": "skipped",
+      "where": "Week 2: Practice › Practice",
+      "text": "Staff-only unit “Staff notes” was not imported"
+    },
+    {
+      "level": "skipped",
+      "where": "Week 2: Practice › Practice › Discussion and notes",
+      "text": "The discussion component “Discussion” is not supported, so it was not imported; recreate it by hand if students need it"
+    },
+    {
+      "level": "changed",
+      "where": "",
+      "text": "Video end times dropped: 1 video"
+    },
+    {
+      "level": "changed",
+      "where": "",
+      "text": "Video transcripts dropped: 1 video"
+    },
+    {
+      "level": "changed",
+      "where": "",
+      "text": "Video download settings dropped: 1 video"
+    },
+    {
+      "level": "changed",
+      "where": "",
+      "text": "Superscripts and subscripts were turned into formula scripts: 2 pages"
+    },
+    {
+      "level": "changed",
+      "where": "",
+      "text": "Shuffled choices now keep their written order: 1 quiz"
+    },
+    {
+      "level": "changed",
+      "where": "",
+      "text": "The \"show answer\" setting was dropped: 1 quiz"
+    },
+    {
+      "level": "changed",
+      "where": "",
+      "text": "Text answers are now checked ignoring case: 1 question"
+    },
+    {
+      "level": "changed",
+      "where": "Week 1: Basics › Choice questions › Single choice",
+      "text": "Hints and feedback were dropped"
+    },
+    {
+      "level": "changed",
+      "where": "Week 1: Basics › Choice questions › Single choice",
+      "text": "Hints shown on request were dropped"
+    },
+    {
+      "level": "changed",
+      "where": "Week 2: Practice › Practice › Text answers",
+      "text": "Question 1: other accepted answers were dropped: “København”"
+    },
+    {
+      "level": "note",
+      "where": "",
+      "text": "Checkbox questions use Mathion's partial credit: 2 questions"
+    }
+  ],
+  "blockers": [],
+  "uploads": [
+    {
+      "source": "sine-demo.js",
+      "target": "sine-demo.js",
+      "kind": "app",
+      "size": 409
+    },
+    {
+      "source": "img/fig 1.png",
+      "target": "fig-1.png",
+      "kind": "static",
+      "size": 67
+    },
+    {
+      "source": "notes.pdf",
+      "target": "notes.pdf",
+      "kind": "static",
+      "size": 586
+    }
+  ],
+  "linked": [
+    "fig-1.png",
+    "notes.pdf",
+    "sine-demo.js"
+  ],
+  "max_quiz_attempts": 2,
+  "label": "Open edX (unfinished): Synthetic Demo Course",
+  "blocking": false
+}

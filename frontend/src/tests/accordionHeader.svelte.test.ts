@@ -4,6 +4,7 @@ import AccordionHeader, { type HeaderMode } from '../components/editor/Accordion
 import { createDirtyRegistry, DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../lib/dirtyRegistry.svelte';
 import { ApiError } from '../lib/api';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
+import { settle } from './support/settle';
 
 // Slice-5c T2: the header shows the title only (D5); its controls depend on
 // where it sits relative to the focus (D4) and on the version's permissions;
@@ -13,7 +14,6 @@ import { toasts, clearToasts } from '../stores/toasts.svelte';
 let target: HTMLDivElement;
 let cmp: ReturnType<typeof mount> | null = null;
 let registry: DirtyRegistry;
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 afterEach(() => { if (cmp) unmount(cmp); cmp = null; target?.remove(); clearToasts(); vi.restoreAllMocks(); });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

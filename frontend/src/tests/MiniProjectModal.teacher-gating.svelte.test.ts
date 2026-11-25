@@ -1,14 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import {
-  mount,
-  unmount,
-  flushSync,
-  type Component,
-  type MountOptions,
-  type ComponentProps,
-} from 'svelte';
+import { mount, unmount, type Component, type MountOptions, type ComponentProps } from 'svelte';
 import MiniProjectModal from '../components/runs/MiniProjectModal.svelte';
 import type { Course, MiniProjectResponse, BlockResponse } from '../lib/types';
+import { settle } from './support/settle';
 
 // T12 — Slice A modal teacher-gating (spec §6.2 MiniProjectModal bullets):
 // the publish-precondition banner inside the modal renders bullets pointing
@@ -59,11 +53,6 @@ function jres(body: unknown, status = 200) {
     json: () => Promise.resolve(body),
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response);
-}
-
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
 }
 
 const blocks: BlockResponse[] = [

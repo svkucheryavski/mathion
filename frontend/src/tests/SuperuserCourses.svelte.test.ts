@@ -5,8 +5,8 @@ import type { PanelAdmin, PanelCourse, AdminAssignResult } from '../lib/superuse
 import { SetupStore } from '../lib/setupStore.svelte';
 import type { PanelSetup } from '../lib/setup';
 import { session } from '../stores/session.svelte';
+import { settle } from './support/settle';
 
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 function jsonResponse(status: number, body: unknown) {
   return status === 204 ? new Response(null, { status })
     : new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });

@@ -3,6 +3,7 @@ import { mount, unmount, flushSync } from 'svelte';
 import RunRosterTab from '../components/runs/RunRosterTab.svelte';
 import type { GroupResponse, RunStudentResponse } from '../lib/types';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
+import { settle } from './support/settle';
 
 // VR backlog round, Task 9: the Roster items from polish3 §4/§WBR and slice6c §3/§4.
 
@@ -23,11 +24,6 @@ function jres(body: unknown, status = 200): Response {
     json: () => Promise.resolve(body),
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response;
-}
-
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
 }
 
 const stu = (id: number, over: Partial<RunStudentResponse> = {}): RunStudentResponse => ({

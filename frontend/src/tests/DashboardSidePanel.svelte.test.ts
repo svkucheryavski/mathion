@@ -4,6 +4,7 @@ import { REQUEST_ERROR_MESSAGE } from '../lib/api';
 import { mount, unmount, flushSync, tick } from 'svelte';
 
 import DashboardSidePanel from '../components/runs/DashboardSidePanel.svelte';
+import { settle as settleOnce } from './support/settle';
 import type { PanelTarget } from '../components/runs/DashboardSidePanel.svelte';
 import type { DashboardMpRow, DashboardMpGroupEntry } from '../lib/dashboards';
 import { formatLocalWithTz } from '../lib/datetime';
@@ -1068,9 +1069,7 @@ describe('DashboardSidePanel', () => {
       target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
       isAdmin: true,
     });
-    flushSync();
-    await tick(); await tick();
-    flushSync();
+    await settleOnce();
     pickResult('accepted');
     const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
@@ -1141,9 +1140,7 @@ describe('DashboardSidePanel', () => {
       target: submissionTarget({ status: 'awaiting_eval', submissionId: 100 }),
       isAdmin: true,
     });
-    flushSync();
-    await tick(); await tick();
-    flushSync();
+    await settleOnce();
     pickResult('accepted');
     const form = host.querySelector('form[aria-label="Write evaluation"]') as HTMLFormElement;
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));

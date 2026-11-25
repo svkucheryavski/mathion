@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import CourseList from '../pages/CourseList.svelte';
 import type { CourseListItem } from '../lib/types';
+import { settle } from './support/settle';
 
 const fetchSpy = vi.fn();
 beforeEach(() => {
@@ -21,11 +22,6 @@ afterEach(() => {
   if (cmp) { unmount(cmp); cmp = null; }
   if (target) { target.remove(); target = null; }
 });
-
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
-}
 
 function courseStub(id: number, over: Partial<CourseListItem> = {}): CourseListItem {
   const isAdmin = over.is_admin ?? false;

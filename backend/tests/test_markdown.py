@@ -339,7 +339,10 @@ def test_render_address_last_inside_emphasis_links(md, href):
     "https://a.b:99999999",
     "https://%zz.org",
     "https:///",
-    "https://[::1]/x",
+    "https://[example.com]/x",
+    "https://[1.2.3.4]/x",
+    "https://[fe80::1%25eth0]/x",
+    "https://[::1]:99999/x",
 ])
 def test_bare_urls_nh3_strips_stay_plain_text(url):
     result = render_markdown(f"see {url} here")
@@ -347,15 +350,36 @@ def test_bare_urls_nh3_strips_stay_plain_text(url):
     assert url in result
 
 
+@pytest.mark.parametrize("src, href", [
+    ("see https://[a]@example.com/x here", 'href="https://%5Ba%5D@example.com/x"'),
+    ("[t](https://[y]@evil.example/\u00e9)", 'href="https://%5By%5D@evil.example/%C3%A9"'),
+    ("[t](https://x@[y]@evil.example/%zz)", 'href="https://x@%5By%5D@evil.example/%25zz"'),
+])
+def test_brackets_in_the_user_part_keep_a_normalised_href(src, href):
+    assert href in render_markdown(src)
+
+
+def test_scheme_less_address_still_links():
+    assert '<a href="//example.com/x"' in render_markdown("[t](//example.com/x)")
+
+
+def test_bare_ipv6_url_links():
+    # markdown-it-py 4.3 links a bracketed IPv6 host, and nh3 keeps it.
+    assert '<a href="https://[::1]/x"' in render_markdown("see https://[::1]/x here")
+
+
 @pytest.mark.parametrize("src,text", [
     ("[t](https://%zz.org)", "t"),
     ("<https://%zz.org>", "https://%zz.org"),
+    ("[t](https://[example.com]/x)", "t"),
+    ("[t](//[example.com]/x)", "t"),
+    ("[t](//%zz.org)", "t"),
+    ("<https://[example.com]/x>", "https://[example.com]/x"),
     ('[**bold** t](https://%zz.org "a title")', "<strong>bold</strong> t"),
-    # nh3 does not escape < or > inside an attribute value (probed), so the
-    # check is not a pattern over its output.
+    # nh3 escapes < and > inside an attribute value.
     ('[t](https://%zz.org "a>b")', "<p>t</p>"),
     ('[t](https://%zz.org "<a href=x>")', "<p>t</p>"),
-    ('[![pic](x.png "</a>")](https://%zz.org)', '<img src="x.png" alt="pic" title="</a>">'),
+    ('[![pic](x.png "</a>")](https://%zz.org)', '<img src="x.png" alt="pic" title="&lt;/a&gt;">'),
 ])
 def test_authored_link_with_a_bad_href_stays_plain_text(src, text):
     result = render_markdown(src)
@@ -739,3 +763,69 @@ def test_unclosed_double_dollar_is_linear(src, limit):
     start = time.perf_counter()
     render_markdown(src)
     assert time.perf_counter() - start < limit
+
+
+# Today's backtick scan, frozen, to pin the faster one against.
+def _old_in_code(src, start, end, *_):
+    pos = start
+    while m := markdown_mod._RUN.search(src, pos, end):
+        if markdown_mod._escaped(src, m.start()):
+            pos = m.start() + 1
+            continue
+        n = len(m.group())
+        close = next((r for r in markdown_mod._RUN.finditer(src, m.end()) if len(r.group()) == n), None)
+        if close is None:
+            pos = m.end()
+            continue
+        if close.start() > end:
+            return True
+        pos = close.end()
+    return False
+
+
+def _backtick_corpus():
+    rng = random.Random(20261124)
+    return ["".join(rng.choice("`$\\a ") for _ in range(rng.randint(1, 40))) for _ in range(2000)]
+
+
+def test_in_code_matches_old_scan():
+    for src in _backtick_corpus():
+        dollars = [i for i, c in enumerate(src) if c == "$"]
+        for a, i in enumerate(dollars):
+            for j in dollars[a + 1:]:
+                assert markdown_mod._in_code(src, i + 1, j) == _old_in_code(src, i + 1, j), (src, i, j)
+
+
+def test_render_matches_old_scan(monkeypatch):
+    corpus = _backtick_corpus() + ["[x](a`b) $c ` d$ `"]
+    new = [render_markdown(s) for s in corpus]
+    monkeypatch.setattr(markdown_mod, "_in_code", _old_in_code)
+    assert [render_markdown(s) for s in corpus] == new
+
+
+def _backtick_text(k, n):
+    return "$x " + " ".join("`" * i for i in range(2, k)) + " a`" * n + " y$"
+
+
+def _best_of_3(text):
+    best = None
+    for _ in range(3):
+        start = time.perf_counter()
+        render_markdown(text)
+        took = time.perf_counter() - start
+        best = took if best is None else min(best, took)
+    return best
+
+
+def test_backtick_scan_scales_linearly():
+    small, large = _best_of_3(_backtick_text(350, 20000)), _best_of_3(_backtick_text(495, 40000))
+    print(f"backtick scan: S {small:.3f} s, 2S {large:.3f} s")
+    assert large < 0.5
+
+
+def test_backtick_scan_nested_images_stay_linear():
+    # each alt text is its own source; the paragraph's run index must not be rebuilt per image
+    inner = "".join(f"![$`{i}` x$](x{i}.png) " for i in range(9))
+    took = _best_of_3(f"![{inner}](y.png) $`a` b$ " * 1000)
+    print(f"nested backtick scan: {took:.3f} s")
+    assert took < 2.0                                 # ~0.16 s here; rebuilding the index per image takes ~24 s

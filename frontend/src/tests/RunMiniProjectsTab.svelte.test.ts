@@ -3,6 +3,7 @@ import { mount, unmount as svelteUnmount, flushSync } from 'svelte';
 import RunMiniProjectsTab from '../components/runs/RunMiniProjectsTab.svelte';
 import type { Course, MiniProjectResponse, BlockResponse } from '../lib/types';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
+import { settle } from './support/settle';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -26,11 +27,6 @@ function jres(body: unknown, status = 200) {
     json: () => Promise.resolve(body),
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response);
-}
-
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
 }
 
 const blocks: BlockResponse[] = [

@@ -4,6 +4,7 @@ import RunDetailPage from '../pages/runs/RunDetailPage.svelte';
 import { session } from '../stores/session.svelte';
 import { currentRoute, __resetGuardsForTests } from '../lib/router.svelte';
 import { expectRoutesInApp } from './support/routeClickProbe';
+import { settle } from './support/settle';
 
 const fetchSpy = vi.fn();
 
@@ -84,11 +85,6 @@ function mockCascade(opts: {
     if (url.match(/\/api\/runs\/\d+\/assets$/)) return jres([]);
     return jres([]);
   };
-}
-
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
 }
 
 describe('RunDetailPage shell', () => {

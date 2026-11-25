@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import func, select
+from sqlalchemy import delete as sa_delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
@@ -17,7 +17,7 @@ from mathion.api.lookups import get_or_404
 from mathion.api.authz import require_course_admin_for_run, require_run_admin_or_teacher
 from mathion.api.asset_render import reference_new_run_asset, render_with_run_assets
 from mathion.api.submission_files import run_asset_storage_dir
-from mathion.assets import get_mime_type, sanitize_filename, validate_extension
+from mathion.assets import commit_delete, get_mime_type, sanitize_filename, validate_extension
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
 from mathion.models import (
@@ -335,13 +335,12 @@ def delete_run_asset(
             )
 
     filepath = os.path.join(run_asset_storage_dir(run_id), asset.filename)
-    db.delete(asset)
-    db.commit()
-    if os.path.isfile(filepath):
-        try:
-            os.remove(filepath)
-        except OSError:
-            pass
+    # links before the asset row, the order every save takes
+    db.execute(sa_delete(RunAssetReference).where(RunAssetReference.run_asset_id == asset_id))
+    if db.execute(sa_delete(RunAsset).where(RunAsset.id == asset_id).returning(RunAsset.id)).first() is None:
+        db.rollback()                                  # deleted meanwhile: the file may be a new upload's
+        raise HTTPException(status_code=404, detail="Asset not found")
+    commit_delete(db, [filepath])
 
 
 class RunRenderRequest(BaseModel):
@@ -362,8 +361,8 @@ def render_run_markdown(
     """Render markdown with bare-filename asset refs resolved against this run's asset pool.
 
     Convention is `![alt](filename.png)` (markdown.py:52-68 extracts non-URL refs);
-    `render_with_run_assets` validates each against the run's RunAsset pool and rewrites
-    `src="{filename}"` / `href="{filename}"` to `/api/runs/{run_id}/assets/{filename}`.
+    `render_with_run_assets` validates each against the run's RunAsset pool and points
+    those image and link targets at `/api/runs/{run_id}/assets/{filename}`.
     Side-effect-free: SELECTs only; no RunAssetReference rows are written here
     (sync_run_asset_references runs only on PATCH/POST of mini-projects).
     422 raised internally by render_with_run_assets when any referenced asset

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest';
-import { mount, unmount, flushSync, tick } from 'svelte';
+import { mount, unmount, flushSync } from 'svelte';
 
 // Mock csvWrite so we can capture what text is passed to downloadCSV.
 // toCSV and sanitizeTitle still use real implementations.
@@ -14,6 +14,7 @@ vi.mock('../lib/csvWrite', async (importOriginal) => {
 import { downloadCSV } from '../lib/csvWrite';
 import { STATUS_LABEL, STATUS_SHORT_LABEL } from '../lib/dashboards';
 import RunSubmissionTab from '../components/runs/RunSubmissionTab.svelte';
+import { settle } from './support/settle';
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
@@ -59,11 +60,6 @@ afterEach(() => {
   if (component) { unmount(component); component = null; }
   if (host?.parentNode) host.parentNode.removeChild(host);
 });
-
-async function settle() {
-  await tick(); await tick(); await tick();
-  flushSync();
-}
 
 function submissionMock(overrides: Record<string, unknown> = {}) {
   return {

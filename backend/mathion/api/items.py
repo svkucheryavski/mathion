@@ -1,4 +1,3 @@
-import os
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,6 +5,9 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from mathion.api.draft_lock import lock_draft
+from mathion.api import advisory
+from mathion.assets import commit_delete
 from mathion.api.text_utils import bump_content_updated_at, slugify
 from mathion.api.lookups import INT4_MAX, get_or_404
 from mathion.api.authz import require_course_admin
@@ -44,6 +46,8 @@ def _process_content_md(db: Session, version: CourseVersion, item_id: int, conte
 @router.post("/api/sequences/{sequence_id}/items", status_code=201, response_model=ItemResponse)
 def create_item(sequence_id: int, data: ItemCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     version = _get_version_for_sequence(db, sequence_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
+    version = _get_version_for_sequence(db, sequence_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
         raise HTTPException(status_code=403, detail="Version is disabled")
@@ -70,8 +74,7 @@ def create_item(sequence_id: int, data: ItemCreate, db: Session = Depends(get_db
             }],
         )
 
-    # NOTE: order assignment is not safe under concurrent writes.
-    # For PostgreSQL, consider SELECT ... FOR UPDATE or a serializable transaction.
+    # Safe: the draft lock serializes creates in this version.
     current_max_order = db.scalar(select(func.max(Item.order)).where(Item.sequence_id == sequence_id)) or 0
     if current_max_order >= INT4_MAX:
         raise HTTPException(
@@ -112,6 +115,9 @@ def list_items(sequence_id: int, limit: int = 100, offset: int = 0, db: Session 
 
 @router.patch("/api/items/{item_id}", response_model=ItemResponse)
 def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    item = get_or_404(db, Item, item_id)
+    version = _get_version_for_item(db, item)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
     item = get_or_404(db, Item, item_id)
     version = _get_version_for_item(db, item)
     require_course_admin(db, user, version.course_id)
@@ -251,22 +257,17 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db), u
         db.rollback()
         raise HTTPException(status_code=422, detail="video_url cannot be null for video items")
 
-    db.commit()
+    advisory.interleave_hook("item_saved")
+    commit_delete(db, removed_script_files)           # GC'd script files go only after the commit
     db.refresh(item)
-    # Unlink GC'd interactive_app script files after the DB commit — best-effort,
-    # mirroring delete_asset (a leftover file is harmless; a row without its file
-    # is worse). The rows were deleted inside the committed transaction above.
-    for path in removed_script_files:
-        if os.path.isfile(path):
-            try:
-                os.remove(path)
-            except OSError:
-                pass
     return item
 
 
 @router.delete("/api/items/{item_id}", status_code=204)
 def delete_item(item_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    item = get_or_404(db, Item, item_id)
+    version = _get_version_for_item(db, item)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
     item = get_or_404(db, Item, item_id)
     version = _get_version_for_item(db, item)
     require_course_admin(db, user, version.course_id)
@@ -283,17 +284,13 @@ def delete_item(item_id: int, db: Session = Depends(get_db), user: User = Depend
     if item.type == "interactive_app":
         removed_script_files = sync_script_reference(db, version.id, item.id, None)
     db.delete(item)
-    db.commit()
-    for path in removed_script_files:
-        if os.path.isfile(path):
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+    commit_delete(db, removed_script_files)
 
 
 @router.post("/api/sequences/{sequence_id}/items/reorder")
 def reorder_items(sequence_id: int, data: ReorderRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    version = _get_version_for_sequence(db, sequence_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
     version = _get_version_for_sequence(db, sequence_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
@@ -309,7 +306,7 @@ def reorder_items(sequence_id: int, data: ReorderRequest, db: Session = Depends(
     if incoming_ids != real_ids:
         raise HTTPException(status_code=400, detail="Reorder list must include every item in this sequence")
 
-    for entry in data.order:
+    for entry in sorted(data.order, key=lambda e: e.id):   # id order, one lock order
         item = db.get(Item, entry.id)
         item.order = entry.order
     db.commit()

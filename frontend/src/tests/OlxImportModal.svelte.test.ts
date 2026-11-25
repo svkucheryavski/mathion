@@ -27,6 +27,7 @@ import type { GuardAsk } from '../lib/askInPlace.svelte';
 import { blobKey, type CheckResponse, type ReportLine } from '../lib/olx/types';
 import type { Version } from '../lib/types';
 import { clearToasts, toasts } from '../stores/toasts.svelte';
+import { settle } from './support/settle';
 
 type Reply = { status: number; body?: unknown } | 'network';
 type Queued = Reply | (() => Promise<Response>);
@@ -87,8 +88,6 @@ afterEach(() => {
   document.documentElement.style.overflow = '';
   vi.unstubAllGlobals();
 });
-
-async function settle() { for (let i = 0; i < 20; i++) await Promise.resolve(); flushSync(); }
 
 function mkVersion(over: Partial<Version> = {}): Version {
   return {

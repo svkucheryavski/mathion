@@ -3,6 +3,7 @@ import { mount, unmount, flushSync } from 'svelte';
 import NewRunModal from '../components/runs/NewRunModal.svelte';
 import type { Course, Version } from '../lib/types';
 import { currentRoute } from '../lib/router.svelte';
+import { settle } from './support/settle';
 
 const fetchSpy = vi.fn();
 
@@ -19,11 +20,6 @@ const course: Course = { id: 1, slug: 'algebra', name: 'Algebra', description: '
 const versions: Version[] = [
   { id: 99, course_id: 1, created_at: '2026-01-01', published_at: '2026-01-02', is_disabled: false, label: '' } as Version,
 ];
-
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
-}
 
 function mountModal(extra: Record<string, unknown> = {}) {
   const target = document.createElement('div');

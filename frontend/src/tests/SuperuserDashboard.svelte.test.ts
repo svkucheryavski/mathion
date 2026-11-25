@@ -1,19 +1,16 @@
 import { it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mount, unmount, flushSync } from 'svelte';
+import { mount, unmount } from 'svelte';
 import SuperuserDashboard from '../pages/superuser/SuperuserDashboard.svelte';
 import * as router from '../lib/router.svelte';
 import { SetupStore } from '../lib/setupStore.svelte';
 import type { PanelSetup } from '../lib/setup';
+import { settle } from './support/settle';
 
 function jsonResponse(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 function mockFetch(status: number, body: unknown) {
   return vi.fn(async (..._args: Parameters<typeof fetch>) => jsonResponse(status, body));
-}
-async function settle() {
-  for (let i = 0; i < 8; i++) await Promise.resolve();
-  flushSync();
 }
 const ZEROS = { total_users: 0, total_courses: 0, storage_bytes: 0, active_users_24h: 0, active_users_7d: 0 };
 

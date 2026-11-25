@@ -3,10 +3,10 @@ import { mount, unmount, flushSync } from 'svelte';
 import EditCourseDialog from '../components/superuser/EditCourseDialog.svelte';
 import { ApiError } from '../lib/api';
 import type { PanelCourse } from '../lib/superuser';
+import { settle } from './support/settle';
 
 let target: HTMLDivElement;
 let cmp: ReturnType<typeof mount> | null = null;
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'existing', full_name: 'A' }),
     { status: 200, headers: { 'content-type': 'application/json' } })));

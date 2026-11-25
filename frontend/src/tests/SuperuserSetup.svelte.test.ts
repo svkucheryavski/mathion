@@ -11,6 +11,7 @@ import { createDirtyRegistry, DIRTY_REGISTRY_KEY, type DirtyRegistry } from '../
 import { InPlaceAsk, NAV_ASK_KEY, type NavAskView } from '../lib/askInPlace.svelte';
 import * as router from '../lib/router.svelte';
 import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
+import { settle, until } from './support/settle';
 
 // Set up D3-D9: the page frame, its moves, All set, and the four steps: Email,
 // Site name and logo, First course and its admin, Sign-in rules and limits.
@@ -63,9 +64,6 @@ function pngOf(width: number, height: number): Uint8Array {
 function jsonResponse(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
-async function settle() { for (let i = 0; i < 16; i++) await Promise.resolve(); flushSync(); }
-/** FileReader answers in a task, not a microtask. */
-async function tick() { await new Promise((r) => setTimeout(r, 0)); await settle(); }
 
 type Answer = [number, unknown];
 type Handler = (body: unknown) => Answer | Promise<Answer>;
@@ -150,10 +148,6 @@ function type(el: HTMLInputElement, v: string) { el.value = v; el.dispatchEvent(
 const writes = () => calls.filter((c) => /^(POST \/setup|POST \/branding|POST \/courses|PATCH|PUT)/.test(c.key));
 const blocked = () => foot('save')!.getAttribute('aria-disabled') === 'true';
 const mark = (n: number) => items()[n - 1].querySelector('.sl-mark')!;
-/** Wait, a task at a time, until `done()` holds (at most 20 tasks). */
-async function until(done: () => boolean) {
-  for (let i = 0; i < 20 && !done(); i++) await tick();
-}
 /** Choose a file in the step's logo picker, as the browser's picker would, and
  *  wait until it is read: its decode starts, or its refusal shows. */
 async function choose(bytes: Uint8Array, name = 'school.png') {

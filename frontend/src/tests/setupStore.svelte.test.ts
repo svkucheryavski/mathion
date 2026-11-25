@@ -4,6 +4,7 @@ import { SetupStore } from '../lib/setupStore.svelte';
 import {
   entryMove, markFor, setMark, clearMark, keepSignIn, setupGo, setupSaved, setupSkip, SETUP_MARK, type PanelSetup,
 } from '../lib/setup';
+import { settle } from './support/settle';
 
 // Set up D2, D3a, D13: the shell's one copy of the wizard's state.
 
@@ -23,7 +24,6 @@ function deferred(): { promise: Promise<PanelSetup> } & Pending {
   const promise = new Promise<PanelSetup>((res, rej) => { resolve = res; reject = rej; });
   return { promise, resolve, reject };
 }
-const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 
 describe('SetupStore', () => {
   let gets: ReturnType<typeof deferred>[];

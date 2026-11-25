@@ -66,17 +66,9 @@ def unique_name(name: str, taken: set[str], counters: Counters | None = None) ->
     return next_free(base, f".{ext}" if dot else "", NAME_MAX, taken, counters)
 
 
-def clean_name(name: str) -> str:
-    """sanitize_filename until it stops changing, so the upload keeps the planned name."""
-    out = sanitize_filename(name)
-    while (again := sanitize_filename(out)) != out:
-        out = again
-    return out
-
-
 def _app_key(name: str) -> str:
     # app files and Graasta names are compared without .js
-    clean = clean_name(name)
+    clean = sanitize_filename(name)
     return clean[:-3] if clean.endswith(".js") else clean
 
 
@@ -94,7 +86,7 @@ def plan_files(static: list[StaticEntry], apps: list[AppEntry], graasta_names: s
         by_key.setdefault(_app_key(app.name), app)
     used: set[str] = set()
     for name in sorted(graasta_names):
-        target = clean_name(name + ".js")
+        target = sanitize_filename(name + ".js")
         app = by_key.get(_app_key(target))
         if app is None:
             continue
@@ -139,11 +131,11 @@ def plan_files(static: list[StaticEntry], apps: list[AppEntry], graasta_names: s
             report.add("skipped", "", f"The file “{entry.path}” is over the per-file limit, so it was not uploaded; "
                                       "make it smaller and upload it by hand")
         if reason == "size" and entry.skipped is None:   # the limit may differ at build; the other names stay put
-            taken.add(unique_name(clean_name(basename), taken, counters))
+            taken.add(unique_name(sanitize_filename(basename), taken, counters))
         if reason is not None:
             skipped[entry.path] = reason
             continue
-        target = unique_name(clean_name(basename), taken, counters)
+        target = unique_name(sanitize_filename(basename), taken, counters)
         taken.add(target)
         static_map[entry.path] = target
         uploads.append(Upload(entry.path, target, "static", entry.size))

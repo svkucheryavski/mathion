@@ -23,6 +23,7 @@ import VersionsPage from '../pages/editor/VersionsPage.svelte';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
 import type { Version } from '../lib/types';
 import { readExport } from '../lib/olx/readExport';
+import { settle } from './support/settle';
 
 const postMock = vi.mocked(api.post);
 
@@ -55,7 +56,6 @@ afterEach(async () => {
   await navigate('/', { force: true });
 });
 
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 async function openDirtyForm(label = 'Spring') {
   component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
   await settle();

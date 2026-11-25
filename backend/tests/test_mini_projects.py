@@ -228,3 +228,22 @@ def test_disabled_version_allows_historical_read(admin_client, teacher_client, t
     assert len(body) == 1
     assert body[0]["id"] == mp["id"]
     assert body[0]["is_published"] is True
+
+
+def test_mini_project_save_refuses_data_image(admin_client, db, seed_run_with_groups):
+    run, _, _ = seed_run_with_groups()
+    block = db.execute(
+        select(Block).where(Block.version_id == db.get(Run, run["id"]).version_id)
+    ).scalars().first()
+    response = admin_client.post(
+        f"/api/runs/{run['id']}/mini-projects",
+        json={
+            "block_id": block.id,
+            "assignment_md": "![a](data:image/png;base64,AAAA)",
+            "hard_deadline": NEAR_DEADLINE_ISO,
+            "resubmission_deadline": FAR_DEADLINE_ISO,
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == ("Images pasted as data: URLs are not supported. "
+                                         "Upload the file under Assets and link it by name.")

@@ -4,6 +4,7 @@ import AssetSidebar from '../components/editor/AssetSidebar.svelte';
 import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
 import type { AssetResponse } from '../lib/assets';
 import type { AssetContext, AssetItem } from '../lib/assetContext';
+import { settle } from './support/settle';
 
 const mkAsset = (overrides: Partial<AssetResponse> = {}): AssetResponse => ({
   id: 1,
@@ -74,10 +75,8 @@ describe('AssetSidebar — list render', () => {
 
   it('renders rows for each asset returned by listAssets on mount', async () => {
     const { target } = mountSidebar();
-    await Promise.resolve();
-    flushSync();
-    await Promise.resolve();
-    flushSync();
+    await settle();
+    await settle();
     expect(target.querySelector('[data-testid="asset-row-1"]')).toBeTruthy();
     expect(target.querySelector('[data-testid="asset-row-2"]')).toBeTruthy();
   });
@@ -94,13 +93,12 @@ describe('AssetSidebar — list render', () => {
     expect(target.querySelector('[data-testid="loading-indicator"]')).toBeTruthy();
     // Resolve the mock so afterEach cleanup doesn't hang on an unresolved fetch
     resolveList([]);
-    await Promise.resolve(); flushSync();
-    await Promise.resolve(); flushSync();
+    await settle();
   });
 
   it('shows the "used" badge when is_referenced is true and hides it otherwise', async () => {
     const { target } = mountSidebar();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const row1 = target.querySelector('[data-testid="asset-row-1"]')!;
     const row2 = target.querySelector('[data-testid="asset-row-2"]')!;
     expect(row1.querySelector('[data-testid="used-badge"]')).toBeNull();
@@ -115,7 +113,7 @@ describe('AssetSidebar — first-time banner', () => {
 
   it('renders the canonical banner literal when cursorReady is false', async () => {
     const { target } = mountSidebar({ cursorReady: false });
-    await Promise.resolve(); flushSync();
+    await settle();
     const banner = target.querySelector('[data-testid="cursor-banner"]');
     expect(banner).toBeTruthy();
     expect(banner?.textContent).toContain(
@@ -125,7 +123,7 @@ describe('AssetSidebar — first-time banner', () => {
 
   it('hides the banner when cursorReady is true', async () => {
     const { target } = mountSidebar({ cursorReady: true });
-    await Promise.resolve(); flushSync();
+    await settle();
     expect(target.querySelector('[data-testid="cursor-banner"]')).toBeNull();
   });
 });
@@ -140,7 +138,7 @@ describe('AssetSidebar — click to insert', () => {
   it('clicking a row calls onInsert with server filename and mime_type', async () => {
     const onInsert = vi.fn();
     const { target } = mountSidebar({ onInsert });
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const row = target.querySelector<HTMLElement>('[data-testid="asset-row-1"]')!;
     const clickBtn = row.querySelector<HTMLElement>('.row-click')!;
     clickBtn.click();
@@ -154,8 +152,7 @@ describe('AssetSidebar — empty list', () => {
   it('renders the no-assets prompt when listAssets returns []', async () => {
     (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     const { target } = mountSidebar();
-    await Promise.resolve(); flushSync();
-    await Promise.resolve(); flushSync();
+    await settle();
     expect(target.textContent).toContain('No assets yet');
   });
 });
@@ -178,11 +175,11 @@ describe('AssetSidebar — refreshKey triggers re-fetch', () => {
     });
     const cmp = mount(AssetSidebar, { target, props: propsRef });
     cleanup = () => unmount(cmp);
-    await Promise.resolve(); flushSync();
+    await settle();
     expect(spy).toHaveBeenCalledTimes(1);
     propsRef.refreshKey = 1;
     flushSync();
-    await Promise.resolve(); flushSync();
+    await settle();
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
@@ -214,12 +211,12 @@ describe('AssetSidebar — refreshKey triggers re-fetch', () => {
     });
     const cmp = mount(AssetSidebar, { target, props: propsRef });
     cleanup = () => unmount(cmp);
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     expect((ctxA.list as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect(target.querySelector('[data-testid="asset-row-1"]')).toBeTruthy();
     propsRef.assetContext = ctxB;
     flushSync();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     expect((ctxB.list as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect(target.querySelector('[data-testid="asset-row-2"]')).toBeTruthy();
     expect(target.querySelector('[data-testid="asset-row-1"]')).toBeNull();
@@ -235,7 +232,7 @@ describe('AssetSidebar — uploadProgress + uploadError rendering', () => {
     const { target } = mountSidebar({
       uploadProgress: { current: 2, total: 5, filename: 'foo.png' },
     });
-    await Promise.resolve(); flushSync();
+    await settle();
     const row = target.querySelector('[data-testid="upload-progress"]');
     expect(row?.textContent).toContain('Uploading file 2 of 5');
     expect(row?.textContent).toContain('foo.png');
@@ -245,7 +242,7 @@ describe('AssetSidebar — uploadProgress + uploadError rendering', () => {
     const { target } = mountSidebar({
       uploadError: { detail: 'File size 10485761 exceeds max 10485760', stoppedAt: { n: 3, m: 5 } },
     });
-    await Promise.resolve(); flushSync();
+    await settle();
     const err = target.querySelector('[data-testid="upload-error"]')!;
     expect(err.textContent).toContain('Upload stopped at file 3 of 5');
     expect(err.textContent).toContain('File size 10485761 exceeds max 10485760');
@@ -267,7 +264,7 @@ describe('AssetSidebar — uploadProgress + uploadError rendering', () => {
     document.body.appendChild(target);
     const cmp = mount(AssetSidebar, { target, props: propsRef });
     cleanup = () => unmount(cmp);
-    await Promise.resolve(); flushSync();
+    await settle();
     const dismiss = target.querySelector<HTMLElement>('[data-testid="upload-error-dismiss"] button')!;
     dismiss.click();
     flushSync();
@@ -283,7 +280,7 @@ describe('AssetSidebar — drop on sidebar', () => {
   it('drop on the drop zone calls stopPropagation synchronously and invokes onUploadFile', async () => {
     const onUploadFile = vi.fn().mockResolvedValue(mkAsset({ filename: 'dropped.png' }));
     const { target } = mountSidebar({ onUploadFile });
-    await Promise.resolve(); flushSync();
+    await settle();
     const dropZone = target.querySelector<HTMLElement>('[data-testid="drop-zone"]')!;
     const stopSpy = vi.fn();
     const preventSpy = vi.fn();
@@ -298,15 +295,14 @@ describe('AssetSidebar — drop on sidebar', () => {
     // was already called immediately after dispatchEvent returned.
     expect(preventSpy).toHaveBeenCalled();
     expect(stopSpy).toHaveBeenCalled();
-    await Promise.resolve(); flushSync();
-    await Promise.resolve(); flushSync();
+    await settle();
     expect(onUploadFile).toHaveBeenCalledWith(expect.any(File), { current: 1, total: 1 });
   });
 
   it('drop on the root <aside> outside the drop zone also uploads (root-level handler)', async () => {
     const onUploadFile = vi.fn().mockResolvedValue(mkAsset({ filename: 'rooted.png' }));
     const { target } = mountSidebar({ onUploadFile });
-    await Promise.resolve(); flushSync();
+    await settle();
     const aside = target.querySelector<HTMLElement>('aside[data-testid="asset-sidebar"]')!;
     const stopSpy = vi.fn();
     const preventSpy = vi.fn();
@@ -319,8 +315,7 @@ describe('AssetSidebar — drop on sidebar', () => {
     aside.dispatchEvent(dropEvent);
     expect(preventSpy).toHaveBeenCalled();
     expect(stopSpy).toHaveBeenCalled();
-    await Promise.resolve(); flushSync();
-    await Promise.resolve(); flushSync();
+    await settle();
     expect(onUploadFile).toHaveBeenCalledWith(expect.any(File), { current: 1, total: 1 });
   });
 });
@@ -330,13 +325,12 @@ describe('AssetSidebar — file picker', () => {
     (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     const onUploadFile = vi.fn().mockResolvedValue(mkAsset({ filename: 'picked.png' }));
     const { target } = mountSidebar({ onUploadFile });
-    await Promise.resolve(); flushSync();
+    await settle();
     const input = target.querySelector<HTMLInputElement>('[data-testid="file-picker"]')!;
     const file = new File(['x'], 'picked.png', { type: 'image/png' });
     Object.defineProperty(input, 'files', { value: [file], configurable: true });
     input.dispatchEvent(new Event('change', { bubbles: true }));
-    await Promise.resolve(); flushSync();
-    await Promise.resolve(); flushSync();
+    await settle();
     expect(onUploadFile).toHaveBeenCalledWith(file, { current: 1, total: 1 });
   });
 });
@@ -351,7 +345,7 @@ describe('AssetSidebar — delete UI', () => {
 
   it('a referenced row shows `used` and a disabled trash with the in-use reason (R2)', async () => {
     const { target } = mountSidebar();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const t1 = target.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!;
     const t2 = target.querySelector<HTMLButtonElement>('[data-testid="asset-row-2"] [data-testid="delete-trash"] button')!;
     expect(t1.disabled).toBe(false);
@@ -373,13 +367,13 @@ describe('AssetSidebar — delete UI', () => {
       ])
       .mockResolvedValueOnce([mkAsset({ id: 2, filename: 'b.pdf', is_referenced: true })]);
     const { target } = mountSidebar();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const trash = target.querySelector<HTMLElement>('[data-testid="delete-trash"] button')!;
     trash.click();
     flushSync();
     const confirm = target.querySelector<HTMLElement>('.inline-confirm button.confirm')!;
     confirm.click();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     expect(deleteSpy).toHaveBeenCalledWith(1);
     expect(target.querySelector('[data-testid="asset-row-1"]')).toBeNull();
     expect(target.querySelector('[data-testid="asset-row-2"]')).toBeTruthy();
@@ -395,13 +389,13 @@ describe('AssetSidebar — delete UI', () => {
       ])
       .mockResolvedValueOnce([mkAsset({ id: 2, filename: 'b.pdf', is_referenced: true })]);
     const { target } = mountSidebar();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const trash = target.querySelector<HTMLElement>('[data-testid="delete-trash"] button')!;
     trash.click();
     flushSync();
     const confirm = target.querySelector<HTMLElement>('.inline-confirm button.confirm')!;
     confirm.click();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const err = target.querySelector('[data-testid="delete-error"]');
     expect(err?.textContent).toContain('Asset not found');
     expect(target.querySelector('[data-testid="asset-row-1"]')).toBeNull();
@@ -418,7 +412,7 @@ describe('AssetSidebar — delete UI', () => {
       ])
       .mockResolvedValueOnce([]);
     const { target } = mountSidebar();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const trash = target.querySelector<HTMLElement>('[data-testid="delete-trash"] button')!;
     trash.click();
     flushSync();
@@ -429,7 +423,7 @@ describe('AssetSidebar — delete UI', () => {
     confirm.click();
     expect(stubCtx.remove).toHaveBeenCalledTimes(1);
     resolveDelete();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
   });
 
   it('cross-row delete race: row1 completion does not clear row2 confirm pair', async () => {
@@ -451,7 +445,7 @@ describe('AssetSidebar — delete UI', () => {
       .mockResolvedValueOnce([]);
 
     const { target } = mountSidebar();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
 
     // Start delete on row 1.
     const trash1 = target.querySelector<HTMLElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!;
@@ -478,7 +472,7 @@ describe('AssetSidebar — delete UI', () => {
 
     // Row 1 resolves first. Its finally must NOT clear row 2's UI.
     resolveDelete1();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
 
     // Row 2's confirm pair must still be present and STILL DISABLED (row 2 delete still in flight).
     const confirm2After = target.querySelector<HTMLButtonElement>('[data-testid="asset-row-2"] .inline-confirm button.confirm')!;
@@ -487,7 +481,7 @@ describe('AssetSidebar — delete UI', () => {
 
     // Now resolve row 2 to clean up.
     resolveDelete2();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
 
     expect(deleteMock).toHaveBeenCalledTimes(2);
     expect(deleteMock).toHaveBeenNthCalledWith(1, 1);
@@ -506,7 +500,7 @@ describe('AssetSidebar — long filename truncation', () => {
       mkAsset({ id: 1, filename: 'short.pdf' }),
     ]);
     const { target } = mountSidebar();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const name = target.querySelector('[data-testid="asset-row-1"] .name')!;
     expect(name.textContent).toBe('short.pdf');
     expect(name.getAttribute('title')).toBe('short.pdf');
@@ -518,7 +512,7 @@ describe('AssetSidebar — long filename truncation', () => {
       mkAsset({ id: 1, filename: full }),
     ]);
     const { target } = mountSidebar();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const name = target.querySelector('[data-testid="asset-row-1"] .name')!;
     // MAX=24, stem='Presentation 2 (corrected version of the lecture slides)',
     // ext='.pdf' (4). reserve=8. prefixLen=16.
@@ -535,7 +529,7 @@ describe('AssetSidebar — long filename truncation', () => {
       mkAsset({ id: 1, filename: full }),
     ]);
     const { target } = mountSidebar();
-    await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync();
+    await settle();
     const name = target.querySelector('[data-testid="asset-row-1"] .name')!;
     // MAX=24, no dot → filename.slice(0, 21) + '...'.
     expect(name.textContent).toBe('this-is-a-name-withou...');
@@ -547,11 +541,10 @@ describe('AssetSidebar — Slice-5b restyle', () => {
   beforeEach(() => {
     (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
   });
-  const settleList = async () => { await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync(); };
 
   it('the cursor hint is the D11 hint paragraph', async () => {
     const { target } = mountSidebar({ cursorReady: false });
-    await settleList();
+    await settle();
     const hint = target.querySelector('[data-testid="cursor-banner"]')!;
     expect(hint.tagName).toBe('P');
     expect(hint.classList.contains('hint')).toBe(true);
@@ -559,14 +552,14 @@ describe('AssetSidebar — Slice-5b restyle', () => {
 
   it('opening the inline confirm focuses Cancel; Escape cancels it, is default-prevented and refocuses the trash', async () => {
     const { target } = mountSidebar();
-    await settleList();
+    await settle();
     target.querySelector<HTMLButtonElement>('[data-testid="delete-trash"] button')!.click();
-    await Promise.resolve(); flushSync(); await Promise.resolve();
+    await settle();
     const cancel = target.querySelector<HTMLButtonElement>('.inline-confirm button.cancel')!;
     expect(document.activeElement).toBe(cancel);
     const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     cancel.dispatchEvent(ev);
-    await Promise.resolve(); flushSync(); await Promise.resolve();
+    await settle();
     expect(ev.defaultPrevented).toBe(true);
     expect(target.querySelector('.inline-confirm button.confirm')).toBeNull();
     expect(document.activeElement).toBe(target.querySelector('[data-testid="delete-trash"] button'));
@@ -574,7 +567,7 @@ describe('AssetSidebar — Slice-5b restyle', () => {
 
   it('renders no emoji or text glyph controls', async () => {
     const { target } = mountSidebar({ uploadError: { detail: 'Boom' } });
-    await settleList();
+    await settle();
     expect(target.textContent).not.toMatch(/[\u{1F5D1}×]/u);
     expect(target.querySelector('[data-testid="delete-trash"] button svg')).not.toBeNull();
     expect(target.querySelector('[data-testid="upload-error-dismiss"] button svg')).not.toBeNull();
@@ -584,21 +577,18 @@ describe('AssetSidebar — Slice-5b restyle', () => {
 // ---- Slice-5b T2 review (lane-2 I2): closing the confirm through Confirm
 // never drops focus to <body>.
 describe('AssetSidebar — focus after a confirmed delete (R7)', () => {
-  const settleAll = async () => {
-    for (let i = 0; i < 4; i++) { await Promise.resolve(); flushSync(); }
-  };
   const confirmRow = async (target: HTMLElement, id: number) => {
     target.querySelector<HTMLButtonElement>(`[data-testid="asset-row-${id}"] [data-testid="delete-trash"] button`)!.click();
-    await settleAll();
+    await settle();
     target.querySelector<HTMLButtonElement>('.inline-confirm button.confirm')!.click();
-    await settleAll();
+    await settle();
   };
 
   it('a failed delete gives focus back to the same row\'s trash', async () => {
     (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
     (stubCtx.remove as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
     const { target } = mountSidebar();
-    await settleAll();
+    await settle();
     await confirmRow(target, 1);
     expect(target.querySelector('[data-testid="delete-error"]')).not.toBeNull();
     expect(document.activeElement).toBe(
@@ -610,7 +600,7 @@ describe('AssetSidebar — focus after a confirmed delete (R7)', () => {
       .mockResolvedValueOnce([mkAsset({ id: 1, filename: 'a.png' }), mkAsset({ id: 2, filename: 'b.png' })])
       .mockResolvedValue([mkAsset({ id: 2, filename: 'b.png' })]);
     const { target } = mountSidebar();
-    await settleAll();
+    await settle();
     await confirmRow(target, 1);
     expect(document.activeElement).toBe(
       target.querySelector('[data-testid="asset-row-2"] [data-testid="delete-trash"] button'));
@@ -621,14 +611,13 @@ describe('AssetSidebar — focus after a confirmed delete (R7)', () => {
       .mockResolvedValueOnce([mkAsset({ id: 1, filename: 'a.png' })])
       .mockResolvedValue([]);
     const { target } = mountSidebar();
-    await settleAll();
+    await settle();
     await confirmRow(target, 1);
     expect(document.activeElement).toBe(target.querySelector('[data-testid="drop-zone"]'));
   });
 });
 
 describe('AssetSidebar — the delete question (Polish 1)', () => {
-  const settleAll = async () => { for (let i = 0; i < 6; i++) { await Promise.resolve(); flushSync(); } };
 
   // The sidebar inside a modal panel, as MarkdownEditor mounts it in the item
   // and mini-project modals; `disabled` flips through the $state props.
@@ -654,7 +643,7 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
   it('the question is a row named "Delete <file>?" with Delete and Cancel; Cancel focuses the trash', async () => {
     (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
     const { panel } = mountInPanel();
-    await settleAll();
+    await settle();
     panel.querySelector<HTMLButtonElement>('[data-testid="delete-trash"] button')!.click();
     flushSync();
     const g = panel.querySelector('.inline-confirm') as HTMLElement;
@@ -662,7 +651,7 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
     expect(g.querySelector('button.confirm')?.textContent?.trim()).toBe('Delete');
     expect(document.activeElement).toBe(g.querySelector('button.cancel'));
     (g.querySelector('button.cancel') as HTMLButtonElement).click();
-    await settleAll();
+    await settle();
     expect(panel.querySelector('.inline-confirm')).toBeNull();
     expect(document.activeElement).toBe(panel.querySelector('[data-testid="delete-trash"] button'));
   });
@@ -670,11 +659,11 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
   it('turning disabled while the question is idle closes it, deletes nothing, and focus goes to the panel', async () => {
     (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
     const { panel, props } = mountInPanel();
-    await settleAll();
+    await settle();
     panel.querySelector<HTMLButtonElement>('[data-testid="delete-trash"] button')!.click();
     flushSync();
     props.disabled = true;
-    await settleAll();
+    await settle();
     expect(panel.querySelector('.inline-confirm')).toBeNull();
     expect(stubCtx.remove).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(panel);
@@ -687,17 +676,17 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
       .mockResolvedValueOnce([mkAsset({ id: 1, filename: 'a.png' })])
       .mockResolvedValue([]);
     const { panel, props } = mountInPanel();
-    await settleAll();
+    await settle();
     panel.querySelector<HTMLButtonElement>('[data-testid="delete-trash"] button')!.click();
     flushSync();
     (panel.querySelector('.inline-confirm button.confirm') as HTMLButtonElement).click();
     flushSync();
     props.disabled = true;
-    await settleAll();
+    await settle();
     const busy = panel.querySelector('.inline-confirm button.confirm') as HTMLButtonElement;
     expect(busy.getAttribute('aria-busy')).toBe('true');
     resolve();
-    await settleAll();
+    await settle();
     expect(panel.querySelector('.inline-confirm')).toBeNull();
     expect(document.activeElement).toBe(panel);
   });
@@ -708,17 +697,17 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
       mkAsset({ id: 1, filename: 'a.png' }), mkAsset({ id: 2, filename: 'b.png' }),
     ]);
     const { panel, props } = mountInPanel();
-    await settleAll();
+    await settle();
     const trashOf = (id: number) => panel.querySelector<HTMLButtonElement>(`[data-testid="asset-row-${id}"] [data-testid="delete-trash"] button`)!;
     trashOf(1).click();
     flushSync();
     (panel.querySelector('[data-testid="asset-row-1"] .inline-confirm button.confirm') as HTMLButtonElement).click();
     flushSync();
     trashOf(2).click();
-    await settleAll();
+    await settle();
     expect(document.activeElement).toBe(panel.querySelector('[data-testid="asset-row-2"] .inline-confirm button.cancel'));
     props.disabled = true;
-    await settleAll();
+    await settle();
     expect(panel.querySelector('[data-testid="asset-row-2"] .inline-confirm')).toBeNull();
     expect(panel.querySelector('[data-testid="asset-row-1"] .inline-confirm button.confirm')?.getAttribute('aria-busy')).toBe('true');
     expect(document.activeElement).toBe(panel);
@@ -734,17 +723,17 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
       // Row 2 went in another tab meanwhile.
       .mockResolvedValue([mkAsset({ id: 3, filename: 'c.png' })]);
     const { panel } = mountInPanel();
-    await settleAll();
+    await settle();
     const trashOf = (id: number) => panel.querySelector<HTMLButtonElement>(`[data-testid="asset-row-${id}"] [data-testid="delete-trash"] button`)!;
     trashOf(1).click();
     flushSync();
     (panel.querySelector('[data-testid="asset-row-1"] .inline-confirm button.confirm') as HTMLButtonElement).click();
     flushSync();
     trashOf(2).click();
-    await settleAll();
+    await settle();
     expect(document.activeElement).toBe(panel.querySelector('[data-testid="asset-row-2"] .inline-confirm button.cancel'));
     resolve();
-    await settleAll();
+    await settle();
     expect(panel.querySelector('.inline-confirm')).toBeNull();
     expect(stubCtx.remove).toHaveBeenCalledTimes(1);
     expect(document.activeElement).toBe(trashOf(3));
@@ -755,12 +744,12 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
       .mockResolvedValueOnce([mkAsset({ id: 1, filename: 'a.png' }), mkAsset({ id: 2, filename: 'b.png' })])
       .mockResolvedValue([mkAsset({ id: 2, filename: 'b.png' })]);
     const { panel, props } = mountInPanel();
-    await settleAll();
+    await settle();
     panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
     flushSync();
     expect(document.activeElement).toBe(panel.querySelector('.inline-confirm button.cancel'));
     props.refreshKey = 1;
-    await settleAll();
+    await settle();
     expect(panel.querySelector('.inline-confirm')).toBeNull();
     expect(stubCtx.remove).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(
@@ -773,12 +762,12 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
       .mockResolvedValueOnce([mkAsset({ id: 1, filename: 'a.png' })])
       .mockRejectedValue(new Error('down'));
     const { panel, props } = mountInPanel();
-    await settleAll();
+    await settle();
     panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
     flushSync();
     expect(document.activeElement).toBe(panel.querySelector('.inline-confirm button.cancel'));
     props.refreshKey = 1;
-    await settleAll();
+    await settle();
     expect(panel.querySelector('.error-inline')!.textContent).toBe('Could not load assets.');
     expect(panel.querySelector('.inline-confirm')).toBeNull();
     expect(document.activeElement).toBe(panel.querySelector('[data-testid="drop-zone"]'));
@@ -787,14 +776,14 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
   it('Escape on a row with an open question cancels it (call 7)', async () => {
     (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
     const { panel } = mountInPanel();
-    await settleAll();
+    await settle();
     panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
-    await settleAll();
+    await settle();
     const insert = panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] .row-click')!;
     insert.focus();
     const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     insert.dispatchEvent(ev);
-    await settleAll();
+    await settle();
     expect(ev.defaultPrevented).toBe(true);          // the enclosing modal stays open
     expect(panel.querySelector('.inline-confirm')).toBeNull();
     expect(document.activeElement).toBe(panel.querySelector('[data-testid="asset-row-1"] [data-testid="delete-trash"] button'));
@@ -803,14 +792,14 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
   it('an IME Escape on the row neither cancels the question nor is swallowed (call 7)', async () => {
     (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
     const { panel } = mountInPanel();
-    await settleAll();
+    await settle();
     panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
-    await settleAll();
+    await settle();
     const insert = panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] .row-click')!;
     insert.focus();
     const ev = new KeyboardEvent('keydown', { key: 'Escape', keyCode: 229, bubbles: true, cancelable: true });
     insert.dispatchEvent(ev);
-    await settleAll();
+    await settle();
     expect(ev.defaultPrevented).toBe(false);
     expect(panel.querySelector('.inline-confirm')).not.toBeNull();
   });
@@ -818,14 +807,14 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
   it('Escape on a row without a question is left to the modal', async () => {
     (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' }), mkAsset({ id: 2, filename: 'b.png' })]);
     const { panel } = mountInPanel();
-    await settleAll();
+    await settle();
     panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-2"] [data-testid="delete-trash"] button')!.click();
-    await settleAll();
+    await settle();
     const insert = panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] .row-click')!;
     insert.focus();
     const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     insert.dispatchEvent(ev);
-    await settleAll();
+    await settle();
     expect(ev.defaultPrevented).toBe(false);
     expect(panel.querySelector('[data-testid="asset-row-2"] .inline-confirm')).not.toBeNull();
   });
@@ -835,27 +824,27 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
     (stubCtx.remove as ReturnType<typeof vi.fn>).mockReturnValue(new Promise<void>((r) => { releaseDel = r; }));
     (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' }), mkAsset({ id: 2, filename: 'b.png' })]);
     const { panel } = mountInPanel();
-    await settleAll();
+    await settle();
     panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
-    await settleAll();
+    await settle();
     panel.querySelector<HTMLButtonElement>('.inline-confirm button.confirm')!.click();
-    await settleAll();
+    await settle();
     // P60: another row's question opens while row 1's stays busy.
     panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-2"] [data-testid="delete-trash"] button')!.click();
-    await settleAll();
+    await settle();
     expect(panel.querySelector('[data-testid="asset-row-2"] .inline-confirm')).not.toBeNull();
     for (const sel of ['.inline-confirm button.cancel', '.row-click']) {
       const el = panel.querySelector<HTMLButtonElement>(`[data-testid="asset-row-1"] ${sel}`)!;
       el.focus();
       const ev = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
       el.dispatchEvent(ev);
-      await settleAll();
+      await settle();
       expect(ev.defaultPrevented).toBe(true);
       expect(panel.querySelector('[data-testid="asset-row-1"] .inline-confirm')).not.toBeNull();
       expect(document.activeElement).toBe(el);
     }
     releaseDel();
-    await settleAll();
+    await settle();
   });
 
   it('a busy question remounted after a failed reload does not take focus', async () => {
@@ -866,23 +855,23 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
       .mockRejectedValueOnce(new Error('down'))
       .mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
     const { panel, props } = mountInPanel();
-    await settleAll();
+    await settle();
     panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
-    await settleAll();
+    await settle();
     panel.querySelector<HTMLButtonElement>('.inline-confirm button.confirm')!.click();
-    await settleAll();
+    await settle();
     props.refreshKey = 1;                    // fails: the rows go, the busy question waits
-    await settleAll();
+    await settle();
     expect(panel.querySelector('[data-testid="asset-row-1"]')).toBeNull();
     const text = document.createElement('textarea');
     panel.append(text);
     text.focus();
     props.refreshKey = 2;                    // the row and its busy question come back
-    await settleAll();
+    await settle();
     expect(panel.querySelector('[data-testid="asset-row-1"] .inline-confirm')).not.toBeNull();
     expect(document.activeElement).toBe(text);
     releaseDel();
-    await settleAll();
+    await settle();
     text.remove();
   });
 
@@ -892,17 +881,17 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
       .mockRejectedValueOnce(new Error('down'))
       .mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
     const { panel, props } = mountInPanel();
-    await settleAll();
+    await settle();
     panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
     flushSync();
     props.refreshKey = 1;
-    await settleAll();
+    await settle();
     // The author goes back to the editor.
     const text = document.createElement('textarea');
     panel.append(text);
     text.focus();
     props.refreshKey = 2;
-    await settleAll();
+    await settle();
     expect(panel.querySelector('[data-testid="asset-row-1"]')).not.toBeNull();
     expect(panel.querySelector('.inline-confirm')).toBeNull();
     expect(document.activeElement).toBe(text);
@@ -912,13 +901,13 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
   it('a reload that keeps the row of an idle question leaves focus where the author moved it (R57, whole-branch review)', async () => {
     (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' }), mkAsset({ id: 2, filename: 'b.png' })]);
     const { panel, props } = mountInPanel();
-    await settleAll();
+    await settle();
     panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-2"] [data-testid="delete-trash"] button')!.click();
     flushSync();
     const zone = panel.querySelector<HTMLElement>('[data-testid="drop-zone"]')!;
     zone.focus();
     props.refreshKey = 1;
-    await settleAll();
+    await settle();
     expect(panel.querySelector('[data-testid="asset-row-2"] .inline-confirm')).not.toBeNull();
     expect(document.activeElement).toBe(zone);
   });
@@ -929,15 +918,15 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
       .mockResolvedValueOnce([mkAsset({ id: 1, filename: 'a.png' }), mkAsset({ id: 2, filename: 'b.png' })])
       .mockReturnValue(new Promise<AssetItem[]>((r) => { releaseList = r; }));
     const { panel } = mountInPanel();
-    await settleAll();
+    await settle();
     panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
     flushSync();
     (panel.querySelector('.inline-confirm button.confirm') as HTMLButtonElement).click();
-    await settleAll();
+    await settle();
     expect(panel.querySelector('[data-testid="asset-row-1"]')).toBeNull();
     expect(document.activeElement).not.toBe(document.body);
     releaseList([mkAsset({ id: 2, filename: 'b.png' })]);
-    await settleAll();
+    await settle();
     expect(document.activeElement).toBe(
       panel.querySelector('[data-testid="asset-row-2"] [data-testid="delete-trash"] button'));
   });
@@ -945,13 +934,13 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
   it('a new asset context drops the old rows and their question until its list arrives (whole-branch review)', async () => {
     (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue([mkAsset({ id: 1, filename: 'a.png' })]);
     const { panel, props } = mountInPanel();
-    await settleAll();
+    await settle();
     panel.querySelector<HTMLButtonElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!.click();
     flushSync();
     const ctxB = makeStubAssetContext();
     (ctxB.list as ReturnType<typeof vi.fn>).mockReturnValue(new Promise<AssetItem[]>(() => {}));
     props.assetContext = ctxB;
-    await settleAll();
+    await settle();
     expect(panel.querySelector('[data-testid="asset-row-1"]')).toBeNull();
     expect(panel.querySelector('.inline-confirm')).toBeNull();
     expect(panel.querySelector('[data-testid="loading-indicator"]')).not.toBeNull();
@@ -960,7 +949,7 @@ describe('AssetSidebar — the delete question (Polish 1)', () => {
 
   it('the drop zone is aria-disabled with its reason while the sidebar is disabled or uploading', async () => {
     const { panel, props } = mountInPanel();
-    await settleAll();
+    await settle();
     const zone = panel.querySelector('[data-testid="drop-zone"]') as HTMLElement;
     expect(zone.hasAttribute('aria-disabled')).toBe(false);
     expect(zone.hasAttribute('title')).toBe(false);
@@ -981,7 +970,7 @@ describe('AssetSidebar — the saved upload limit (Settings D11b)', () => {
     const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
     Object.defineProperty(ev, 'dataTransfer', { value: { files: [file] } });
     dropZone.dispatchEvent(ev);
-    for (let i = 0; i < 3; i++) { await Promise.resolve(); flushSync(); }
+    await settle();
   }
   const sized = (mb: number) => {
     const f = new File(['x'], 'big.png', { type: 'image/png' });
@@ -993,7 +982,7 @@ describe('AssetSidebar — the saved upload limit (Settings D11b)', () => {
     uploadLimit.mb = 50;
     const onUploadFile = vi.fn().mockResolvedValue(mkAsset({ filename: 'big.png' }));
     const { target } = mountSidebar({ onUploadFile });
-    await Promise.resolve(); flushSync();
+    await settle();
     await drop(target, sized(51));
     expect(onUploadFile).not.toHaveBeenCalled();
     expect(target.querySelector('[data-testid="upload-error"]')?.textContent?.trim()).toBe('big.png is over the 50 MB limit.');
@@ -1006,12 +995,12 @@ describe('AssetSidebar — the saved upload limit (Settings D11b)', () => {
     uploadLimit.mb = 50;
     const onUploadFile = vi.fn().mockResolvedValue(mkAsset({ filename: 'big.png' }));
     const { target } = mountSidebar({ onUploadFile });
-    await Promise.resolve(); flushSync();
+    await settle();
     const dropZone = target.querySelector<HTMLElement>('[data-testid="drop-zone"]')!;
     const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
     Object.defineProperty(ev, 'dataTransfer', { value: { files: [sized(51), new File(['x'], 'tool.exe')] } });
     dropZone.dispatchEvent(ev);
-    for (let i = 0; i < 3; i++) { await Promise.resolve(); flushSync(); }
+    await settle();
     expect(onUploadFile).not.toHaveBeenCalled();
     expect(target.textContent).toContain('Nothing was uploaded. big.png is over the 50 MB limit. tool.exe: extension not allowed.');
   });
@@ -1021,12 +1010,12 @@ describe('AssetSidebar — the saved upload limit (Settings D11b)', () => {
     uploadLimit.mb = 50;
     const onUploadFile = vi.fn().mockResolvedValue(mkAsset({ filename: 'big.png' }));
     const { target } = mountSidebar({ onUploadFile });
-    await Promise.resolve(); flushSync();
+    await settle();
     const dropZone = target.querySelector<HTMLElement>('[data-testid="drop-zone"]')!;
     const ev = new Event('drop', { bubbles: true, cancelable: true }) as unknown as DragEvent;
     Object.defineProperty(ev, 'dataTransfer', { value: { files: [sized(51), new File(['x'], 'ok.png')] } });
     dropZone.dispatchEvent(ev);
-    for (let i = 0; i < 3; i++) { await Promise.resolve(); flushSync(); }
+    await settle();
     expect(onUploadFile).not.toHaveBeenCalled();
     expect(target.querySelector('[data-testid="upload-error"]')?.textContent?.trim())
       .toBe('Nothing was uploaded. big.png is over the 50 MB limit.');
@@ -1036,7 +1025,7 @@ describe('AssetSidebar — the saved upload limit (Settings D11b)', () => {
     uploadLimit.mb = null;
     const onUploadFile = vi.fn().mockResolvedValue(mkAsset({ filename: 'big.png' }));
     const { target } = mountSidebar({ onUploadFile });
-    await Promise.resolve(); flushSync();
+    await settle();
     await drop(target, sized(60));
     expect(onUploadFile).toHaveBeenCalled();
   });

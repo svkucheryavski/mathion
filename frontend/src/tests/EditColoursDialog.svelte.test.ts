@@ -1,18 +1,15 @@
 import { it, expect, vi, beforeEach, afterEach, describe } from 'vitest';
-import { mount, unmount, flushSync } from 'svelte';
+import { mount, unmount } from 'svelte';
 import EditColoursDialog from '../components/superuser/EditColoursDialog.svelte';
 import { ApiError } from '../lib/api';
 import type { BrandingPart, PanelColours, ThemeCheck } from '../lib/superuser';
 import { THEME_VARS } from './support/themeVars';
+import { settle, until } from './support/settle';
 
 // Branding D2, D10: the Edit colours dialog. The file is read once and the same
 // bytes go to the check and to Save; Save waits for the check; a refused
 // choice drops every pending change; a late check answer is ignored; the
 // preview declares the merged colours and never the raw file.
-
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
-/** FileReader answers in a task, not a microtask. */
-async function tick() { for (let i = 0; i < 3; i++) { await new Promise((r) => setTimeout(r, 0)); await settle(); } }
 
 const enc = new TextEncoder();
 const PROXY = "This file is over the server's upload limit.";
@@ -58,6 +55,7 @@ async function render(saved: PanelColours = colours()) {
   await settle();
 }
 const panel = () => document.querySelector<HTMLElement>('section.modal-panel')!;
+const alertText = () => panel().querySelector('[role="alert"]')?.textContent ?? null;
 const footButton = (label: string) => [...panel().querySelectorAll<HTMLButtonElement>('footer.modal-foot button')].find((b) => b.textContent!.trim() === label);
 const save = () => footButton('Save')!;
 const blocked = () => save().getAttribute('aria-disabled') === 'true';
@@ -69,8 +67,10 @@ async function choose(source: string | Uint8Array, name = 'school.css') {
   const bytes = typeof source === 'string' ? enc.encode(source) : source;
   const input = panel().querySelector<HTMLInputElement>('input[type="file"]')!;
   Object.defineProperty(input, 'files', { value: [new File([new Uint8Array(bytes)], name, { type: 'text/css' })], configurable: true });
+  const before = checks.length;
+  const was = alertText();
   input.dispatchEvent(new Event('change', { bubbles: true }));
-  await tick();
+  await until(() => checks.length > before || (alertText() !== null && alertText() !== was));
 }
 async function answerCheck(i: number, c: ThemeCheck) { checks[i].resolve(c); await settle(); }
 

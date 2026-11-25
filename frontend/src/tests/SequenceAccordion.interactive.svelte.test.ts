@@ -6,6 +6,7 @@ import { currentEditorVersion } from '../stores/currentEditorVersion.svelte';
 import { navigate, currentRoute, __resetGuardsForTests } from '../lib/router.svelte';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
 import type { AdminTree, AdminTreeBlock, AdminTreeItem, AdminTreeSequence, AdminTreeVersion } from '../lib/types';
+import { settle } from './support/settle';
 
 const fetchSpy = vi.fn();
 const originalFetch = globalThis.fetch;
@@ -16,7 +17,6 @@ function jres(body: unknown, status = 200) {
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response);
 }
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 
 function mkVersion(over: Partial<AdminTreeVersion> = {}): AdminTreeVersion {
   return {

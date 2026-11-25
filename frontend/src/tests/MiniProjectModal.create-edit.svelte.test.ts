@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi, onTestFinished } from 'vitest';
-import { mount, unmount, flushSync, type Component, type MountOptions } from 'svelte';
+import { mount, unmount, type Component, type MountOptions } from 'svelte';
 import MiniProjectModal from '../components/runs/MiniProjectModal.svelte';
 import type { Course, MiniProjectResponse, BlockResponse } from '../lib/types';
+import { settle } from './support/settle';
 
 const baseCourse: Course = { id: 1, slug: 'c', name: 'C', description: '', is_admin: true };
 
@@ -50,11 +51,6 @@ function jres(body: unknown, status = 200) {
     json: () => Promise.resolve(body),
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response);
-}
-
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
 }
 
 // jsdom doesn't ship DataTransfer/DragEvent constructors; mirror the pattern

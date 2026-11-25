@@ -1,0 +1,61 @@
+{
+  "files": {
+    "chapter/ch_basics.xml": "<chapter display_name=\"Week 1: Basics\">\n  <sequential url_name=\"seq_intro\"/>\n  <sequential url_name=\"seq_quizzes\"/>\n</chapter>\n",
+    "chapter/ch_practice.xml": "<chapter display_name=\"Week 2: Practice\">\n  <sequential url_name=\"seq_practice\"/>\n</chapter>\n",
+    "course.xml": "<course url_name=\"2026_T1\" org=\"MathionX\" course=\"DEMO101\"/>\n",
+    "course/2026_T1.xml": "<course display_name=\"Synthetic Demo Course\" max_attempts=\"3\" language=\"en\">\n  <chapter url_name=\"ch_basics\"/>\n  <chapter url_name=\"ch_practice\"/>\n  <wiki slug=\"MathionX.DEMO101.2026_T1\"/>\n</course>\n",
+    "discussion/d_week2.xml": "<discussion discussion_category=\"Week 2\" discussion_target=\"Notes\" display_name=\"Discussion\"/>\n",
+    "html/h_embed.html": "<p><iframe width=\"560\" height=\"315\" src=\"https://www.youtube.com/embed/AbCdEfGhIjK\" allowfullscreen></iframe></p>\n",
+    "html/h_embed.xml": "<html filename=\"h_embed\" display_name=\"Embedded video\"/>\n",
+    "html/h_notes.html": "<p>Use the discussion to share your answers.</p>\n",
+    "html/h_notes.xml": "<html filename=\"h_notes\" display_name=\"Notes\"/>\n",
+    "html/h_reading.html": "<p>The area of a square with side 3 is 3<sup>2</sup> = 9.</p>\n<ul>\n  <li>Squares grow fast.</li>\n  <li>Roots grow slowly.</li>\n</ul>\n",
+    "html/h_reading.xml": "<html filename=\"h_reading\" display_name=\"Reading\"/>\n",
+    "html/h_sine.html": "<iframe src=\"https://graasta.com/apps/sine-demo/\" width=\"100%\" height=\"500\" title=\"Sine demo\"></iframe>\n",
+    "html/h_sine.xml": "<html filename=\"h_sine\" display_name=\"Sine demo\"/>\n",
+    "html/h_staff.html": "<p>Answers for the teaching team.</p>\n",
+    "html/h_staff.xml": "<html filename=\"h_staff\" display_name=\"Staff only\"/>\n",
+    "html/h_welcome.html": "<h2>Welcome</h2>\n<p>This course uses formulas like \\(x^2 + y^2 = r^2\\) and</p>\n<p>\\[\\sigma = \\sqrt{\\frac{1}{n}\\sum_{i=1}^{n}(x_i-\\bar{x})^2}\\]</p>\n<p>See <a href=\"/static/notes.pdf\">the notes</a>.</p>\n<p><img src=\"/static/img/fig 1.png\" alt=\"Figure 1\"/></p>\n",
+    "html/h_welcome.xml": "<html filename=\"h_welcome\" display_name=\"Text\"/>\n",
+    "policies/2026_T1/policy.json": "{\"course/2026_T1\": {\"display_name\": \"Synthetic Demo Course\", \"max_attempts\": 2, \"showanswer\": \"finished\"}}\n",
+    "problem/p_checkbox.xml": "<problem display_name=\"Checkboxes\">\n  <p>Select the prime numbers.</p>\n  <choiceresponse>\n    <checkboxgroup>\n      <choice correct=\"true\">2</choice>\n      <choice correct=\"true\">3</choice>\n      <choice correct=\"false\">4</choice>\n    </checkboxgroup>\n  </choiceresponse>\n  <choiceresponse>\n    <label>Select the vowels.</label>\n    <checkboxgroup>\n      <choice correct=\"true\">a</choice>\n      <choice correct=\"false\">b</choice>\n      <choice correct=\"true\">e</choice>\n    </checkboxgroup>\n  </choiceresponse>\n</problem>\n",
+    "problem/p_dropdown.xml": "<problem display_name=\"Dropdowns\">\n  <p>The capital of France is</p>\n  <optionresponse>\n    <optioninput options=\"('Paris','Lyon','Nice')\" correct=\"Paris\"/>\n  </optionresponse>\n  <optionresponse>\n    <label>The square root of 16 is</label>\n    <optioninput>\n      <option correct=\"False\">2</option>\n      <option correct=\"True\">4</option>\n      <option correct=\"False\">8</option>\n    </optioninput>\n  </optionresponse>\n</problem>\n",
+    "problem/p_mc.xml": "<problem display_name=\"Single choice\" max_attempts=\"2\" showanswer=\"finished\" weight=\"1\">\n  <p>Which number is even?</p>\n  <multiplechoiceresponse>\n    <choicegroup type=\"MultipleChoice\">\n      <choice correct=\"false\">3</choice>\n      <choice correct=\"true\">4</choice>\n      <choice correct=\"false\">\\(\\pi\\)</choice>\n    </choicegroup>\n  </multiplechoiceresponse>\n  <solution>\n    <div class=\"detailed-solution\">\n      <p>Explanation</p>\n      <p>4 is divisible by 2.</p>\n    </div>\n  </solution>\n  <multiplechoiceresponse>\n    <label>What is \\(2 + 3\\)?</label>\n    <description>Pick one.</description>\n    <choicegroup type=\"MultipleChoice\" shuffle=\"true\">\n      <choice correct=\"true\">5<choicehint>Right.</choicehint></choice>\n      <choice correct=\"false\">6</choice>\n    </choicegroup>\n    <solution>\n      <div class=\"detailed-solution\"><p>Explanation</p><p>Add them.</p></div>\n    </solution>\n  </multiplechoiceresponse>\n  <demandhint>\n    <hint>Count on your fingers.</hint>\n  </demandhint>\n</problem>\n",
+    "problem/p_numeric.xml": "<problem display_name=\"Numbers\">\n  <p>What is \\(0.5 \\times 160\\)?</p>\n  <numericalresponse answer=\"80\">\n    <formulaequationinput/>\n  </numericalresponse>\n  <numericalresponse answer=\"9.81\">\n    <label>Give the acceleration of gravity in m/s<sup>2</sup>.</label>\n    <responseparam type=\"tolerance\" default=\"1%\"/>\n    <formulaequationinput/>\n  </numericalresponse>\n</problem>\n",
+    "problem/p_string.xml": "<problem display_name=\"Text answers\">\n  <p>Name the capital of Denmark.</p>\n  <stringresponse answer=\"Copenhagen\" type=\"ci\">\n    <additional_answer answer=\"København\"/>\n    <textline size=\"20\"/>\n  </stringresponse>\n  <stringresponse answer=\"mean\" type=\"\">\n    <label>Which statistic is the sum divided by the count?</label>\n    <textline size=\"20\"/>\n  </stringresponse>\n</problem>\n",
+    "sequential/seq_intro.xml": "<sequential display_name=\"Getting started\">\n  <vertical url_name=\"u_welcome\"/>\n  <vertical url_name=\"u_video\"/>\n  <vertical url_name=\"u_sine\"/>\n  <vertical url_name=\"u_two_parts\"/>\n</sequential>\n",
+    "sequential/seq_practice.xml": "<sequential display_name=\"Practice\">\n  <vertical url_name=\"u_text_answer\"/>\n  <vertical url_name=\"u_mixed\"/>\n  <vertical url_name=\"u_staff\"/>\n  <vertical url_name=\"u_embed\"/>\n</sequential>\n",
+    "sequential/seq_quizzes.xml": "<sequential display_name=\"Choice questions\" format=\"Homework\" graded=\"true\">\n  <vertical url_name=\"u_mc\"/>\n  <vertical url_name=\"u_checkbox\"/>\n  <vertical url_name=\"u_dropdown\"/>\n  <vertical display_name=\"Numbers\">\n    <problem url_name=\"p_numeric\"/>\n  </vertical>\n</sequential>\n",
+    "vertical/u_checkbox.xml": "<vertical display_name=\"Checkboxes\">\n  <problem url_name=\"p_checkbox\"/>\n</vertical>\n",
+    "vertical/u_dropdown.xml": "<vertical display_name=\"Dropdowns\">\n  <problem url_name=\"p_dropdown\"/>\n</vertical>\n",
+    "vertical/u_embed.xml": "<vertical display_name=\"Embedded video\">\n  <html url_name=\"h_embed\"/>\n</vertical>\n",
+    "vertical/u_mc.xml": "<vertical display_name=\"Single choice\">\n  <problem url_name=\"p_mc\"/>\n</vertical>\n",
+    "vertical/u_mixed.xml": "<vertical display_name=\"Discussion and notes\">\n  <discussion url_name=\"d_week2\"/>\n  <html url_name=\"h_notes\"/>\n</vertical>\n",
+    "vertical/u_sine.xml": "<vertical display_name=\"Sine demo\">\n  <html url_name=\"h_sine\"/>\n</vertical>\n",
+    "vertical/u_staff.xml": "<vertical display_name=\"Staff notes\" visible_to_staff_only=\"true\">\n  <html url_name=\"h_staff\"/>\n</vertical>\n",
+    "vertical/u_text_answer.xml": "<vertical display_name=\"Text answers\">\n  <problem url_name=\"p_string\"/>\n</vertical>\n",
+    "vertical/u_two_parts.xml": "<vertical display_name=\"Reading and video\">\n  <html url_name=\"h_reading\"/>\n  <video url_name=\"v_vimeo\"/>\n</vertical>\n",
+    "vertical/u_video.xml": "<vertical display_name=\"Intro video\">\n  <video url_name=\"v_intro\"/>\n</vertical>\n",
+    "vertical/u_welcome.xml": "<vertical display_name=\"Welcome\">\n  <html url_name=\"h_welcome\"/>\n</vertical>\n",
+    "video/v_intro.xml": "<video display_name=\"Intro video\" youtube_id_1_0=\"AbCdEfGhIjK\" start_time=\"00:01:05\" end_time=\"00:05:00\" download_video=\"true\" sub=\"intro_subs\">\n  <source src=\"https://example.org/intro.mp4\"/>\n  <transcript language=\"en\" src=\"intro-en.srt\"/>\n</video>\n",
+    "video/v_vimeo.xml": "<video display_name=\"Vimeo clip\" youtube_id_1_0=\"\" html5_sources=\"[&quot;https://vimeo.com/123456789&quot;]\"/>\n"
+  },
+  "static": [
+    {
+      "path": "img/fig 1.png",
+      "size": 67,
+      "skipped": null
+    },
+    {
+      "path": "notes.pdf",
+      "size": 586,
+      "skipped": null
+    }
+  ],
+  "apps": [
+    {
+      "name": "sine-demo.js",
+      "size": 409
+    }
+  ]
+}

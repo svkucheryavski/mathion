@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mount, unmount, flushSync, type ComponentProps } from 'svelte';
+import { mount, unmount, type ComponentProps } from 'svelte';
 import MiniProjectModal from '../components/runs/MiniProjectModal.svelte';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
 import { navigate, __resetGuardsForTests } from '../lib/router.svelte';
 import { localTzLabel } from '../lib/datetime';
 import type { Course, MiniProjectResponse, BlockResponse } from '../lib/types';
+import { settle } from './support/settle';
 
 type ModalProps = ComponentProps<typeof MiniProjectModal>;
 
@@ -34,11 +35,6 @@ function jres(body: unknown, status = 200) {
     json: () => Promise.resolve(body),
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response);
-}
-
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
 }
 
 const fetchSpy = vi.fn();

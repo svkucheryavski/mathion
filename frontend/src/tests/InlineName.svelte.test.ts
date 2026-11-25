@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mount, unmount, flushSync, createRawSnippet, type ComponentProps } from 'svelte';
 import InlineName from '../components/ui/InlineName.svelte';
 import { ApiError, OFFLINE_MESSAGE } from '../lib/api';
+import { settle } from './support/settle';
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
@@ -32,7 +33,6 @@ function key(el: HTMLElement, k: string) {
   el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
   flushSync();
 }
-async function settle() { for (let i = 0; i < 6; i++) await Promise.resolve(); flushSync(); }
 
 describe('InlineName (handoff §4 Inline field editing)', () => {
   it('the ✕ Cancel rings gray; ✓ does not (VR-B, call 10)', () => {

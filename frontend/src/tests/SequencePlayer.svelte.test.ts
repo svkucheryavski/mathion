@@ -18,6 +18,7 @@ import SequencePlayer from '../pages/SequencePlayer.svelte';
 import type { BlockContent, Item } from '../lib/types';
 import { expectRoutesInApp } from './support/routeClickProbe';
 import { installLinkRouter } from '../lib/linkRouter';
+import { settle } from './support/settle';
 
 const SLUG = 'algebra';
 
@@ -382,11 +383,6 @@ describe('SequencePlayer footer (T1 / D4; D93 the bottom bar)', () => {
   });
 });
 
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
-}
-
 describe('SequencePlayer 9d states (Slice-4 T2)', () => {
   it('loading: Skeleton (3 rows) while the course loads; then "Sequence not found" page ErrorState when the store stays empty', async () => {
     // Store NOT seeded → the :16-29 effect takes the loadCourse branch.
@@ -430,7 +426,6 @@ describe('SequencePlayer 9d states (Slice-4 T2)', () => {
 describe('SequencePlayer focus at the course ends', () => {
   const prev = (el: HTMLElement) => el.querySelector('footer.player-nav button.nav-btn.prev') as HTMLButtonElement;
   const next = (el: HTMLElement) => el.querySelector('footer.player-nav button.nav-btn.next') as HTMLButtonElement;
-  const settle = async () => { await new Promise((r) => setTimeout(r, 0)); flushSync(); };
 
   it('← onto the first item keeps focus on ←, which is blocked, not disabled', async () => {
     seed();
@@ -587,7 +582,6 @@ describe('SequencePlayer focus at the course ends', () => {
 
 // Review r1: the player's own course load and the visit record.
 describe('SequencePlayer load and visits', () => {
-  const settle = async () => { await new Promise((r) => setTimeout(r, 0)); flushSync(); };
 
   it('an aborted course load leaves loading to the new one', async () => {
     let resolveA!: () => void;

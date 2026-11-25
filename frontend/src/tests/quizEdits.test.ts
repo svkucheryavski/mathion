@@ -5,10 +5,9 @@ import {
 import { InPlaceAsk, DISCARD_NAV_ASK, type Ask, type Answer } from '../lib/askInPlace.svelte';
 import { ApiError } from '../lib/api';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
+import { settle } from './support/settle';
 
 afterEach(() => { vi.restoreAllMocks(); clearToasts(); document.body.replaceChildren(); });
-
-const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
 
 function handle(over: { dirty?: boolean; saving?: boolean; ask?: (q: Ask) => Promise<Answer> } = {}, id = 'a') {
   const close = vi.fn();
@@ -349,7 +348,7 @@ describe('InlineEdit', () => {
     ed.value = 'new';
     const ime = new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, cancelable: true });
     ed.keydown(ime);
-    await Promise.resolve();
+    await settle();
     expect(ime.defaultPrevented).toBe(false);
     expect(send).not.toHaveBeenCalled();
   });
@@ -373,7 +372,7 @@ describe('InlineEdit', () => {
     const enter = new KeyboardEvent('keydown', { key: 'Enter', cancelable: true });
     ed.keydown(enter);
     expect(enter.defaultPrevented).toBe(true);
-    await Promise.resolve();
+    await settle();
     expect(send).toHaveBeenCalledWith('new');
   });
 
@@ -395,7 +394,7 @@ describe('InlineEdit', () => {
     expect(ed.asking.current).toMatchObject({ warning: DISCARD_PROMPT });
     ed.asking.answer('cancel');
     expect(await p).toBe(false);
-    await flush();
+    await settle();
     expect(document.activeElement).toBe(field);
     expect(edits.active).toBe(ed.handle);
   });
@@ -463,7 +462,7 @@ describe('InlineEdit', () => {
     expect(ed.asking.current).toMatchObject({ confirmLabel: 'Change key' });
     ed.asking.answer('cancel');
     await p;
-    await flush();
+    await settle();
     expect(send).not.toHaveBeenCalled();
     expect(close).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(field);
@@ -477,7 +476,7 @@ describe('InlineEdit', () => {
     ed.value = 'new';
     const p = ed.commit();
     ed.asking.answer('confirm');
-    await flush();
+    await settle();
     expect(send).toHaveBeenCalledWith('new');
     expect(ed.asking.busy).toBe(true);
     expect(ed.saving).toBe(true);
@@ -495,7 +494,7 @@ describe('InlineEdit', () => {
     const p = ed.commit();
     drawn(ed.asking);
     ed.asking.answer('confirm');
-    await flush();
+    await settle();
     const elsewhere = document.body.appendChild(document.createElement('button'));
     elsewhere.focus();
     resolve();
@@ -513,7 +512,7 @@ describe('InlineEdit', () => {
     const p = ed.commit();
     drawn(ed.asking);
     ed.asking.answer('confirm');
-    await flush();
+    await settle();
     expect(ed.asking.host?.contains(document.activeElement)).toBe(true);
     resolve();
     await p;

@@ -16,7 +16,7 @@
     assembleBuildBody, buildStatus, checkBuildSize, checkImport, createDraft, discardDraft, localDate, markPresent, reportText, runBuild,
     uploadAll, type BuildOutcome, type UploadProgress,
   } from '../../lib/olx/run';
-  import type { CheckResponse, ImportLimits, ReportLine } from '../../lib/olx/types';
+  import type { CheckResponse, CheckSummary, ImportLimits, ReportLine } from '../../lib/olx/types';
   import type { Version } from '../../lib/types';
 
   let { courseId, courseSlug, versions, onClose, onBusyChange, registerAsk }: {
@@ -281,7 +281,7 @@
   }
 
   const count = (n: number | undefined, one: string, many: string) => `${n ?? 0} ${n === 1 ? one : many}`;
-  function summaryLine(s: Record<string, number>): string {
+  function summaryLine(s: CheckSummary): string {
     const bytes = s.bytes ?? 0;
     const kb = Math.round(bytes / 1024);
     const size = kb < 1024 ? `${bytes > 0 ? Math.max(1, kb) : 0} KB` : `${Math.round(bytes / MB)} MB`;

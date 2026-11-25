@@ -3,8 +3,8 @@ import { mount, unmount, flushSync } from 'svelte';
 import SuperuserUsers from '../pages/superuser/SuperuserUsers.svelte';
 import { rect, stubZoom } from './support/zoomStubs';
 import type { PanelUser, PanelUserList } from '../lib/superuser';
+import { settle } from './support/settle';
 
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 function jsonResponse(status: number, body: unknown) {
   return status === 204 ? new Response(null, { status })
     : new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });

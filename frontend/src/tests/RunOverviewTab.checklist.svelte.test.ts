@@ -4,6 +4,7 @@ import RunOverviewTab, {
   type DeleteOutcome, type PublishOutcome, type Readiness, type ReadinessRow, type UnpublishOutcome,
 } from '../components/runs/RunOverviewTab.svelte';
 import type { RunResponse } from '../lib/types';
+import { settle } from './support/settle';
 
 beforeEach(() => {
   document.body.innerHTML = '';
@@ -13,11 +14,6 @@ const makeRun = (over: Partial<RunResponse> = {}): RunResponse => ({
   id: 10, course_id: 1, version_id: 99, title: 'Spring', start_date: '2026-06-01', end_date: '2026-06-30',
   is_published: false, groups_enabled: false, ...over,
 } as RunResponse);
-
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
-}
 
 const TEACHER: ReadinessRow = { id: 'teacher', label: 'At least one teacher assigned', state: 'ok' };
 const VERSION: ReadinessRow = { id: 'version', label: 'Course version enabled', state: 'ok' };

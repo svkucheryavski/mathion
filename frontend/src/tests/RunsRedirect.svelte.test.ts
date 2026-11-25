@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mount, unmount, flushSync } from 'svelte';
+import { mount, unmount } from 'svelte';
 import RunsRedirect from '../pages/runs/RunsRedirect.svelte';
 import { session } from '../stores/session.svelte';
 import { currentRoute, __resetGuardsForTests } from '../lib/router.svelte';
 import * as router from '../lib/router.svelte';
+import { settle } from './support/settle';
 
 const user = {
   id: 1, email: 'u@x', full_name: 'U', is_superuser: false, is_disabled: false, photo_url: null,
@@ -19,7 +20,6 @@ function at(url: string) {
   currentRoute.search = location.search;
   currentRoute.hash = location.hash;
 }
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 
 beforeEach(() => {
   __resetGuardsForTests();

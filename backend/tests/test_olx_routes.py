@@ -345,29 +345,33 @@ def test_render_error_after_partial_inserts_rolls_back(auth_client, db, test_use
     assert db.get(CourseVersion, version.id).label == UNFINISHED
 
 
-def test_script_files_unlinked_only_after_commit(auth_client, db, test_user, monkeypatch):
+def test_script_files_unlinked_only_after_commit(auth_client, db, test_user, monkeypatch, tmp_path):
     _, version = _admin_course(db, test_user)
     _upload_all(auth_client, version.id)
-    events = []
+    folder = tmp_path / "scripts"
+    folder.mkdir()
+    script = folder / "sentinel.js"
+    script.write_text("x")
+    seen = []
     real_commit = db.commit
-    monkeypatch.setattr(olx_import, "apply", lambda plan, vid, s, day: ["/nonexistent/sentinel.js"])
-    monkeypatch.setattr(olx_import.os, "unlink", lambda p: events.append(("unlink", p)))
+    monkeypatch.setattr(olx_import, "apply", lambda plan, vid, s, day: [str(script)])
 
     def commit():
-        events.append(("commit", None))
+        seen.append(script.exists())
         real_commit()
     monkeypatch.setattr(db, "commit", commit)
     assert _build(auth_client, version.id).status_code == 200
-    assert events == [("commit", None), ("unlink", "/nonexistent/sentinel.js")]
+    assert seen == [False] and not script.exists()     # moved aside before, gone after
+    assert list(folder.iterdir()) == []
 
-    events.clear()
+    script.write_text("x")
 
     def failing_commit():
         raise RuntimeError("commit failed")
     monkeypatch.setattr(db, "commit", failing_commit)
     with pytest.raises(RuntimeError):
         _build(auth_client, version.id)
-    assert events == []
+    assert script.read_text() == "x" and [p.name for p in folder.iterdir()] == ["sentinel.js"]
 
 
 def test_apply_refused_maps_to_http(auth_client, db, test_user, monkeypatch):
@@ -1167,3 +1171,28 @@ def test_merge_keeps_names_with_an_inner_open_quote_apart():
 def test_merge_ignores_a_closing_quote_before_the_first_opening_one():
     line = _rl("skipped", "The file “extra.pdf” was not uploaded, so it is not in the draft")
     assert olx_import._merged([line], [_rl("skipped", "5” wide: “extra.pdf” was refused")], set()) == []
+
+
+def test_build_and_discard_take_the_version_lock_first(auth_client, db, test_user, monkeypatch):
+    from mathion.api import advisory
+    from tests.conftest import record_lock_calls
+    _, version = _admin_course(db, test_user)
+    _upload_all(auth_client, version.id)
+    from tests.test_concurrency_draft_lock import _statements
+    events = record_lock_calls(monkeypatch)
+    with _statements() as seen:
+        assert _build(auth_client, version.id).status_code == 200
+    assert events[0] == ("lock", advisory.LOCK_NS_VERSION_INFO, (version.id,))
+    assert _advisory_before_row_locks(seen)
+    _, draft = _admin_course(db, test_user, slug="olx-discard")
+    events.clear()
+    with _statements() as seen:
+        assert auth_client.post(f"/api/versions/{draft.id}/olx-import/discard").status_code == 204
+    assert events[0] == ("lock", advisory.LOCK_NS_VERSION_INFO, (draft.id,))
+    assert _advisory_before_row_locks(seen)
+
+
+def _advisory_before_row_locks(seen) -> bool:
+    lock = next(i for i, st in enumerate(seen) if "pg_advisory_xact_lock" in st)
+    row = next(i for i, st in enumerate(seen) if "FROM course_versions" in st and "FOR UPDATE" in st)
+    return lock < row

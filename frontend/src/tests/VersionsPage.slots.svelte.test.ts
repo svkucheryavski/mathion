@@ -22,6 +22,7 @@ import { versionsPageState } from '../lib/versionsPageLoader.svelte';
 import VersionsPage from '../pages/editor/VersionsPage.svelte';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
 import type { Version } from '../lib/types';
+import { settle } from './support/settle';
 
 const navigateMock = vi.mocked(navigate);
 
@@ -51,7 +52,6 @@ afterEach(() => {
   if (target.parentNode) target.parentNode.removeChild(target);
 });
 
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 async function render() {
   component = mount(VersionsPage, { target, props: { courseSlug: 'c' } });
   await settle();

@@ -6,6 +6,7 @@ import { expectRoutesInApp } from './support/routeClickProbe';
 import { currentRoute, __resetGuardsForTests } from '../lib/router.svelte';
 import { session } from '../stores/session.svelte';
 import { toasts, clearToasts } from '../stores/toasts.svelte';
+import { settle } from './support/settle';
 
 const fetchSpy = vi.fn();
 
@@ -28,15 +29,6 @@ function ok(body: unknown) {
     json: () => Promise.resolve(body),
     headers: new Headers({ 'content-type': 'application/json' }),
   } as unknown as Response);
-}
-
-async function settle() {
-  // Three sequential api.get calls (course → runs + versions in parallel) pass
-  // through api.ts's async request() function: each hop adds ~3–4 microtask
-  // ticks. onMount also adds one deferred queueMicrotask tick at the front,
-  // so 12 iterations reliably drains the full chain in jsdom/Vitest.
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
 }
 
 const adminCourse = { id: 1, slug: 'algebra', name: 'Algebra', description: '', is_admin: true };

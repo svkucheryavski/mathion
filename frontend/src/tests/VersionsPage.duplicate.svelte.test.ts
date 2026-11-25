@@ -30,6 +30,7 @@ import { versionsPageState } from '../lib/versionsPageLoader.svelte';
 import { pushToast } from '../stores/toasts.svelte';
 import VersionsPage from '../pages/editor/VersionsPage.svelte';
 import type { Version } from '../lib/types';
+import { settle } from './support/settle';
 
 // Typed handles to the already-hoisted mock fns (used in assertions + reset).
 const navigateMock = vi.mocked(navigate);
@@ -64,11 +65,6 @@ afterEach(() => {
   if (component) { unmount(component); component = null; }
   if (target.parentNode) target.parentNode.removeChild(target);
 });
-
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
-}
 
 function clickButtonByText(root: HTMLElement, text: string) {
   const btn = [...root.querySelectorAll('button')].find((b) => b.textContent?.trim() === text);

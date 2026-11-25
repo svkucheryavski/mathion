@@ -69,3 +69,23 @@ def test_looks_like_pdf():
     assert looks_like_pdf(b"MZ\x90\x00") is False
     assert looks_like_pdf(b"") is False
     assert looks_like_pdf(b"%PD") is False
+
+
+def test_sanitize_cap_trims_dash():
+    assert sanitize_filename("a" * 250 + "-b.png") == "a" * 250 + ".png"
+
+
+def test_sanitize_is_idempotent():
+    import random
+    rng = random.Random(20261124)
+    names = ["a" * 250 + "-b.png", "x." + "e" * 254, "ß" * 300 + ".png", "é-" * 130 + ".png"]
+    for _ in range(500):
+        size = rng.randint(245, 300)
+        base = [rng.choice("ab-") for _ in range(size)]
+        base[rng.randint(240, min(size, 252) - 1)] = "-"   # a dash near the cut
+        for _ in range(rng.randint(0, 3)):
+            base[rng.randrange(size)] = rng.choice(" .")
+        names.append("".join(base) + rng.choice([".png", ".pdf", ""]))
+    for name in names:
+        once = sanitize_filename(name)
+        assert sanitize_filename(once) == once, name

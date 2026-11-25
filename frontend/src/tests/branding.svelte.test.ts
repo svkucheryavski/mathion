@@ -3,6 +3,7 @@ import {
   PRODUCT_NAME, DEFAULT_BRANDING, branding, readInlineBranding, applyBranding, setBranding, THEME_WAIT_MS,
   type BrandingPublic,
 } from '../lib/branding.svelte';
+import { settle } from './support/settle';
 
 // Branding D13/D14: the inline data, and the head tags the app writes itself.
 
@@ -130,14 +131,14 @@ describe('applyBranding', () => {
   it('adds the new theme link before removing the old one, and resolves on load', async () => {
     let settled = false;
     const first = applyBranding(UPLOADED, doc).then(() => { settled = true; });
-    await Promise.resolve();
+    await settle();
     expect(themeLinks(doc).map((l) => l.getAttribute('href'))).toEqual([`/api/branding/theme.css?v=${'d'.repeat(16)}`]);
     expect(settled).toBe(false);
     loadThemes(doc);
     await first;
 
     const second = applyBranding({ ...UPLOADED, theme: 'e'.repeat(16) }, doc);
-    await Promise.resolve();
+    await settle();
     // Both are in the head until the new one has loaded: no flash of Mathion's colours.
     expect(themeLinks(doc).map((l) => l.getAttribute('href'))).toEqual([
       `/api/branding/theme.css?v=${'d'.repeat(16)}`, `/api/branding/theme.css?v=${'e'.repeat(16)}`,
@@ -150,7 +151,7 @@ describe('applyBranding', () => {
 
   it('resolves on error too, and keeps the new link', async () => {
     const done = applyBranding(UPLOADED, doc);
-    await Promise.resolve();
+    await settle();
     loadThemes(doc, 'error');
     await done;
     expect(themeLinks(doc)).toHaveLength(1);
@@ -162,7 +163,7 @@ describe('applyBranding', () => {
     built.href = '/_app/index.css';
     doc.head.append(built);
     const done = applyBranding(UPLOADED, doc);
-    await Promise.resolve();
+    await settle();
     loadThemes(doc);
     await done;
     expect(doc.head.lastElementChild).toBe(themeLinks(doc)[0]);
@@ -170,7 +171,7 @@ describe('applyBranding', () => {
 
   it('the same theme again changes nothing and resolves at once', async () => {
     const first = applyBranding(UPLOADED, doc);
-    await Promise.resolve();
+    await settle();
     loadThemes(doc);
     await first;
     const link = themeLinks(doc)[0];
@@ -180,7 +181,7 @@ describe('applyBranding', () => {
 
   it('theme: null removes the link', async () => {
     const first = applyBranding(UPLOADED, doc);
-    await Promise.resolve();
+    await settle();
     loadThemes(doc);
     await first;
     await applyBranding({ ...UPLOADED, theme: null }, doc);
@@ -192,7 +193,7 @@ describe('applyBranding', () => {
   async function settledSoon(p: Promise<void>) {
     let done = false;
     void p.then(() => { done = true; });
-    for (let i = 0; i < 5; i++) await Promise.resolve();
+    await settle();
     return done;
   }
 
@@ -245,7 +246,7 @@ describe('applyBranding', () => {
 
   it('every tag it writes carries data-branding', async () => {
     const done = applyBranding(UPLOADED, doc);
-    await Promise.resolve();
+    await settle();
     loadThemes(doc);
     await done;
     const tags = brandingTags(doc).map((t) => t.tagName.toLowerCase());

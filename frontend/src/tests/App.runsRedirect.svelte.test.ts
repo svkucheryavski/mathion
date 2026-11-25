@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mount, unmount, flushSync } from 'svelte';
+import { mount, unmount } from 'svelte';
 import App from '../App.svelte';
 import { session } from '../stores/session.svelte';
 import { navigate, currentRoute, __resetGuardsForTests } from '../lib/router.svelte';
+import { settle } from './support/settle';
 
 // Review Focus 2: an old bookmark while signed out. App sends the visitor to
 // login with `next`; RunsRedirect must not move the login page; after login
@@ -19,7 +20,6 @@ vi.mock('../lib/auth.svelte', () => ({
 const originalFetch = globalThis.fetch;
 let target: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 
 beforeEach(() => {
   __resetGuardsForTests();

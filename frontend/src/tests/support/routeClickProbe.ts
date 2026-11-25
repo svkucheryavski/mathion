@@ -1,12 +1,8 @@
 import { expect } from 'vitest';
 import { currentRoute } from '../../lib/router.svelte';
+import { settle } from './settle';
 
 const here = () => currentRoute.path + currentRoute.search + currentRoute.hash;
-
-/** Let a routed click's navigate() settle. */
-async function settle(): Promise<void> {
-  for (let i = 0; i < 5; i++) await Promise.resolve();
-}
 
 /**
  * C6: a ⌘-click on `link` is left to the browser (the page stays put), and a

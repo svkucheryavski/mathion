@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mount, unmount, flushSync } from 'svelte';
+import { mount, unmount } from 'svelte';
 import App from '../App.svelte';
 import { session } from '../stores/session.svelte';
 import { currentRoute, __resetGuardsForTests } from '../lib/router.svelte';
+import { settle } from './support/settle';
 
 // An unknown address renders NotFound through App. Only fetch is stubbed, and it
 // never resolves, so a page behind a click stays in its loading state.
@@ -17,7 +18,6 @@ vi.mock('../lib/auth.svelte', () => ({
 const originalFetch = globalThis.fetch;
 let target: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 const STUDENT = {
   id: 1, email: 'u@x', full_name: 'U', is_superuser: false, is_disabled: false, photo_url: null,
   has_course_admin: false, has_run_teacher: false,

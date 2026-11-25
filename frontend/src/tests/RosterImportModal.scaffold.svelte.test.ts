@@ -1,13 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import RosterImportModal from '../components/runs/RosterImportModal.svelte';
+import { settle } from './support/settle';
 
 beforeEach(() => {
   vi.useFakeTimers();
   document.body.innerHTML = '';
 });
-
-async function settle() { await Promise.resolve(); await Promise.resolve(); flushSync(); }
 
 function mountModal(extra: Record<string, unknown> = {}) {
   const target = document.createElement('div');

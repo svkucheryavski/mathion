@@ -3,8 +3,8 @@ import { mount, unmount, flushSync } from 'svelte';
 import SuperuserSettings from '../pages/superuser/SuperuserSettings.svelte';
 import type { PanelSettings } from '../lib/superuser';
 import { uploadLimit, resetUploadLimit } from '../lib/uploadLimit.svelte';
+import { settle } from './support/settle';
 
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 function jsonResponse(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }

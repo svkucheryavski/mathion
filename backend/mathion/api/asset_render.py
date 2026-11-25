@@ -1,4 +1,5 @@
 import os
+import re
 from urllib.parse import unquote
 
 from fastapi import HTTPException
@@ -6,9 +7,46 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 
+DATA_URL_REFUSAL = ("Images pasted as data: URLs are not supported. "
+                    "Upload the file under Assets and link it by name.")
+BLOCK_DATA_URL_REFUSAL = ("Images pasted as data: URLs are not supported in block info. "
+                          "Link an image by its full web address.")
+
+
+_ESCAPE = re.compile(r"%([0-9A-Fa-f]{2})")
+_ESCAPED_ESCAPE = re.compile(r"%25[0-9A-Fa-f]{2}")
+
+
+def _shown(name: str) -> str:
+    """A missing name as typed: decoded, unless decoding would read as another escape or letter."""
+    if _ESCAPED_ESCAPE.search(name) or any(chr(int(h, 16)).isascii() and chr(int(h, 16)).isalnum()
+                                           for h in _ESCAPE.findall(name)):
+        return name
+    return unquote(name)
+
+
 def _names(missing: set[str]) -> str:
     """Missing names as the author typed them (markdown-it percent-encodes targets)."""
-    return ", ".join(sorted(unquote(n) for n in missing))
+    return ", ".join(sorted({_shown(n) for n in missing}))
+
+
+def _checked_refs(content_md: str) -> set[str]:
+    """Asset names the text refers to; a pasted data: image is refused."""
+    from mathion.markdown import extract_asset_filenames, is_data_url
+
+    refs = extract_asset_filenames(content_md)
+    if any(is_data_url(r) for r in refs):
+        raise HTTPException(status_code=422, detail=DATA_URL_REFUSAL)
+    return refs
+
+
+def render_without_assets(content_md: str | None) -> str:
+    """Render text that cannot hold assets (block info); a pasted data: image is still refused."""
+    from mathion.markdown import extract_asset_filenames, is_data_url, render_markdown
+
+    if any(is_data_url(r) for r in extract_asset_filenames(content_md or "")):
+        raise HTTPException(status_code=422, detail=BLOCK_DATA_URL_REFUSAL)
+    return render_markdown(content_md or "")
 
 
 def render_with_assets(db: Session, version_id: int, content_md: str | None) -> str:
@@ -21,16 +59,15 @@ def render_with_assets(db: Session, version_id: int, content_md: str | None) -> 
     Use everywhere that markdown is saved as HTML for a course version:
     item content, question text/explanation, version info_md.
     """
-    from mathion.markdown import extract_asset_filenames, render_markdown, resolve_asset_urls
+    from mathion.markdown import render_markdown
     from mathion.models import Asset
 
     if not content_md:
         return render_markdown(content_md)
 
-    html = render_markdown(content_md)
-    ref_filenames = extract_asset_filenames(content_md)
+    ref_filenames = _checked_refs(content_md)
     if not ref_filenames:
-        return html
+        return render_markdown(content_md)
 
     existing = set(db.execute(
         select(Asset.filename).where(
@@ -44,7 +81,7 @@ def render_with_assets(db: Session, version_id: int, content_md: str | None) -> 
             status_code=422,
             detail=f"Referenced assets not found in version: {_names(missing)}",
         )
-    return resolve_asset_urls(html, version_id, ref_filenames)
+    return render_markdown(content_md, asset_url=lambda name: f"/assets/{version_id}/{name}")
 
 
 def sync_asset_references(
@@ -162,11 +199,11 @@ def sync_script_reference(
         )
         if still_referenced:
             continue
-        asset = db.get(Asset, aid)
-        if asset is None:
-            continue
-        removed_files.append(os.path.join(_asset_dir(asset.version_id), asset.filename))
-        db.delete(asset)
+        gone = db.execute(
+            sa_delete(Asset).where(Asset.id == aid).returning(Asset.version_id, Asset.filename)
+        ).first()
+        if gone is not None:                           # only a row this call deleted gives up its file
+            removed_files.append(os.path.join(_asset_dir(gone.version_id), gone.filename))
 
     return removed_files
 
@@ -179,16 +216,15 @@ def render_with_run_assets(db: Session, run_id: int, content_md: str | None) -> 
     filenames to `/api/runs/{run_id}/assets/{filename}` paths in the rendered HTML.
     Raises 422 if any referenced filename is missing from this run's assets.
     """
-    from mathion.markdown import extract_asset_filenames, render_markdown
+    from mathion.markdown import render_markdown
     from mathion.models import RunAsset
 
     if not content_md:
         return render_markdown(content_md)
 
-    html = render_markdown(content_md)
-    ref_filenames = extract_asset_filenames(content_md)
+    ref_filenames = _checked_refs(content_md)
     if not ref_filenames:
-        return html
+        return render_markdown(content_md)
 
     existing = set(db.execute(
         select(RunAsset.filename).where(
@@ -202,14 +238,7 @@ def render_with_run_assets(db: Session, run_id: int, content_md: str | None) -> 
             status_code=422,
             detail=f"Referenced run-assets not found: {_names(missing)}",
         )
-
-    # Rewrite bare filenames to run-scoped URLs. Mirror Phase 6's
-    # resolve_asset_urls (markdown.py:71) style — use html.replace, not regex.
-    base_url = f"/api/runs/{run_id}/assets"
-    for filename in ref_filenames:
-        html = html.replace(f'src="{filename}"', f'src="{base_url}/{filename}"')
-        html = html.replace(f'href="{filename}"', f'href="{base_url}/{filename}"')
-    return html
+    return render_markdown(content_md, asset_url=lambda name: f"/api/runs/{run_id}/assets/{name}")
 
 
 def reference_new_run_asset(db: Session, asset, mp_ids: list[int]) -> None:

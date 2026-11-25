@@ -19,6 +19,7 @@ import { ApiError } from '../lib/api';
 import CourseView from '../pages/CourseView.svelte';
 import type { StudentMiniProjectListItem } from '../lib/types';
 import { formatShortDeadline } from '../lib/datetime';
+import { settle } from './support/settle';
 
 let target: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
@@ -34,16 +35,6 @@ afterEach(() => {
   if (target.parentNode) target.parentNode.removeChild(target);
   __test__setSlots(null);
 });
-
-// 12-tick settle: CourseView fires loadCourse() inside an $effect, then waits
-// for the .catch(...).finally(() => { loading = false; }) chain — a multi-tick
-// promise chain. A bare `await Promise.resolve()` would leave `loading=true`
-// and the page would render the Skeleton branch without the BlockGroup tree.
-// Copied verbatim from tests/RunDetailPage.svelte.test.ts:83-86.
-async function settle() {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  flushSync();
-}
 
 describe('CourseView — mpByBlockId pass-through to BlockGroup (E2)', () => {
   it('renders MiniProjectLink for the block when the snapshot has a matching mp item', async () => {
@@ -84,7 +75,6 @@ describe('CourseView — mpByBlockId pass-through to BlockGroup (E2)', () => {
       props: { courseSlug: 'course-x' },
     });
     await settle();
-    flushSync();
 
     const link = target.querySelector<HTMLAnchorElement>(
       'a[href="/courses/course-x/blocks/intro/mini-project"]',

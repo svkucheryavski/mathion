@@ -3,10 +3,10 @@ import { mount, unmount, flushSync } from 'svelte';
 import EditEmailDialog from '../components/superuser/EditEmailDialog.svelte';
 import { ApiError } from '../lib/api';
 import type { PanelEmailSettings } from '../lib/superuser';
+import { settle } from './support/settle';
 
 let target: HTMLDivElement;
 let cmp: ReturnType<typeof mount> | null = null;
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 afterEach(() => {
   if (cmp) unmount(cmp); cmp = null; target?.remove();
   document.documentElement.style.overflow = '';

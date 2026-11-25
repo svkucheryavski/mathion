@@ -336,6 +336,66 @@ def test_missing_asset_message_shows_names_as_typed(admin_client, asset_tmpdir):
     assert "café.png" in response.json()["detail"] and "my notes.pdf" in response.json()["detail"]
 
 
+def _seq(admin_client, slug, upload=None):
+    course = admin_client.post("/api/courses", json={"slug": slug, "name": "M", "description": ""}).json()
+    version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
+    if upload:
+        admin_client.post(f"/api/versions/{version['id']}/assets",
+                          files={"file": (upload, io.BytesIO(b"png"), "image/png")})
+    block = admin_client.post(f"/api/versions/{version['id']}/blocks", json={"title": "B", "info": ""}).json()
+    seq = admin_client.post(f"/api/blocks/{block['id']}/sequences", json={"title": "S"}).json()
+    return version, seq
+
+
+def _page(admin_client, seq, md):
+    return admin_client.post(f"/api/sequences/{seq['id']}/items",
+                             json={"title": "Page", "type": "static_page", "content_md": md})
+
+
+def test_item_asset_rewrite_skips_code_and_math(admin_client, asset_tmpdir):
+    version, seq = _seq(admin_client, "md-rw", upload="pic.png")
+    r = _page(admin_client, seq, '![p](pic.png) and `src="pic.png"` and $\\text{src="pic.png"}$')
+    assert r.status_code in (200, 201), r.text
+    assert r.json()["content_html"].count(f'/assets/{version["id"]}/pic.png') == 1
+
+
+@pytest.mark.parametrize("target", ["data:image/png;base64,AAAA", "DATA:image/png;base64,AAAA"])
+def test_data_image_refused_with_short_message(admin_client, asset_tmpdir, target):
+    from mathion.api import asset_render
+    _, seq = _seq(admin_client, "md-data")
+    r = _page(admin_client, seq, f"![a]({target})")
+    assert r.status_code == 422
+    assert r.json()["detail"] == ("Images pasted as data: URLs are not supported. "
+                                  "Upload the file under Assets and link it by name.")
+    assert r.json()["detail"] == asset_render.DATA_URL_REFUSAL
+
+
+def test_data_link_text_is_not_refused(admin_client, asset_tmpdir):
+    _, seq = _seq(admin_client, "md-datalink")
+    assert _page(admin_client, seq, "[x](data:text/html,hi)").status_code in (200, 201)
+
+
+def test_missing_names_keep_typed_spelling(admin_client, asset_tmpdir):
+    _, seq = _seq(admin_client, "md-typed")
+    r = _page(admin_client, seq, "![a](p%69c.png) ![b](pic.png) ![c](pic.png)")
+    assert r.status_code == 422
+    assert r.json()["detail"].endswith(": p%69c.png, pic.png")
+
+
+def test_missing_names_keep_escaped_percent(admin_client, asset_tmpdir):
+    _, seq = _seq(admin_client, "md-typed2")
+    r = _page(admin_client, seq, "![a](a%2541.png) ![b](a%41.png)")
+    assert r.status_code == 422
+    assert r.json()["detail"].endswith(": a%2541.png, a%41.png")
+
+
+def test_missing_names_show_a_plain_percent(admin_client, asset_tmpdir):
+    _, seq = _seq(admin_client, "md-typed3")
+    r = _page(admin_client, seq, "![a](100%.png)")
+    assert r.status_code == 422
+    assert r.json()["detail"].endswith(": 100%.png")
+
+
 def test_item_update_tracks_references(admin_client, db, asset_tmpdir):
     course = admin_client.post("/api/courses", json={"slug": "md3", "name": "M", "description": ""}).json()
     version = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
@@ -409,6 +469,40 @@ def test_version_copy_assets(admin_client, db, asset_tmpdir):
     v2_dir = asset_tmpdir / "courses" / str(v2["id"])
     assert (v2_dir / "a.png").read_bytes() == b"aaa"
     assert (v2_dir / "b.pdf").read_bytes() == b"bbb"
+
+
+def test_version_copy_assets_failure_leaves_nothing(admin_client, db, asset_tmpdir, monkeypatch):
+    import shutil
+    from mathion.models import CourseVersion
+    course = admin_client.post("/api/courses", json={"slug": "copy-fail", "name": "C", "description": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
+    for name in ("a.png", "b.png"):
+        admin_client.post(f"/api/versions/{v1['id']}/assets", files={"file": (name, io.BytesIO(b"x"), "image/png")})
+    real, calls = shutil.copy2, []
+
+    def flaky(src, dst):
+        calls.append(dst)
+        if len(calls) == 2:
+            raise FileNotFoundError(src)                  # the source vanished mid-copy
+        return real(src, dst)
+
+    monkeypatch.setattr(shutil, "copy2", flaky)
+    with pytest.raises(FileNotFoundError):
+        admin_client.post(f"/api/courses/{course['id']}/versions",
+                          json={"label": "L2", "info_md": "", "copy_assets_from": v1["id"]})
+    assert sorted(p.name for p in (asset_tmpdir / "courses").iterdir()) == [str(v1["id"])]
+    db.expire_all()
+    assert [v.id for v in db.query(CourseVersion).filter_by(course_id=course["id"])] == [v1["id"]]
+
+
+def test_version_copy_assets_refused_info_leaves_nothing(admin_client, asset_tmpdir):
+    course = admin_client.post("/api/courses", json={"slug": "copy-422", "name": "C", "description": ""}).json()
+    v1 = admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
+    admin_client.post(f"/api/versions/{v1['id']}/assets", files={"file": ("a.png", io.BytesIO(b"x"), "image/png")})
+    r = admin_client.post(f"/api/courses/{course['id']}/versions",
+                          json={"label": "L2", "info_md": "![n](nope.png)", "copy_assets_from": v1["id"]})
+    assert r.status_code == 422
+    assert sorted(p.name for p in (asset_tmpdir / "courses").iterdir()) == [str(v1["id"])]
 
 
 def test_version_copy_assets_wrong_course_rejected(admin_client, asset_tmpdir):
@@ -703,26 +797,38 @@ def test_asset_file_response_has_nosniff(admin_client, asset_tmpdir):
         assert response.headers["x-content-type-options"] == "nosniff"
 
 
-def test_upload_into_a_version_deleted_meanwhile_leaves_no_folder(admin_client, asset_tmpdir, monkeypatch):
-    from sqlalchemy import text
-    from mathion.api import assets as assets_api
+def _after_upload_commit(sql, version_id, written):
+    """Run sql in a second session right after the commit that follows the file write."""
+    from sqlalchemy import event, text
+    from sqlalchemy.orm import Session
     from mathion.database import SessionLocal
-    _course, version = _create_published_version(admin_client)
-    real_replace = assets_api.os.replace
+    fired = []
 
-    def replace_after_delete(src, dst):
+    def run(session):
+        if fired or not written.exists():
+            return
+        fired.append(True)
         with SessionLocal() as s:
-            s.execute(text("DELETE FROM course_versions WHERE id = :id"), {"id": version["id"]})
+            s.execute(text(sql), {"id": version_id})
             s.commit()
-        real_replace(src, dst)
 
-    monkeypatch.setattr(assets_api.os, "replace", replace_after_delete)
-    response = admin_client.post(
-        f"/api/versions/{version['id']}/assets",
-        files={"file": ("a.png", io.BytesIO(b"x"), "image/png")},
-    )
-    assert response.status_code == 404
-    assert not (asset_tmpdir / "courses" / str(version["id"])).exists()
+    event.listen(Session, "after_commit", run)
+    return lambda: event.remove(Session, "after_commit", run)
+
+
+def test_upload_into_a_version_deleted_meanwhile_leaves_no_folder(admin_client, asset_tmpdir):
+    _course, version = _create_published_version(admin_client)
+    folder = asset_tmpdir / "courses" / str(version["id"])
+    stop = _after_upload_commit("DELETE FROM course_versions WHERE id = :id", version["id"], folder / "a.png")
+    try:
+        response = admin_client.post(
+            f"/api/versions/{version['id']}/assets",
+            files={"file": ("a.png", io.BytesIO(b"x"), "image/png")},
+        )
+    finally:
+        stop()
+    assert (response.status_code, response.json()["detail"]) == (404, "CourseVersion not found")
+    assert not folder.exists()
 
 
 def test_upload_into_a_version_deleted_before_the_insert_is_404(admin_client, monkeypatch):
@@ -744,20 +850,97 @@ def test_upload_into_a_version_deleted_before_the_insert_is_404(admin_client, mo
     assert (response.status_code, response.json()["detail"]) == (404, "CourseVersion not found")
 
 
-def test_upload_whose_asset_row_is_deleted_meanwhile_is_404(admin_client, asset_tmpdir, monkeypatch):
+def test_upload_whose_asset_row_is_deleted_meanwhile_is_404(admin_client, asset_tmpdir):
+    _course, version = _create_published_version(admin_client)
+    written = asset_tmpdir / "courses" / str(version["id"]) / "a.png"
+    stop = _after_upload_commit("DELETE FROM assets WHERE version_id = :id", version["id"], written)
+    try:
+        response = admin_client.post(f"/api/versions/{version['id']}/assets",
+                                     files={"file": ("a.png", io.BytesIO(b"x"), "image/png")})
+    finally:
+        stop()
+    assert (response.status_code, response.json()["detail"]) == (404, "Asset not found")
+
+
+def test_version_delete_waits_for_the_upload(admin_client, asset_tmpdir, monkeypatch):
+    import os
     from sqlalchemy import text
-    from mathion.api import assets as assets_api
+    from sqlalchemy.exc import OperationalError
     from mathion.database import SessionLocal
     _course, version = _create_published_version(admin_client)
-    real_replace = assets_api.os.replace
+    outcome = []
+    real_replace = os.replace
 
-    def replace_after_delete(src, dst):
+    def replace(src, dst):
         with SessionLocal() as s:
-            s.execute(text("DELETE FROM assets WHERE version_id = :id"), {"id": version["id"]})
-            s.commit()
+            s.execute(text("SET LOCAL lock_timeout = '200ms'"))
+            try:
+                s.execute(text("DELETE FROM course_versions WHERE id = :id"), {"id": version["id"]})
+                outcome.append("deleted")
+            except OperationalError:
+                outcome.append("waited")
+            s.rollback()
         real_replace(src, dst)
 
-    monkeypatch.setattr(assets_api.os, "replace", replace_after_delete)
-    response = admin_client.post(f"/api/versions/{version['id']}/assets",
-                                 files={"file": ("a.png", io.BytesIO(b"x"), "image/png")})
-    assert (response.status_code, response.json()["detail"]) == (404, "Asset not found")
+    monkeypatch.setattr(os, "replace", replace)
+    r = admin_client.post(f"/api/versions/{version['id']}/assets",
+                          files={"file": ("a.png", io.BytesIO(b"x"), "image/png")})
+    assert outcome == ["waited"] and r.status_code == 201
+
+
+# ----- beta gate Task 2: the file is on disk before its row is committed -----
+
+
+def _draft(admin_client, slug):
+    course = admin_client.post("/api/courses", json={"slug": slug, "name": "M", "description": ""}).json()
+    return admin_client.post(f"/api/courses/{course['id']}/versions", json={"label": "L", "info_md": ""}).json()
+
+
+def _upload(admin_client, version, name="pic.png"):
+    return admin_client.post(f"/api/versions/{version['id']}/assets",
+                             files={"file": (name, io.BytesIO(b"png"), "image/png")})
+
+
+def test_upload_row_invisible_until_file_written(admin_client, asset_tmpdir, monkeypatch):
+    import os
+    from sqlalchemy import func, select
+    from mathion.database import SessionLocal
+    from mathion.models import Asset
+    version = _draft(admin_client, "up-order")
+    seen = []
+    real_replace = os.replace
+
+    def replace(src, dst):
+        with SessionLocal() as s:
+            seen.append(s.scalar(select(func.count(Asset.id)).where(Asset.version_id == version["id"])))
+        real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", replace)
+    assert _upload(admin_client, version).status_code == 201
+    assert seen == [0]
+
+
+def test_upload_disk_failure_leaves_no_row_and_no_file(admin_client, asset_tmpdir, db, monkeypatch):
+    import os
+    from sqlalchemy import select
+    from mathion.models import Asset
+    version = _draft(admin_client, "up-fail")
+
+    def replace(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", replace)
+    r = _upload(admin_client, version)
+    assert r.status_code == 500 and r.json()["detail"] == "Failed to write asset to disk"
+    db.expire_all()
+    assert db.scalars(select(Asset).where(Asset.version_id == version["id"])).all() == []
+    folder = asset_tmpdir / "courses" / str(version["id"])
+    left = [p.name for p in folder.iterdir()] if folder.exists() else []
+    assert left == []
+
+
+def test_upload_duplicate_name_still_409(admin_client, asset_tmpdir):
+    version = _draft(admin_client, "up-dup")
+    assert _upload(admin_client, version).status_code == 201
+    r = _upload(admin_client, version)
+    assert r.status_code == 409 and "already exists" in r.json()["detail"]

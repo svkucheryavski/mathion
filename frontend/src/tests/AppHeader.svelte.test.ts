@@ -16,6 +16,7 @@ import { session } from '../stores/session.svelte';
 import { currentRoute } from '../lib/router.svelte';
 import * as router from '../lib/router.svelte';
 import { logout } from '../lib/auth.svelte';
+import { settle } from './support/settle';
 
 const userBase = {
   id: 1,
@@ -209,14 +210,12 @@ describe('AppHeader', () => {
     logoutBtn!.click();
     // Drain any synchronous microtasks; logout has NOT resolved yet, so
     // navigate must not have fired if the component is awaiting.
-    for (let i = 0; i < 8; i++) await Promise.resolve();
-    flushSync();
+    await settle();
     expect(logout).toHaveBeenCalled();
     expect(navSpy).not.toHaveBeenCalled();
     // Now resolve logout and drain again; navigate should fire after the await.
     resolveLogout();
-    for (let i = 0; i < 8; i++) await Promise.resolve();
-    flushSync();
+    await settle();
     expect(navSpy).toHaveBeenCalledWith('/login');
   });
 });

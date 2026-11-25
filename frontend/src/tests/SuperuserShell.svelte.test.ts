@@ -7,6 +7,7 @@ import { session } from '../stores/session.svelte';
 import * as dirtyMod from '../lib/dirtyRegistry.svelte';
 import { SETUP_MARK, type PanelSetup } from '../lib/setup';
 import { KEEP_ALIVE_MS } from '../lib/setupStore.svelte';
+import { settle } from './support/settle';
 
 vi.mock('../lib/auth.svelte', () => ({
   logout: vi.fn(async () => {}),
@@ -67,10 +68,6 @@ const SETTINGS = {
   sign_in: { pin_minutes: 10, pin_requests_per_hour: 3, pin_failures_per_hour: 5, longest_sign_in_days: 30 },
   site: { base_url: 'https://learn.uni.dk' },
 };
-async function settle() {
-  for (let i = 0; i < 8; i++) await Promise.resolve();
-  flushSync();
-}
 function buttonByText(t: HTMLElement, text: string): HTMLButtonElement | null {
   return (Array.from(t.querySelectorAll('button')) as HTMLButtonElement[])
     .find((b) => (b.textContent ?? '').trim() === text) ?? null;

@@ -3,12 +3,13 @@ from sqlalchemy import exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from mathion.api.asset_render import render_without_assets
+from mathion.api.draft_lock import lock_draft
 from mathion.api.text_utils import slugify
 from mathion.api.lookups import INT4_MAX, get_or_404
 from mathion.api.authz import has_run_pinned_to_version, require_course_admin
 from mathion.database import get_db
 from mathion.dependencies import get_current_user
-from mathion.markdown import render_markdown
 from mathion.models import Block, CourseAdmin, CourseVersion, Sequence
 from mathion.models_auth import User
 from mathion.schemas import (
@@ -41,6 +42,7 @@ def _get_version_state(db: Session, version_id: int) -> str:
 
 @router.post("/api/versions/{version_id}/blocks", status_code=201, response_model=BlockResponse)
 def create_block(version_id: int, data: BlockCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    lock_draft(db, version_id)                         # the draft's write lock, then fresh reads
     version = get_or_404(db, CourseVersion, version_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
@@ -71,8 +73,7 @@ def create_block(version_id: int, data: BlockCreate, db: Session = Depends(get_d
             }],
         )
 
-    # NOTE: order assignment is not safe under concurrent writes.
-    # For PostgreSQL, consider SELECT ... FOR UPDATE or a serializable transaction.
+    # Safe: the draft lock serializes creates in this version.
     current_max_order = db.scalar(select(func.max(Block.order)).where(Block.version_id == version_id)) or 0
     if current_max_order >= INT4_MAX:
         raise HTTPException(
@@ -86,7 +87,7 @@ def create_block(version_id: int, data: BlockCreate, db: Session = Depends(get_d
         slug=slug,
         order=next_order,
         info=data.info,
-        info_html=render_markdown(data.info or ""),
+        info_html=render_without_assets(data.info),
     )
     db.add(block)
     try:
@@ -121,6 +122,9 @@ def list_blocks(version_id: int, limit: int = 100, offset: int = 0, db: Session 
 
 @router.patch("/api/blocks/{block_id}", response_model=BlockResponse)
 def update_block(block_id: int, data: BlockUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    block = get_or_404(db, Block, block_id)
+    version = get_or_404(db, CourseVersion, block.version_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
     block = get_or_404(db, Block, block_id)
     version = get_or_404(db, CourseVersion, block.version_id)
     require_course_admin(db, user, version.course_id)
@@ -176,10 +180,10 @@ def update_block(block_id: int, data: BlockUpdate, db: Session = Depends(get_db)
                 )
             updates["slug"] = new_slug
 
+    if "info" in updates:
+        updates["info_html"] = render_without_assets(updates["info"])  # refuse before any change
     for field, value in updates.items():
         setattr(block, field, value)
-        if field == "info":
-            block.info_html = render_markdown(value or "")
     try:
         db.commit()
     except IntegrityError:
@@ -196,6 +200,9 @@ def update_block(block_id: int, data: BlockUpdate, db: Session = Depends(get_db)
 def delete_block(block_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     block = get_or_404(db, Block, block_id)
     version = get_or_404(db, CourseVersion, block.version_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
+    block = get_or_404(db, Block, block_id)
+    version = get_or_404(db, CourseVersion, block.version_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
         raise HTTPException(status_code=403, detail="Version is disabled")
@@ -210,6 +217,7 @@ def delete_block(block_id: int, db: Session = Depends(get_db), user: User = Depe
 
 @router.post("/api/versions/{version_id}/blocks/reorder")
 def reorder_blocks(version_id: int, data: ReorderRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    lock_draft(db, version_id)                         # the draft's write lock, then fresh reads
     version = get_or_404(db, CourseVersion, version_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
@@ -225,7 +233,7 @@ def reorder_blocks(version_id: int, data: ReorderRequest, db: Session = Depends(
     if incoming_ids != real_ids:
         raise HTTPException(status_code=400, detail="Reorder list must include every block in this version")
 
-    for entry in data.order:
+    for entry in sorted(data.order, key=lambda e: e.id):   # id order, one lock order
         block = db.get(Block, entry.id)
         block.order = entry.order
     db.commit()
@@ -237,6 +245,9 @@ def reorder_blocks(version_id: int, data: ReorderRequest, db: Session = Depends(
 
 @router.post("/api/blocks/{block_id}/sequences", status_code=201, response_model=SequenceResponse)
 def create_sequence(block_id: int, data: SequenceCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    block = get_or_404(db, Block, block_id)
+    version = get_or_404(db, CourseVersion, block.version_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
     block = get_or_404(db, Block, block_id)
     version = get_or_404(db, CourseVersion, block.version_id)
     require_course_admin(db, user, version.course_id)
@@ -268,8 +279,7 @@ def create_sequence(block_id: int, data: SequenceCreate, db: Session = Depends(g
             }],
         )
 
-    # NOTE: order assignment is not safe under concurrent writes.
-    # For PostgreSQL, consider SELECT ... FOR UPDATE or a serializable transaction.
+    # Safe: the draft lock serializes creates in this version.
     current_max_order = db.scalar(select(func.max(Sequence.order)).where(Sequence.block_id == block_id)) or 0
     if current_max_order >= INT4_MAX:
         raise HTTPException(
@@ -304,6 +314,10 @@ def list_sequences(block_id: int, limit: int = 100, offset: int = 0, db: Session
 
 @router.patch("/api/sequences/{sequence_id}", response_model=SequenceResponse)
 def update_sequence(sequence_id: int, data: SequenceUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    seq = get_or_404(db, Sequence, sequence_id)
+    block = get_or_404(db, Block, seq.block_id)
+    version = get_or_404(db, CourseVersion, block.version_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
     seq = get_or_404(db, Sequence, sequence_id)
     block = get_or_404(db, Block, seq.block_id)
     version = get_or_404(db, CourseVersion, block.version_id)
@@ -379,6 +393,10 @@ def delete_sequence(sequence_id: int, db: Session = Depends(get_db), user: User 
     seq = get_or_404(db, Sequence, sequence_id)
     block = get_or_404(db, Block, seq.block_id)
     version = get_or_404(db, CourseVersion, block.version_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
+    seq = get_or_404(db, Sequence, sequence_id)
+    block = get_or_404(db, Block, seq.block_id)
+    version = get_or_404(db, CourseVersion, block.version_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
         raise HTTPException(status_code=403, detail="Version is disabled")
@@ -396,6 +414,9 @@ def delete_sequence(sequence_id: int, db: Session = Depends(get_db), user: User 
 def reorder_sequences(block_id: int, data: ReorderRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     block = get_or_404(db, Block, block_id)
     version = get_or_404(db, CourseVersion, block.version_id)
+    lock_draft(db, version.id)                         # the draft's write lock, then fresh reads
+    block = get_or_404(db, Block, block_id)
+    version = get_or_404(db, CourseVersion, block.version_id)
     require_course_admin(db, user, version.course_id)
     if version.is_disabled:
         raise HTTPException(status_code=403, detail="Version is disabled")
@@ -410,7 +431,7 @@ def reorder_sequences(block_id: int, data: ReorderRequest, db: Session = Depends
     if incoming_ids != real_ids:
         raise HTTPException(status_code=400, detail="Reorder list must include every sequence in this block")
 
-    for entry in data.order:
+    for entry in sorted(data.order, key=lambda e: e.id):   # id order, one lock order
         seq = db.get(Sequence, entry.id)
         seq.order = entry.order
     db.commit()

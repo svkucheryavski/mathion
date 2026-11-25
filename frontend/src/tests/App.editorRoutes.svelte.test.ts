@@ -6,6 +6,7 @@ import { navigate, currentRoute, __resetGuardsForTests } from '../lib/router.sve
 import { clearEditorVersion } from '../stores/currentEditorVersion.svelte';
 import { clearToasts } from '../stores/toasts.svelte';
 import type { AdminTree, AdminTreeItem } from '../lib/types';
+import { settle } from './support/settle';
 
 // Slice-5b T3b: a routing smoke test through the REAL App + router + store —
 // the item route renders VersionEditPage's modal, Back returns to the tree,
@@ -30,7 +31,6 @@ const jres = (body: unknown, status = 200) => Promise.resolve({
   text: () => Promise.resolve(''),
   headers: new Headers({ 'content-type': 'application/json' }),
 } as unknown as Response);
-async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); }
 // jsdom fires popstate for history.back() on the SECOND macrotask after the
 // call (probed: one setTimeout(0) is not enough), so wait two timer hops.
 const tick0 = () => new Promise((r) => setTimeout(r, 0));
