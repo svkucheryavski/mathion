@@ -32,7 +32,7 @@ var lockOpt = []string{"-o", fmt.Sprintf("DPkg::Lock::Timeout=%d", int(lockWait/
 
 var (
 	// ErrWouldRemove means installing Docker would remove packages already on the server.
-	ErrWouldRemove = errors.New("installing Docker's packages would remove packages already on this server")
+	ErrWouldRemove = errors.New("Docker's packages would remove packages already on this server")
 	// ErrNoDockerRelease means Docker publishes no packages for this release.
 	ErrNoDockerRelease = errors.New("Docker publishes no packages for this release yet")
 	// ErrLocked means another program holds the apt lock.

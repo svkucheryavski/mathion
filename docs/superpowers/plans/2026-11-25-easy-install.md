@@ -102,7 +102,7 @@
 ### Task 3: Questions and Docker in `mathion install`
 
 **Files:**
-- Modify: `cli/cmd/install.go` (opts, flags, `RunE`, `runInstall`), `cli/cmd/root.go` (`App` gets `Prompt *prompt.Prompter`, `Docker dockersetup.Steps`, `ReadOSRelease func() (dockersetup.OS, error)`, `DockerCmd dockersetup.Cmd`, set in `Execute`)
+- Modify: `cli/cmd/install.go` (opts, flags, `RunE`, `runInstall`), `cli/cmd/root.go` (`App` gets `Prompt *prompt.Prompter` (writes to stderr), `DockerCmd dockersetup.Cmd`, `DockerDaemon func() string` (`"dockerd"`, `"snap"` or `""`), `ReadOSRelease func() (dockersetup.OS, error)`, `InstallDocker func(ctx, dockersetup.OS, arch string) error`, set in `Execute`; as built, Task 3 ruling)
 - Test: `cli/cmd/install_test.go`, new `cli/cmd/install_docker_test.go`
 
 **Interfaces:**
@@ -114,8 +114,8 @@
     - when Docker works but Compose is missing, return an error carrying `Instructions("Docker works, but Docker Compose v2 is missing.")`;
     - otherwise read the OS: unsupported, or `Install` returns `ErrNoDockerRelease` → error with `Instructions(<reason>)`; supported → `Confirm("Docker is not installed. Install it from Docker's official packages?", true)` (skipped under `yes`); no → error `"Docker is needed; install it and run sudo mathion install again"` plus `Instructions`; yes → `Steps.Install`, then `Preflight` again.
   - `func (a *App) askMissing(o *installOpts) error`: asks `Site address (e.g. learn.school.edu)` with check `config.BuildBaseURL`, and `Your email (you become the site administrator)` with check `config.ValidateEmail`, only for empty fields and only on the fresh path.
-- `RunE` order: `requireRoot()` → `ensureDocker` → `lockAndGuard` → `runInstall`. `ensureDocker` must run before `lockAndGuard`, whose `SweepWorkers` calls Docker.
-- Interactive = `!o.Yes && prompt.StdinIsTerminal(os.Stdin)`. Non-interactive with a missing value keeps today's error text, with "(interactive prompting is planned but not yet available)" replaced by "(or run it in a terminal to be asked)".
+- `RunE` order: `requireRoot()` → `checkFlagsEarly` (fresh install: missing values under `--yes` or no terminal, and bad flag values, fail before Docker is touched) → `ensureDocker` → `lockAndGuard` → `runInstall`. `ensureDocker` must run before `lockAndGuard`, whose `SweepWorkers` calls Docker.
+- Interactive = `prompt.StdinIsTerminal(os.Stdin)`; every yes/no question goes through `a.confirm(yes, …)`, which answers yes under `--yes` without asking; `askMissing` refuses under `--yes`. A daemon that does not answer stops with a start hint (`snap start docker` for the snap; `systemctl enable --now docker` / `dpkg --configure -a` otherwise); a half-installed `docker-ce` is installed again; Docker working without Compose is finished from Docker's packages only when `docker-ce` is fully installed, any other Docker gets the instructions. Non-interactive with a missing value keeps today's error text, with "(interactive prompting is planned but not yet available)" replaced by "(or run it in a terminal to be asked)".
 
 - [ ] **Step 1: Write the failing tests:**
   - `TestInstallAsksForMissingValues`: scripted input `"Learn.Example.EDU.\nyou@example.edu\n"` → the fresh path receives the same domain `BuildBaseURL` gives for the flag `--domain Learn.Example.EDU.` (Review Focus 3: compare against the flag path's result, not a literal).

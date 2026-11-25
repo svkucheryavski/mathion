@@ -149,7 +149,7 @@ func TestInstallRequiresBothFlags(t *testing.T) {
 	dir := t.TempDir() // no .env, no state → fresh path
 	app := &App{CfgDir: dir, Project: "mathion_prod", Runner: &compose.FakeRunner{}, Out: os.Stdout, Err: os.Stderr}
 	err := app.runInstall(context.Background(), installOpts{Domain: "d.edu"}) // admin-email omitted
-	if err == nil || !strings.Contains(err.Error(), "requires --domain and --admin-email") {
+	if err == nil || !strings.Contains(err.Error(), "install requires --domain and --admin-email (or run it in a terminal to be asked)") {
 		t.Fatalf("install must require both flags regardless of --yes, got %v", err)
 	}
 	if _, e := os.Stat(filepath.Join(dir, ".env")); e == nil {
@@ -266,20 +266,20 @@ func TestResumeVolumeCheckErrorFailsClosed(t *testing.T) {
 // TestInstallRefusesOnBreadcrumb: install is in the refuse set, so a leftover
 // recovery breadcrumb makes its RunE refuse (non-nil error) BEFORE reaching
 // runInstall — no `up`, no `pull` — and the breadcrumb is retained (install never
-// clears it). No flags needed: the guard refuses before flag validation.
+// clears it). Valid flags pass the early flag check, so the guard is what refuses.
 //
-// Non-vacuity: with no flags set, runInstall would itself error ("requires
-// --domain and --admin-email") before any up/pull, so `err != nil` + no-up/pull
-// would hold even if the guard were absent. We therefore assert the error is the
-// GUARD'S refusal ("refusing…"), which the missing-flags error never contains —
-// removing the guard flips this to the missing-flags message and fails the test.
+// Non-vacuity: the error must be the guard's refusal ("refusing…"); without the
+// guard, runInstall would go on to up/pull.
 func TestInstallRefusesOnBreadcrumb(t *testing.T) {
 	rootedVarlib(t)
 	seedBreadcrumb(t)
 	f := &compose.FakeRunner{}
 	var errb bytes.Buffer
-	app := &App{CfgDir: t.TempDir(), Project: "mathion_prod", Runner: f, Err: &errb}
+	app := &App{CfgDir: t.TempDir(), Project: "mathion_prod", Runner: f, Err: &errb,
+		DockerCmd: &sysCmd{outputs: map[string]string{"systemctl is-enabled docker": "enabled\n"}}}
 	cmd := newInstallCmd(app)
+	cmd.Flags().Set("domain", "learn.example.edu") // valid flags pass the early check, so the guard refuses
+	cmd.Flags().Set("admin-email", "you@example.edu")
 	err := cmd.RunE(cmd, nil)
 	if err == nil || !strings.Contains(err.Error(), "refusing") {
 		t.Fatalf("install must refuse via the guard on a leftover breadcrumb, got %v", err)
