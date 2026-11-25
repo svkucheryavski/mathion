@@ -21,7 +21,7 @@ Chrome's emulation was read on every screen. Only a real theme settles the colou
 
 ## Real HTTP/1.1 proxy (on the deployed beta)
 
-- **A too-big upload through an old proxy:** HTTP/1.1 nginx can drop the connection instead of sending its 413. Upload 40 MB through one and note which message the student gets: the network copy with Retry, or the limit sentence. If it is the network copy, adjust the README's D11c paragraph ("Upload limit", README.md) and `docs/release-notes/settings-release-order.md`, which quote the sentence.
+- **A too-big upload through an old proxy:** HTTP/1.1 nginx can drop the connection instead of sending its 413. Upload 40 MB through one and note which message the student gets: the network copy with Retry, or the limit sentence. If it is the network copy, adjust the D11c paragraph ("Upload limit", `docs/self-hosting.md`) and `docs/release-notes/settings-release-order.md`, which quote the sentence.
 
 ## A real touch device (on the deployed beta)
 
