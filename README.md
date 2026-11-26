@@ -57,6 +57,10 @@ You need:
 - a 64-bit Ubuntu (22.04 or later) or Debian (12 or later) server, Intel/AMD
   or ARM. Another Linux works too if Docker and Docker Compose v2 are already
   installed;
+- a suggested minimum of 1 CPU core, 1 GB of memory with a swap file, and
+  10 GB of disk; 2 cores, 2 GB and 20 GB or more give room for imports and
+  backups (see
+  [Server size](docs/self-hosting.md#server-size));
 - `curl` and `gpg` (`sudo apt install curl gpg` if they are missing);
 - a domain name that points at the server, with ports 80 and 443 open;
 - an email account (SMTP) that Mathion can send sign-in PINs from.
