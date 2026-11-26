@@ -24,7 +24,7 @@ from mathion.olx.apply import ApplyRefused, apply
 from mathion.olx.bundle import CheckBody
 from mathion.olx.convert import convert
 from mathion.olx.files import Limits
-from tests.conftest import CSRFTestClient
+from tests.conftest import CSRFTestClient, secs
 from tests.test_olx_tree import fixture_files
 
 FIX = Path(__file__).parent / "fixtures" / "olx"
@@ -628,7 +628,7 @@ def test_large_synthetic_course_is_fast(auth_client, db, test_user, capsys):
     assert _count(db, Item) == 8 * 8 * 30
     with capsys.disabled():
         print(f"\n[olx] 8x8x30 build: {elapsed:.2f} s")
-    assert elapsed < 10
+    assert elapsed < secs(10)
 
 
 def test_import_twice_into_one_course(auth_client, db, test_user, asset_tmpdir):
@@ -1096,7 +1096,7 @@ def test_merge_is_fast_on_a_large_report():
     browser = [_rl("skipped", f"The server refused “b{i}.pdf”: " + "x" * 1900) for i in range(20000)]
     start = time.perf_counter()
     out = olx_import._merged(server, browser, missing)
-    assert time.perf_counter() - start < 1
+    assert time.perf_counter() - start < secs(1)
     assert len(out) == 4000 and all(ln.text.endswith("not in the draft") for ln in out)
 
 
@@ -1139,7 +1139,7 @@ def test_merge_is_fast_on_unclosed_quotes():
     browser = [_rl("skipped", "“" * 2000) for _ in range(3000)]
     start = time.perf_counter()
     olx_import._merged([], browser, set())
-    assert time.perf_counter() - start < 1
+    assert time.perf_counter() - start < secs(1)
 
 
 def test_merge_sees_every_quoted_name_in_a_browser_line():

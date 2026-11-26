@@ -6,6 +6,7 @@ from mathion.olx.mdtext import (
     Seg, escape_line_starts, escape_text, formula_errors, normalize_segments,
     render_segments, script_text_ok, split_math,
 )
+from tests.conftest import secs
 
 
 def M(text, display=False):
@@ -180,7 +181,7 @@ def test_split_math_many_unclosed_openers_is_fast():
     import time
     start = time.perf_counter()
     segs = split_math("\\( [mathjax] [mathjaxinline] \\[ " * 200_000)
-    assert time.perf_counter() - start < 2
+    assert time.perf_counter() - start < secs(2)
     assert all(s.kind == "text" for s in segs)
 
 
@@ -188,7 +189,7 @@ def test_many_touching_formulas_is_fast():
     import time
     start = time.perf_counter()
     segs = normalize_segments(split_math("\\(a\\)1" * 200_000))
-    assert time.perf_counter() - start < 2
+    assert time.perf_counter() - start < secs(2)
     assert len(segs) == 1 and segs[0].text.startswith("a{}1{}a")
 
 
@@ -197,11 +198,11 @@ def test_long_number_before_formula_is_fast():
     for text in ("1" * 200_000 + "x\\(y\\)", "1," * 100_000 + "x\\(y\\)"):
         start = time.perf_counter()
         normalize_segments(split_math(text))
-        assert time.perf_counter() - start < 2
+        assert time.perf_counter() - start < secs(2)
 
 
 def test_many_control_spaces_is_fast():
     import time
     start = time.perf_counter()
     segs = normalize_segments(split_math("\\(x" + "\\ " * 400_000 + "\\)"))
-    assert time.perf_counter() - start < 2 and segs == [M("x")]
+    assert time.perf_counter() - start < secs(2) and segs == [M("x")]

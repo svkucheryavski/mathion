@@ -26,6 +26,15 @@ from mathion.main import app
 from mathion.models_auth import User
 from mathion.auth import request_pin, verify_pin
 
+# CI machines are slower than a laptop: timing limits are multiplied by MATHION_TEST_TIME_SCALE (default 1).
+TIME_SCALE = float(os.environ.get("MATHION_TEST_TIME_SCALE", "1"))
+if not 0 < TIME_SCALE < float("inf"):
+    raise ValueError("MATHION_TEST_TIME_SCALE must be a positive number")
+
+
+def secs(limit: float) -> float:
+    return limit * TIME_SCALE
+
 
 def _same_destructive_target(url_a: str, url_b: str) -> bool:
     """True if two URLs plausibly identify the SAME physical database.

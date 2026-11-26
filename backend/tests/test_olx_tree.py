@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from mathion.olx.bundle import BuildBody, CheckBody
 from mathion.olx.report import Report, ReportLine
 from mathion.olx.tree import OlxError, load_course, parse_xml
+from tests.conftest import secs
 
 FIXTURE = Path(__file__).parent / "fixtures" / "olx"
 COURSE = FIXTURE / "course"
@@ -520,7 +521,7 @@ def test_long_names_are_cut_and_lines_bounded():
     rep = Report()
     start = time.time()
     tree = load_course(files, rep)
-    assert time.time() - start < 5
+    assert time.time() - start < secs(5)
     assert len(tree.chapters[0].display_name) == 200
     lines = rep.lines([ReportLine("note", "w" * 5000, "t" * 5000)])
     assert all(len(ln.where) <= 600 and len(ln.text) <= 2000 for ln in lines)

@@ -8,6 +8,7 @@ import mathion.markdown as markdown_mod
 from mathion.latex_mathml import latex_to_mathml
 from mathion.markdown import MATHML_ALLOWED, _clean, extract_asset_filenames, render_markdown
 from tests.test_latex_mathml import ACCEPTANCE
+from tests.conftest import secs
 
 
 def test_render_basic_markdown():
@@ -213,7 +214,7 @@ def test_render_bare_url_inside_emphasis_is_linked():
 def test_render_bare_url_with_many_closing_parens_stays_fast():
     start = time.perf_counter()
     result = render_markdown("https://x.org/" + ")" * 20000)
-    assert time.perf_counter() - start < 1.0
+    assert time.perf_counter() - start < secs(1.0)
     assert 'href="https://x.org/"' in result
 
 
@@ -696,7 +697,7 @@ def test_backticks_that_open_no_code_span_keep_the_formula(md):
 def test_display_blocks_in_a_long_list_stay_fast():
     start = time.perf_counter()
     render_markdown("- $$x\n" * 8000 + "$$")
-    assert time.perf_counter() - start < 2.0
+    assert time.perf_counter() - start < secs(2.0)
 
 
 @pytest.mark.parametrize("md", [
@@ -706,7 +707,7 @@ def test_display_blocks_in_a_long_list_stay_fast():
 def test_math_free_markdown_stays_fast(md):
     start = time.perf_counter()
     render_markdown(md)
-    assert time.perf_counter() - start < 2.0
+    assert time.perf_counter() - start < secs(2.0)
 
 
 # --- math round 2026-11-24 ---
@@ -762,7 +763,7 @@ def test_formula_output_cap_shows_error_box():
 def test_unclosed_double_dollar_is_linear(src, limit):
     start = time.perf_counter()
     render_markdown(src)
-    assert time.perf_counter() - start < limit
+    assert time.perf_counter() - start < secs(limit)
 
 
 # Today's backtick scan, frozen, to pin the faster one against.
@@ -820,7 +821,7 @@ def _best_of_3(text):
 def test_backtick_scan_scales_linearly():
     small, large = _best_of_3(_backtick_text(350, 20000)), _best_of_3(_backtick_text(495, 40000))
     print(f"backtick scan: S {small:.3f} s, 2S {large:.3f} s")
-    assert large < 0.5
+    assert large < secs(0.5)
 
 
 def test_backtick_scan_nested_images_stay_linear():
@@ -828,4 +829,4 @@ def test_backtick_scan_nested_images_stay_linear():
     inner = "".join(f"![$`{i}` x$](x{i}.png) " for i in range(9))
     took = _best_of_3(f"![{inner}](y.png) $`a` b$ " * 1000)
     print(f"nested backtick scan: {took:.3f} s")
-    assert took < 2.0                                 # ~0.16 s here; rebuilding the index per image takes ~24 s
+    assert took < secs(2.0)  # ~0.16 s here; rebuilding the index per image takes ~24 s
