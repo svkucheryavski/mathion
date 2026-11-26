@@ -11,6 +11,7 @@ Only the checks a person must make on real devices and a real proxy. They run ag
 Done on 2026-11-26 with `cli-v0.9.0` and image `v0.3.0` on Ubuntu 24.04: the fresh install with its first PIN, the DNS-not-pointing-here path (answer n, then the printed `tls enable` line), re-running the one-liner, `sudo mathion install` again, and `sudo mathion panel` all worked. One check is left:
 
 - **Debian 12, after the provider reinstalls the system:** run the one-liner, press Enter at `Set up Mathion on this server now?`, answer the questions and let it install Docker. Docker's apt key that Mathion writes is accepted (`apt-get update` shows no key error), `systemctl is-enabled docker` says `enabled`, and the ending shows the site address and a first PIN that signs you in.
+- **A 1 GB server with a swap file:** install, import a large Open edX course and make a backup (`sudo mathion backup`), with `sudo docker stats --no-stream` and `free -h` run during each. If it copes, the "Server size" minimum in `docs/self-hosting.md` stands; if not, raise it. Also note how much memory the import took, so the guide can give a number.
 
 ## Windows High Contrast (on the deployed beta)
 
