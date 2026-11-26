@@ -6,6 +6,17 @@ added: 2026-11-14
 
 Only the checks a person must make on real devices and a real proxy. They run against the deployed beta server, not the laptop: the dev servers stay on 127.0.0.1, and the office Wi-Fi blocks phone-to-laptop connections. The Safari checks, the keyboard-in-frames check and the hover-tip decisions were done on 2026-11-25. Their fixes are in the beta-pass fix round. The VoiceOver checks are in `beta-voiceover-pass.md`.
 
+## Install on the rented server (before the beta)
+
+The new one-command install (`feat/easy-install`), after the first `cli-v*` release that includes it is tagged. One run per line; note what the terminal printed.
+
+- **Fresh Ubuntu 24.04:** run the one-liner, press Enter at `Set up Mathion on this server now?`, answer the questions, and let it install Docker. It ends with `✓ Mathion is running at https://<domain>` (or, if Let's Encrypt is slow, `… will work once the certificate arrives.`) and a first PIN, and the PIN signs you in. Right after the first boot, apt can be busy for a minute or two with its daily jobs: the install should wait for it (up to 2 minutes) instead of failing.
+- **Debian 12, after the provider reinstalls the system:** the same run. Docker's apt key that Mathion writes is accepted (`apt-get update` shows no key error), and `systemctl is-enabled docker` says `enabled`.
+- **DNS not pointing at the server yet:** point the domain elsewhere (or use a fresh name), run the install, answer no at `Turn on HTTPS anyway?`. The ending says HTTPS is off and why, and prints a `sudo mathion tls enable …` line. Fix DNS, run that line, then `sudo mathion pin <email>`: the site opens over HTTPS and the PIN signs you in.
+- **Re-run the one-liner** on the installed server: it prints `Mathion is already set up here, or its setup was started.` with the `sudo mathion install` and update lines, and changes nothing in the deployment (it only replaces the `mathion` command).
+- **`sudo mathion install` again** on the installed server: it prints `✓ Mathion is running at https://<domain>` and `Run sudo mathion pin <email> to get a sign-in PIN.`, and makes no new PIN.
+- **`sudo mathion panel`:** sign in, then open the printed link in the same browser; the admin panel opens.
+
 ## Windows High Contrast (on the deployed beta)
 
 Chrome's emulation was read on every screen. Only a real theme settles the colours.
@@ -21,7 +32,7 @@ Chrome's emulation was read on every screen. Only a real theme settles the colou
 
 ## Real HTTP/1.1 proxy (on the deployed beta)
 
-- **A too-big upload through an old proxy:** HTTP/1.1 nginx can drop the connection instead of sending its 413. Upload 40 MB through one and note which message the student gets: the network copy with Retry, or the limit sentence. If it is the network copy, adjust the README's D11c paragraph ("Upload limit", README.md) and `docs/release-notes/settings-release-order.md`, which quote the sentence.
+- **A too-big upload through an old proxy:** HTTP/1.1 nginx can drop the connection instead of sending its 413. Upload 40 MB through one and note which message the student gets: the network copy with Retry, or the limit sentence. If it is the network copy, adjust the D11c paragraph ("Upload limit", `docs/self-hosting.md`) and `docs/release-notes/settings-release-order.md`, which quote the sentence.
 
 ## A real touch device (on the deployed beta)
 

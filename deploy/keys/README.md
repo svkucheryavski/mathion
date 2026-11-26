@@ -200,7 +200,7 @@ the repo where they are consumed:
 
 Publish the primary fingerprint **out of band** (the project site, a signed
 announcement) so users can check it against the key embedded in `install.sh`
-(README, "Check the release key (out of band)"). Never
+(`docs/self-hosting.md`, "Check the release key (out of band)"). Never
 rely solely on the copy shipped in the repo.
 
 ---

@@ -2,8 +2,11 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
@@ -14,7 +17,7 @@ import (
 
 type installOpts struct {
 	Domain, AdminEmail, Version string
-	Yes                         bool
+	Yes, NoTLS                  bool
 }
 
 func newInstallCmd(app *App) *cobra.Command {
@@ -23,6 +26,16 @@ func newInstallCmd(app *App) *cobra.Command {
 		Use:   "install",
 		Short: "Install and start a Mathion deployment",
 		RunE: func(c *cobra.Command, _ []string) error {
+			// Docker first: lockAndGuard sweeps containers with it.
+			if err := requireRoot(); err != nil {
+				return err
+			}
+			if err := app.checkFlagsEarly(o); err != nil {
+				return err
+			}
+			if err := app.ensureDocker(c.Context(), o.Yes); err != nil {
+				return err
+			}
 			release, proceed, err := lockAndGuard(c.Context(), app, "install")
 			defer release()
 			if err != nil || !proceed {
@@ -34,7 +47,8 @@ func newInstallCmd(app *App) *cobra.Command {
 	c.Flags().StringVar(&o.Domain, "domain", "", "deployment domain (host[:port], no scheme)")
 	c.Flags().StringVar(&o.AdminEmail, "admin-email", "", "first superuser email")
 	c.Flags().StringVar(&o.Version, "version", "", "app image tag (default: recommended)")
-	c.Flags().BoolVar(&o.Yes, "yes", false, "scripted/CI install: never prompt (both --domain and --admin-email are required regardless)")
+	c.Flags().BoolVar(&o.Yes, "yes", false, "scripted install: never ask; needs --domain and --admin-email, and installs Docker if it is missing")
+	c.Flags().BoolVar(&o.NoTLS, "no-tls", false, "do not set up the bundled HTTPS proxy")
 	return c
 }
 
@@ -82,7 +96,10 @@ func (a *App) runInstall(ctx context.Context, o installOpts) error {
 			return fmt.Errorf(".env is incomplete or inconsistent (%w); repair it or run `mathion uninstall --purge`", err)
 		}
 		warnDivergentFlags(a, o, st) // domain/email/version are ignored on resume
-		return a.resume(ctx, st)
+		if err := a.resume(ctx, st); err != nil {
+			return fmt.Errorf("finishing the setup failed (%w). Fix the problem shown above, then run sudo mathion install again", err)
+		}
+		return a.rerunHTTPS(ctx, st.AdminEmail, o)
 	}
 
 	// FRESH branch: volume guard BEFORE any secret is generated.
@@ -99,12 +116,85 @@ func (a *App) runInstall(ctx context.Context, o installOpts) error {
 	if err := dockerx.PortFree("127.0.0.1:8000"); err != nil {
 		return err
 	}
-	// Both values are required on a fresh install regardless of --yes (interactive
-	// prompting for omitted values is planned for a later slice, not implemented).
+	// Ask for values not given as flags; --yes or no terminal never asks.
 	if o.Domain == "" || o.AdminEmail == "" {
-		return fmt.Errorf("install requires --domain and --admin-email (interactive prompting is planned but not yet available)")
+		if err := a.askMissing(&o); err != nil {
+			return err
+		}
 	}
 	return a.runInstallFresh(ctx, o)
+}
+
+// askMissing asks for the site address and admin email when their flags are empty.
+func (a *App) askMissing(o *installOpts) error {
+	p := a.prompter()
+	if o.Yes || !p.Interactive {
+		return errors.New("install requires --domain and --admin-email (or run it in a terminal to be asked)")
+	}
+	var err error
+	if o.Domain == "" {
+		if o.Domain, err = p.Ask("Site address (e.g. learn.school.edu)", checkSiteAddress); err != nil {
+			return unanswered(err, "pass --domain and --admin-email")
+		}
+	}
+	if o.AdminEmail == "" {
+		if o.AdminEmail, err = p.Ask("Your email (you become the site administrator)", checkAdminEmail); err != nil {
+			return unanswered(err, "pass --domain and --admin-email")
+		}
+	}
+	return nil
+}
+
+// checkFlagsEarly fails a fresh install on bad or missing flag values before Docker is touched.
+func (a *App) checkFlagsEarly(o installOpts) error {
+	if _, err := os.Lstat(a.CfgDir + "/.env"); !os.IsNotExist(err) {
+		return nil // not a fresh install; runInstall decides
+	}
+	if (o.Domain == "" || o.AdminEmail == "") && (o.Yes || !a.prompter().Interactive) {
+		return errors.New("install requires --domain and --admin-email (or run it in a terminal to be asked)")
+	}
+	if o.Domain != "" {
+		if _, err := config.BuildBaseURL(config.NormalizeSiteAddress(o.Domain)); err != nil {
+			return err
+		}
+	}
+	if o.AdminEmail != "" {
+		if err := config.ValidateEmail(o.AdminEmail); err != nil {
+			return err
+		}
+	}
+	if o.Version != "" {
+		return config.ValidateOCITag(o.Version)
+	}
+	return nil
+}
+
+// checkSiteAddress uses the --domain rules, worded for a typed answer.
+func checkSiteAddress(s string) error {
+	switch {
+	case s == "":
+		return errors.New("Please type the site address, for example learn.school.edu.")
+	case strings.Contains(s, "://"):
+		return errors.New("Type only the address, without http:// or https://, for example learn.school.edu.")
+	case strings.Contains(strings.TrimSuffix(s, "/"), "/"):
+		return errors.New("Type only the address, without a path, for example learn.school.edu.")
+	}
+	n := config.NormalizeSiteAddress(s)
+	if _, err := config.BuildBaseURL(n); err != nil {
+		return errors.New(strings.Replace(err.Error(), "--domain", "the site address", 1))
+	}
+	// A typed address without a port must be able to get a certificate.
+	if _, port, err := net.SplitHostPort(n); (err != nil || port == "") && config.ValidateDomain(n) != nil {
+		return errors.New("This needs a domain name such as learn.school.edu: an IP address or a short name cannot get a free certificate. (Only if you run your own HTTPS proxy in front: an address with a port, such as learn.school.edu:8443, is accepted.)")
+	}
+	return nil
+}
+
+func checkAdminEmail(s string) error {
+	if s == "" {
+		return errors.New("Please type an email address.")
+	}
+	return config.ValidateEmail(s)
 }
 
 func warnDivergentFlags(a *App, o installOpts, st config.State) {
@@ -178,7 +268,13 @@ func (a *App) runInstallFresh(ctx context.Context, o installOpts) error {
 		return err
 	}
 	email := config.NormalizeEmail(o.AdminEmail)
+	o.Domain = config.NormalizeSiteAddress(o.Domain)
 	baseURL, err := config.BuildBaseURL(o.Domain)
+	if err != nil {
+		return err
+	}
+	// The HTTPS questions and checks come before anything is written or started.
+	plan, h, err := a.httpsDecide(ctx, o.Domain, email, o)
 	if err != nil {
 		return err
 	}
@@ -207,39 +303,34 @@ func (a *App) runInstallFresh(ctx context.Context, o installOpts) error {
 	}
 
 	// 5-7. Pull, up, migrate, create superuser.
-	if err := a.compose(ctx, "pull"); err != nil {
-		return err
-	}
-	if err := a.compose(ctx, "up", "-d", "--wait"); err != nil {
-		return err
-	}
-	if err := a.compose(ctx, "exec", "-T", "app", "alembic", "upgrade", "head"); err != nil {
-		return err
-	}
-	if err := a.compose(ctx, "exec", "-T", "app", "python", "-m", "mathion.superuser", "create-superuser", "--", email); err != nil {
-		return err
+	fmt.Fprintln(a.Out, "\n  Starting Mathion …")
+	for _, s := range []struct {
+		doing string
+		args  []string
+	}{
+		{"downloading Mathion", []string{"pull"}},
+		{"starting its containers", []string{"up", "-d", "--wait"}},
+		{"preparing the database", []string{"exec", "-T", "app", "alembic", "upgrade", "head"}},
+		{"creating your account", []string{"exec", "-T", "app", "python", "-m", "mathion.superuser", "create-superuser", "--", email}},
+	} {
+		if err := a.compose(ctx, s.args...); err != nil {
+			return fmt.Errorf("starting Mathion failed while %s (%w). Fix the problem shown above, then run sudo mathion install again; it continues where it stopped", s.doing, err)
+		}
 	}
 	if err := config.WriteState(a.CfgDir, config.State{Schema: 2, AdminEmail: email, Complete: true}); err != nil {
 		return err
 	}
 
-	// 8. Next steps (no secrets printed).
-	fmt.Fprintf(a.Out, nextSteps, o.Domain, o.Domain, email)
+	fmt.Fprintln(a.Out, "  Starting Mathion … ok")
+
+	// 8. HTTPS, then the first PIN or the next step.
+	if plan != nil {
+		if h, err = a.httpsApply(ctx, plan); err != nil {
+			return err
+		}
+	}
+	a.printEnding(ctx, o.Domain, email, h)
 	return nil
 }
 
 func composeBytes() []byte { return compose.ComposeYAML }
-
-const nextSteps = `
-Deployment up. Next:
-  1. Front it with HTTPS. Easiest — bundled auto-TLS (opens 80+443, obtains a
-     Let's Encrypt cert):
-         sudo mathion tls enable --domain %s --email you@example.org
-     Or run your own TLS proxy (see README "Self-hosting").
-  2. Log in at https://%s — NOT http://127.0.0.1:8000 (the Secure session cookie
-     won't persist over plain HTTP).
-  3. Issue your first-login PIN:  sudo mathion pin %s
-  4. Open the superuser panel; its Set up page walks you through email, the site
-     name, the first course and sign-in rules:
-         docker compose ... exec -T app python -m mathion.superuser activate
-`

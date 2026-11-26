@@ -89,7 +89,9 @@ jobs:
           version: "~> v2"
           install-only: true
       - name: Shellcheck keys + cli scripts
-        run: shellcheck deploy/keys/*.sh cli/scripts/*.sh cli/*.sh
+        run: shellcheck deploy/keys/*.sh cli/scripts/*.sh cli/*.sh deploy/install.sh deploy/install_handoff_test.sh
+      - name: Installer hand-off test
+        run: sh deploy/install_handoff_test.sh
       - name: Release signing test (throwaway key)
         run: sh cli/scripts/sign_test.sh
       - name: self-update release guards

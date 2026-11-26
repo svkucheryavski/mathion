@@ -9,6 +9,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/svkucheryavski/mathion/cli/internal/compose"
 	"github.com/svkucheryavski/mathion/cli/internal/config"
+	"github.com/svkucheryavski/mathion/cli/internal/dockersetup"
+	"github.com/svkucheryavski/mathion/cli/internal/prompt"
 )
 
 type App struct {
@@ -19,6 +21,13 @@ type App struct {
 	Err        io.Writer
 	In         io.Reader
 	tlsEnabled bool // read fail-safe at startup; toggled by tls enable/disable
+
+	// Install-time seams, set in Execute.
+	Prompt        *prompt.Prompter
+	DockerCmd     dockersetup.Cmd
+	DockerDaemon  func() string
+	ReadOSRelease func() (dockersetup.OS, error)
+	InstallDocker func(ctx context.Context, o dockersetup.OS, arch string, composeOnly bool) error
 }
 
 // buildVersion / buildDefaultImage are overridden by main via SetBuildInfo,
@@ -148,7 +157,7 @@ func newRootCmd(app *App) *cobra.Command {
 		newLogsCmd(app), newPinCmd(app), newSuperuserCmd(app), newVersionCmd(app),
 		newUninstallCmd(app), newBackupCmd(app), newRestoreCmd(app), newUpdateCmd(app),
 		newSelfUpdateCmd(app), newTLSCmd(app), newReconcileCmd(app), newBrandingCmd(app),
-		newLicensesCmd(app),
+		newLicensesCmd(app), newPanelCmd(app),
 	)
 	return root
 }
@@ -161,8 +170,24 @@ func Execute() {
 		Out:     os.Stdout, Err: os.Stderr, In: os.Stdin,
 	}
 	app.tlsEnabled = tlsEnabledFromEnv(app.CfgDir)
+	app.Prompt = prompt.New(app.In, app.Err, prompt.StdinIsTerminal(os.Stdin)) // questions stay visible when stdout goes to a file
+	app.DockerDaemon = dockerDaemon
+	app.DockerCmd = dockersetup.ExecCmd{}
+	app.ReadOSRelease = readOSRelease
+	app.InstallDocker = func(ctx context.Context, o dockersetup.OS, arch string, composeOnly bool) error {
+		return dockerSteps(arch, app.Out, composeOnly).Install(ctx, o)
+	}
 	if err := newRootCmd(app).ExecuteContext(context.Background()); err != nil {
 		app.Err.Write([]byte("error: " + err.Error() + "\n"))
 		osExit(exitCode(err))
 	}
+}
+
+// dockerSteps installs Docker and Compose, or only Compose next to the admin's own Docker packages.
+func dockerSteps(arch string, out io.Writer, composeOnly bool) dockersetup.Steps {
+	s := dockersetup.NewSteps(arch, out)
+	if composeOnly {
+		s.Packages = []string{"docker-compose-plugin"}
+	}
+	return s
 }
