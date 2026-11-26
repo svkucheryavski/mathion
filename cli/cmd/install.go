@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 
@@ -96,7 +97,7 @@ func (a *App) runInstall(ctx context.Context, o installOpts) error {
 		}
 		warnDivergentFlags(a, o, st) // domain/email/version are ignored on resume
 		if err := a.resume(ctx, st); err != nil {
-			return err
+			return fmt.Errorf("finishing the setup failed (%w). Fix the problem shown above, then run sudo mathion install again", err)
 		}
 		return a.rerunHTTPS(ctx, st.AdminEmail, o)
 	}
@@ -153,7 +154,7 @@ func (a *App) checkFlagsEarly(o installOpts) error {
 		return errors.New("install requires --domain and --admin-email (or run it in a terminal to be asked)")
 	}
 	if o.Domain != "" {
-		if _, err := config.BuildBaseURL(o.Domain); err != nil {
+		if _, err := config.BuildBaseURL(config.NormalizeSiteAddress(o.Domain)); err != nil {
 			return err
 		}
 	}
@@ -178,8 +179,13 @@ func checkSiteAddress(s string) error {
 	case strings.Contains(strings.TrimSuffix(s, "/"), "/"):
 		return errors.New("Type only the address, without a path, for example learn.school.edu.")
 	}
-	if _, err := config.BuildBaseURL(s); err != nil {
+	n := config.NormalizeSiteAddress(s)
+	if _, err := config.BuildBaseURL(n); err != nil {
 		return errors.New(strings.Replace(err.Error(), "--domain", "the site address", 1))
+	}
+	// A typed address without a port must be able to get a certificate.
+	if _, port, err := net.SplitHostPort(n); (err != nil || port == "") && config.ValidateDomain(n) != nil {
+		return errors.New("This needs a domain name such as learn.school.edu: an IP address or a short name cannot get a free certificate. (Only if you run your own HTTPS proxy in front: an address with a port, such as learn.school.edu:8443, is accepted.)")
 	}
 	return nil
 }
@@ -298,17 +304,18 @@ func (a *App) runInstallFresh(ctx context.Context, o installOpts) error {
 
 	// 5-7. Pull, up, migrate, create superuser.
 	fmt.Fprintln(a.Out, "\n  Starting Mathion …")
-	if err := a.compose(ctx, "pull"); err != nil {
-		return err
-	}
-	if err := a.compose(ctx, "up", "-d", "--wait"); err != nil {
-		return err
-	}
-	if err := a.compose(ctx, "exec", "-T", "app", "alembic", "upgrade", "head"); err != nil {
-		return err
-	}
-	if err := a.compose(ctx, "exec", "-T", "app", "python", "-m", "mathion.superuser", "create-superuser", "--", email); err != nil {
-		return err
+	for _, s := range []struct {
+		doing string
+		args  []string
+	}{
+		{"downloading Mathion", []string{"pull"}},
+		{"starting its containers", []string{"up", "-d", "--wait"}},
+		{"preparing the database", []string{"exec", "-T", "app", "alembic", "upgrade", "head"}},
+		{"creating your account", []string{"exec", "-T", "app", "python", "-m", "mathion.superuser", "create-superuser", "--", email}},
+	} {
+		if err := a.compose(ctx, s.args...); err != nil {
+			return fmt.Errorf("starting Mathion failed while %s (%w). Fix the problem shown above, then run sudo mathion install again; it continues where it stopped", s.doing, err)
+		}
 	}
 	if err := config.WriteState(a.CfgDir, config.State{Schema: 2, AdminEmail: email, Complete: true}); err != nil {
 		return err

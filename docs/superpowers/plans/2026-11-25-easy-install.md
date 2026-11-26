@@ -235,8 +235,8 @@
 
 **Interfaces:**
 - Produces: `offer_setup` (POSIX sh), using the env seams `MATHION_CONFIG_DIR` (default `/etc/mathion`, the CLI's own name) and `MATHION_TTY` (default `/dev/tty`). It decides in this order:
-  1. `$MATHION_CONFIG_DIR/.env` exists (a broken symlink counts) → print `Mathion is already set up here. Update with: sudo mathion self-update && sudo mathion update` and return 0;
-  2. `"$DEST" install --help` does not mention `--no-tls` (an older CLI) → print `Next: sudo mathion install --domain <your-domain> --admin-email <you@example.edu>` and return 0;
+  1. `$MATHION_CONFIG_DIR/.env` exists (a broken symlink counts) → print `Mathion is already set up here, or its setup was started.`, then `To finish or check it: sudo mathion install` and `To update it: sudo mathion self-update && sudo mathion update` and return 0;
+  2. `"$DEST" install --help` does not mention `--no-tls` (an older CLI) → print `Next: sudo mathion install --domain YOUR-DOMAIN --admin-email YOUR-EMAIL` and return 0;
   3. `$MATHION_TTY` cannot be opened for reading → print `Next: sudo mathion install   (it asks for the site address and your email)` and return 0;
   4. otherwise ask `Set up Mathion on this server now? [Y/n]` on stderr (read from `$MATHION_TTY`; empty, y, Y, yes, Yes or YES → yes; n, N, no, No or NO → no; surrounding spaces are trimmed; anything else asks again; end of input → no). On yes: remove `$TMP` (main's EXIT trap does not run across `exec`), then `exec "$DEST" install <"$MATHION_TTY"`. On no: print the short `Next:` line.
 - The sourcing guard (`MATHION_INSTALL_LIB=1`) keeps working, so the test can call `offer_setup` directly.

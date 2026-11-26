@@ -61,6 +61,9 @@ You need:
 - a domain name that points at the server, with ports 80 and 443 open;
 - an email account (SMTP) that Mathion can send sign-in PINs from.
 
+The commands below start with `sudo`. If you are logged in as root and the
+server has no `sudo`, leave it out.
+
 1. Log in to the server (over SSH), run the installer there and answer `Y`
    when it asks `Set up Mathion on this server now?`:
 

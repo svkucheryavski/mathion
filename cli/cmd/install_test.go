@@ -3,6 +3,8 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -162,5 +164,68 @@ func TestInstallSavesANormalisedAddress(t *testing.T) {
 	m, _ := config.ReadEnvFile(app.CfgDir)
 	if m["MATHION_BASE_URL"] != "https://learn.example.edu" {
 		t.Fatalf("base URL %q", m["MATHION_BASE_URL"])
+	}
+}
+
+func TestCheckSiteAddressNeedsADomain(t *testing.T) {
+	for _, s := range []string{".", "learn.school.edu:"} {
+		if err := checkSiteAddress(s); err == nil {
+			t.Fatalf("%q must be refused", s)
+		}
+	}
+	if err := checkSiteAddress("203.0.113.5"); err == nil || !strings.Contains(err.Error(), "Only if you run your own HTTPS proxy in front") || strings.Contains(err.Error(), "without HTTPS") {
+		t.Fatalf("hint: %v", err)
+	}
+	for _, s := range []string{"203.0.113.5", "school", "my_school.edu", "localhost"} {
+		if err := checkSiteAddress(s); err == nil || !strings.Contains(err.Error(), "needs a domain name such as learn.school.edu") {
+			t.Fatalf("%q: err=%v", s, err)
+		}
+	}
+	for _, s := range []string{"learn.school.edu", "Learn.School.EDU.", "203.0.113.5:8000", "localhost:8000"} {
+		if err := checkSiteAddress(s); err != nil {
+			t.Fatalf("%q: %v", s, err)
+		}
+	}
+}
+
+func TestInstallAsksAgainForANonDomain(t *testing.T) {
+	app, out := freshApp(t, "203.0.113.5\nlearn.example.edu\nyou@example.edu\nn\n", true)
+	if err := app.runInstall(context.Background(), installOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	env, _ := config.ReadEnvFile(app.CfgDir)
+	if env["MATHION_BASE_URL"] != "https://learn.example.edu" || !strings.Contains(out.String(), "an IP address or a short name cannot get a free certificate") {
+		t.Fatalf("base %q out %q", env["MATHION_BASE_URL"], out.String())
+	}
+}
+
+func TestInstallRejectsADotDomain(t *testing.T) {
+	app, _ := freshApp(t, "", false)
+	if err := app.checkFlagsEarly(installOpts{Domain: ".", AdminEmail: "you@example.edu"}); err == nil {
+		t.Fatal("want an error for --domain .")
+	}
+	if err := app.checkFlagsEarly(installOpts{Domain: "school", AdminEmail: "you@example.edu"}); err != nil {
+		t.Fatalf("the flag keeps its rules: %v", err)
+	}
+}
+
+func TestFreshInstallStartFailureSaysRunAgain(t *testing.T) {
+	for step, words := range map[string]string{
+		"pull":             "while downloading Mathion",
+		"up -d --wait":     "while starting its containers",
+		"alembic":          "while preparing the database",
+		"create-superuser": "while creating your account",
+	} {
+		f := &compose.FakeRunner{RunFunc: func(args []string) error {
+			if strings.Contains(strings.Join(args, " "), step) {
+				return errors.New("exit status 1")
+			}
+			return nil
+		}}
+		app := &App{CfgDir: t.TempDir(), Project: "mathion_prod", Runner: f, Out: io.Discard, Err: io.Discard}
+		err := app.runInstallFresh(context.Background(), installOpts{Domain: "learn.example.edu", AdminEmail: "you@example.edu", NoTLS: true})
+		if err == nil || !strings.Contains(err.Error(), words) || !strings.Contains(err.Error(), "run sudo mathion install again; it continues where it stopped") {
+			t.Fatalf("%s: err=%v", step, err)
+		}
 	}
 }

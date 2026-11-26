@@ -3,8 +3,11 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
 	"errors"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -19,7 +22,7 @@ const (
 	httpsDomain = "learn.example.edu"
 	httpsEmail  = "you@example.edu"
 	httpsNext   = "sudo mathion tls enable --domain learn.example.edu --email you@example.edu"
-	httpsLater  = "sudo mathion tls enable --domain learn.example.edu --email <your-email>"
+	httpsLater  = "sudo mathion tls enable --domain learn.example.edu --email YOUR-EMAIL"
 )
 
 // httpsWorld fakes ports, DNS, this server's addresses and the certificate probe.
@@ -199,6 +202,7 @@ func TestHTTPSDNSMismatchAsks(t *testing.T) {
 		"learn.example.edu points at 203.0.113.9, but this server's addresses are 198.51.100.7, 2001:db8::5.",
 		"If your provider has a firewall, it must allow ports 80 and 443.",
 		"Turn on HTTPS anyway? [y/N]",
+		"Answer y to turn HTTPS on now: it starts by itself once the domain points here. Answer n to leave it off for now.",
 	} {
 		if !strings.Contains(w.out.String(), s) {
 			t.Fatalf("output lacks %q: %q", s, w.out.String())
@@ -221,7 +225,7 @@ func TestHTTPSDNSMismatchYes(t *testing.T) {
 	w.local = []net.IP{net.ParseIP("198.51.100.7")}
 	w.ready = false
 	wantOn(t, w, w.step(t, httpsDomain, httpsEmail, installOpts{Yes: true}), true)
-	if !strings.Contains(w.out.String(), "The certificate is still on its way. Check with sudo mathion tls status in a few minutes.") {
+	if !strings.Contains(w.out.String(), "The certificate is still on its way. Open https://learn.example.edu in a few minutes, or run sudo mathion install again to check.") {
 		t.Fatalf("out %q", w.out.String())
 	}
 }
@@ -348,7 +352,7 @@ func TestHTTPSMismatchYesWarns(t *testing.T) {
 	w.noReads(t)
 	w.local = []net.IP{net.ParseIP("198.51.100.7")}
 	w.step(t, httpsDomain, httpsEmail, installOpts{Yes: true})
-	if !strings.Contains(w.out.String(), "warning: turning HTTPS on anyway; it starts by itself once learn.example.edu points at this server.") {
+	if !strings.Contains(w.out.String(), "warning: turning HTTPS on anyway; it starts by itself once learn.example.edu points at this server.") || strings.Contains(w.out.String(), "Answer y") {
 		t.Fatalf("out %q", w.out.String())
 	}
 }
@@ -365,7 +369,7 @@ func TestHTTPSStartFailureIsAnError(t *testing.T) {
 	w := newHTTPSWorld(t, "y\n", true)
 	w.app.Runner.(*compose.FakeRunner).RunFunc = func([]string) error { return errors.New("pull failed") }
 	h, err := w.app.httpsStep(context.Background(), httpsDomain, httpsEmail, installOpts{})
-	if err == nil || h.On {
+	if err == nil || h.On || !strings.Contains(err.Error(), "HTTPS could not be started") || !strings.Contains(err.Error(), "Run sudo mathion install again") {
 		t.Fatalf("h=%+v err=%v", h, err)
 	}
 }
@@ -383,5 +387,66 @@ func TestHTTPSUnreadableOwnAddressesGoesOn(t *testing.T) {
 	wantOn(t, w, w.step(t, httpsDomain, httpsEmail, installOpts{}), false)
 	if !strings.Contains(w.out.String(), "This server's own addresses could not be read, so the domain cannot be compared; going on.") {
 		t.Fatalf("out %q", w.out.String())
+	}
+}
+
+func TestHTTPSWarnsOnStrayPublicAddress(t *testing.T) {
+	w := newHTTPSWorld(t, "y\n", true)
+	w.lookup = []string{"203.0.113.9", "2001:db8::9"}
+	w.local = []net.IP{net.ParseIP("203.0.113.9"), net.ParseIP("2001:db8::5")}
+	wantOn(t, w, w.step(t, httpsDomain, httpsEmail, installOpts{}), false)
+	if !strings.Contains(w.out.String(), "learn.example.edu also points at 2001:db8::9, which is not this server") {
+		t.Fatalf("out %q", w.out.String())
+	}
+	// A NAT'd IPv4 next to our IPv6: the router's address is no stray.
+	w = newHTTPSWorld(t, "y\n", true)
+	w.lookup = []string{"198.51.100.1", "2001:db8::5"}
+	w.local = []net.IP{net.ParseIP("10.0.0.5"), net.ParseIP("2001:db8::5")}
+	wantOn(t, w, w.step(t, httpsDomain, httpsEmail, installOpts{}), false)
+	if strings.Contains(w.out.String(), "also points at") {
+		t.Fatalf("NAT: out %q", w.out.String())
+	}
+	// No public IPv6 here: any AAAA answer is someone else's.
+	w = newHTTPSWorld(t, "y\n", true)
+	w.lookup = []string{"203.0.113.9", "2001:db8::9"}
+	w.local = []net.IP{net.ParseIP("203.0.113.9")}
+	wantOn(t, w, w.step(t, httpsDomain, httpsEmail, installOpts{}), false)
+	if !strings.Contains(w.out.String(), "also points at 2001:db8::9") {
+		t.Fatalf("IPv4-only server: out %q", w.out.String())
+	}
+}
+
+func TestHTTPSIPv6OnlyDNSOnIPv4ServerAsks(t *testing.T) {
+	w := newHTTPSWorld(t, "y\nn\n", true)
+	w.lookup = []string{"2001:db8::9"}
+	w.local = []net.IP{net.ParseIP("198.51.100.7")}
+	wantOff(t, w, w.step(t, httpsDomain, httpsEmail, installOpts{}), "does not point at this server yet", httpsNext)
+}
+
+func TestHealthProbeDialsThisServer(t *testing.T) {
+	var host string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		host = r.Host
+		if r.URL.Path != "/health" {
+			rw.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+	prevAddr, prevRoots := probeAddr, probeRoots
+	probeAddr, probeRoots = srv.Listener.Addr().String(), pool
+	t.Cleanup(func() { probeAddr, probeRoots = prevAddr, prevRoots })
+	if !getHealthOverHTTPS(context.Background(), "example.com") || host != "example.com" {
+		t.Fatalf("want the local proxy's answer for example.com (host %q)", host)
+	}
+	if getHealthOverHTTPS(context.Background(), "learn.other.test") {
+		t.Fatal("a certificate for another name must not count")
+	}
+	// host:port: dial that port on this server, verify the name without the port.
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	probeAddr = "127.0.0.1:1"
+	if !getHealthOverHTTPS(context.Background(), "example.com:"+port) || host != "example.com:"+port {
+		t.Fatalf("host:port: host %q", host)
 	}
 }

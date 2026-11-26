@@ -409,3 +409,77 @@ func TestShowStderrOnlyForApt(t *testing.T) {
 		t.Fatal("apt-get's stderr is shown, systemctl's is not")
 	}
 }
+
+func TestInstallRerunWritesWholeFiles(t *testing.T) {
+	w := newWorld(t)
+	w.files[keyPath] = "stale key\n"
+	w.files[sourcesPath] = "deb stale\n"
+	for run := 1; run <= 2; run++ {
+		if err := w.steps("amd64").Install(context.Background(), bookworm); err != nil {
+			t.Fatalf("run %d: %v", run, err)
+		}
+		wantSrc := "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable\n"
+		if w.files[keyPath] != checkedKey(t) || w.files[sourcesPath] != wantSrc {
+			t.Fatalf("run %d: files not written whole: %q", run, w.files)
+		}
+	}
+	for _, wr := range w.writes {
+		if strings.Contains(wr.data, "stale") {
+			t.Fatalf("a write kept old content: %+v", wr)
+		}
+	}
+}
+
+func TestInstallComposeOnly(t *testing.T) {
+	w := newWorld(t)
+	s := w.steps("amd64")
+	s.Packages = []string{"docker-compose-plugin"}
+	if err := s.Install(context.Background(), bookworm); err != nil {
+		t.Fatal(err)
+	}
+	sim := "apt-get -o DPkg::Lock::Timeout=120 install -s docker-compose-plugin"
+	inst := "apt-get -o DPkg::Lock::Timeout=120 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y --no-remove docker-compose-plugin"
+	if want := []string{update, sim, inst, enableNow}; !reflect.DeepEqual(w.cmd.calls, want) {
+		t.Fatalf("calls = %q", w.cmd.calls)
+	}
+}
+
+func TestInstallSimulateFailureHints(t *testing.T) {
+	w := newWorld(t)
+	w.cmd.errs[simulate] = []error{errors.New("exit status 100")}
+	err := w.steps("amd64").Install(context.Background(), bookworm)
+	if err == nil || !strings.Contains(err.Error(), "sudo dpkg --configure -a") || !strings.Contains(err.Error(), lockHint) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestInstallUpdateFailureNamesOldSources(t *testing.T) {
+	w := newWorld(t)
+	w.files["/etc/apt/sources.list.d/docker.sources"] = "Types: deb\n"
+	w.cmd.errs[update] = []error{errors.New("exit status 100")}
+	err := w.steps("amd64").Install(context.Background(), bookworm)
+	if err == nil || !strings.Contains(err.Error(), "/etc/apt/sources.list.d/docker.sources") || !strings.Contains(err.Error(), "Conflicting values") {
+		t.Fatalf("err = %v", err)
+	}
+	w = newWorld(t)
+	w.cmd.errs[update] = []error{errors.New("exit status 100")}
+	if err := w.steps("amd64").Install(context.Background(), bookworm); err == nil || strings.Contains(err.Error(), "docker.sources") {
+		t.Fatalf("no old file: err = %v", err)
+	}
+}
+
+func TestInstallComposeOnlyUsesExistingDockerSources(t *testing.T) {
+	w := newWorld(t)
+	w.files["/etc/apt/sources.list.d/docker.sources"] = "Types: deb\n"
+	s := w.steps("amd64")
+	s.Packages = []string{"docker-compose-plugin"}
+	if err := s.Install(context.Background(), bookworm); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.writes) != 0 {
+		t.Fatalf("wrote %+v next to docker.sources", w.writes)
+	}
+	if len(w.cmd.calls) != 4 || w.cmd.calls[0] != update {
+		t.Fatalf("calls = %q", w.cmd.calls)
+	}
+}

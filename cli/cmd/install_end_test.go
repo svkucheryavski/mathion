@@ -332,8 +332,9 @@ func TestResumeFailureSkipsTheEnding(t *testing.T) {
 	}
 	app, out := endApp(f)
 	app.CfgDir = seedInstalled(t, false)
-	if err := app.runInstall(context.Background(), installOpts{}); err == nil {
-		t.Fatal("want the resume error")
+	err := app.runInstall(context.Background(), installOpts{})
+	if err == nil || !strings.Contains(err.Error(), "Fix the problem shown above, then run sudo mathion install again") {
+		t.Fatalf("want the resume error with the next step, got %v", err)
 	}
 	if strings.Contains(out.String(), "Mathion is") {
 		t.Fatalf("ending printed after a failed resume: %q", out.String())
@@ -357,4 +358,26 @@ func TestResumeNormalisesTheSavedAddress(t *testing.T) {
 		t.Fatalf("probed %q", probed)
 	}
 	wantAll(t, out.String(), "✓ Mathion is running at https://learn.example.edu\n")
+}
+
+func TestEndingPendingSaysHowToGetANewPIN(t *testing.T) {
+	app, out := endApp(pinRunner("PIN: 482913\nIt expires in 15 minutes.\n", nil))
+	app.printEnding(context.Background(), "learn.example.edu", "you@example.edu", httpsResult{On: true, Pending: true})
+	wantAll(t, out.String(), "If the PIN runs out before the site opens, run sudo mathion pin you@example.edu for a new one.")
+	app, out = endApp(pinRunner("PIN: 482913\nIt expires in 15 minutes.\n", nil))
+	app.printEnding(context.Background(), "learn.example.edu", "you@example.edu", httpsResult{On: true})
+	if strings.Contains(out.String(), "runs out") {
+		t.Fatalf("not pending: %q", out.String())
+	}
+}
+
+func TestEndingOffNamesInstallAgain(t *testing.T) {
+	app, out := endApp(pinRunner("", nil))
+	app.printEnding(context.Background(), "learn.example.edu", "you@example.edu", httpsResult{Reason: "you answered no", NextCmd: tlsEnableLine("learn.example.edu", "you@example.edu")})
+	wantAll(t, out.String(), "Or run sudo mathion install again: it asks about HTTPS once more.")
+	app, out = endApp(pinRunner("", nil))
+	app.printEnding(context.Background(), "learn.example.edu:8443", "you@example.edu", httpsResult{Reason: "not a plain domain"})
+	if strings.Contains(out.String(), "install again") {
+		t.Fatalf("host:port: %q", out.String())
+	}
 }

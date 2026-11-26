@@ -151,12 +151,14 @@ offer_setup() {
   tty="${MATHION_TTY:-/dev/tty}"
   next='Next: sudo mathion install   (it asks for the site address and your email)'
   if [ -e "$cfg/.env" ] || [ -L "$cfg/.env" ]; then
-    echo "Mathion is already set up here. Update with: sudo mathion self-update && sudo mathion update"
+    echo "Mathion is already set up here, or its setup was started."
+    echo "  To finish or check it: sudo mathion install"
+    echo "  To update it: sudo mathion self-update && sudo mathion update"
     return 0
   fi
   # An older mathion (a pinned version) has no questions to ask.
   if ! "$DEST" install --help 2>/dev/null | grep -q -- '--no-tls'; then
-    echo 'Next: sudo mathion install --domain <your-domain> --admin-email <you@example.edu>'
+    echo 'Next: sudo mathion install --domain YOUR-DOMAIN --admin-email YOUR-EMAIL'
     return 0
   fi
   if ! (: <"$tty") 2>/dev/null; then

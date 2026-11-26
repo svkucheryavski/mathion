@@ -36,6 +36,9 @@ func (a *App) printEnding(ctx context.Context, domain, email string, h httpsResu
 	default:
 		fmt.Fprintf(a.Out, "  First PIN:     %s\n", strings.Join(strings.Fields(out), " "))
 	}
+	if h.Pending && err == nil && strings.TrimSpace(out) != "" {
+		fmt.Fprintf(a.Out, "  If the PIN runs out before the site opens, run sudo mathion pin %s for a new one.\n", email)
+	}
 	fmt.Fprint(a.Out, "\n"+panelLines)
 }
 
@@ -63,7 +66,7 @@ func (a *App) printOffEnding(email string, h httpsResult) {
 		turnOn = "Once the port is free, turn it on with:"
 	}
 	if h.NextCmd != "" {
-		fmt.Fprintf(a.Out, "  %s\n      %s\n  Or put your own HTTPS proxy in front, as the guide shows:\n      %s\n\n", turnOn, h.NextCmd, externalProxyGuide)
+		fmt.Fprintf(a.Out, "  %s\n      %s\n  Or run sudo mathion install again: it asks about HTTPS once more.\n  Or put your own HTTPS proxy in front, as the guide shows:\n      %s\n\n", turnOn, h.NextCmd, externalProxyGuide)
 	} else {
 		fmt.Fprintf(a.Out, "  Put your own HTTPS proxy in front, as the guide shows:\n      %s\n\n", externalProxyGuide)
 	}

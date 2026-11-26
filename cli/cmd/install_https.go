@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
@@ -31,6 +33,8 @@ var (
 	probeDomainHTTPS = getHealthOverHTTPS
 	certWait         = 2 * time.Minute
 	certPoll         = 5 * time.Second
+	probeAddr        = "127.0.0.1:443" // the bundled proxy listens on every address
+	probeRoots       *x509.CertPool    // nil: the system's roots
 )
 
 // interfaceIPs lists this server's own addresses.
@@ -48,7 +52,7 @@ func interfaceIPs() ([]net.IP, error) {
 	return ips, nil
 }
 
-// getHealthOverHTTPS reports whether https://<domain>/health answers with a valid certificate.
+// getHealthOverHTTPS reports whether this server answers https://<domain>/health with a valid certificate.
 func getHealthOverHTTPS(ctx context.Context, domain string) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -56,7 +60,20 @@ func getHealthOverHTTPS(ctx context.Context, domain string) bool {
 	if err != nil {
 		return false
 	}
-	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}} // no proxy from the environment
+	// Dial this server, not wherever public DNS points; no proxy from the environment.
+	name, addr := domain, probeAddr
+	if h, p, err := net.SplitHostPort(domain); err == nil {
+		lh, _, _ := net.SplitHostPort(probeAddr)
+		name, addr = h, net.JoinHostPort(lh, p)
+	}
+	tr := &http.Transport{
+		DisableKeepAlives: true,
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, addr)
+		},
+		TLSClientConfig: &tls.Config{ServerName: name, RootCAs: probeRoots},
+	}
+	client := &http.Client{Transport: tr}
 	resp, err := client.Do(req)
 	if err != nil {
 		return false
@@ -81,7 +98,7 @@ func (a *App) httpsStep(ctx context.Context, domain, email string, o installOpts
 // httpsApply turns on the proxy and waits for the certificate.
 func (a *App) httpsApply(ctx context.Context, p *httpsPlan) (httpsResult, error) {
 	if err := a.turnOnTLS(ctx, p.domain, p.email); err != nil {
-		return httpsResult{}, err
+		return httpsResult{}, fmt.Errorf("Mathion is running, but HTTPS could not be started (%w). Run sudo mathion install again to try once more", err)
 	}
 	return httpsResult{On: true, Pending: !a.waitForCertificate(ctx, p.domain)}, nil
 }
@@ -94,7 +111,7 @@ func (a *App) httpsDecide(ctx context.Context, domain, email string, o installOp
 	}
 	later := email
 	if config.ValidateTLSEmail(email) != nil {
-		later = "<your-email>"
+		later = "YOUR-EMAIL"
 	}
 	off := func(reason string) (*httpsPlan, httpsResult, error) {
 		return nil, httpsResult{Reason: reason, NextCmd: tlsEnableLine(domain, later)}, nil
@@ -138,6 +155,9 @@ func (a *App) httpsDecide(ctx context.Context, domain, email string, o installOp
 	email = config.NormalizeEmail(email)
 	later = email
 	if !a.dnsPointsHere(domain) {
+		if !o.Yes {
+			fmt.Fprintln(a.Out, "  Fix the domain's DNS record so it points at this server. Answer y to turn HTTPS on now: it starts by itself once the domain points here. Answer n to leave it off for now.")
+		}
 		ok, err := a.confirm(o.Yes, "Turn on HTTPS anyway?", false)
 		switch {
 		case errors.Is(err, prompt.ErrNotInteractive):
@@ -184,6 +204,7 @@ func (a *App) dnsPointsHere(domain string) bool {
 			for _, m := range mine {
 				if ip.Equal(m) {
 					fmt.Fprintf(a.Out, "  Checking that %s points at this server … ok\n", domain)
+					a.warnStrays(domain, ips, mine)
 					return true
 				}
 			}
@@ -216,6 +237,36 @@ func (a *App) dnsPointsHere(domain string) bool {
 	}
 	fmt.Fprintln(a.Out, "  If your provider has a firewall, it must allow ports 80 and 443.")
 	return false
+}
+
+// warnStrays warns about foreign DNS answers in a family this server uses publicly; any IPv6 answer counts, as IPv6 is not NATed.
+func (a *App) warnStrays(domain string, dns, mine []net.IP) {
+	for _, fam := range []string{"IPv4", "IPv6"} {
+		ours, public := false, false
+		for _, m := range mine {
+			if familyOf(m) == fam && !isPrivate(m) {
+				public = true
+			}
+		}
+		if fam == "IPv6" {
+			public = true
+		}
+		var stray []string
+		for _, ip := range dns {
+			if familyOf(ip) != fam {
+				continue
+			}
+			for _, m := range mine {
+				if ip.Equal(m) {
+					ours = true
+				}
+			}
+			stray = append(stray, ip.String())
+		}
+		if public && !ours && len(stray) > 0 {
+			fmt.Fprintf(a.Out, "  Warning: %s also points at %s, which is not this server. Let's Encrypt may use that address and fail; fix or remove that DNS record.\n", domain, strings.Join(stray, ", "))
+		}
+	}
 }
 
 // ownAddrs lists this server's addresses other than loopback and link-local.
@@ -256,7 +307,7 @@ func familyOf(ip net.IP) string {
 	return "IPv6"
 }
 
-// noPublicFamily reports a family DNS uses when the server has no public address in any family DNS uses.
+// noPublicFamily reports IPv4 when DNS uses it and the server has no public address in any family DNS uses; IPv6 is not NATed.
 func noPublicFamily(dns, mine []net.IP) (string, bool) {
 	public := map[string]bool{}
 	for _, m := range mine {
@@ -269,7 +320,9 @@ func noPublicFamily(dns, mine []net.IP) (string, bool) {
 		if public[familyOf(ip)] {
 			return "", false
 		}
-		fam = familyOf(ip)
+		if familyOf(ip) == "IPv4" {
+			fam = "IPv4"
+		}
 	}
 	return fam, fam != ""
 }
@@ -299,7 +352,7 @@ func (a *App) waitForCertificate(ctx context.Context, domain string) bool {
 		}
 		if ctx.Err() != nil || !time.Now().Before(deadline) {
 			fmt.Fprintln(a.Out)
-			fmt.Fprintln(a.Out, "  The certificate is still on its way. Check with sudo mathion tls status in a few minutes.")
+			fmt.Fprintf(a.Out, "  The certificate is still on its way. Open https://%s in a few minutes, or run sudo mathion install again to check.\n", domain)
 			return false
 		}
 		fmt.Fprint(a.Out, ".")

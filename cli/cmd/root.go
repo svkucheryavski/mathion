@@ -27,7 +27,7 @@ type App struct {
 	DockerCmd     dockersetup.Cmd
 	DockerDaemon  func() string
 	ReadOSRelease func() (dockersetup.OS, error)
-	InstallDocker func(ctx context.Context, o dockersetup.OS, arch string) error
+	InstallDocker func(ctx context.Context, o dockersetup.OS, arch string, composeOnly bool) error
 }
 
 // buildVersion / buildDefaultImage are overridden by main via SetBuildInfo,
@@ -174,11 +174,20 @@ func Execute() {
 	app.DockerDaemon = dockerDaemon
 	app.DockerCmd = dockersetup.ExecCmd{}
 	app.ReadOSRelease = readOSRelease
-	app.InstallDocker = func(ctx context.Context, o dockersetup.OS, arch string) error {
-		return dockersetup.NewSteps(arch, app.Out).Install(ctx, o)
+	app.InstallDocker = func(ctx context.Context, o dockersetup.OS, arch string, composeOnly bool) error {
+		return dockerSteps(arch, app.Out, composeOnly).Install(ctx, o)
 	}
 	if err := newRootCmd(app).ExecuteContext(context.Background()); err != nil {
 		app.Err.Write([]byte("error: " + err.Error() + "\n"))
 		osExit(exitCode(err))
 	}
+}
+
+// dockerSteps installs Docker and Compose, or only Compose next to the admin's own Docker packages.
+func dockerSteps(arch string, out io.Writer, composeOnly bool) dockersetup.Steps {
+	s := dockersetup.NewSteps(arch, out)
+	if composeOnly {
+		s.Packages = []string{"docker-compose-plugin"}
+	}
+	return s
 }

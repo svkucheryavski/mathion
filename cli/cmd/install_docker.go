@@ -94,7 +94,7 @@ func (a *App) ensureDocker(ctx context.Context, yes bool) error {
 	ok, err := a.confirm(yes, missing+" Install it from Docker's official packages?", true)
 	if errors.Is(err, prompt.ErrNotInteractive) {
 		return errors.New(missing + " Run sudo mathion install in a terminal to be asked, or install everything without questions:\n" +
-			"  sudo mathion install --yes --domain <site address> --admin-email <your email>")
+			"  sudo mathion install --yes --domain SITE-ADDRESS --admin-email YOUR-EMAIL")
 	}
 	if err != nil {
 		return unanswered(err, "add --yes to install "+name+" without asking")
@@ -102,7 +102,7 @@ func (a *App) ensureDocker(ctx context.Context, yes bool) error {
 	if !ok {
 		return errors.New(dockersetup.Instructions(name + " is needed, and it was not installed."))
 	}
-	if err := a.InstallDocker(ctx, o, arch); err != nil {
+	if err := a.InstallDocker(ctx, o, arch, name == "Docker Compose"); err != nil {
 		if errors.Is(err, dockersetup.ErrNoDockerRelease) {
 			return errors.New(dockersetup.Instructions(fmt.Sprintf("Docker does not publish packages for %s %s yet.", o.ID, o.Codename)))
 		}
@@ -138,8 +138,11 @@ func (a *App) dockerStopped(ctx context.Context) error {
 		if s, known := a.dockerCE(ctx); known && s != ceInstalled {
 			return nil // apt left docker-ce unfinished: install it again
 		}
-		return errors.New("Docker is installed but does not answer. Start it with: sudo systemctl enable --now docker\n" +
-			"If that fails, run sudo dpkg --configure -a, then sudo mathion install again")
+		msg := "Docker is installed but does not answer. Start it with: sudo systemctl enable --now docker\n"
+		if _, err := a.DockerCmd.Output(ctx, "dpkg", "--version"); err == nil {
+			return errors.New(msg + "If that fails, run sudo dpkg --configure -a, then sudo mathion install again")
+		}
+		return errors.New(msg + "then run sudo mathion install again")
 	}
 	return nil
 }

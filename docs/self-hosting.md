@@ -18,8 +18,8 @@ distinct steps: first install the CLI **binary**, then use it to stand up the
 its signature and checksum (below), installs `mathion` to `/usr/local/bin`, and
 then asks `Set up Mathion on this server now? [Y/n]`. Enter or `y` goes straight
 on to `mathion install`; `n` prints the command to run later. It does not ask
-when Mathion is already set up on the server (it prints the update command
-instead), when there is no terminal to ask on, or when the release you pinned
+when Mathion is already set up on the server, or its setup was started (it
+prints how to finish it with `sudo mathion install` or update it), when there is no terminal to ask on, or when the release you pinned
 (below) is older than this question (it prints the full `mathion install`
 command instead):
 
@@ -77,9 +77,14 @@ It asks only for what it needs:
    installs Docker Engine and Compose v2 from Docker's signed apt repository.
    On any other system it says how to install Docker yourself and stops; run
    `sudo mathion install` again afterwards. A Docker that already works is left
-   as it is. Once Docker works, it is set to start at boot.
-2. **Site address** (`learn.school.edu`): a bare host name, or `host:port`, with
-   no `https://`. Skipped when you pass `--domain`.
+   as it is; when Docker from Docker's own packages works but Compose is
+   missing, it offers to add only Compose. Once Docker works, it is set to start
+   at boot.
+2. **Site address** (`learn.school.edu`): a domain name, or `host:port`, with
+   no `https://`. An IP address or a one-word name is refused here, because it
+   cannot get a certificate. An address with a port (`learn.school.edu:8443`)
+   is only for a server behind your own HTTPS proxy; it never gets the bundled
+   HTTPS. Skipped when you pass `--domain`.
 3. **Your email**, which becomes the first superuser's. Skipped when you pass
    `--admin-email`.
 4. **HTTPS.** `Turn on HTTPS with a free Let's Encrypt certificate?` (default
@@ -98,11 +103,13 @@ It ends in one of two ways:
 - **HTTPS is on.** It prints `✓ Mathion is running at https://<domain>`, your
   sign-in email and a first PIN. Browse to `https://<domain>` and sign in. If the
   certificate has not arrived within the wait, it says the site will work once
-  it does; check with `sudo mathion tls status`.
+  it does and how to get a new PIN if this one runs out; open the site in a few
+  minutes, or run `sudo mathion install` again to check.
 - **HTTPS is off** (you answered no, a port was busy, the domain did not point
   here yet, or `--no-tls`). It says why, prints the `sudo mathion tls enable …`
-  line that turns it on later (for a `host:port` address, only the guide), and
-  links the [guide for your own HTTPS proxy](#tls--reverse-proxy-external). Then run
+  line that turns it on later, says that `sudo mathion install` again asks once
+  more (for a `host:port` address, only the guide), and links the
+  [guide for your own HTTPS proxy](#tls--reverse-proxy-external). Then run
   `sudo mathion pin <email>` for a PIN. Sign in over HTTPS, **not**
   `http://127.0.0.1:8000`: the Secure session cookie does not stick over plain
   HTTP.

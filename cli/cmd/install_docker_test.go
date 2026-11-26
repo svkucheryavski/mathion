@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -49,7 +51,7 @@ type dockerWorld struct {
 }
 
 func newDockerWorld(t *testing.T, answers string, interactive bool) *dockerWorld {
-	w := &dockerWorld{sys: &sysCmd{outputs: map[string]string{"dpkg --print-architecture": "amd64\n", "systemctl is-enabled docker": "enabled\n"}}}
+	w := &dockerWorld{sys: &sysCmd{outputs: map[string]string{"dpkg --print-architecture": "amd64\n", "dpkg --version": "Debian dpkg 1.21\n", "systemctl is-enabled docker": "enabled\n"}}}
 	r := &compose.FakeRunner{OutputFunc: func(args []string) (string, error) {
 		switch strings.Join(args, " ") {
 		case "version":
@@ -81,8 +83,12 @@ func newDockerWorld(t *testing.T, answers string, interactive bool) *dockerWorld
 		ReadOSRelease: func() (dockersetup.OS, error) {
 			return dockersetup.OS{ID: "debian", VersionID: "12", Codename: "bookworm"}, nil
 		},
-		InstallDocker: func(_ context.Context, o dockersetup.OS, arch string) error {
-			w.installs = append(w.installs, o.Codename+"/"+arch)
+		InstallDocker: func(_ context.Context, o dockersetup.OS, arch string, composeOnly bool) error {
+			rec := o.Codename + "/" + arch
+			if composeOnly {
+				rec += "/compose-only"
+			}
+			w.installs = append(w.installs, rec)
 			if w.installErr != nil {
 				return w.installErr
 			}
@@ -295,7 +301,7 @@ func TestEnsureDockerInputEndsAtQuestion(t *testing.T) {
 
 func TestEnsureDockerStillSilentAfterInstall(t *testing.T) {
 	w := newDockerWorld(t, "y\n", true)
-	w.app.InstallDocker = func(context.Context, dockersetup.OS, string) error { return nil } // Docker stays silent
+	w.app.InstallDocker = func(context.Context, dockersetup.OS, string, bool) error { return nil } // Docker stays silent
 	err := w.app.ensureDocker(context.Background(), false)
 	if err == nil || !strings.Contains(err.Error(), "does not answer yet") {
 		t.Fatalf("err=%v", err)
@@ -359,7 +365,7 @@ func TestEnsureDockerFinishesComposeFromOwnInstall(t *testing.T) {
 	w := newDockerWorld(t, "y\n", true)
 	w.installed = true
 	w.sys.outputs[dpkgStatus] = "install ok installed"
-	if err := w.app.ensureDocker(context.Background(), false); err != nil || len(w.installs) != 1 {
+	if err := w.app.ensureDocker(context.Background(), false); err != nil || len(w.installs) != 1 || w.installs[0] != "bookworm/amd64/compose-only" {
 		t.Fatalf("err=%v installs=%v", err, w.installs)
 	}
 	if !strings.Contains(w.out.String(), "Docker Compose is missing. Install it from Docker's official packages? [Y/n]") {
@@ -405,5 +411,32 @@ func TestEnsureDockerInstalledLineMatchesSketch(t *testing.T) {
 	w := newDockerWorld(t, "y\n", true)
 	if err := w.app.ensureDocker(context.Background(), false); err != nil || !strings.Contains(w.out.String(), "✓ Docker installed, starts at boot") {
 		t.Fatalf("err=%v out=%q", err, w.out.String())
+	}
+}
+
+func TestEnsureDockerStoppedNoDpkgHintWithoutDpkg(t *testing.T) {
+	w := newDockerWorld(t, "y\n", true)
+	w.binary = true
+	delete(w.sys.outputs, "dpkg --version")
+	err := w.app.ensureDocker(context.Background(), false)
+	if err == nil || strings.Contains(err.Error(), "dpkg") || !strings.Contains(err.Error(), "sudo systemctl enable --now docker") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestEnsureDockerNoTerminalLineCanBePasted(t *testing.T) {
+	w := newDockerWorld(t, "", false)
+	err := w.app.ensureDocker(context.Background(), false)
+	if err == nil || !strings.Contains(err.Error(), "sudo mathion install --yes --domain SITE-ADDRESS --admin-email YOUR-EMAIL") || strings.Contains(err.Error(), "<") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestDockerStepsComposeOnly(t *testing.T) {
+	if s := dockerSteps("amd64", io.Discard, true); !reflect.DeepEqual(s.Packages, []string{"docker-compose-plugin"}) || s.Arch != "amd64" {
+		t.Fatalf("compose only: %+v", s.Packages)
+	}
+	if s := dockerSteps("arm64", io.Discard, false); s.Packages != nil || s.Arch != "arm64" {
+		t.Fatalf("full: %+v", s.Packages)
 	}
 }

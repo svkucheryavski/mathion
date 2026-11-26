@@ -19,6 +19,8 @@ import (
 const (
 	keyPath     = "/etc/apt/keyrings/docker.asc"
 	sourcesPath = "/etc/apt/sources.list.d/docker.list"
+	// deb822SourcesPath is the file Docker's own guide writes today.
+	deb822SourcesPath = "/etc/apt/sources.list.d/docker.sources"
 	// lockWait is how long to wait for another program holding the apt lock.
 	lockWait = 2 * time.Minute
 	lockPoll = 10 * time.Second
@@ -118,6 +120,7 @@ type Steps struct {
 	Sleep     func(time.Duration)
 	Out       io.Writer
 	Arch      string
+	Packages  []string // nil installs Docker and Compose
 }
 
 // NewSteps returns Steps that act on this server.
@@ -148,6 +151,40 @@ func (s Steps) Install(ctx context.Context, o OS) error {
 		}
 		return fmt.Errorf("installing Docker: checking Docker's package source: %w", err)
 	}
+	if _, err := s.ReadFile(deb822SourcesPath); err == nil && s.Packages != nil {
+		// Compose only, next to Docker's own source: use that source as it is.
+		if err := s.update(ctx); err != nil {
+			return fmt.Errorf("installing Docker: apt-get update: %w", err)
+		}
+	} else if err := s.addSource(ctx, key, base, o.Codename); err != nil {
+		return err
+	}
+	pkgs := s.Packages
+	if pkgs == nil {
+		pkgs = packages
+	}
+	sim, err := s.Cmd.Output(ctx, "apt-get", append(append(append([]string{}, lockOpt...), "install", "-s"), pkgs...)...)
+	if err != nil {
+		return fmt.Errorf("installing Docker: apt-get install -s: %w. If apt says dpkg was interrupted, run sudo dpkg --configure -a, then sudo mathion install again; if another program is using apt, %s", err, lockHint)
+	}
+	if removed := removals(sim); len(removed) > 0 {
+		return fmt.Errorf("installing Docker: %w: %s. Remove or replace them yourself, then run sudo mathion install again", ErrWouldRemove, strings.Join(removed, ", "))
+	}
+	args := append(append([]string{}, lockOpt...), "-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold", "install", "-y", "--no-remove")
+	if err := s.Cmd.Run(ctx, "apt-get", append(args, pkgs...)...); err != nil {
+		if errors.Is(err, ErrLocked) {
+			return fmt.Errorf("installing Docker: apt-get install: %w (waited %v); %s", ErrLocked, lockWait, lockHint)
+		}
+		return fmt.Errorf("installing Docker: apt-get install: %w. If apt says dpkg was interrupted, run sudo dpkg --configure -a, then sudo mathion install again", err)
+	}
+	if err := s.Cmd.Run(ctx, "systemctl", "enable", "--now", "docker"); err != nil {
+		return fmt.Errorf("installing Docker: systemctl enable --now docker: %w", err)
+	}
+	return nil
+}
+
+// addSource writes Docker's checked key and source, then runs apt-get update; a failed update takes the source out again.
+func (s Steps) addSource(ctx context.Context, key []byte, base, codename string) error {
 	if err := s.WriteFile(keyPath, key, 0o644); err != nil {
 		return fmt.Errorf("installing Docker: writing %s: %w", keyPath, err)
 	}
@@ -156,7 +193,7 @@ func (s Steps) Install(ctx context.Context, o OS) error {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("installing Docker: reading %s: %w", sourcesPath, err)
 	}
-	line := fmt.Sprintf("deb [arch=%s signed-by=%s] %s %s stable\n", s.Arch, keyPath, base, o.Codename)
+	line := fmt.Sprintf("deb [arch=%s signed-by=%s] %s %s stable\n", s.Arch, keyPath, base, codename)
 	if err := s.WriteFile(sourcesPath, []byte(line), 0o644); err != nil {
 		return fmt.Errorf("installing Docker: writing %s: %w", sourcesPath, err)
 	}
@@ -167,27 +204,14 @@ func (s Steps) Install(ctx context.Context, o OS) error {
 		} else {
 			rerr = s.Remove(sourcesPath)
 		}
+		hint := ""
+		if _, oerr := s.ReadFile(deb822SourcesPath); oerr == nil {
+			hint = fmt.Sprintf(". Another Docker source, %s, is also on this server; if apt says \"Conflicting values\", remove that file and run sudo mathion install again", deb822SourcesPath)
+		}
 		if rerr != nil {
-			return fmt.Errorf("installing Docker: apt-get update: %w; remove %s by hand (%v)", err, sourcesPath, rerr)
+			return fmt.Errorf("installing Docker: apt-get update: %w; remove %s by hand (%v)%s", err, sourcesPath, rerr, hint)
 		}
-		return fmt.Errorf("installing Docker: apt-get update: %w; the Docker source was taken out again", err)
-	}
-	sim, err := s.Cmd.Output(ctx, "apt-get", append(append(append([]string{}, lockOpt...), "install", "-s"), packages...)...)
-	if err != nil {
-		return fmt.Errorf("installing Docker: apt-get install -s: %w", err)
-	}
-	if removed := removals(sim); len(removed) > 0 {
-		return fmt.Errorf("installing Docker: %w: %s. Remove or replace them yourself, then run sudo mathion install again", ErrWouldRemove, strings.Join(removed, ", "))
-	}
-	args := append(append([]string{}, lockOpt...), "-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold", "install", "-y", "--no-remove")
-	if err := s.Cmd.Run(ctx, "apt-get", append(args, packages...)...); err != nil {
-		if errors.Is(err, ErrLocked) {
-			return fmt.Errorf("installing Docker: apt-get install: %w (waited %v); %s", ErrLocked, lockWait, lockHint)
-		}
-		return fmt.Errorf("installing Docker: apt-get install: %w. If apt says dpkg was interrupted, run sudo dpkg --configure -a, then sudo mathion install again", err)
-	}
-	if err := s.Cmd.Run(ctx, "systemctl", "enable", "--now", "docker"); err != nil {
-		return fmt.Errorf("installing Docker: systemctl enable --now docker: %w", err)
+		return fmt.Errorf("installing Docker: apt-get update: %w; the Docker source was taken out again%s", err, hint)
 	}
 	return nil
 }

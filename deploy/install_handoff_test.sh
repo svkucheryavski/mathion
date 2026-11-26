@@ -25,7 +25,7 @@ chmod +x "$W/stub"
 DEST="$W/stub"
 NEW_HELP='      --no-tls    do not set up the bundled HTTPS proxy'
 NEXT='Next: sudo mathion install   (it asks for the site address and your email)'
-OLD_NEXT='Next: sudo mathion install --domain <your-domain> --admin-email <you@example.edu>'
+OLD_NEXT='Next: sudo mathion install --domain YOUR-DOMAIN --admin-email YOUR-EMAIL'
 QUESTION='Set up Mathion on this server now? [Y/n]'
 mkdir "$W/cfg" "$W/fresh" "$W/link"
 
@@ -57,14 +57,16 @@ grep -q '^  offer_setup$' "$ROOT_DIR/deploy/install.sh" || fail "main does not c
 touch "$W/cfg/.env"
 MATHION_CONFIG_DIR="$W/cfg"
 run existing '\n'
-has existing 'Mathion is already set up here. Update with: sudo mathion self-update && sudo mathion update'
+has existing 'Mathion is already set up here, or its setup was started.'
+has existing 'To finish or check it: sudo mathion install'
+has existing 'To update it: sudo mathion self-update && sudo mathion update'
 not_ran existing
 
 # 1b. A broken .env link also counts (install would refuse it).
 ln -s "$W/nowhere" "$W/link/.env"
 MATHION_CONFIG_DIR="$W/link"
 run link '\n'
-has link 'Mathion is already set up here.'
+has link 'To finish or check it: sudo mathion install'
 not_ran link
 
 MATHION_CONFIG_DIR="$W/fresh"
