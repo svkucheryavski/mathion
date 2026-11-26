@@ -8,6 +8,7 @@ from mathion.olx.links import LinkTargets
 from mathion.olx.quiz import PlanOption, convert_problem, numeric_answer, precision_for
 from mathion.olx.report import Report
 from mathion.olx.tree import parse_xml
+from tests.conftest import secs
 
 TARGETS = LinkTargets(static={"fig.png": "fig.png"}, skipped={})
 FIX = Path(__file__).parent / "fixtures/olx/course/problem"
@@ -444,7 +445,7 @@ def test_huge_old_dropdown_skipped_fast():
     start = time.perf_counter()
     qs, rep = conv(f'<problem><p>Q</p><optionresponse><optioninput options="(\'{"a" * 2_000_000}\',\'b\')" correct="b"/>'
                    f'</optionresponse></problem>')
-    assert qs == [] and time.perf_counter() - start < 2
+    assert qs == [] and time.perf_counter() - start < secs(2)
     assert any("too long" in x for x in texts(rep))
     qs, _ = conv(f'<problem><p>Q</p><optionresponse><optioninput options="(\'{"a" * 500}\',\'b\')" correct="b"/>'
                  f'</optionresponse></problem>')
@@ -456,7 +457,7 @@ def test_prune_is_linear():
     start = time.perf_counter()
     qs, _ = conv("<problem><stringresponse answer='a' type='ci'><div>" + "<b>x</b><choicehint>h</choicehint>" * 100_000
                  + "</div><textline/></stringresponse></problem>")
-    assert len(qs) == 1 and time.perf_counter() - start < 10
+    assert len(qs) == 1 and time.perf_counter() - start < secs(10)
 
 
 def test_prune_keeps_tails_in_order():
@@ -588,7 +589,7 @@ def test_prune_tails_linear():
         e.tail = "abcdefghij"
     start = time.perf_counter()
     _prune(root, {"choicehint"})
-    assert time.perf_counter() - start < 2
+    assert time.perf_counter() - start < secs(2)
     assert len(root[0].tail) == 3_000_000 and len(root) == 1
 
 

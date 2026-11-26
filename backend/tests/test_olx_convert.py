@@ -17,6 +17,7 @@ from mathion.olx.files import Limits, Upload, plan_files, unique_name
 from mathion.olx.report import Report
 from mathion.olx.quiz import PlanOption, PlanQuestion
 from tests.test_olx_tree import fixture_files
+from tests.conftest import secs
 
 LIMITS = Limits(max_file_bytes=10_000, max_total_bytes=50_000)
 PAGE = '<html display_name="Text"><p>Hello</p></html>'
@@ -340,12 +341,12 @@ def test_repeated_names_stay_linear():
     names_taken, name_counters = set(), {}
     for _ in range(20_000):
         names_taken.add(unique_name("image.png", names_taken, name_counters))
-    assert time.perf_counter() - start < 2
+    assert time.perf_counter() - start < secs(2)
     assert len(set(slugs)) == 20_000 and len(names_taken) == 20_000
     start = time.perf_counter()
     plan = plan_files([StaticEntry(path=f"d{n}/image.png", size=1) for n in range(20_000)], [], set(),
                       Limits(10, 10**9), Report())
-    assert time.perf_counter() - start < 2 and len({u.target for u in plan.uploads}) == 20_000
+    assert time.perf_counter() - start < secs(2) and len({u.target for u in plan.uploads}) == 20_000
 
 
 def test_targets_stay_put_when_the_per_file_limit_changes():
@@ -555,7 +556,7 @@ def test_truncated_collisions_stay_linear():
     static = [StaticEntry(path=f"{d}/{n}", size=1) for d in "xy" for n in names]
     start = time.perf_counter()
     files = plan_files(static, [], set(), Limits(10, 10**9), Report())
-    assert time.perf_counter() - start < 3
+    assert time.perf_counter() - start < secs(3)
     assert len({u.target for u in files.uploads}) == 40_000
 
 
@@ -592,12 +593,12 @@ def test_existing_numbered_names_stay_linear():
     static += [StaticEntry(path=f"d{i}/a.png", size=1) for i in range(20_000)]
     start = time.perf_counter()
     files = plan_files(static, [], set(), Limits(10, 10**9), Report())
-    assert time.perf_counter() - start < 3 and len({u.target for u in files.uploads}) == len(static)
+    assert time.perf_counter() - start < secs(3) and len({u.target for u in files.uploads}) == len(static)
     taken = {f"video-{n}" for n in range(2, 20_000)}
     counters = {}
     start = time.perf_counter()
     slugs = [make_slug("Video", "item-1", taken, counters) for _ in range(20_000)]
-    assert time.perf_counter() - start < 3 and slugs[:2] == ["video", "video-20000"]
+    assert time.perf_counter() - start < secs(3) and slugs[:2] == ["video", "video-20000"]
 
 
 def test_counters_per_extension():

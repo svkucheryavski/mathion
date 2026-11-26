@@ -7,6 +7,7 @@ from mathion.markdown import extract_asset_filenames, render_markdown
 from mathion.olx.html_md import html_to_markdown, parse_html, text_only
 from mathion.olx.links import Link, LinkTargets, classify_link
 from mathion.olx.report import Report
+from tests.conftest import secs
 
 TARGETS = LinkTargets(
     static={"img/fig 1.png": "fig-1-2.png", "notes.pdf": "notes.pdf", "i.png": "i.png",
@@ -294,10 +295,10 @@ def test_text_only():
 def test_deep_nesting_and_large_page_are_fast():
     start = time.perf_counter()
     out = md("<div>" * 50_000 + "x" + "</div>" * 50_000)
-    assert out == "x" and time.perf_counter() - start < 3
+    assert out == "x" and time.perf_counter() - start < secs(3)
     start = time.perf_counter()
     out = md("<p>a <em>b</em> \\(c\\) <a href='https://e.com'>d</a><br></p>" * 20_000)
-    assert time.perf_counter() - start < 5 and out.count("$c$") == 20_000
+    assert time.perf_counter() - start < secs(5) and out.count("$c$") == 20_000
 
 
 def test_sentinel_character_in_text_is_removed():
@@ -324,7 +325,7 @@ def test_long_code_and_break_runs_are_fast():
                  "<p>x<em>" + "<span> </span>" * 100_000 + "y</em></p>"):
         start = time.perf_counter()
         md(html)
-        assert time.perf_counter() - start < 5
+        assert time.perf_counter() - start < secs(5)
 
 
 def test_cleaned_studio_names_match():
@@ -465,7 +466,7 @@ def test_parser_depth_and_duplicates():
 def test_mid_paragraph_break_run_is_fast():
     start = time.perf_counter()
     out = md("<p>x" + "<br>" * 200_000 + "y</p>")
-    assert time.perf_counter() - start < 3 and out.startswith("x\\\n") and out.endswith("\\\ny")
+    assert time.perf_counter() - start < secs(3) and out.startswith("x\\\n") and out.endswith("\\\ny")
 
 
 def test_empty_formula_next_to_break_leaves_no_backslash():
@@ -555,7 +556,7 @@ def test_cell_edge_breaks_and_deep_end_tags():
 def test_spaces_inside_an_address_are_fast():
     start = time.perf_counter()
     out = md('<p><a href="https://e.com/' + " " * 200_000 + 'x">l</a></p>')
-    assert time.perf_counter() - start < 3 and out.endswith(" x>)")
+    assert time.perf_counter() - start < secs(3) and out.endswith(" x>)")
 
 
 def test_deep_lists_and_quotes_keep_text_and_links():

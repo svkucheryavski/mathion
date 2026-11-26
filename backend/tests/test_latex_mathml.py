@@ -9,6 +9,7 @@ import re
 import pytest
 
 from mathion.latex_mathml import LatexError, Node, latex_to_mathml
+from tests.conftest import secs
 
 UNARY_MINUS = '<mo lspace="0em" rspace="0em">−</mo>'
 TIGHT = ' lspace="0em" rspace="0em"'
@@ -1449,7 +1450,7 @@ def test_nested_over_left_converts_fast(inside, floor):
     src = src + "+a" * ((2000 - len(src)) // 2)
     start = time.perf_counter()
     latex_to_mathml(src, True)
-    assert time.perf_counter() - start < 0.5
+    assert time.perf_counter() - start < secs(0.5)
 
 
 def test_look_ahead_stops_past_max_depth(monkeypatch):
