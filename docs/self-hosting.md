@@ -7,6 +7,45 @@ inbound TCP **80 and 443** open (for ACME/Let's Encrypt); a reverse proxy for TL
 **published** image — valid only after the maintainer has pushed a release and
 made the GHCR package public.
 
+## Server size
+
+What to rent. These sizes are recommendations, not tested limits: Mathion has
+not yet been run on a 1 GB or a single-core server.
+
+| | Minimum | Recommended |
+|---|---|---|
+| CPU | 1 core | 2 cores |
+| Memory | 1 GB, with a swap file | 2 GB |
+| Disk | 10 GB | 20 GB or more |
+
+- **Memory:** on a 4 GB Ubuntu 24.04 server right after an install, with the
+  site idle, the whole server used about 770 MB. Mathion's three containers
+  (the app, the database and the HTTPS proxy) used about 130 MB of that. Use
+  grows as the site gets content and users. Importing a large course needs
+  more for a while (not measured yet), so give a 1 GB server a swap file.
+- **Disk:** on the same server the system, Docker and Mathion took about 4 GB.
+  The rest is your data: the database, uploaded files, and the backups in
+  `/var/lib/mathion/backups`. Each backup is a full copy of the database and
+  the uploaded files, and while it is being made it briefly needs about twice
+  that space. Mathion never deletes backups, and every `mathion update` makes
+  one before it updates the database, so delete old backups from that folder now
+  and then and keep the newest. An update also leaves the previous app image
+  on disk.
+- **CPU:** the app runs as one process, so it uses about one core. A second
+  core leaves room for the database, backups and system updates next to it.
+
+A swap file on a 1 GB server. Check first with `sudo swapon --show`: if it
+prints anything, the server already has swap and you can skip this. Otherwise
+these commands add 2 GB of swap that stays after a reboot:
+
+```bash
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
 ## Self-hosting with the `mathion` CLI
 
 The recommended path. The `mathion` CLI installs and manages the whole stack for
