@@ -10,6 +10,7 @@
   import EmptyState from '../../components/ui/EmptyState.svelte';
   import VersionBadges from '../../components/editor/VersionBadges.svelte';
   import { deleteVersionReason, duplicateVersionReason } from '../../lib/editorReasons';
+  import { archiveUrl, checkArchive, startDownload } from '../../lib/versionArchive';
   import { pushToast } from '../../stores/toasts.svelte';
   import AskSlot from '../../components/ui/AskSlot.svelte';
   import DirtyGuard from '../../components/editor/DirtyGuard.svelte';
@@ -301,6 +302,22 @@
     }
   }
 
+  // A download changes nothing, so it leaves `busy` alone; one check per row at a time.
+  const checking = new Set<number>();
+
+  async function download(v: Version) {
+    if (checking.has(v.id)) return;
+    checking.add(v.id);
+    try {
+      await checkArchive(v.id);
+      startDownload(archiveUrl(v.id));
+    } catch (e) {
+      pushToast(failureText(e, 'Could not download this version'), 'error');
+    } finally {
+      checking.delete(v.id);
+    }
+  }
+
   async function deleteVersion(v: Version) {
     if (busy || deleteVersionReason(v) !== null) return;
     const id = v.id;
@@ -429,6 +446,8 @@
                   onclick={() => navigate(`/courses/${courseSlug}/edit/v/${v.id}`)} />
                 <IconButton size="sm" glyph="duplicate" title={dupReason ?? 'Duplicate'} aria-label="Duplicate v{v.id}" id={`v-${v.id}-duplicate`}
                   disabled={busy || dupReason !== null} onclick={() => void openDuplicate(v)} />
+                <IconButton size="sm" glyph="download" title="Download" aria-label="Download v{v.id}" id={`v-${v.id}-download`}
+                  disabled={busy} onclick={(e: MouseEvent) => { if (e.detail <= 1) void download(v); }} />
                 {#if v.is_disabled}
                   <IconButton size="sm" glyph="enable" title="Enable" aria-label="Enable v{v.id}" id={`v-${v.id}-toggle`} disabled={busy}
                     onclick={() => void transition(v, 'enable')} />

@@ -26,7 +26,7 @@
     cancel?: boolean;
     // Slice-5c: the ✓ of an inline "+ Add …" row submits its form.
     type?: 'button' | 'submit';
-    onclick?: () => void;
+    onclick?: (e: MouseEvent) => void;
     onmousedown?: (e: MouseEvent) => void;
     // Forward aria-label so an icon-only button can announce a purpose distinct
     // from its tooltip; falls back to `title` when omitted.
