@@ -52,7 +52,9 @@
 
 <div class="item-row">
   <ItemMark type={item.type} state="not-yet" />
-  <span class="item-title"><span class="vh">{`${ITEM_TYPE_NAME[item.type]}: `}</span>{visibleTitle}</span>
+  <!-- The name opens the item for a mouse (not after a drag that selects it); the pencil stays the keyboard way in. -->
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <span class="item-title" class:busy onclick={() => { if (!busy && !window.getSelection()?.toString()) onOpen(); }}><span class="vh">{`${ITEM_TYPE_NAME[item.type]}: `}</span>{visibleTitle}</span>
   {#if item.type === 'quiz'}
     <span class="sep" aria-hidden="true">·</span>
     <span class="mono q-count" data-testid="item-question-count">{item.questions_count} {item.questions_count === 1 ? 'question' : 'questions'}</span>
@@ -84,7 +86,8 @@
     border-radius: var(--radius);
     background: var(--focus-row);
   }
-  .item-title { min-width: 0; font-size: 14px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; /* ref 1590 */ }
+  .item-title { min-width: 0; font-size: 14px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; cursor: pointer; /* ref 1590 */ }
+  .item-title.busy { cursor: default; }
   .sep { color: var(--faint); /* ref 1606 — the separator use of --faint */ }
   .q-count { font-size: 13px; color: var(--muted); /* ref 1606 */ }
   .actions { margin-left: auto; display: flex; align-items: center; gap: 6px; /* ref 1593 */ }
