@@ -165,7 +165,7 @@ describe('AssetSidebar with runAssetContext', () => {
       jres([{ id: 1, filename: 'a.png', mime_type: 'image/png', file_size: 1, is_referenced: false }]),
     );
     const onUploadFile = vi.fn<(file: File, batch?: { current: number; total: number }) => Promise<AssetItem | null>>()
-      .mockResolvedValue({ id: 1, filename: 'a.png', mime_type: 'image/png', file_size: 1, is_referenced: false });
+      .mockResolvedValue({ id: 1, filename: 'a.png', mime_type: 'image/png', file_size: 1, uploaded_at: '2026-05-01T00:00:00Z', is_referenced: false });
     const target = document.createElement('div');
     document.body.appendChild(target);
     const cmp = mount(AssetSidebar, {

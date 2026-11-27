@@ -368,7 +368,7 @@ describe('AssetSidebar — delete UI', () => {
       .mockResolvedValueOnce([mkAsset({ id: 2, filename: 'b.pdf', is_referenced: true })]);
     const { target } = mountSidebar();
     await settle();
-    const trash = target.querySelector<HTMLElement>('[data-testid="delete-trash"] button')!;
+    const trash = target.querySelector<HTMLElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!;
     trash.click();
     flushSync();
     const confirm = target.querySelector<HTMLElement>('.inline-confirm button.confirm')!;
@@ -390,7 +390,7 @@ describe('AssetSidebar — delete UI', () => {
       .mockResolvedValueOnce([mkAsset({ id: 2, filename: 'b.pdf', is_referenced: true })]);
     const { target } = mountSidebar();
     await settle();
-    const trash = target.querySelector<HTMLElement>('[data-testid="delete-trash"] button')!;
+    const trash = target.querySelector<HTMLElement>('[data-testid="asset-row-1"] [data-testid="delete-trash"] button')!;
     trash.click();
     flushSync();
     const confirm = target.querySelector<HTMLElement>('.inline-confirm button.confirm')!;
@@ -1028,5 +1028,212 @@ describe('AssetSidebar — the saved upload limit (Settings D11b)', () => {
     await settle();
     await drop(target, sized(60));
     expect(onUploadFile).toHaveBeenCalled();
+  });
+});
+
+describe('AssetSidebar — search', () => {
+  const tsOf = (i: number) => `2026-05-01T00:00:${String(i).padStart(2, '0')}Z`;
+  // ids 1..n, upload time rising with id.
+  const pics = (n: number, skip: number[] = []) =>
+    Array.from({ length: n }, (_, k) => k + 1).filter((i) => !skip.includes(i))
+      .map((i) => mkAsset({ id: i, filename: `pic-${i}.png`, uploaded_at: tsOf(i) }));
+  const rowIds = (t: HTMLElement) =>
+    [...t.querySelectorAll('[data-testid^="asset-row-"]')].map((r) => Number(r.getAttribute('data-testid')!.slice('asset-row-'.length)));
+  const search = (t: HTMLElement) => t.querySelector<HTMLInputElement>('[data-testid="asset-search"]')!;
+  const type = (t: HTMLElement, v: string) => {
+    const s = search(t);
+    s.value = v;
+    s.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  };
+  const escape = (t: HTMLElement) => {
+    const e = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    search(t).dispatchEvent(e);
+    flushSync();
+    return e;
+  };
+  const trashOf = (t: HTMLElement, id: number) =>
+    t.querySelector<HTMLButtonElement>(`[data-testid="asset-row-${id}"] [data-testid="delete-trash"] button`);
+  function mountReactive() {
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const props: any = $state({
+      assetContext: stubCtx,
+      onInsert: vi.fn(),
+      onUploadFile: vi.fn(),
+      refreshKey: 0,
+      cursorReady: false,
+      uploading: false,
+      uploadProgress: null,
+      uploadError: null,
+    });
+    const cmp = mount(AssetSidebar, { target, props });
+    cleanup = () => unmount(cmp);
+    return { target, props };
+  }
+
+  it('search field has placeholder and aria-label "Find an asset" and no <label>', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue(pics(3));
+    const { target } = mountSidebar();
+    await settle();
+    const s = search(target);
+    expect(s.type).toBe('text');
+    expect(s.placeholder).toBe('Find an asset');
+    expect(s.getAttribute('aria-label')).toBe('Find an asset');
+    expect(target.querySelector('label')).toBeNull();
+  });
+
+  it('empty search shows the 6 newest and "4 more, type to find them"', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue(pics(10));
+    const { target } = mountSidebar();
+    await settle();
+    expect(rowIds(target)).toEqual([10, 9, 8, 7, 6, 5]);
+    expect(target.querySelector('[data-testid="asset-more"]')?.textContent?.trim()).toBe('4 more, type to find them');
+  });
+
+  it('typing filters all assets, case-insensitive', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue(pics(10));
+    const { target } = mountSidebar();
+    await settle();
+    type(target, 'PIC-1');
+    expect(rowIds(target)).toEqual([10, 1]);
+    expect(target.querySelector('[data-testid="asset-more"]')).toBeNull();
+  });
+
+  it('no match shows "No assets match"', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue(pics(10));
+    const { target } = mountSidebar();
+    await settle();
+    type(target, 'zebra');
+    expect(rowIds(target)).toEqual([]);
+    expect(target.querySelector('[data-testid="asset-no-match"]')?.textContent?.trim()).toBe('No assets match');
+  });
+
+  it('Escape in a non-empty search clears it and is default-prevented', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue(pics(10));
+    const { target } = mountSidebar();
+    await settle();
+    type(target, 'pic-1');
+    const e = escape(target);
+    expect(e.defaultPrevented).toBe(true);
+    expect(search(target).value).toBe('');
+    expect(rowIds(target)).toHaveLength(6);
+  });
+
+  it('Escape in an empty search is not default-prevented', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue(pics(10));
+    const { target } = mountSidebar();
+    await settle();
+    expect(escape(target).defaultPrevented).toBe(false);
+  });
+
+  it('a reload bringing a new asset clears the search', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValueOnce(pics(10)).mockResolvedValue(pics(11));
+    const { target, props } = mountReactive();
+    await settle();
+    type(target, 'pic-1');
+    props.refreshKey = 1;
+    flushSync();
+    await settle();
+    expect(search(target).value).toBe('');
+    expect(rowIds(target)[0]).toBe(11);
+  });
+
+  it('a reload without a new asset keeps the search', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue(pics(10));
+    const { target, props } = mountReactive();
+    await settle();
+    type(target, 'pic-1');
+    props.refreshKey = 1;
+    flushSync();
+    await settle();
+    expect(search(target).value).toBe('pic-1');
+    expect(rowIds(target)).toEqual([10, 1]);
+  });
+
+  it('an idle delete question on a row the search hides closes', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue(pics(10));
+    const { target } = mountSidebar();
+    await settle();
+    trashOf(target, 5)!.click();
+    await settle();
+    expect(target.querySelector('.inline-confirm')).not.toBeNull();
+    type(target, 'pic-1');
+    expect(target.querySelector('.inline-confirm')).toBeNull();
+    type(target, '');
+    expect(target.querySelector('.inline-confirm')).toBeNull();
+    expect(trashOf(target, 5)).not.toBeNull();
+  });
+
+  it('while searching, the room of the "more" line stays', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue(pics(10));
+    const { target } = mountSidebar();
+    await settle();
+    type(target, 'pic-1');
+    expect(target.querySelector('[data-testid="asset-more"]')).toBeNull();
+    expect(target.querySelector('[data-testid="asset-more-room"]')).not.toBeNull();
+  });
+
+  it('the match status is one live region that stays in place', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue(pics(10));
+    const { target } = mountSidebar();
+    await settle();
+    const status = target.querySelector('[data-testid="asset-no-match"]');
+    expect(status?.getAttribute('role')).toBe('status');
+    expect(status?.textContent?.trim()).toBe('');
+    type(target, 'zebra');
+    expect(target.querySelector('[data-testid="asset-no-match"]')).toBe(status);
+    expect(status?.textContent?.trim()).toBe('No assets match');
+  });
+
+  it('a question with focus whose row an upload pushes past the cap closes, focus to the row now there', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValueOnce(pics(10)).mockResolvedValue(pics(11));
+    const { target, props } = mountReactive();
+    await settle();
+    trashOf(target, 5)!.click();
+    await settle();
+    expect(target.querySelector('.inline-confirm')?.contains(document.activeElement)).toBe(true);
+    props.refreshKey = 1;
+    flushSync();
+    await settle();
+    await settle();
+    expect(rowIds(target)).toEqual([11, 10, 9, 8, 7, 6]);
+    expect(target.querySelector('.inline-confirm')).toBeNull();
+    expect(document.activeElement).toBe(trashOf(target, 6));
+  });
+
+  it('a delete that settles while typing in the search keeps focus there, and its error still shows', async () => {
+    const { ApiError } = await import('../lib/api');
+    let fail!: (e: unknown) => void;
+    (stubCtx.remove as ReturnType<typeof vi.fn>).mockReturnValue(new Promise((_, reject) => { fail = reject; }));
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValue(pics(10));
+    const { target } = mountSidebar();
+    await settle();
+    trashOf(target, 5)!.click();
+    await settle();
+    target.querySelector<HTMLButtonElement>('.inline-confirm button.confirm')!.click();
+    await settle();
+    search(target).focus();
+    type(target, 'pic-1');
+    expect(rowIds(target)).toEqual([10, 1]);
+    fail(new ApiError(500, 'Server error'));
+    await settle();
+    await settle();
+    expect(target.querySelector('[data-testid="delete-error"]')).not.toBeNull();
+    expect(document.activeElement).toBe(search(target));
+  });
+
+  it('deleting the last shown row moves focus to the trash now at that position', async () => {
+    (stubCtx.list as ReturnType<typeof vi.fn>).mockResolvedValueOnce(pics(10)).mockResolvedValue(pics(10, [5]));
+    const { target } = mountSidebar();
+    await settle();
+    trashOf(target, 5)!.click();
+    await settle();
+    target.querySelector<HTMLButtonElement>('.inline-confirm button.confirm')!.click();
+    await settle();
+    await settle();
+    expect(rowIds(target)).toEqual([10, 9, 8, 7, 6, 4]);
+    expect(document.activeElement).toBe(trashOf(target, 4));
   });
 });

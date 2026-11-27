@@ -5,6 +5,7 @@
   import { SvelteSet } from 'svelte/reactivity';
   import { ApiError, failureText } from '../../lib/api';
   import { formatRef } from '../../lib/assets';
+  import { ASSET_CAP, shownAssets } from '../../lib/assetList';
   import type { AssetContext, AssetItem } from '../../lib/assetContext';
   import { assetDropRefusal } from '../../lib/assetDrop';
   import { formatFileSize } from '../../lib/format';
@@ -36,6 +37,12 @@
   } = $props();
 
   let assets = $state<AssetItem[]>([]);
+  let query = $state('');
+  let searchEl = $state<HTMLInputElement | null>(null);
+  // The rows on screen: the 6 newest, or every match while searching.
+  const shown = $derived(shownAssets(assets, query));
+  // Ids of the last loaded list; a reload with a new one (an upload) clears the search. Plain `let`, as below.
+  let seenIds: Set<number> | null = null;
   let listError = $state<string | null>(null);
   let loading = $state(true);
   let fileInputEl = $state<HTMLInputElement | null>(null);
@@ -63,6 +70,8 @@
       const list = await assetContext.list();
       if (myToken === loadToken) {
         const gone = idleQuestionGone(list);
+        if (seenIds && list.some((a) => !seenIds!.has(a.id))) query = '';
+        seenIds = new Set(list.map((a) => a.id));
         assets = list;
         if (gone) void refocusAfterDelete(gone.id, gone.idx);
       }
@@ -92,7 +101,7 @@
     if (!mountDone) return;
     // A new context: the old rows (and a question about one) go at once, so
     // nothing of the previous version or run can be clicked while its list loads.
-    if (ctx !== shownCtx) { shownCtx = ctx; assets = []; confirmId = null; }
+    if (ctx !== shownCtx) { shownCtx = ctx; assets = []; confirmId = null; seenIds = null; query = ''; }
     void fetchAssets();
   });
   // The context the list shows (plain `let`, as above).
@@ -125,12 +134,28 @@
   $effect(() => {
     if (!disabled || confirmId === null || deletingIds.has(confirmId)) return;
     const id = confirmId;
-    const idx = untrack(() => assets.findIndex((a) => a.id === id));
+    const idx = untrack(() => shown.rows.findIndex((a) => a.id === id));
     // This row's question: another row's busy one may be on screen too (P60).
     const inside = asideEl?.querySelector(`[data-testid="asset-row-${id}"] .inline-confirm`)?.contains(document.activeElement) ?? false;
     confirmId = null;
     if (inside) void refocusAfterDelete(id, idx);
   });
+  // A row that leaves the screen (search, cap) closes its idle question; runs before the DOM drops the row.
+  $effect.pre(() => {
+    const id = confirmId;
+    if (id === null || deletingIds.has(id) || shown.rows.some((a) => a.id === id)) return;
+    const row = asideEl?.querySelector(`[data-testid="asset-row-${id}"]`);
+    const inside = row?.querySelector('.inline-confirm')?.contains(document.activeElement) ?? false;
+    const idx = row?.parentElement ? Array.from(row.parentElement.children).indexOf(row) : -1;
+    confirmId = null;
+    if (inside) void refocusAfterDelete(id, idx);
+  });
+  // Escape clears a non-empty search and keeps the modal open.
+  function onSearchKeydown(e: KeyboardEvent) {
+    if (e.key !== 'Escape' || e.isComposing || e.keyCode === 229 || query === '') return;
+    e.preventDefault();
+    query = '';
+  }
   // Call 7: while a row asks, Escape anywhere on it cancels (a busy question just holds), and the modal stays open.
   function onRowKeydown(e: KeyboardEvent, id: number) {
     if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
@@ -148,7 +173,7 @@
   function idleQuestionGone(list: AssetItem[]): { id: number; idx: number } | null {
     const id = confirmId;
     if (id === null || deletingIds.has(id) || list.some((a) => a.id === id)) return null;
-    const idx = assets.findIndex((a) => a.id === id);
+    const idx = shown.rows.findIndex((a) => a.id === id);
     const hadFocus = questionHasFocus();
     confirmId = null;
     return hadFocus ? { id, idx } : null;
@@ -168,7 +193,7 @@
       const closing = confirmId === id;
       if (closing) confirmId = null;
       deletingIds.delete(id);
-      const idx = assets.findIndex((a) => a.id === id);
+      const idx = shown.rows.findIndex((a) => a.id === id);
       // The reload keeps the list on screen: a deleted row leaves at once, so
       // it cannot be clicked meanwhile; focus moves on now, and again only if
       // the reload took its target away.
@@ -188,8 +213,10 @@
     await tick();
     const active = document.activeElement;
     if (confirmId !== null || (active && active !== document.body && !asideEl?.contains(active))) return;
+    // Never out of the search field while the author types.
+    if (active === searchEl) return;
     const near: (HTMLElement | null | undefined)[] = [
-      trashEls[id], trashEls[assets[idx]?.id ?? -1], trashEls[assets[idx - 1]?.id ?? -1], dropZoneEl,
+      trashEls[id], trashEls[shown.rows[idx]?.id ?? -1], trashEls[shown.rows[idx - 1]?.id ?? -1], dropZoneEl,
     ];
     const target = near.find(usable) ?? asideEl?.closest<HTMLElement>('section.modal-panel');
     target?.focus();
@@ -276,6 +303,21 @@
 >
   <h3>{assetContext.kind === 'run' ? 'Run assets — shared across all MPs in this run' : 'Course assets'}</h3>
 
+  {#if assets.length > 0}
+    <input
+      type="text"
+      class="search"
+      data-testid="asset-search"
+      placeholder="Find an asset"
+      aria-label="Find an asset"
+      autocomplete="off"
+      spellcheck="false"
+      bind:this={searchEl}
+      bind:value={query}
+      onkeydown={onSearchKeydown}
+    />
+  {/if}
+
   {#if !cursorReady}
     <p class="hint" data-testid="cursor-banner">
       Click in the editor to position the cursor, or new assets will be appended to the end.
@@ -323,61 +365,73 @@
   {:else if assets.length === 0}
     <p class="muted">No assets yet. Drop a file in the zone below or click it to pick.</p>
   {:else}
-    <ul class="list">
-      {#each assets as a (a.id)}
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <li class="row" data-testid={`asset-row-${a.id}`} onkeydown={(e) => onRowKeydown(e, a.id)}>
-          <button
-            type="button"
-            class="row-click"
-            disabled={disabled}
-            onclick={() => onInsert(formatRef(a.filename, a.mime_type))}
-          >
-            <span class="thumb">
-              {#if isImage(a.mime_type)}
-                <img loading="lazy" src={assetContext.imgSrc(a)} alt="" />
-              {:else}
-                <span class="chip mono">{extChip(a)}</span>
+    <div class="rows" class:full={assets.length > ASSET_CAP}>
+      {#if shown.rows.length > 0}
+        <ul class="list">
+          {#each shown.rows as a (a.id)}
+            <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+            <li class="row" data-testid={`asset-row-${a.id}`} onkeydown={(e) => onRowKeydown(e, a.id)}>
+              <button
+                type="button"
+                class="row-click"
+                disabled={disabled}
+                onclick={() => onInsert(formatRef(a.filename, a.mime_type))}
+              >
+                <span class="thumb">
+                  {#if isImage(a.mime_type)}
+                    <img loading="lazy" src={assetContext.imgSrc(a)} alt="" />
+                  {:else}
+                    <span class="chip mono">{extChip(a)}</span>
+                  {/if}
+                </span>
+                <span class="meta">
+                  <span class="name" title={a.filename}>{displayName(a.filename)}</span>
+                  <span class="size mono">{formatFileSize(a.file_size)}</span>
+                </span>
+              </button>
+              {#if a.is_referenced}
+                <span
+                  class="used"
+                  data-testid="used-badge"
+                  title="Remove this reference from content and save to enable delete."
+                >used</span>
               {/if}
-            </span>
-            <span class="meta">
-              <span class="name" title={a.filename}>{displayName(a.filename)}</span>
-              <span class="size mono">{formatFileSize(a.file_size)}</span>
-            </span>
-          </button>
-          {#if a.is_referenced}
-            <span
-              class="used"
-              data-testid="used-badge"
-              title="Remove this reference from content and save to enable delete."
-            >used</span>
-          {/if}
-          {#if confirmId === a.id || deletingIds.has(a.id)}
-            <!-- The row's own click (insert) must not run under the question. -->
-            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-            <span onclick={(e) => e.stopPropagation()}>
-              <!-- A busy question that remounts (after a failed reload) leaves focus where it is. -->
-              <InlineConfirm takeFocus={!deletingIds.has(a.id)} label="Delete {a.filename}?" confirmLabel="Delete"
-                             busy={deletingIds.has(a.id)}
-                             onConfirm={() => void confirmDelete(a.id)} onCancel={() => void cancelDelete()} />
-            </span>
-          {:else}
-            <span data-testid="delete-trash">
-              <IconButton
-                glyph="trash"
-                size="sm"
-                danger
-                title={a.is_referenced ? inUseReason : 'Remove asset'}
-                aria-label={a.is_referenced ? `${inUseReason}: ${a.filename}` : `Delete ${a.filename}`}
-                disabled={disabled || a.is_referenced}
-                bind:element={trashEls[a.id]}
-                onclick={() => void askDelete(a.id)}
-              />
-            </span>
-          {/if}
-        </li>
-      {/each}
-    </ul>
+              {#if confirmId === a.id || deletingIds.has(a.id)}
+                <!-- The row's own click (insert) must not run under the question. -->
+                <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+                <span onclick={(e) => e.stopPropagation()}>
+                  <!-- A busy question that remounts (after a failed reload) leaves focus where it is. -->
+                  <InlineConfirm takeFocus={!deletingIds.has(a.id)} label="Delete {a.filename}?" confirmLabel="Delete"
+                                 busy={deletingIds.has(a.id)}
+                                 onConfirm={() => void confirmDelete(a.id)} onCancel={() => void cancelDelete()} />
+                </span>
+              {:else}
+                <span data-testid="delete-trash">
+                  <IconButton
+                    glyph="trash"
+                    size="sm"
+                    danger
+                    title={a.is_referenced ? inUseReason : 'Remove asset'}
+                    aria-label={a.is_referenced ? `${inUseReason}: ${a.filename}` : `Delete ${a.filename}`}
+                    disabled={disabled || a.is_referenced}
+                    bind:element={trashEls[a.id]}
+                    onclick={() => void askDelete(a.id)}
+                  />
+                </span>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      <!-- One live region, always present, so a screen reader hears its change. -->
+      <p class="muted" role="status" data-testid="asset-no-match">{shown.rows.length === 0 ? 'No assets match' : ''}</p>
+    </div>
+    {#if shown.more > 0}
+      <p class="muted" data-testid="asset-more">{shown.more} more, type to find them</p>
+    {:else if assets.length > ASSET_CAP}
+      <!-- The line's room while searching, so the panel does not shift. -->
+      <p class="muted" aria-hidden="true" data-testid="asset-more-room">&nbsp;</p>
+    {/if}
   {/if}
 
   <div
@@ -453,7 +507,20 @@
   }
   .muted { margin: 0; font-size: 12px; color: var(--muted); }
   .error-inline { margin: 0; font-size: 12px; color: var(--danger); }
-  .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .search {
+    height: 28px;
+    padding: 0 8px;
+    font-size: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    width: 100%;
+  }
+  .search::placeholder { color: var(--placeholder); }
+  /* With more assets than shown, the list's full room: the panel keeps its height while searching. */
+  .rows.full { min-height: 312px; }
+  /* Six and a half rows (about 47.5px each): a cut row shows that more matches scroll. */
+  .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-height: 312px; overflow-y: auto; }
   .row { display: flex; align-items: center; gap: 9px; padding: 6px 7px; border-radius: var(--radius); /* ref 1720 */ }
   .row:hover { background: var(--surface-2); }
   .row-click {

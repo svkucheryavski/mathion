@@ -48,6 +48,7 @@ describe('courseAssetContext', () => {
       filename: 'pic.png',
       mime_type: 'image/png',
       file_size: 100,
+      uploaded_at: '2026-05-01T00:00:00Z',
       is_referenced: false,
     };
     expect(ctx.imgSrc(item)).toBe('/assets/7/pic.png');
@@ -83,6 +84,7 @@ describe('runAssetContext', () => {
       filename: 'd.png',
       mime_type: 'image/png',
       file_size: 100,
+      uploaded_at: '2026-05-01T00:00:00Z',
       is_referenced: false,
     };
     expect(ctx.imgSrc(item)).toBe('/api/runs/42/assets/d.png');
