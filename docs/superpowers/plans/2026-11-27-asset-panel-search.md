@@ -63,7 +63,7 @@ list height; the text area already matches the panel's height through the flex r
   `src/tests/assetContext.test.ts` (two) to carry it.
 - [ ] **Step 4: Run** the test file, then `npm run check`. Expected: PASS; check reports 0 errors.
 - [ ] **Step 5: Commit** (after the review loop and the owner's OK):
-  `git add frontend/src/lib/assetList.ts frontend/src/lib/assetContext.ts frontend/src/tests/assetList.test.ts frontend/src/tests/assetContext.test.ts`
+  `git add frontend/src/lib/assetList.ts frontend/src/lib/assetContext.ts frontend/src/tests/assetList.test.ts frontend/src/tests/assetContext.test.ts frontend/src/tests/AssetSidebar.run-mode.svelte.test.ts`
   `git commit -m "feat(editor): asset list order, match and cap helpers"`
 
 ### Task 2: Panel search, slice and scrolling

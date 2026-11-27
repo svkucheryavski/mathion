@@ -7,6 +7,7 @@ export type AssetItem = {
   filename: string;
   mime_type: string;
   file_size: number;
+  uploaded_at: string;
   is_referenced: boolean;
 };
 
