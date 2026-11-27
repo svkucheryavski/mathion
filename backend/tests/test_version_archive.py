@@ -168,3 +168,49 @@ def test_stream_yields_per_entry(tmp_path):
     assert len(chunks) > 1
     tar = _tar(b"".join(chunks))
     assert [m.name for m in tar.getmembers()] == ["mathion-course.json", "assets/a.png", "assets/b.png"]
+
+
+def test_a_failed_stream_never_looks_finished(admin_client, db, monkeypatch):
+    """Through the whole app: after a mid-stream failure no final body message is sent."""
+    import asyncio
+    from mathion.main import app
+
+    _, v, _ = _build_full_source(admin_client, db)
+
+    def broken(doc, files):
+        yield memoryview(b"partial")
+        raise FileNotFoundError("gone")
+
+    monkeypatch.setattr(version_archive, "stream_archive", broken)
+    token = admin_client.cookies["session_token"]
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",
+        "scheme": "http", "path": f"/api/versions/{v['id']}/archive", "raw_path": b"",
+        "query_string": b"", "root_path": "", "client": ("127.0.0.1", 1), "server": ("127.0.0.1", 80),
+        "headers": [(b"host", b"testserver"), (b"cookie", f"session_token={token}".encode())],
+    }
+    sent = []
+    asked = []
+
+    async def receive():
+        if not asked:
+            asked.append(1)
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await asyncio.Event().wait()  # the client stays connected
+
+    async def send(message):
+        sent.append(message)
+
+    with pytest.raises(FileNotFoundError):
+        asyncio.run(app(scope, receive, send))
+    assert sent[0]["type"] == "http.response.start" and sent[0]["status"] == 200
+    bodies = [m for m in sent if m["type"] == "http.response.body"]
+    assert bodies and bytes(bodies[0]["body"]) == b"partial"
+    assert not [m for m in bodies if not m.get("more_body", False)]
+
+
+def test_superuser_paths_still_get_no_store(client):
+    r = client.get("/api/superuser/not-a-token/nothing")
+    assert r.headers["cache-control"] == "no-store"
+    assert r.headers["referrer-policy"] == "no-referrer"
+    assert "referrer-policy" not in client.get("/health").headers

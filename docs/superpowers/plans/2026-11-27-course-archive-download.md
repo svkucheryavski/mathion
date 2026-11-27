@@ -24,7 +24,7 @@
 
 1. A file removed from disk after the check but before it is streamed → the stream stops with an error (the browser shows a failed download); it never sends a truncated or zero-filled entry. Test in Task 2 (`test_stream_stops_when_a_file_vanishes`).
 2. Non-ASCII titles, Markdown and file names survive byte-for-byte (JSON written as UTF-8, `ensure_ascii=False`). Test in Task 1 (`test_document_keeps_unicode`).
-3. A draft edited while its archive is built → text and file list come from one locked moment (`lock_draft`, as duplicate). Covered by design; the reviewer checks the lock is taken before any read and released before streaming.
+3. A draft edited while its archive is built → text and file list come from one moment. As built: one REPEATABLE READ snapshot instead of `lock_draft` (asset upload and delete do not take `lock_draft`), pinned by `test_reads_share_one_repeatable_read_snapshot`.
 4. A numeric answer keeps its exact digits (`Decimal` → string). Test in Task 1 (full-fidelity test asserts `"4.0000000000"`).
 5. Double click on Download → one check, one download. Test in Task 3 (`a second click while checking does nothing`).
 
@@ -94,7 +94,7 @@
   - `stream_archive(doc: bytes, files: list[ArchiveFile]) -> Iterator[bytes]` in `export.py` — `tarfile.open(fileobj=<sink>, mode="w|gz")`; `DOC_NAME` first (mode `0o644`, mtime = now), then `ASSET_DIR + filename` for each file (mode `0o644`, mtime = `ArchiveFile.mtime`, size from `os.fstat` of the opened file); after each entry, yield what the sink holds; a file that cannot be opened raises (no entry is written for it). uid/gid 0, empty uname/gname.
   - `GET /api/versions/{version_id}/archive/check` → `200 {"filename": "<slug>-v<id>.tar.gz"}`
   - `GET /api/versions/{version_id}/archive` → `StreamingResponse`, `media_type="application/gzip"`, header `Content-Disposition: attachment; filename="<slug>-v<id>.tar.gz"`.
-  - Both endpoints share one helper `_prepare(db, user, version_id) -> tuple[bytes, list[ArchiveFile], str]`: `lock_draft(db, version_id)` first, then `get_or_404(db, CourseVersion, version_id)`, `require_course_admin`, `preflight`, `build_document` → `document_bytes`, then `db.rollback()` (releases the lock and the connection) before returning. The generator never touches `db`.
+  - Both endpoints share one helper `_prepare(db, user, version_id) -> tuple[bytes, list[ArchiveFile], str]`: `lock_draft(db, version_id)` first (as built: commit the auth transaction, then open a REPEATABLE READ transaction instead — see Review Focus 3), then `get_or_404(db, CourseVersion, version_id)`, `require_course_admin`, `preflight`, `build_document` → `document_bytes`, then `db.rollback()` (releases the snapshot and the connection) before returning. The generator never touches `db`.
 
 - [ ] **Step 1: Write the failing tests** in `backend/tests/test_version_archive.py` (seed with `_build_full_source`; read the body into `tarfile.open(fileobj=io.BytesIO(r.content), mode="r:gz")`):
   - `test_download_contains_document_and_every_file`: 200; names `== {"mathion-course.json"} | {f"assets/{n}" for n in files}`; each asset's bytes equal what was uploaded (`name.encode() * 4`, `b"console.log(1)"`); the JSON's `version.label == "L"`; `mathion-course.json` is the first member.

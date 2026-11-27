@@ -139,4 +139,15 @@ describe('VersionsPage — Download', () => {
     expect(startMock).not.toHaveBeenCalled();
     expect(toasts.list.map((t) => [t.message, t.kind])).toEqual([['Could not download this version', 'error']]);
   });
+
+  it('a quick second click after a refusal tries again', async () => {
+    checkMock.mockRejectedValueOnce(new ApiError(409, 'no')).mockResolvedValueOnce(undefined);
+    await render();
+    download(7)!.dispatchEvent(new MouseEvent('click', { detail: 1, bubbles: true }));
+    await settle();
+    download(7)!.dispatchEvent(new MouseEvent('click', { detail: 2, bubbles: true }));
+    await settle();
+    expect(checkMock).toHaveBeenCalledTimes(2);
+    expect(startMock).toHaveBeenCalledTimes(1);
+  });
 });

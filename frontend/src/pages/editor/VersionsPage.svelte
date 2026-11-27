@@ -304,14 +304,23 @@
 
   // A download changes nothing, so it leaves `busy` alone; one check per row at a time.
   const checking = new Set<number>();
+  // Rows whose last click started a download: a double click's second click skips them.
+  const started = new Set<number>();
+
+  function downloadClick(e: MouseEvent, v: Version) {
+    if (e.detail > 1 && started.has(v.id)) return;
+    void download(v);
+  }
 
   async function download(v: Version) {
     if (checking.has(v.id)) return;
     checking.add(v.id);
     try {
       await checkArchive(v.id);
+      started.add(v.id);
       startDownload(archiveUrl(v.id));
     } catch (e) {
+      started.delete(v.id);
       pushToast(failureText(e, 'Could not download this version'), 'error');
     } finally {
       checking.delete(v.id);
@@ -447,7 +456,7 @@
                 <IconButton size="sm" glyph="duplicate" title={dupReason ?? 'Duplicate'} aria-label="Duplicate v{v.id}" id={`v-${v.id}-duplicate`}
                   disabled={busy || dupReason !== null} onclick={() => void openDuplicate(v)} />
                 <IconButton size="sm" glyph="download" title="Download" aria-label="Download v{v.id}" id={`v-${v.id}-download`}
-                  disabled={busy} onclick={(e: MouseEvent) => { if (e.detail <= 1) void download(v); }} />
+                  disabled={busy} onclick={(e: MouseEvent) => downloadClick(e, v)} />
                 {#if v.is_disabled}
                   <IconButton size="sm" glyph="enable" title="Enable" aria-label="Enable v{v.id}" id={`v-${v.id}-toggle`} disabled={busy}
                     onclick={() => void transition(v, 'enable')} />
