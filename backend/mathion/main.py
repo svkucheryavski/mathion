@@ -36,6 +36,7 @@ from mathion.api.superuser import router as superuser_router
 from mathion.api.superuser_courses import router as superuser_courses_router
 from mathion.api.superuser_branding import router as superuser_branding_router
 from mathion.api.olx_import import router as olx_import_router
+from mathion.api.version_archive import router as version_archive_router
 from mathion.api.superuser_setup import router as superuser_setup_router
 from mathion.api.superuser_settings import router as superuser_settings_router
 from mathion.api.superuser_users import router as superuser_users_router
@@ -185,6 +186,7 @@ app.include_router(superuser_branding_router)
 app.include_router(superuser_setup_router)
 app.include_router(branding_router)
 app.include_router(olx_import_router)
+app.include_router(version_archive_router)
 
 
 @app.get("/health")

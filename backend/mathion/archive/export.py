@@ -1,6 +1,10 @@
 """Export a course version: its archive document, its files, and the archive's name."""
+import io
 import json
 import os
+import tarfile
+import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from fastapi import HTTPException
@@ -9,7 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from mathion.api.version_clone import collect_referenced_filenames
 from mathion.archive.format import (
-    FORMAT, ArchiveBlock, ArchiveCourse, ArchiveDoc, ArchiveItem, ArchiveOption, ArchiveQuestion,
+    ASSET_DIR, DOC_NAME, FORMAT, ArchiveBlock, ArchiveCourse, ArchiveDoc, ArchiveItem, ArchiveOption, ArchiveQuestion,
     ArchiveSequence, ArchiveVersion,
 )
 from mathion.config import settings
@@ -87,3 +91,41 @@ def preflight(db: Session, version: CourseVersion) -> list[ArchiveFile]:
 
 def archive_filename(course_slug: str, version_id: int) -> str:
     return f"{course_slug}-v{version_id}.tar.gz"
+
+
+class _Sink:
+    """Collects what tarfile writes until the stream hands it on."""
+
+    def __init__(self) -> None:
+        self.buf = bytearray()
+
+    def write(self, data: bytes) -> int:
+        self.buf += data
+        return len(data)
+
+    def take(self) -> memoryview:
+        out, self.buf = self.buf, bytearray()
+        return memoryview(out)
+
+
+def _info(name: str, size: int, mtime: float) -> tarfile.TarInfo:
+    info = tarfile.TarInfo(name)
+    info.size, info.mtime, info.mode = size, int(mtime), 0o644
+    return info
+
+
+def stream_archive(doc: bytes, files: list[ArchiveFile]) -> Iterator[memoryview]:
+    """The tar.gz, one entry at a time; a file that cannot be opened stops it."""
+    sink = _Sink()
+    # level 6: level 9 is much slower and gains almost nothing on images and scripts
+    with tarfile.open(fileobj=sink, mode="w|gz", compresslevel=6) as tar:
+        tar.addfile(_info(DOC_NAME, len(doc), time.time()), io.BytesIO(doc))
+        if chunk := sink.take():
+            yield chunk
+        for f in files:
+            with open(f.path, "rb") as fh:
+                tar.addfile(_info(ASSET_DIR + f.filename, os.fstat(fh.fileno()).st_size, f.mtime), fh)
+            if chunk := sink.take():
+                yield chunk
+    if chunk := sink.take():
+        yield chunk
