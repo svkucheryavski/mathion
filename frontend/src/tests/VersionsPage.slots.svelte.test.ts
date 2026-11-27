@@ -94,15 +94,15 @@ describe('VersionsPage — heading (3a)', () => {
   });
 });
 
-describe('VersionsPage — four fixed slots (§5.4)', () => {
-  it('a created, enabled version: all four enabled with plain titles', async () => {
+describe('VersionsPage — five fixed slots (§5.4, Download added)', () => {
+  it('a created, enabled version: all five enabled with plain titles', async () => {
     versionsPageState.versions = [mkVersion({ id: 7 })];
     await render();
     const s = slots(7);
-    expect(s.map((b) => b.getAttribute('data-glyph'))).toEqual(['pencil', 'duplicate', 'disable', 'trash']);
-    expect(s.map((b) => b.title)).toEqual(['Open', 'Duplicate', 'Disable', 'Delete']);
+    expect(s.map((b) => b.getAttribute('data-glyph'))).toEqual(['pencil', 'duplicate', 'download', 'disable', 'trash']);
+    expect(s.map((b) => b.title)).toEqual(['Open', 'Duplicate', 'Download', 'Disable', 'Delete']);
     expect(s.every((b) => !b.disabled)).toBe(true);
-    expect(s[3].classList.contains('danger')).toBe(true);
+    expect(s[4].classList.contains('danger')).toBe(true);
   });
 
   it('a published version: Delete disabled with its reason', async () => {
@@ -118,11 +118,12 @@ describe('VersionsPage — four fixed slots (§5.4)', () => {
     versionsPageState.versions = [mkVersion({ id: 3, state: 'archived', is_disabled: true })];
     await render();
     const s = slots(3);
-    expect(s.map((b) => b.getAttribute('data-glyph'))).toEqual(['pencil', 'duplicate', 'enable', 'trash']);
+    expect(s.map((b) => b.getAttribute('data-glyph'))).toEqual(['pencil', 'duplicate', 'download', 'enable', 'trash']);
     expect(s[1].disabled).toBe(true);
     expect(s[1].title).toBe('Duplicate — enable the version first');
     expect(s[2].disabled).toBe(false);
-    expect(s[3].title).toBe('Delete — only for a created version');
+    expect(s[3].disabled).toBe(false);
+    expect(s[4].title).toBe('Delete — only for a created version');
   });
 
   it('a created + disabled version: Delete says "enable the version first"', async () => {

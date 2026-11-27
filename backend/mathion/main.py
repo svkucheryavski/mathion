@@ -10,6 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from sqlalchemy.engine import make_url
+from starlette.datastructures import MutableHeaders
 
 from mathion.api.auth import router as auth_router
 from mathion.api.branding import favicon_ico, router as branding_router
@@ -36,6 +37,7 @@ from mathion.api.superuser import router as superuser_router
 from mathion.api.superuser_courses import router as superuser_courses_router
 from mathion.api.superuser_branding import router as superuser_branding_router
 from mathion.api.olx_import import router as olx_import_router
+from mathion.api.version_archive import router as version_archive_router
 from mathion.api.superuser_setup import router as superuser_setup_router
 from mathion.api.superuser_settings import router as superuser_settings_router
 from mathion.api.superuser_users import router as superuser_users_router
@@ -132,16 +134,31 @@ app = FastAPI(title="Mathion", version="0.1.0", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
-@app.middleware("http")
-async def _superuser_no_store(request: Request, call_next):
+class _SuperuserNoStore:
     """no-store + no-referrer on EVERY /api/superuser/ response, including the
     guard's 401/404 (which bypass the handler body). The panel token lives in
-    the URL, so error responses must not be cached or leak a Referer either."""
-    response = await call_next(request)
-    if request.url.path.startswith("/api/superuser/"):
-        response.headers["Cache-Control"] = "no-store"
-        response.headers["Referrer-Policy"] = "no-referrer"
-    return response
+    the URL, so error responses must not be cached or leak a Referer either.
+    Plain ASGI, so a stream that fails midway is never ended as if complete."""
+
+    def __init__(self, inner) -> None:
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http" or not scope["path"].startswith("/api/superuser/"):
+            await self.inner(scope, receive, send)
+            return
+
+        async def stamped(message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["Cache-Control"] = "no-store"
+                headers["Referrer-Policy"] = "no-referrer"
+            await send(message)
+
+        await self.inner(scope, receive, stamped)
+
+
+app.add_middleware(_SuperuserNoStore)
 
 
 @app.exception_handler(RequestValidationError)
@@ -185,6 +202,7 @@ app.include_router(superuser_branding_router)
 app.include_router(superuser_setup_router)
 app.include_router(branding_router)
 app.include_router(olx_import_router)
+app.include_router(version_archive_router)
 
 
 @app.get("/health")
