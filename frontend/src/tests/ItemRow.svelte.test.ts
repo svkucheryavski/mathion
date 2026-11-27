@@ -175,3 +175,49 @@ it('the title is read with its type first, as hidden text', () => {
   expect(target.querySelector('.item-title .vh')?.textContent).toBe('Page: ');
   expect(target.querySelector('.item-title')?.textContent).toBe('Page: Intro');
 });
+
+describe('ItemRow — the name opens the item', () => {
+  const name = (t: HTMLElement) => t.querySelector<HTMLElement>('.item-title')!;
+
+  it('clicking the name calls onOpen once', () => {
+    const onOpen = vi.fn();
+    const { target } = mountRow({ onOpen });
+    name(target).click();
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('clicking the name while busy does nothing', () => {
+    const onOpen = vi.fn();
+    const { target } = mountRow({ onOpen, busy: true });
+    name(target).click();
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it('in a published version the name still opens', () => {
+    const onOpen = vi.fn();
+    const { target } = mountRow({ onOpen, canStructure: false });
+    name(target).click();
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('selecting the name\'s text does not open the item', () => {
+    const onOpen = vi.fn();
+    const { target } = mountRow({ onOpen });
+    const range = document.createRange();
+    range.selectNodeContents(name(target));
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+    name(target).click();
+    sel.removeAllRanges();
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it('the name is not focusable and has no role', () => {
+    const { target } = mountRow();
+    const n = name(target);
+    expect(n.tagName).toBe('SPAN');
+    expect(n.hasAttribute('tabindex')).toBe(false);
+    expect(n.hasAttribute('role')).toBe(false);
+  });
+});
