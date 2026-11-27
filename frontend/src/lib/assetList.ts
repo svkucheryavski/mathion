@@ -1,6 +1,6 @@
 import type { AssetItem } from './assetContext';
 
-export const ASSET_CAP = 8;
+export const ASSET_CAP = 6;
 
 // A missing or unreadable time sorts as oldest.
 function time(item: Pick<AssetItem, 'uploaded_at'>): number {

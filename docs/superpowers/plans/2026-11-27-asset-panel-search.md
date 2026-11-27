@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** The editor's asset panel shows the 8 newest assets, filters the full list from a search
+**Goal:** The editor's asset panel shows the 6 newest assets, filters the full list from a search
 field while typing, and scrolls inside a bounded height, so the text area and the list scroll
 independently.
 
@@ -19,7 +19,7 @@ list height; the text area already matches the panel's height through the flex r
 - Frontend only; no server change; no new dependencies; Svelte 5 runes.
 - Copy, exact: placeholder and accessible name `Find an asset`; `N more, type to find them`;
   `No assets match`.
-- Cap: 8 rows when the search is empty. Matching: name contains the trimmed text, case-insensitive.
+- Cap: 6 rows (owner, 2026-11-27; was 8) when the search is empty. Matching: name contains the trimmed text, case-insensitive.
 - Order: `uploaded_at` newest first; equal or unreadable times → higher `id` first.
 - Code comments: one short plain line.
 - Tests: `cd frontend && npm test -- <file>`; types: `cd frontend && npm run check`. Never two test
@@ -27,7 +27,7 @@ list height; the text area already matches the panel's height through the flex r
 
 ## Review Focus
 
-1. Delete focus repair after the list is sliced: a deleted 8th row with more assets behind it must
+1. Delete focus repair after the list is sliced: a deleted last shown row with more assets behind it must
    land on the trash now at that position, never on `<body>` (test in Task 2).
 2. A reload after a save (refreshKey bump, no new asset) must keep the typed search (Task 2).
 3. Escape with an empty field must still close the modal (not default-prevented) (Task 2).
@@ -45,7 +45,7 @@ list height; the text area already matches the panel's height through the flex r
 
 **Interfaces:**
 - Produces:
-  - `export const ASSET_CAP = 8;`
+  - `export const ASSET_CAP = 6;`
   - `export function newestFirst<T extends Pick<AssetItem, 'id' | 'uploaded_at'>>(list: T[]): T[]` — new array.
   - `export function shownAssets<T extends Pick<AssetItem, 'id' | 'uploaded_at' | 'filename'>>(list: T[], query: string, cap = ASSET_CAP): { rows: T[]; more: number }`
     — empty trimmed query: first `cap` of `newestFirst`, `more = total - cap` (min 0); otherwise every
@@ -54,7 +54,7 @@ list height; the text area already matches the panel's height through the flex r
 - [ ] **Step 1: Write the failing tests** in `assetList.test.ts`:
   - `newestFirst` orders `2026-05-03` > `2026-05-02` > `2026-05-01`; equal times → `id` 7 before 3;
     `uploaded_at` missing or `'junk'` sorts as oldest, ties by id; input array not mutated.
-  - `shownAssets(10 assets, '')` → 8 rows (the 8 newest), `more: 2`; 5 assets → 5 rows, `more: 0`.
+  - `shownAssets(10 assets, '')` → 6 rows (the 6 newest), `more: 4`; 5 assets → 5 rows, `more: 0`.
   - `shownAssets(list, '  HIST ')` matches `histogram.png` and `Hist2.pdf`, not `bar.png`; 12 matches
     → all 12 rows, `more: 0`; no match → `rows: []`, `more: 0`.
 - [ ] **Step 2: Run** `cd frontend && npm test -- src/tests/assetList.test.ts`. Expected: FAIL (module not found).
@@ -81,7 +81,7 @@ list height; the text area already matches the panel's height through the flex r
   (`2026-05-01T00:00:0${n}Z`-style, distinct), names `pic-1.png`…`pic-10.png`, plus where needed
   `Histogram.png`. Tests:
   - `search field has placeholder and aria-label "Find an asset" and no <label>`.
-  - `empty search shows the 8 newest and "2 more, type to find them"` — rows 10…3 in that DOM order;
+  - `empty search shows the 6 newest and "4 more, type to find them"` — rows 10…5 in that DOM order;
     `asset-more` text exact.
   - `typing filters all assets, case-insensitive` — set input value `PIC-1`, dispatch `input`,
     flushSync → rows `pic-10.png`, `pic-1.png` only; no `asset-more`.
@@ -93,8 +93,8 @@ list height; the text area already matches the panel's height through the flex r
     `a reload without a new asset keeps the search`.
   - `an idle delete question on a row the search hides closes` — open the trash on `pic-5.png`, type
     `pic-1`, assert no `.inline-confirm`.
-  - `deleting the 8th shown row moves focus to the trash now at that position` — 10 assets, delete
-    row id 3 (8th shown); list mock then returns ids 1,2,4…10; focus lands on id 2's trash.
+  - `deleting the last shown row moves focus to the trash now at that position` — 10 assets, delete
+    row id 5 (6th shown); list mock then returns ids 1…4,6…10; focus lands on id 4's trash.
   - Update existing tests whose expected row order assumed server order: give their fixtures
     distinct `uploaded_at`, or assert by testid instead of position.
 - [ ] **Step 2: Run** `cd frontend && npm test -- src/tests/AssetSidebar.svelte.test.ts`. Expected: the new tests FAIL.
@@ -112,16 +112,15 @@ list height; the text area already matches the panel's height through the flex r
   - Use `shown.rows` instead of `assets` for indexes in `refocusAfterDelete` and `idleQuestionGone`.
   - `$effect`: an idle `confirmId` not in `shown.rows` closes, with the same inside-focus repair as the
     disabled effect.
-  - CSS: `.list { max-height: 352px; overflow-y: auto; }` (8 rows of 44px — measure in the browser and
-    adjust so exactly 8 rows fit); search input styled at sidebar size (12px text, compact padding,
+  - CSS: `.list { max-height: 312px; overflow-y: auto; }` (6.5 rows of about 47.5px, measured in Chrome) and a `.rows.full { min-height: 312px }` wrapper when there are more assets than the cap; search input styled at sidebar size (12px text, compact padding,
     the global field look).
 - [ ] **Step 4: Run** the sidebar test file, `src/tests/AssetSidebar.run-mode.svelte.test.ts`,
   `src/tests/MarkdownEditor.svelte.test.ts`, then the whole `npm test` and `npm run check`.
   Expected: all PASS, 0 errors, no "Unhandled" line.
 - [ ] **Step 5: Browser check** (agent-browser, dev server, a course with 12+ assets): the panel
-  shows 8 rows and the `more` line; the list scrolls inside the panel with a search matching 12;
-  the text area scrolls on its own; the modal is no taller than with 8 assets; below 880px the list
+  shows 6 rows and the `more` line; the list scrolls inside the panel with a search matching 12;
+  the text area scrolls on its own; the modal is no taller than with 6 assets; below 880px the list
   keeps its cap. Screenshots compared Chrome vs the spec, then Safari-only checks to the owner.
 - [ ] **Step 6: Commit** (after the review loop and the owner's OK):
   `git add frontend/src/components/editor/AssetSidebar.svelte frontend/src/tests/AssetSidebar.svelte.test.ts`
-  `git commit -m "feat(editor): asset panel search, newest 8 and its own scrolling"`
+  `git commit -m "feat(editor): asset panel search, newest 6 and its own scrolling"`

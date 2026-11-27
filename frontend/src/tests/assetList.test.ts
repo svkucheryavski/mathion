@@ -31,12 +31,12 @@ describe('newestFirst', () => {
 });
 
 describe('shownAssets', () => {
-  it('caps at 8 by default', () => expect(ASSET_CAP).toBe(8));
+  it('caps at 6 by default', () => expect(ASSET_CAP).toBe(6));
 
-  it('empty search: the 8 newest and how many more', () => {
+  it('empty search: the 6 newest and how many more', () => {
     const r = shownAssets(many(10), '');
-    expect(r.rows.map((x) => x.id)).toEqual([10, 9, 8, 7, 6, 5, 4, 3]);
-    expect(r.more).toBe(2);
+    expect(r.rows.map((x) => x.id)).toEqual([10, 9, 8, 7, 6, 5]);
+    expect(r.more).toBe(4);
   });
 
   it('empty search with fewer than the cap: all rows, none more', () => {
