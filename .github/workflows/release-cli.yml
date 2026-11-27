@@ -86,7 +86,7 @@ jobs:
         working-directory: cli
         env:
           CLI_TAG: ${{ github.ref_name }}
-          APP_IMAGE: v0.3.0
+          APP_IMAGE: v0.3.1
           GPG_FINGERPRINT: ${{ vars.S_REL_FPR }}!
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
